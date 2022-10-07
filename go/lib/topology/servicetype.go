@@ -25,6 +25,7 @@ const (
 	Router
 	Control
 	Colibri
+	ColibriGateway
 	Discovery
 	Gateway
 	HiddenSegmentLookup
@@ -39,6 +40,8 @@ func (t ServiceType) String() string {
 		return "control"
 	case Colibri:
 		return "colibri"
+	case ColibriGateway:
+		return "colibri_gateway"
 	case Discovery:
 		return "discovery"
 	case Gateway:
@@ -61,6 +64,8 @@ func ServiceTypeFromString(s string) ServiceType {
 		return Control
 	case "colibri":
 		return Colibri
+	case "colibri_gateway":
+		return ColibriGateway
 	case "discovery":
 		return Discovery
 	case "gateway":
