@@ -27,6 +27,8 @@ func TestServiceTypeStringAndParse(t *testing.T) {
 		topology.Unknown,
 		topology.Router,
 		topology.Control,
+		topology.Colibri,
+		topology.ColibriGateway,
 		topology.Discovery,
 		topology.Gateway,
 		topology.HiddenSegmentLookup,

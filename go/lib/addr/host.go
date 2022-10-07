@@ -67,6 +67,7 @@ const (
 	SvcDS       HostSVC = 0x0001
 	SvcCS       HostSVC = 0x0002
 	SvcCOL      HostSVC = 0x0006
+	SvcCOLGATE  HostSVC = 0x0007
 	SvcWildcard HostSVC = 0x0010
 	SvcNone     HostSVC = 0xffff
 
@@ -276,6 +277,8 @@ func (h HostSVC) BaseString() string {
 		return "CS"
 	case SvcCOL:
 		return "COL"
+	case SvcCOLGATE:
+		return "COLIGATE"
 	case SvcWildcard:
 		return "Wildcard"
 	default:

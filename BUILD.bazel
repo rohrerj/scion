@@ -39,6 +39,7 @@ pkg_tar(
     srcs = [
         "//go/co",
         "//go/cs",
+        "//go/coligate",
         "//go/daemon",
         "//go/dispatcher",
         "//go/posix-gateway",
