@@ -16,9 +16,12 @@ package main
 
 import (
 	"context"
+	"net"
 
+	"github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/serrors"
+	"github.com/scionproto/scion/go/lib/snet"
 	"github.com/scionproto/scion/go/lib/topology"
 	"github.com/scionproto/scion/go/pkg/app"
 	"github.com/scionproto/scion/go/pkg/app/launcher"
@@ -55,8 +58,23 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 	})
 
 	var cleanup app.Cleanup
-	// TODO(justin) setup gateway and start running both the control plane and
-	// the data plane here. TAL at go/co or go/cs for inspiration.
+
+	var egressMapping map[uint16]*net.UDPAddr = make(map[uint16]*net.UDPAddr)
+
+	for ifid, info := range topo.InterfaceInfoMap() {
+		egressMapping[uint16(ifid)] = info.InternalAddr
+	}
+
+	serverAddr := &snet.UDPAddr{
+		IA:   topo.IA(),
+		Host: topo.ColibriGatewayServiceAddress(cfg.General.ID),
+	}
+
+	//init
+	err = processing.Init(&cfg.Coligate, &cleanup, &egressMapping, serverAddr)
+	if err != nil {
+		return err
+	}
 
 	// cleanup when exit
 	g.Go(func() error {

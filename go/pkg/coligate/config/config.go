@@ -23,21 +23,38 @@ import (
 )
 
 type Config struct {
-	General  env.General `toml:"general,omitempty"`
-	Logging  log.Config  `toml:"log,omitempty"`
-	Metrics  env.Metrics `toml:"metrics,omitempty"`
-	Tracing  env.Tracing `toml:"tracing,omitempty"`
-	Coligate Coligate    `toml:"coligate,omitempty"`
+	General  env.General    `toml:"general,omitempty"`
+	Logging  log.Config     `toml:"log,omitempty"`
+	Metrics  env.Metrics    `toml:"metrics,omitempty"`
+	Tracing  env.Tracing    `toml:"tracing,omitempty"`
+	Coligate ColigateConfig `toml:"coligate,omitempty"`
 }
 
 func (cfg *Config) InitDefaults() {
-	// TODO(justin)
+	config.InitAll(
+		&cfg.General,
+		&cfg.Logging,
+		&cfg.Metrics,
+		&cfg.Tracing,
+		&cfg.Coligate,
+	)
 }
 
 func (cfg *Config) Validate() error {
-	return nil // TODO(justin)
+	return config.ValidateAll(
+		&cfg.General,
+		&cfg.Logging,
+		&cfg.Metrics,
+		&cfg.Coligate,
+	)
 }
 
 func (cfg *Config) Sample(dst io.Writer, path config.Path, _ config.CtxMap) {
-	// TODO(justin)
+	config.WriteSample(dst, path, config.CtxMap{config.ID: "coligate"},
+		&cfg.General,
+		&cfg.Logging,
+		&cfg.Metrics,
+		&cfg.Tracing,
+		&cfg.Coligate,
+	)
 }

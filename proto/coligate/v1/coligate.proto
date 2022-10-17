@@ -1,4 +1,4 @@
-// Copyright 2021 ETH Zurich
+// Copyright 2022 ETH Zurich
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,17 @@ service ColibriGateway {
 message UpdateSigmasRequest {
     uint64 asid = 1;
     bytes suffix = 2;
+    uint32 bwcls = 3;
+    uint32 rlc = 4;
+    int64 validityTimestamp = 5;
+    repeated HopInterfaces hopInterfaces = 6;
+    repeated bytes macs = 7;
     // TODO(justin)
+}
+
+message HopInterfaces {
+    uint32 ingressid = 1;
+    uint32 egressid = 2;
 }
 
 message UpdateSigmasResponse {
