@@ -31,6 +31,7 @@ import (
 	"github.com/scionproto/scion/go/co/reservation/segment"
 	st "github.com/scionproto/scion/go/co/reservation/segmenttest"
 	"github.com/scionproto/scion/go/co/reservation/test"
+	et "github.com/scionproto/scion/go/co/reservation/test/eer"
 	"github.com/scionproto/scion/go/co/reservationstorage/backend"
 	"github.com/scionproto/scion/go/lib/addr"
 	"github.com/scionproto/scion/go/lib/colibri/reservation"
@@ -40,23 +41,24 @@ import (
 
 func TestDB(t *testing.T, newDB func() backend.DB) {
 	tests := map[string]func(context.Context, *testing.T, func() backend.DB){
-		"insert segment reservations create ID":  testNewSegmentRsv,
-		"persist segment reservation":            testPersistSegmentRsv,
-		"get segment reservation from ID":        testGetSegmentRsvFromID,
-		"get segment reservations from src_dst":  testGetSegmentRsvsFromSrcDstIA,
-		"get all segment reservations":           testGetAllSegmentRsvs,
-		"get segment reservation from IF pair":   testGetSegmentRsvsFromIFPair,
-		"delete segment reservation":             testDeleteSegmentRsv,
-		"delete expired indices":                 testDeleteExpiredIndices,
-		"test next expiration time":              testNextExpirationTime,
-		"persist e2e reservation":                testPersistE2ERsv,
-		"get all e2e reservations":               testGetAllE2ERsvs,
-		"get e2e reservation from ID":            testGetE2ERsvFromID,
-		"get e2e reservations from segment ones": testGetE2ERsvsOnSegRsv,
-		"add entries to admission list":          testAddToAdmissionList,
-		"check admission list":                   testCheckAdmissionList,
-		"state interface blocked":                testGetInterfaceUsage,
-		"stateful tables":                        testStatefulTables,
+		"insert_segment_reservations_create_ID":  testNewSegmentRsv,
+		"persist_segment_reservation":            testPersistSegmentRsv,
+		"get_segment_reservation_from_ID":        testGetSegmentRsvFromID,
+		"get_segment_reservations_from_src_dst":  testGetSegmentRsvsFromSrcDstIA,
+		"get_active_eers_at_src":                 testGetActiveEERs,
+		"get_all_segment_reservations":           testGetAllSegmentRsvs,
+		"get_segment_reservation_from_IF_pair":   testGetSegmentRsvsFromIFPair,
+		"delete_segment_reservation":             testDeleteSegmentRsv,
+		"delete_expired_indices":                 testDeleteExpiredIndices,
+		"test_next_expiration_time":              testNextExpirationTime,
+		"persist_e2e_reservation":                testPersistE2ERsv,
+		"get_all_e2e_reservations":               testGetAllE2ERsvs,
+		"get_e2e_reservation_from_ID":            testGetE2ERsvFromID,
+		"get_e2e_reservations_from_segment_ones": testGetE2ERsvsOnSegRsv,
+		"add_entries_to_admission_list":          testAddToAdmissionList,
+		"check_admission_list":                   testCheckAdmissionList,
+		"state_interface_blocked":                testGetInterfaceUsage,
+		"stateful_tables":                        testStatefulTables,
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -273,7 +275,6 @@ func testGetSegmentRsvsFromSrcDstIA(ctx context.Context, t *testing.T, newDB fun
 		},
 		"dst_isd wildcard": {
 			srcIA: xtest.MustParseIA("1-ff00:0:1"),
-			// dstIA: xtest.MustParseIA("0-ff00:0:2"), // wildcard
 			dstIA: xtest.MustParseIA("0-ffff:ffff:ffff"), // wildcard
 			rsvs: []*segment.Reservation{
 				st.NewRsv(st.WithID("ff00:0:1", "00000001"),
@@ -360,6 +361,93 @@ func testGetSegmentRsvsFromSrcDstIA(ctx context.Context, t *testing.T, newDB fun
 				actualIDs[i] = &r.ID
 			}
 			require.ElementsMatch(t, tc.expected, actualIDs)
+		})
+	}
+}
+
+func testGetActiveEERs(ctx context.Context, t *testing.T, newDB func() backend.DB) {
+	cases := map[string]struct {
+		rsvs     []*e2e.Reservation
+		expected []*reservation.ID
+	}{
+		"empty_db": {
+			rsvs:     nil,
+			expected: nil,
+		},
+		"not_source": {
+			rsvs: []*e2e.Reservation{
+				et.NewRsv(
+					et.WithID("ff00:0:1", "000000000000000000000001"),
+					et.AddIndex(0),
+					et.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"),
+					et.WithCurrentStep(1)),
+				et.NewRsv(
+					et.WithID("ff00:0:1", "000000000000000000000002"),
+					et.AddIndex(0),
+					et.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:3"),
+					et.WithCurrentStep(1)),
+			},
+			expected: nil,
+		},
+		"only_index": {
+			rsvs: []*e2e.Reservation{
+				et.NewRsv(
+					et.WithID("ff00:0:1", "000000000000000000000001"),
+					et.AddIndex(0),
+					et.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2")),
+			},
+			expected: []*reservation.ID{
+				test.MustParseID("ff00:0:1", "000000000000000000000001"),
+			},
+		},
+		"three_segrs": {
+			rsvs: []*e2e.Reservation{
+				et.NewRsv(
+					et.WithID("ff00:0:1", "000000000000000000000001"),
+					et.AddIndex(0),
+					et.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2")),
+				et.NewRsv(
+					et.WithID("ff00:0:1", "000000000000000000000002"),
+					et.AddIndex(0),
+					et.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2")),
+				et.NewRsv(
+					et.WithID("ff00:0:1", "000000000000000000000003"),
+					et.AddIndex(0),
+					et.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2")),
+				et.NewRsv(
+					et.WithID("ff00:0:8", "000000000000000000000001"),
+					et.AddIndex(0),
+					et.WithPath("1-ff00:0:8", 1, 1, "1-ff00:0:3"),
+					et.WithCurrentStep(1)),
+			},
+			expected: []*reservation.ID{
+				test.MustParseID("ff00:0:1", "000000000000000000000001"),
+				test.MustParseID("ff00:0:1", "000000000000000000000002"),
+				test.MustParseID("ff00:0:1", "000000000000000000000003"),
+			},
+		},
+	}
+	for name, tc := range cases {
+		name, tc := name, tc
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			db := newDB()
+			// insert the reservations of the test case into the DB
+			for _, r := range tc.rsvs {
+				err := db.PersistE2ERsv(ctx, r)
+				require.NoError(t, err)
+			}
+			// test the function
+			rsvs, err := db.GetActiveEERs(ctx)
+			require.NoError(t, err)
+			// check we have the expected result
+			require.Equal(t, len(tc.expected), len(rsvs))
+
+			ids := make([]*reservation.ID, len(rsvs))
+			for i, r := range rsvs {
+				ids[i] = &r.ID
+			}
+			require.ElementsMatch(t, tc.expected, ids)
 		})
 	}
 }

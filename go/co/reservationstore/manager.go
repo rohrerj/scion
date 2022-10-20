@@ -143,7 +143,7 @@ func (m *manager) Run(ctx context.Context) {
 		// list e2e reservations
 		rsvs, err := m.store.ReportE2EReservationsInDB(ctx)
 		if err != nil {
-			log.Error("reporting e2e reservations in db", "err", err)
+			log.Info("error reporting e2e reservations in db", "err", err)
 			return
 		}
 		table := make([]string, 0, len(rsvs)+1)

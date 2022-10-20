@@ -21,13 +21,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/scionproto/scion/go/co/reservation/segment"
-	"github.com/scionproto/scion/go/co/reservation/segmenttest"
+	st "github.com/scionproto/scion/go/co/reservation/segmenttest"
 	"github.com/scionproto/scion/go/lib/colibri/reservation"
 	"github.com/scionproto/scion/go/lib/util"
 )
 
 func TestNewIndex(t *testing.T) {
-	r := segmenttest.NewReservation()
+	r := st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	require.Len(t, r.Indices, 0)
 	expTime := util.SecsToTime(1)
 	idx, err := r.NewIndex(0, expTime, 1, 3, 2, 5, reservation.CorePath)
@@ -67,7 +67,7 @@ func TestNewIndex(t *testing.T) {
 }
 
 func TestReservationValidate(t *testing.T) {
-	r := segmenttest.NewReservation()
+	r := st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	err := r.Validate()
 	require.NoError(t, err)
 	// wrong path
@@ -76,7 +76,7 @@ func TestReservationValidate(t *testing.T) {
 	require.Error(t, err)
 	// more than one active index
 	expTime := util.SecsToTime(1)
-	r = segmenttest.NewReservation()
+	r = st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	r.NewIndex(0, expTime, 0, 0, 0, 0, reservation.CorePath)
 	r.NewIndex(1, expTime, 0, 0, 0, 0, reservation.CorePath)
 	require.Len(t, r.Indices, 2)
@@ -85,24 +85,24 @@ func TestReservationValidate(t *testing.T) {
 	err = r.Validate()
 	require.Error(t, err)
 	// ID not set
-	r = segmenttest.NewReservation()
+	r = st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	r.ID = reservation.ID{}
 	err = r.Validate()
 	require.Error(t, err)
 	// starts in this AS but ingress nonzero
-	r = segmenttest.NewReservation()
+	r = st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	r.Ingress = 1
 	err = r.Validate()
 	require.Error(t, err)
 	// Does not start in this AS but ingress empty
-	r = segmenttest.NewReservation()
+	r = st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	r.Steps = nil
 	err = r.Validate()
 	require.Error(t, err)
 }
 
 func TestIndex(t *testing.T) {
-	r := segmenttest.NewReservation()
+	r := st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	expTime := util.SecsToTime(1)
 	r.NewIndex(0, expTime, 0, 0, 0, 0, reservation.CorePath)
 	idx, _ := r.NewIndex(1, expTime, 0, 0, 0, 0, reservation.CorePath)
@@ -119,7 +119,7 @@ func TestIndex(t *testing.T) {
 }
 
 func TestSetIndexConfirmed(t *testing.T) {
-	r := segmenttest.NewReservation()
+	r := st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	expTime := util.SecsToTime(1)
 	id, _ := r.NewIndex(0, expTime, 0, 0, 0, 0, reservation.CorePath)
 	require.Equal(t, segment.IndexTemporary, r.Indices[0].State())
@@ -134,7 +134,7 @@ func TestSetIndexConfirmed(t *testing.T) {
 }
 
 func TestSetIndexActive(t *testing.T) {
-	r := segmenttest.NewReservation()
+	r := st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	expTime := util.SecsToTime(1)
 
 	// index not confirmed
@@ -167,7 +167,7 @@ func TestSetIndexActive(t *testing.T) {
 }
 
 func TestRemoveIndex(t *testing.T) {
-	r := segmenttest.NewReservation()
+	r := st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	expTime := util.SecsToTime(1)
 	idx, _ := r.NewIndex(0, expTime, 0, 0, 0, 0, reservation.CorePath)
 	err := r.RemoveIndex(idx)
@@ -199,7 +199,7 @@ func TestRemoveIndex(t *testing.T) {
 }
 
 func TestMaxBlockedBW(t *testing.T) {
-	r := segmenttest.NewReservation()
+	r := st.NewRsv(st.WithID("ff00:0:1", "beefcafe"), st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	r.Indices = r.Indices[:0]
 	require.Equal(t, uint64(0), r.MaxBlockedBW())
 	r.NewIndex(0, util.SecsToTime(1), 1, 1, 1, 1, reservation.CorePath)

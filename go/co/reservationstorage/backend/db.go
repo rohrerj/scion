@@ -35,6 +35,9 @@ type ReserverOnly interface {
 	GetSegmentRsvsFromSrcDstIA(ctx context.Context, srcIA, dstIA addr.IA,
 		pathType reservation.PathType) ([]*segment.Reservation, error)
 
+	// GetActiveEERs returns all EERs that start at the srcIA and have an active index.
+	GetActiveEERs(ctx context.Context) ([]*e2e.Reservation, error)
+
 	// NewSegmentRsv creates a new segment reservation in the DB, with an unused reservation ID.
 	// The created ID is set in the reservation pointer argument. Used by setup req.
 	NewSegmentRsv(ctx context.Context, rsv *segment.Reservation) error
@@ -72,7 +75,7 @@ type ReserverAndTransit interface {
 
 	// GetAllE2ERsvs returns all e2e reservations.
 	GetAllE2ERsvs(ctx context.Context) ([]*e2e.Reservation, error)
-	// GetE2ERsvFromID finds the end to end resevation given its ID.
+	// GetE2ERsvFromID finds the end to end reservation given its ID.
 	GetE2ERsvFromID(ctx context.Context, ID *reservation.ID) (*e2e.Reservation, error)
 	// GetE2ERsvsOnSegRsv returns the e2e reservations running on top of a given segment one.
 	GetE2ERsvsOnSegRsv(ctx context.Context, ID *reservation.ID) ([]*e2e.Reservation, error)

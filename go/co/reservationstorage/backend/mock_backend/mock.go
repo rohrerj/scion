@@ -158,6 +158,21 @@ func (mr *MockDBMockRecorder) DeleteSegmentRsv(arg0, arg1 interface{}) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteSegmentRsv", reflect.TypeOf((*MockDB)(nil).DeleteSegmentRsv), arg0, arg1)
 }
 
+// GetActiveEERs mocks base method.
+func (m *MockDB) GetActiveEERs(arg0 context.Context) ([]*e2e.Reservation, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetActiveEERs", arg0)
+	ret0, _ := ret[0].([]*e2e.Reservation)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetActiveEERs indicates an expected call of GetActiveEERs.
+func (mr *MockDBMockRecorder) GetActiveEERs(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetActiveEERs", reflect.TypeOf((*MockDB)(nil).GetActiveEERs), arg0)
+}
+
 // GetAllE2ERsvs mocks base method.
 func (m *MockDB) GetAllE2ERsvs(arg0 context.Context) ([]*e2e.Reservation, error) {
 	m.ctrl.T.Helper()
