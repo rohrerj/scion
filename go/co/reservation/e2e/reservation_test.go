@@ -21,7 +21,7 @@ import (
 
 	base "github.com/scionproto/scion/go/co/reservation"
 	"github.com/scionproto/scion/go/co/reservation/segment"
-	"github.com/scionproto/scion/go/co/reservation/segmenttest"
+	st "github.com/scionproto/scion/go/co/reservation/segmenttest"
 	"github.com/scionproto/scion/go/co/reservation/test"
 	"github.com/scionproto/scion/go/lib/colibri/reservation"
 	"github.com/scionproto/scion/go/lib/util"
@@ -103,7 +103,9 @@ func newSegmentReservation(asidPath ...string) *segment.Reservation {
 	if len(asidPath) < 2 {
 		panic("at least source and destination in the path")
 	}
-	r := segmenttest.NewReservation()
+	r := st.NewRsv(
+		st.WithID("ff00:0:1", "beefcafe"),
+		st.WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
 	// use the asid to create an ID and a path and use them in the reservation
 	pathComponents := make([]interface{}, len(asidPath)*3)
 	for i := range asidPath {

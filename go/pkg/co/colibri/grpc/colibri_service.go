@@ -396,7 +396,7 @@ func (s *ColibriService) AddAdmissionEntry(ctx context.Context,
 	// if len(req.DstHost) > 0 {
 	// 	// check that we have the same IP address in the DstHost field and the TCP connection
 	// 	if !bytes.Equal(req.DstHost, clientAddr.IP) {
-	// 		return nil, serrors.New("IP address in request not the same as connnection",
+	// 		return nil, serrors.New("IP address in request not the same as connection",
 	// 			"req", net.IP(req.DstHost).String(), "conn", clientAddr.IP.String())
 	// 	}
 	// }
@@ -414,6 +414,16 @@ func (s *ColibriService) AddAdmissionEntry(ctx context.Context,
 	return &colpb.AddAdmissionEntryResponse{
 		ValidUntil: util.TimeToSecs(validUntil),
 	}, err
+}
+
+func (s *ColibriService) ActiveIndices(ctx context.Context, req *colpb.ActiveIndicesRequest,
+) (*colpb.ActiveIndicesResponse, error) {
+	_, err := checkLocalCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.Store.GetActiveIndicesAtSource(ctx, req)
 }
 
 // checkLocalCaller prevents the service from doing anything if the caller is not from the local AS.

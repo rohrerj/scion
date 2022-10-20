@@ -17,6 +17,7 @@ import (
 	colibri "github.com/scionproto/scion/go/lib/colibri"
 	reservation0 "github.com/scionproto/scion/go/lib/colibri/reservation"
 	path "github.com/scionproto/scion/go/lib/slayers/path"
+	colibri0 "github.com/scionproto/scion/go/pkg/proto/colibri"
 )
 
 // MockStore is a mock of Store interface.
@@ -177,6 +178,21 @@ func (m *MockStore) DeleteExpiredIndices(arg0 context.Context, arg1 time.Time) (
 func (mr *MockStoreMockRecorder) DeleteExpiredIndices(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredIndices", reflect.TypeOf((*MockStore)(nil).DeleteExpiredIndices), arg0, arg1)
+}
+
+// GetActiveIndicesAtSource mocks base method.
+func (m *MockStore) GetActiveIndicesAtSource(arg0 context.Context, arg1 *colibri0.ActiveIndicesRequest) (*colibri0.ActiveIndicesResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetActiveIndicesAtSource", arg0, arg1)
+	ret0, _ := ret[0].(*colibri0.ActiveIndicesResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetActiveIndicesAtSource indicates an expected call of GetActiveIndicesAtSource.
+func (mr *MockStoreMockRecorder) GetActiveIndicesAtSource(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetActiveIndicesAtSource", reflect.TypeOf((*MockStore)(nil).GetActiveIndicesAtSource), arg0, arg1)
 }
 
 // GetReservationsAtSource mocks base method.

@@ -25,6 +25,7 @@ import (
 	"github.com/scionproto/scion/go/lib/colibri"
 	"github.com/scionproto/scion/go/lib/colibri/reservation"
 	slayerspath "github.com/scionproto/scion/go/lib/slayers/path"
+	colpb "github.com/scionproto/scion/go/pkg/proto/colibri"
 )
 
 // Store is the interface to interact with the reservation store.
@@ -93,6 +94,10 @@ type Store interface {
 	InitTearDownSegmentReservation(ctx context.Context, req *base.Request,
 		steps base.PathSteps, rawPath slayerspath.Path) (
 		base.Response, error)
+
+	// GetActiveIndices returns information regarding all active indices that start in this AS.
+	GetActiveIndicesAtSource(ctx context.Context, req *colpb.ActiveIndicesRequest) (
+		*colpb.ActiveIndicesResponse, error)
 
 	// -----------------------------------------------------------
 	// as the destination of reservations:

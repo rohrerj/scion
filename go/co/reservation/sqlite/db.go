@@ -137,6 +137,10 @@ func (x *executor) GetSegmentRsvsFromSrcDstIA(ctx context.Context, srcIA, dstIA 
 	return getSegReservations(ctx, x.db, condition, params...)
 }
 
+func (x *executor) GetActiveEERs(ctx context.Context) ([]*e2e.Reservation, error) {
+	return getEERs(ctx, x.db, "WHERE current_step = 0")
+}
+
 // GetAllSegmentRsvs returns all segment reservations.
 func (x *executor) GetAllSegmentRsvs(ctx context.Context) ([]*segment.Reservation, error) {
 	return getSegReservations(ctx, x.db, "")
@@ -322,78 +326,40 @@ func (x *executor) DeleteE2ERsv(ctx context.Context, ID *reservation.ID) error {
 }
 
 func (x *executor) GetAllE2ERsvs(ctx context.Context) ([]*e2e.Reservation, error) {
-	const query = `SELECT ROWID, reservation_id, steps, current_step FROM e2e_reservation`
-	rows, err := x.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	type rowFields struct {
-		rowID       int
-		rsvID       *reservation.ID
-		currentStep int
-		steps       base.PathSteps
-	}
-	fields := make([]rowFields, 0)
-	for rows.Next() {
-		var rowID int
-		var rsvID []byte
-		var rawSteps []byte
-		var currentStep int
-		if err := rows.Scan(&rowID, &rsvID, &rawSteps, &currentStep); err != nil {
-			return nil, err
-		}
-		ID, err := reservation.IDFromRaw(rsvID)
-		if err != nil {
-			return nil, err
-		}
-		steps := base.PathStepsFromRaw(rawSteps)
-		fields = append(fields, rowFields{
-			rowID:       rowID,
-			rsvID:       ID,
-			currentStep: currentStep,
-			steps:       steps,
-		})
-	}
-	if rows.Err() != nil {
-		return nil, rows.Err()
-	}
-	rsvs := make([]*e2e.Reservation, len(fields))
-	for i, f := range fields {
-		indices, err := getE2EIndices(ctx, x.db, f.rowID)
-		if err != nil {
-			return nil, err
-		}
-		// sort indices so they are consecutive modulo 16
-		base.SortIndices(indices)
-		// read assoc segment reservations
-		segRsvs, err := getE2EAssocSegRsvs(ctx, x.db, f.rowID)
-		if err != nil {
-			return nil, err
-		}
-		rsvs[i] = &e2e.Reservation{
-			ID:                  *f.rsvID,
-			Steps:               f.steps,
-			CurrentStep:         f.currentStep,
-			Indices:             indices,
-			SegmentReservations: segRsvs,
-		}
-	}
-	return rsvs, nil
+	return getEERs(ctx, x.db, "")
 }
 
 // GetE2ERsvFromID finds the end to end resevation given its ID.
-func (x *executor) GetE2ERsvFromID(ctx context.Context, ID *reservation.ID) (
-	*e2e.Reservation, error) {
+func (x *executor) GetE2ERsvFromID(ctx context.Context, ID *reservation.ID,
+) (*e2e.Reservation, error) {
 
-	return getE2ERsvFromID(ctx, x.db, ID)
+	rsvs, err := getEERs(ctx, x.db, "WHERE reservation_id = ?", ID.ToRaw())
+	if err != nil {
+		return nil, err
+	}
+	if len(rsvs) > 0 {
+		return rsvs[0], nil
+	}
+	return nil, nil
 }
 
 // GetE2ERsvsOnSegRsv returns the e2e reservations running on top of a given segment one.
 func (x *executor) GetE2ERsvsOnSegRsv(ctx context.Context, ID *reservation.ID) (
 	[]*e2e.Reservation, error) {
 
-	return getE2ERsvsFromSegment(ctx, x.db, ID)
+	if !ID.IsSegmentID() {
+		return nil, serrors.New("wrong suffix", "suffix", hex.EncodeToString(ID.Suffix))
+	}
+
+	condition := `WHERE ROWID IN (
+		SELECT e2e FROM e2e_to_seg
+		WHERE seg =  (
+			SELECT ROWID FROM seg_reservation
+			WHERE id_as = ? AND id_suffix = ?
+		)
+	)`
+	suffix := binary.BigEndian.Uint32(ID.Suffix)
+	return getEERs(ctx, x.db, condition, ID.ASID, suffix)
 }
 
 func (x *executor) PersistE2ERsv(ctx context.Context, rsv *e2e.Reservation) error {
@@ -952,104 +918,66 @@ func insertNewE2EReservation(ctx context.Context, x *sql.Tx, rsv *e2e.Reservatio
 	return nil
 }
 
-func getE2ERsvFromID(ctx context.Context, x db.Sqler, ID *reservation.ID) (
-	*e2e.Reservation, error) {
+func getEERs(ctx context.Context, x db.Sqler, condition string, params ...interface{},
+) ([]*e2e.Reservation, error) {
 
-	// read reservation
-	var rowID int
-	var rawSteps []byte
-	var currentStep int
-	const query = `SELECT ROWID, steps, current_step FROM e2e_reservation WHERE reservation_id = ?`
-	err := x.QueryRowContext(ctx, query, ID.ToRaw()).Scan(&rowID, &rawSteps, &currentStep)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-	steps := base.PathStepsFromRaw(rawSteps)
-	// read indices
-	indices, err := getE2EIndices(ctx, x, rowID)
-	if err != nil {
-		return nil, err
-	}
-	// sort indices so they are consecutive modulo 16
-	base.SortIndices(indices)
-	// read assoc segment reservations
-	segRsvs, err := getE2EAssocSegRsvs(ctx, x, rowID)
-	if err != nil {
-		return nil, err
-	}
-	rsv := &e2e.Reservation{
-		ID:                  *ID.Copy(),
-		Steps:               steps,
-		CurrentStep:         currentStep,
-		Indices:             indices,
-		SegmentReservations: segRsvs,
-	}
-	return rsv, nil
-}
-
-func getE2ERsvsFromSegment(ctx context.Context, x db.Sqler, ID *reservation.ID) (
-	[]*e2e.Reservation, error) {
-
-	if !ID.IsSegmentID() {
-		return nil, serrors.New("wrong suffix", "suffix", hex.EncodeToString(ID.Suffix))
-	}
-	rowID2e2eIDs := make(map[int]*e2e.Reservation)
-	const query = `
-	SELECT ROWID,reservation_id, steps, current_step FROM e2e_reservation
-	WHERE ROWID IN (
-		SELECT e2e FROM e2e_to_seg
-		WHERE seg =  (
-			SELECT ROWID FROM seg_reservation
-			WHERE id_as = ? AND id_suffix = ?
-		)
-	)`
-	suffix := binary.BigEndian.Uint32(ID.Suffix)
-	rows, err := x.QueryContext(ctx, query, ID.ASID, suffix)
+	query := fmt.Sprintf(`SELECT ROWID, reservation_id, steps, current_step
+		FROM e2e_reservation %s`, condition)
+	rows, err := x.QueryContext(ctx, query, params...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	type rowFields struct {
+		rowID       int
+		rsvID       *reservation.ID
+		currentStep int
+		steps       base.PathSteps
+	}
+	fields := make([]rowFields, 0)
 	for rows.Next() {
 		var rowID int
 		var rsvID []byte
 		var rawSteps []byte
 		var currentStep int
-		err := rows.Scan(&rowID, &rsvID, &rawSteps, &currentStep)
-		if err != nil {
+		if err := rows.Scan(&rowID, &rsvID, &rawSteps, &currentStep); err != nil {
 			return nil, err
 		}
-		id, err := reservation.IDFromRaw(rsvID)
+		ID, err := reservation.IDFromRaw(rsvID)
 		if err != nil {
 			return nil, err
 		}
 		steps := base.PathStepsFromRaw(rawSteps)
-		rowID2e2eIDs[rowID] = &e2e.Reservation{
-			ID:          *id,
-			Steps:       steps,
-			CurrentStep: currentStep,
-		}
+		fields = append(fields, rowFields{
+			rowID:       rowID,
+			rsvID:       ID,
+			currentStep: currentStep,
+			steps:       steps,
+		})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	if rows.Err() != nil {
+		return nil, rows.Err()
 	}
-	rsvs := make([]*e2e.Reservation, 0, len(rowID2e2eIDs))
-	for rowID, rsv := range rowID2e2eIDs {
-		// read indices
-		indices, err := getE2EIndices(ctx, x, rowID)
+	rsvs := make([]*e2e.Reservation, len(fields))
+	for i, f := range fields {
+		indices, err := getE2EIndices(ctx, x, f.rowID)
 		if err != nil {
 			return nil, err
 		}
+		// sort indices so they are consecutive modulo 16
+		base.SortIndices(indices)
 		// read assoc segment reservations
-		segRsvs, err := getE2EAssocSegRsvs(ctx, x, rowID)
+		segRsvs, err := getE2EAssocSegRsvs(ctx, x, f.rowID)
 		if err != nil {
 			return nil, err
 		}
-		rsv.Indices = indices
-		rsv.SegmentReservations = segRsvs
-		rsvs = append(rsvs, rsv)
+		rsvs[i] = &e2e.Reservation{
+			ID:                  *f.rsvID,
+			Steps:               f.steps,
+			CurrentStep:         f.currentStep,
+			Indices:             indices,
+			SegmentReservations: segRsvs,
+		}
 	}
 	return rsvs, nil
 }

@@ -13,5 +13,6 @@ go_library(
         "//go/lib/colibri:go_default_library",
         "//go/lib/colibri/reservation:go_default_library",
         "//go/lib/slayers/path:go_default_library",
+        "//go/pkg/proto/colibri:go_default_library",
     ],
 )
