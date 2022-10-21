@@ -4,9 +4,9 @@ import (
 	"context"
 	"hash/fnv"
 	"strconv"
-	"time"
 
 	"github.com/scionproto/scion/go/coligate/reservation"
+	"github.com/scionproto/scion/go/lib/util"
 	cgpb "github.com/scionproto/scion/go/pkg/proto/coligate"
 )
 
@@ -20,13 +20,20 @@ var _ cgpb.ColibriGatewayServer = (*Coligate)(nil)
 
 func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasRequest) (*cgpb.UpdateSigmasResponse, error) {
 	task := &reservation.ReservationTask{}
+	task.ResId = strconv.FormatInt(int64(msg.GetAsid()), 10) + string(msg.GetSuffix())
 	task.Reservation = &reservation.Reservation{}
-	task.Reservation.ReservationId = strconv.FormatInt(int64(msg.GetAsid()), 10) + string(msg.GetSuffix())
-	task.Reservation.Validity = time.Unix(msg.ValidityTimestamp, 0)
-	task.Reservation.BwCls = uint8(msg.Bwcls)
+	task.Reservation.ReservationId = task.ResId
 	task.Reservation.Rlc = uint8(msg.Rlc)
-	task.Reservation.Macs = msg.Macs
-	task.ResId = task.Reservation.ReservationId
+
+	task.HighestValidity = util.SecsToTime(msg.ExpirationTime)
+
+	task.Reservation.Versions = make(map[uint8]*reservation.ReservationVersion)
+	task.Reservation.Versions[uint8(msg.Version)] = &reservation.ReservationVersion{
+		Version:  uint8(msg.Version),
+		Validity: task.HighestValidity,
+		BwCls:    uint8(msg.Bwcls),
+		Macs:     msg.Macs,
+	}
 
 	task.Reservation.Hops = make([]reservation.HopField, len(msg.HopInterfaces))
 	for i, hop := range msg.HopInterfaces {

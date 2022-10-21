@@ -17,23 +17,20 @@ package config
 import (
 	"io"
 	"math"
-	"time"
 
 	"github.com/scionproto/scion/go/lib/config"
 )
 
 type ColigateConfig struct {
 	//we have 4 bytes = 32 bits available for GatewayId+WorkerId+PerWorkerCounter
-	NumBitsForGatewayId        int
-	NumBitsForWorkerId         int
-	NumBitsForPerWorkerCounter int
+	NumBitsForGatewayId        int `toml:"NumBitsForGatewayId"`
+	NumBitsForWorkerId         int `toml:"NumBitsForWorkerId"`
+	NumBitsForPerWorkerCounter int `toml:"NumBitsForPerWorkerCounter"`
 
-	ColibriGatewayID          int
-	NumWorkers                int
-	MaxQueueSizePerThread     int
-	Salt                      string
-	Port                      int
-	ReservationCleanupTimeout time.Duration
+	ColibriGatewayID      int    `toml:"ColibriGatewayID"`
+	NumWorkers            int    `toml:"NumWorkers"`
+	MaxQueueSizePerThread int    `toml:"MaxQueueSizePerThread"`
+	Salt                  string `toml:"Salt"`
 }
 
 func (cfg *ColigateConfig) Validate() error {

@@ -8,39 +8,130 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIsReservationValid(t *testing.T) {
+func TestReservationNotFound(t *testing.T) {
 	storage := &reservation.ReservationStorage{}
 	storage.InitStorage()
-
-	now := time.Now()
-
-	res, found := storage.IsReservationValid("A", now)
+	res, found := storage.UseReservation("A", 0, time.Now())
 	assert.False(t, found)
 	assert.Nil(t, res)
+}
 
-	storage.Update(&reservation.ReservationTask{
-		ResId: "A",
-		Reservation: &reservation.Reservation{
-			ReservationId: "A",
-			Version:       1,
-			Validity:      now.Add(1 * time.Minute),
-			Macs:          nil,
-			Hops:          nil,
-			BwCls:         0,
-			Rlc:           0,
-		},
-	})
-	res, found = storage.IsReservationValid("A", now)
+func TestReservationVersionNotFound(t *testing.T) {
+	storage := &reservation.ReservationStorage{}
+	resmap := make(map[string]*reservation.Reservation)
+	resvmap := make(map[uint8]*reservation.ReservationVersion)
+	resvmap[0] = &reservation.ReservationVersion{
+		Version:  0,
+		Validity: time.Now().Add(1 * time.Minute),
+	}
+
+	resmap["A"] = &reservation.Reservation{
+		ReservationId:   "A",
+		Versions:        resvmap,
+		ActiveVersionId: 0,
+	}
+	storage.InitStorageWithData(resmap)
+
+	res, found := storage.UseReservation("A", 1, time.Now())
+	assert.False(t, found)
+	assert.Nil(t, res)
+}
+
+func TestActiveVersionIsProvidedVersion(t *testing.T) {
+	storage := &reservation.ReservationStorage{}
+	resmap := make(map[string]*reservation.Reservation)
+	resvmap := make(map[uint8]*reservation.ReservationVersion)
+	resvmap[0] = &reservation.ReservationVersion{
+		Version:  0,
+		Validity: time.Now().Add(1 * time.Minute),
+	}
+
+	resmap["A"] = &reservation.Reservation{
+		ReservationId:   "A",
+		Versions:        resvmap,
+		ActiveVersionId: 0,
+	}
+	storage.InitStorageWithData(resmap)
+
+	res, found := storage.UseReservation("A", 0, time.Now())
+	assert.True(t, found)
+	assert.Equal(t, uint8(0), res.ActiveVersionId)
+}
+
+func TestActiveVersionOlder(t *testing.T) {
+	storage := &reservation.ReservationStorage{}
+	resmap := make(map[string]*reservation.Reservation)
+	resvmap := make(map[uint8]*reservation.ReservationVersion)
+	resvmap[0] = &reservation.ReservationVersion{
+		Version:  0,
+		Validity: time.Now().Add(1 * time.Minute),
+	}
+	resvmap[1] = &reservation.ReservationVersion{
+		Version:  1,
+		Validity: time.Now().Add(2 * time.Minute),
+	}
+
+	resmap["A"] = &reservation.Reservation{
+		ReservationId:   "A",
+		Versions:        resvmap,
+		ActiveVersionId: 0,
+	}
+	storage.InitStorageWithData(resmap)
+
+	res, found := storage.UseReservation("A", 1, time.Now())
+	assert.True(t, found)
+	assert.Equal(t, uint8(1), res.ActiveVersionId)
+	_, found = res.Versions[0]
+	assert.False(t, found)
+
+}
+
+func TestActiveVersionNewer(t *testing.T) {
+	storage := &reservation.ReservationStorage{}
+	resmap := make(map[string]*reservation.Reservation)
+	resvmap := make(map[uint8]*reservation.ReservationVersion)
+	resvmap[0] = &reservation.ReservationVersion{
+		Version:  0,
+		Validity: time.Now().Add(2 * time.Minute),
+	}
+	resvmap[1] = &reservation.ReservationVersion{
+		Version:  1,
+		Validity: time.Now().Add(1 * time.Minute),
+	}
+
+	resmap["A"] = &reservation.Reservation{
+		ReservationId:   "A",
+		Versions:        resvmap,
+		ActiveVersionId: 0,
+	}
+	storage.InitStorageWithData(resmap)
+	_, found := storage.UseReservation("A", 1, time.Now())
+	assert.False(t, found)
+	_, found = resvmap[1]
+	assert.False(t, found)
+}
+
+func TestPacketValidityIsChecked(t *testing.T) {
+	storage := &reservation.ReservationStorage{}
+	resmap := make(map[string]*reservation.Reservation)
+	resvmap := make(map[uint8]*reservation.ReservationVersion)
+	now := time.Now()
+	resvmap[0] = &reservation.ReservationVersion{
+		Version:  0,
+		Validity: now,
+	}
+
+	resmap["A"] = &reservation.Reservation{
+		ReservationId:   "A",
+		Versions:        resvmap,
+		ActiveVersionId: 0,
+	}
+	storage.InitStorageWithData(resmap)
+
+	res, found := storage.UseReservation("A", 0, now)
 	assert.True(t, found)
 	assert.Equal(t, "A", res.ReservationId)
-	assert.Equal(t, now.Add(1*time.Minute), res.Validity)
-
-	res, found = storage.IsReservationValid("A", now.Add(1*time.Minute))
-	assert.True(t, found)
-	assert.Equal(t, "A", res.ReservationId)
-	assert.Equal(t, now.Add(1*time.Minute), res.Validity)
-
-	res, found = storage.IsReservationValid("A", now.Add(1*time.Minute+1))
+	res, found = storage.UseReservation("A", 0, now.Add(1*time.Second))
 	assert.False(t, found)
 	assert.Nil(t, res)
 }

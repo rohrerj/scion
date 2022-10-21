@@ -71,7 +71,7 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 	}
 
 	//init
-	err = processing.Init(&cfg.Coligate, &cleanup, &egressMapping, serverAddr)
+	err = processing.Init(ctx, &cfg.Coligate, &cleanup, &egressMapping, serverAddr, topo.ColibriServiceAddress(cfg.General.ID))
 	if err != nil {
 		return err
 	}

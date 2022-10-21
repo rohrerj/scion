@@ -113,11 +113,11 @@ func (w *Worker) validate() error {
 	if C || R || S { //TODO I assume reverse packets make no sense here?
 		return serrors.New("Invalid flags", "S", S, "R", R, "C", C)
 	}
-	reservation, isValid := w.Storage.IsReservationValid(string(resID), w.ColigatePacketProcessor.pktArrivalTime)
+	reservation, isValid := w.Storage.UseReservation(string(resID), w.ColigatePacketProcessor.colibriPath.InfoField.Ver, w.ColigatePacketProcessor.pktArrivalTime)
 	if !isValid {
 		return serrors.New("E2E reservation is invalid")
 	}
-	if len(reservation.Macs) != len(w.ColigatePacketProcessor.colibriPath.HopFields) {
+	if len(reservation.Current().Macs) != len(w.ColigatePacketProcessor.colibriPath.HopFields) {
 		return serrors.New("Number of hopfields is invalid")
 	}
 	w.ColigatePacketProcessor.reservation = reservation
@@ -129,7 +129,7 @@ func (w *Worker) validate() error {
 func (w *Worker) performTrafficMonitoring() error {
 	bucket, exists := w.TokenBuckets[w.ColigatePacketProcessor.tokenbucketIdentifier]
 	entry := Tokenbucket.TokenBucketEntry{Length: uint64(w.ColigatePacketProcessor.totalLength), ArrivalTime: w.ColigatePacketProcessor.pktArrivalTime}
-	realBandwidth := uint64(8192 * math.Sqrt(math.Pow(2, float64(w.ColigatePacketProcessor.reservation.BwCls-1))))
+	realBandwidth := uint64(8192 * math.Sqrt(math.Pow(2, float64(w.ColigatePacketProcessor.reservation.Current().BwCls-1))))
 
 	if !exists {
 		bucket = &Tokenbucket.TokenBucket{}
@@ -149,9 +149,10 @@ func (w *Worker) performTrafficMonitoring() error {
 
 // update the colibri header fields
 func (w *Worker) updateFields() error {
-	var expTick int64 = w.ColigatePacketProcessor.reservation.Validity.Unix() / 4
+	currentVersion := w.ColigatePacketProcessor.reservation.Current()
+	var expTick int64 = currentVersion.Validity.Unix() / 4
 	var timestampNs int64 = (4*expTick - 16) * int64(math.Pow(10, 9))
-	var tsRel uint32 = uint32((w.ColigatePacketProcessor.reservation.Validity.Unix() - timestampNs) / int64(4*time.Nanosecond))
+	var tsRel uint32 = uint32((currentVersion.Validity.Unix() - timestampNs) / int64(4*time.Nanosecond))
 
 	//Update Colibri Timestamp Field
 	w.ColigatePacketProcessor.colibriPath.PacketTimestamp = colibri.Timestamp{}
@@ -160,15 +161,15 @@ func (w *Worker) updateFields() error {
 	binary.BigEndian.PutUint32(w.ColigatePacketProcessor.colibriPath.PacketTimestamp[4:], w.CoreIdCounter)
 
 	//Update InfoField
-	w.ColigatePacketProcessor.colibriPath.InfoField.BwCls = w.ColigatePacketProcessor.reservation.BwCls
+	w.ColigatePacketProcessor.colibriPath.InfoField.BwCls = currentVersion.BwCls
 	w.ColigatePacketProcessor.colibriPath.InfoField.Rlc = w.ColigatePacketProcessor.reservation.Rlc
-	w.ColigatePacketProcessor.colibriPath.InfoField.HFCount = uint8(len(w.ColigatePacketProcessor.reservation.Macs))
-	w.ColigatePacketProcessor.colibriPath.InfoField.Ver = uint8(w.ColigatePacketProcessor.reservation.Version)
+	w.ColigatePacketProcessor.colibriPath.InfoField.HFCount = uint8(len(currentVersion.Macs))
+	w.ColigatePacketProcessor.colibriPath.InfoField.Ver = uint8(currentVersion.Version)
 	w.ColigatePacketProcessor.colibriPath.InfoField.CurrHF = 0
 	w.ColigatePacketProcessor.colibriPath.InfoField.ExpTick = uint32(expTick)
 
 	//Update Hopfields and MACS
-	for i, mac := range w.ColigatePacketProcessor.reservation.Macs {
+	for i, mac := range currentVersion.Macs {
 		sizeBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(sizeBytes, w.ColigatePacketProcessor.totalLength)
 

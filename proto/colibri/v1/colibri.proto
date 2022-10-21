@@ -452,22 +452,26 @@ message ActiveIndicesRequest {
 }
 
 message ActiveIndicesResponse {
-    message Index {
+    message Reservation {
         // the reservation ID the request refers to.
         ReservationID id = 1;
         // egress ID (16 bits).
         uint32 egress = 2;
+        // the active versions of the current reservation
+        repeated ReservationVersion versions = 3;
+    }
+    message ReservationVersion {
         // the index number (4 bits, 0 to 15).
-        uint32 index = 3;
+        uint32 index = 1;
         // the expiration time of the index.
-        uint32 expiration_time = 4;
+        uint32 expiration_time = 2;
         // the bandwidth allocated to the index.
-        uint32 allocBw = 5;
+        uint32 allocBw = 3;
         // the N sigmas of the N ASes in the path.
-        repeated bytes sigmas = 6;
+        repeated bytes sigmas = 4;
     }
 
     // TODO(justing) add drkey validation
 
-    repeated Index indices = 1;
+    repeated Reservation reservations = 1;
 }

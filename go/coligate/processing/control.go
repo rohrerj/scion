@@ -15,9 +15,11 @@
 package processing
 
 import (
+	"context"
 	"hash/fnv"
 	"math/rand"
 	"net"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -25,9 +27,11 @@ import (
 	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/snet"
+	"github.com/scionproto/scion/go/lib/util"
 	"github.com/scionproto/scion/go/pkg/app"
 	"github.com/scionproto/scion/go/pkg/coligate/config"
 	cggrpc "github.com/scionproto/scion/go/pkg/coligate/grpc"
+	copb "github.com/scionproto/scion/go/pkg/proto/colibri"
 	cgpb "github.com/scionproto/scion/go/pkg/proto/coligate"
 	"golang.org/x/net/ipv4"
 	"google.golang.org/grpc"
@@ -44,7 +48,9 @@ type control struct {
 var bufSize int = 9000 //TODO check size
 
 // Initializes the colibri gateway. Configures the channels, goroutines, the control plane and the data plane
-func Init(config *config.ColigateConfig, cleanup *app.Cleanup, egressMapping *map[uint16]*net.UDPAddr, serverAddr *snet.UDPAddr) error {
+func Init(ctx context.Context, config *config.ColigateConfig, cleanup *app.Cleanup, egressMapping *map[uint16]*net.UDPAddr,
+	serverAddr *snet.UDPAddr, colibiServiceAddr *net.UDPAddr) error {
+
 	control := control{}
 	//loads the salt for load balancing from the config. If the salt is empty a random value will be chosen
 	if config.Salt == "" {
@@ -76,10 +82,62 @@ func Init(config *config.ColigateConfig, cleanup *app.Cleanup, egressMapping *ma
 	if err != nil {
 		return err
 	}
+
+	err = control.loadActiveReservationsFromColibriService(ctx, colibiServiceAddr)
+	if err != nil {
+		return err
+	}
+
 	err = control.initDataPlane(config, egressMapping)
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func (control *control) loadActiveReservationsFromColibriService(ctx context.Context, colibiServiceAddr *net.UDPAddr) error {
+	grpcconn, err := grpc.Dial(colibiServiceAddr.String())
+	if err != nil {
+		return err
+	}
+	copbservice := copb.NewColibriServiceClient(grpcconn)
+	response, err := copbservice.ActiveIndices(ctx, &copb.ActiveIndicesRequest{})
+	if err != nil {
+		return err
+	}
+	for _, respReservation := range response.Reservations {
+		highestValidity := time.Unix(0, 0)
+		res := &reservation.Reservation{
+			ReservationId: strconv.FormatInt(int64(respReservation.Id.Asid), 10) + string(respReservation.Id.Suffix),
+			Rlc:           0, //TODO
+			Versions:      make(map[uint8]*reservation.ReservationVersion),
+			Hops: []reservation.HopField{ //TODO add other hop fields too
+				{
+					EgressId: uint16(respReservation.Egress),
+				},
+			},
+		}
+		for _, respReservationVersion := range respReservation.Versions {
+			resver := &reservation.ReservationVersion{
+				Version:  uint8(respReservationVersion.Index),
+				Validity: util.SecsToTime(respReservationVersion.ExpirationTime),
+				BwCls:    uint8(respReservationVersion.AllocBw),
+				Macs:     respReservationVersion.Sigmas,
+			}
+			res.Versions[uint8(respReservationVersion.Index)] = resver
+			if resver.Validity.Sub(highestValidity) > 0 {
+				highestValidity = resver.Validity
+			}
+		}
+		task := &reservation.ReservationTask{
+			ResId:           res.ReservationId,
+			Reservation:     res,
+			HighestValidity: highestValidity,
+		}
+		control.cleanupChannel <- task
+		control.reservationChannels[hash(task.ResId, control.salt)] <- task
+	}
+
 	return nil
 }
 
@@ -92,7 +150,14 @@ func (control *control) initCleanupRoutine() error {
 			for resId, val := range data {
 				select {
 				case task := <-control.cleanupChannel:
-					data[task.ResId] = task.Reservation.Validity
+					res, exists := data[task.ResId]
+					if exists {
+						if task.HighestValidity.Sub(res) > 0 {
+							data[task.ResId] = task.HighestValidity
+						}
+					} else {
+						data[task.ResId] = task.HighestValidity
+					}
 				default:
 					if time.Until(val) < 0 {
 						deletionTask := &reservation.ReservationTask{}
@@ -154,31 +219,34 @@ func (control *control) initDataPlane(config *config.ColigateConfig, egressMappi
 	}
 
 	var ipv4Conn *ipv4.PacketConn = ipv4.NewPacketConn(udpConn)
-
-	for {
-		numPkts, err := ipv4Conn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
-		if err != nil {
-			//do something
-			continue
-		}
-		if numPkts == 0 {
-			continue
-		}
-		for _, p := range msgs[:numPkts] {
-			var proc *coligatePacketProcessor
-			proc, err = Parse(p.Buffers[0][:p.N])
+	go func() {
+		defer log.HandlePanic()
+		for {
+			numPkts, err := ipv4Conn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
 			if err != nil {
+				//do something
 				continue
 			}
-			var selectedChannel uint32 = hash(string(proc.colibriPath.InfoField.ResIdSuffix), control.salt) % uint32(config.NumWorkers)
-			select {
-			case control.channels[selectedChannel] <- proc:
-			default:
-				continue //packet dropped
+			if numPkts == 0 {
+				continue
 			}
-		}
+			for _, p := range msgs[:numPkts] {
+				var proc *coligatePacketProcessor
+				proc, err = Parse(p.Buffers[0][:p.N])
+				if err != nil {
+					continue
+				}
+				var selectedChannel uint32 = hash(string(proc.colibriPath.InfoField.ResIdSuffix), control.salt) % uint32(config.NumWorkers)
+				select {
+				case control.channels[selectedChannel] <- proc:
+				default:
+					continue //packet dropped
+				}
+			}
 
-	}
+		}
+	}()
+	return nil
 }
 
 // Internal method to get the address of the corresponding border router
