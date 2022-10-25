@@ -139,7 +139,7 @@ func (control *control) loadActiveReservationsFromColibriService(ctx context.Con
 			}
 			for _, respReservationVersion := range respReservation.Indices {
 				resver := &reservation.ReservationIndex{
-					Version:  uint8(respReservationVersion.Index),
+					Index:    uint8(respReservationVersion.Index),
 					Validity: util.SecsToTime(respReservationVersion.ExpirationTime),
 					BwCls:    uint8(respReservationVersion.AllocBw),
 					Macs:     respReservationVersion.Sigmas,

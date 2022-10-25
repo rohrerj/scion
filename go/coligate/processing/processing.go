@@ -164,7 +164,7 @@ func (w *Worker) updateFields() error {
 	w.ColigatePacketProcessor.colibriPath.InfoField.BwCls = currentVersion.BwCls
 	w.ColigatePacketProcessor.colibriPath.InfoField.Rlc = w.ColigatePacketProcessor.reservation.Rlc
 	w.ColigatePacketProcessor.colibriPath.InfoField.HFCount = uint8(len(currentVersion.Macs))
-	w.ColigatePacketProcessor.colibriPath.InfoField.Ver = uint8(currentVersion.Version)
+	w.ColigatePacketProcessor.colibriPath.InfoField.Ver = uint8(currentVersion.Index)
 	w.ColigatePacketProcessor.colibriPath.InfoField.CurrHF = 0
 	w.ColigatePacketProcessor.colibriPath.InfoField.ExpTick = uint32(expTick)
 

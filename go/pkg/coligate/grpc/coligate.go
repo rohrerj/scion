@@ -28,8 +28,8 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 	task.HighestValidity = util.SecsToTime(msg.ExpirationTime)
 
 	task.Reservation.Indices = make(map[uint8]*reservation.ReservationIndex)
-	task.Reservation.Indices[uint8(msg.Version)] = &reservation.ReservationIndex{
-		Version:  uint8(msg.Version),
+	task.Reservation.Indices[uint8(msg.Index)] = &reservation.ReservationIndex{
+		Index:    uint8(msg.Index),
 		Validity: task.HighestValidity,
 		BwCls:    uint8(msg.Bwcls),
 		Macs:     msg.Macs,

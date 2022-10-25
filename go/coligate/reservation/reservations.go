@@ -19,7 +19,7 @@ type Reservation struct {
 	Indices       map[uint8]*ReservationIndex
 }
 type ReservationIndex struct {
-	Version  uint8
+	Index    uint8
 	Validity time.Time
 	Macs     [][]byte
 	BwCls    uint8
@@ -65,7 +65,7 @@ func (store *ReservationStorage) UseReservation(resId string, providexIndex uint
 
 	if res.ActiveIndexId != providexIndex {
 		activeVer, found := res.Indices[res.ActiveIndexId]
-		if found && index.Validity.Sub(activeVer.Validity) < 0 { //active version exists but has longer validity than provided version
+		if found && index.Validity.Sub(activeVer.Validity) < 0 { //active index exists but has longer validity than provided index
 			return nil, false
 		} else {
 			res.ActiveIndexId = providexIndex
@@ -104,7 +104,7 @@ func (res *Reservation) deleteOlderIndices() {
 	}
 	for _, ver := range res.Indices {
 		if ver.Validity.Sub(t) < 0 {
-			delete(res.Indices, uint8(ver.Version))
+			delete(res.Indices, uint8(ver.Index))
 		}
 	}
 }

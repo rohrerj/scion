@@ -21,7 +21,7 @@ func TestReservationVersionNotFound(t *testing.T) {
 	resmap := make(map[string]*reservation.Reservation)
 	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	resvmap[0] = &reservation.ReservationIndex{
-		Version:  0,
+		Index:    0,
 		Validity: time.Now().Add(1 * time.Minute),
 	}
 
@@ -42,7 +42,7 @@ func TestActiveVersionIsProvidedVersion(t *testing.T) {
 	resmap := make(map[string]*reservation.Reservation)
 	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	resvmap[0] = &reservation.ReservationIndex{
-		Version:  0,
+		Index:    0,
 		Validity: time.Now().Add(1 * time.Minute),
 	}
 
@@ -63,11 +63,11 @@ func TestActiveVersionOlder(t *testing.T) {
 	resmap := make(map[string]*reservation.Reservation)
 	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	resvmap[0] = &reservation.ReservationIndex{
-		Version:  0,
+		Index:    0,
 		Validity: time.Now().Add(1 * time.Minute),
 	}
 	resvmap[1] = &reservation.ReservationIndex{
-		Version:  1,
+		Index:    1,
 		Validity: time.Now().Add(2 * time.Minute),
 	}
 
@@ -91,11 +91,11 @@ func TestActiveVersionNewer(t *testing.T) {
 	resmap := make(map[string]*reservation.Reservation)
 	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	resvmap[0] = &reservation.ReservationIndex{
-		Version:  0,
+		Index:    0,
 		Validity: time.Now().Add(2 * time.Minute),
 	}
 	resvmap[1] = &reservation.ReservationIndex{
-		Version:  1,
+		Index:    1,
 		Validity: time.Now().Add(1 * time.Minute),
 	}
 
@@ -117,7 +117,7 @@ func TestPacketValidityIsChecked(t *testing.T) {
 	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	now := time.Now()
 	resvmap[0] = &reservation.ReservationIndex{
-		Version:  0,
+		Index:    0,
 		Validity: now,
 	}
 
