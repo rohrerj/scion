@@ -458,9 +458,9 @@ message ActiveIndicesResponse {
         // egress ID (16 bits).
         uint32 egress = 2;
         // the active versions of the current reservation
-        repeated ReservationVersion versions = 3;
+        repeated ReservationIndex indices = 3;
     }
-    message ReservationVersion {
+    message ReservationIndex {
         // the index number (4 bits, 0 to 15).
         uint32 index = 1;
         // the expiration time of the index.

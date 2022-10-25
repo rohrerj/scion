@@ -19,16 +19,16 @@ func TestReservationNotFound(t *testing.T) {
 func TestReservationVersionNotFound(t *testing.T) {
 	storage := &reservation.ReservationStorage{}
 	resmap := make(map[string]*reservation.Reservation)
-	resvmap := make(map[uint8]*reservation.ReservationVersion)
-	resvmap[0] = &reservation.ReservationVersion{
+	resvmap := make(map[uint8]*reservation.ReservationIndex)
+	resvmap[0] = &reservation.ReservationIndex{
 		Version:  0,
 		Validity: time.Now().Add(1 * time.Minute),
 	}
 
 	resmap["A"] = &reservation.Reservation{
-		ReservationId:   "A",
-		Versions:        resvmap,
-		ActiveVersionId: 0,
+		ReservationId: "A",
+		Indices:       resvmap,
+		ActiveIndexId: 0,
 	}
 	storage.InitStorageWithData(resmap)
 
@@ -40,48 +40,48 @@ func TestReservationVersionNotFound(t *testing.T) {
 func TestActiveVersionIsProvidedVersion(t *testing.T) {
 	storage := &reservation.ReservationStorage{}
 	resmap := make(map[string]*reservation.Reservation)
-	resvmap := make(map[uint8]*reservation.ReservationVersion)
-	resvmap[0] = &reservation.ReservationVersion{
+	resvmap := make(map[uint8]*reservation.ReservationIndex)
+	resvmap[0] = &reservation.ReservationIndex{
 		Version:  0,
 		Validity: time.Now().Add(1 * time.Minute),
 	}
 
 	resmap["A"] = &reservation.Reservation{
-		ReservationId:   "A",
-		Versions:        resvmap,
-		ActiveVersionId: 0,
+		ReservationId: "A",
+		Indices:       resvmap,
+		ActiveIndexId: 0,
 	}
 	storage.InitStorageWithData(resmap)
 
 	res, found := storage.UseReservation("A", 0, time.Now())
 	assert.True(t, found)
-	assert.Equal(t, uint8(0), res.ActiveVersionId)
+	assert.Equal(t, uint8(0), res.ActiveIndexId)
 }
 
 func TestActiveVersionOlder(t *testing.T) {
 	storage := &reservation.ReservationStorage{}
 	resmap := make(map[string]*reservation.Reservation)
-	resvmap := make(map[uint8]*reservation.ReservationVersion)
-	resvmap[0] = &reservation.ReservationVersion{
+	resvmap := make(map[uint8]*reservation.ReservationIndex)
+	resvmap[0] = &reservation.ReservationIndex{
 		Version:  0,
 		Validity: time.Now().Add(1 * time.Minute),
 	}
-	resvmap[1] = &reservation.ReservationVersion{
+	resvmap[1] = &reservation.ReservationIndex{
 		Version:  1,
 		Validity: time.Now().Add(2 * time.Minute),
 	}
 
 	resmap["A"] = &reservation.Reservation{
-		ReservationId:   "A",
-		Versions:        resvmap,
-		ActiveVersionId: 0,
+		ReservationId: "A",
+		Indices:       resvmap,
+		ActiveIndexId: 0,
 	}
 	storage.InitStorageWithData(resmap)
 
 	res, found := storage.UseReservation("A", 1, time.Now())
 	assert.True(t, found)
-	assert.Equal(t, uint8(1), res.ActiveVersionId)
-	_, found = res.Versions[0]
+	assert.Equal(t, uint8(1), res.ActiveIndexId)
+	_, found = res.Indices[0]
 	assert.False(t, found)
 
 }
@@ -89,20 +89,20 @@ func TestActiveVersionOlder(t *testing.T) {
 func TestActiveVersionNewer(t *testing.T) {
 	storage := &reservation.ReservationStorage{}
 	resmap := make(map[string]*reservation.Reservation)
-	resvmap := make(map[uint8]*reservation.ReservationVersion)
-	resvmap[0] = &reservation.ReservationVersion{
+	resvmap := make(map[uint8]*reservation.ReservationIndex)
+	resvmap[0] = &reservation.ReservationIndex{
 		Version:  0,
 		Validity: time.Now().Add(2 * time.Minute),
 	}
-	resvmap[1] = &reservation.ReservationVersion{
+	resvmap[1] = &reservation.ReservationIndex{
 		Version:  1,
 		Validity: time.Now().Add(1 * time.Minute),
 	}
 
 	resmap["A"] = &reservation.Reservation{
-		ReservationId:   "A",
-		Versions:        resvmap,
-		ActiveVersionId: 0,
+		ReservationId: "A",
+		Indices:       resvmap,
+		ActiveIndexId: 0,
 	}
 	storage.InitStorageWithData(resmap)
 	_, found := storage.UseReservation("A", 1, time.Now())
@@ -114,17 +114,17 @@ func TestActiveVersionNewer(t *testing.T) {
 func TestPacketValidityIsChecked(t *testing.T) {
 	storage := &reservation.ReservationStorage{}
 	resmap := make(map[string]*reservation.Reservation)
-	resvmap := make(map[uint8]*reservation.ReservationVersion)
+	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	now := time.Now()
-	resvmap[0] = &reservation.ReservationVersion{
+	resvmap[0] = &reservation.ReservationIndex{
 		Version:  0,
 		Validity: now,
 	}
 
 	resmap["A"] = &reservation.Reservation{
-		ReservationId:   "A",
-		Versions:        resvmap,
-		ActiveVersionId: 0,
+		ReservationId: "A",
+		Indices:       resvmap,
+		ActiveIndexId: 0,
 	}
 	storage.InitStorageWithData(resmap)
 

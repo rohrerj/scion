@@ -21,11 +21,13 @@ go_library(
         "//go/pkg/app:go_default_library",
         "//go/pkg/coligate/config:go_default_library",
         "//go/pkg/coligate/grpc:go_default_library",
+        "//go/pkg/grpc:go_default_library",
         "//go/pkg/proto/colibri:go_default_library",
         "//go/pkg/proto/coligate:go_default_library",
         "@com_github_google_gopacket//:go_default_library",
         "@org_golang_google_grpc//:go_default_library",
         "@org_golang_x_net//ipv4:go_default_library",
+        "@org_golang_x_sync//errgroup:go_default_library",
     ],
 )
 

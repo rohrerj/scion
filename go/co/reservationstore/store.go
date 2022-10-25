@@ -392,14 +392,14 @@ func (s *Store) GetActiveIndicesAtSource(ctx context.Context, req *colpb.ActiveI
 	}
 	reservations := make([]*colpb.ActiveIndicesResponse_Reservation, 0)
 	for _, r := range rsvs {
-		reservationVersions := make([]*colpb.ActiveIndicesResponse_ReservationVersion, 0)
+		reservationIndices := make([]*colpb.ActiveIndicesResponse_ReservationIndex, 0)
 		for _, idx := range r.Indices {
 			sigmas := make([][]byte, len(idx.Token.HopFields))
 			for i, hf := range idx.Token.HopFields {
 				sigmas[i] = make([]byte, len(hf.Mac))
 				copy(sigmas[i], hf.Mac[:])
 			}
-			reservationVersions = append(reservationVersions, &colpb.ActiveIndicesResponse_ReservationVersion{
+			reservationIndices = append(reservationIndices, &colpb.ActiveIndicesResponse_ReservationIndex{
 				Index:          uint32(idx.Idx),
 				ExpirationTime: util.TimeToSecs(idx.Expiration),
 				AllocBw:        uint32(idx.AllocBW),
@@ -407,9 +407,9 @@ func (s *Store) GetActiveIndicesAtSource(ctx context.Context, req *colpb.ActiveI
 			})
 		}
 		reservations = append(reservations, &colpb.ActiveIndicesResponse_Reservation{
-			Id:       translate.PBufID(&r.ID),
-			Egress:   uint32(r.Steps[r.CurrentStep].Egress),
-			Versions: reservationVersions,
+			Id:      translate.PBufID(&r.ID),
+			Egress:  uint32(r.Steps[r.CurrentStep].Egress),
+			Indices: reservationIndices,
 		})
 	}
 	res := &colpb.ActiveIndicesResponse{

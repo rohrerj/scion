@@ -12,13 +12,13 @@ type HopField struct {
 	EgressId  uint16
 }
 type Reservation struct {
-	ReservationId   string
-	Hops            []HopField
-	Rlc             uint8
-	ActiveVersionId uint8
-	Versions        map[uint8]*ReservationVersion
+	ReservationId string
+	Hops          []HopField
+	Rlc           uint8
+	ActiveIndexId uint8
+	Indices       map[uint8]*ReservationIndex
 }
-type ReservationVersion struct {
+type ReservationIndex struct {
 	Version  uint8
 	Validity time.Time
 	Macs     [][]byte
@@ -29,11 +29,12 @@ type ReservationTask struct {
 	Reservation     *Reservation
 	ResId           string
 	IsDeleteQuery   bool
-	HighestValidity time.Time //might be unset. depending on context
+	HighestValidity time.Time //The validity of the longest (but possible not active) reservation index.
 }
 
-func (res *Reservation) Current() *ReservationVersion {
-	ver, found := res.Versions[res.ActiveVersionId]
+// Returns the active reservation index. If the active reservation id is not valid (anymore) nil is returned.
+func (res *Reservation) Current() *ReservationIndex {
+	ver, found := res.Indices[res.ActiveIndexId]
 	if !found {
 		return nil
 	}
@@ -51,59 +52,59 @@ func (store *ReservationStorage) InitStorageWithData(data map[string]*Reservatio
 
 // Checks whether the reservation exists and is valid. If the reservation exists but is not valid anymore, it will be removed.
 // If the reservation exists and is valid, the reservation is returned.
-func (store *ReservationStorage) UseReservation(resId string, version uint8, pktTime time.Time) (*Reservation, bool) {
+func (store *ReservationStorage) UseReservation(resId string, providexIndex uint8, pktTime time.Time) (*Reservation, bool) {
 	res, found := store.reservations[resId]
 	if !found {
 		return nil, false
 	}
-	ver, found := res.Versions[version]
+	index, found := res.Indices[providexIndex]
 	if !found {
 		return nil, false
 	}
-	defer res.deleteOlderVersions()
+	defer res.deleteOlderIndices()
 
-	if res.ActiveVersionId != version {
-		activeVer, found := res.Versions[res.ActiveVersionId]
-		if found && ver.Validity.Sub(activeVer.Validity) < 0 { //active version exists but has longer validity than provided version
+	if res.ActiveIndexId != providexIndex {
+		activeVer, found := res.Indices[res.ActiveIndexId]
+		if found && index.Validity.Sub(activeVer.Validity) < 0 { //active version exists but has longer validity than provided version
 			return nil, false
 		} else {
-			res.ActiveVersionId = version
+			res.ActiveIndexId = providexIndex
 		}
 	}
 
-	if ver.Validity.Sub(pktTime) >= 0 {
+	if index.Validity.Sub(pktTime) >= 0 {
 		return res, true
 	}
 
 	return nil, false
 }
 
-// Merges (overwrites if exists in both) all provided reservation versions with the currently stored versions.
+// Merges (overwrites if exists in both) all provided reservation indices with the currently stored indices.
 // Creates a new entry if no reservation exists.
 func (store *ReservationStorage) Update(task *ReservationTask) {
 	res, found := store.reservations[task.ResId]
 	if found {
-		for versioNumber, reservationVersion := range task.Reservation.Versions {
-			res.Versions[versioNumber] = reservationVersion
+		for indexNumber, reservationIndex := range task.Reservation.Indices {
+			res.Indices[indexNumber] = reservationIndex
 		}
 	} else {
 		store.reservations[task.ResId] = task.Reservation
 	}
 }
 
-// Compares the validity of all versions with the active version and deletes all versions whose validity is behind the active version.
-// If the active version is not valid, it will do the comparison with the current time.
-func (res *Reservation) deleteOlderVersions() {
-	v, found := res.Versions[res.ActiveVersionId]
+// Compares the validity of all indices with the active index and deletes all indices whose validity is behind the active index.
+// If the active index is not valid, it will do the comparison with the current time.
+func (res *Reservation) deleteOlderIndices() {
+	v, found := res.Indices[res.ActiveIndexId]
 	var t time.Time
 	if found {
 		t = v.Validity
 	} else {
 		t = time.Now()
 	}
-	for _, ver := range res.Versions {
+	for _, ver := range res.Indices {
 		if ver.Validity.Sub(t) < 0 {
-			delete(res.Versions, uint8(ver.Version))
+			delete(res.Indices, uint8(ver.Version))
 		}
 	}
 }

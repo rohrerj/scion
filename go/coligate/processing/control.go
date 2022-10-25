@@ -31,9 +31,11 @@ import (
 	"github.com/scionproto/scion/go/pkg/app"
 	"github.com/scionproto/scion/go/pkg/coligate/config"
 	cggrpc "github.com/scionproto/scion/go/pkg/coligate/grpc"
+	libgrpc "github.com/scionproto/scion/go/pkg/grpc"
 	copb "github.com/scionproto/scion/go/pkg/proto/colibri"
 	cgpb "github.com/scionproto/scion/go/pkg/proto/coligate"
 	"golang.org/x/net/ipv4"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 )
 
@@ -43,15 +45,22 @@ type control struct {
 	cleanupChannel      chan *reservation.ReservationTask
 	egressMapping       map[uint16]*net.UDPAddr
 	salt                string
+	exit                bool
 }
 
 var bufSize int = 9000 //TODO check size
 
 // Initializes the colibri gateway. Configures the channels, goroutines, the control plane and the data plane
 func Init(ctx context.Context, config *config.ColigateConfig, cleanup *app.Cleanup, egressMapping *map[uint16]*net.UDPAddr,
-	serverAddr *snet.UDPAddr, colibiServiceAddr *net.UDPAddr) error {
+	serverAddr *snet.UDPAddr, colibiServiceAddr *net.UDPAddr, g *errgroup.Group) error {
 
 	control := control{}
+
+	cleanup.Add(func() error {
+		control.exit = true
+		return nil
+	})
+
 	//loads the salt for load balancing from the config. If the salt is empty a random value will be chosen
 	if config.Salt == "" {
 		randomSalt := make([]byte, 16)
@@ -68,85 +77,99 @@ func Init(ctx context.Context, config *config.ColigateConfig, cleanup *app.Clean
 	for i := 0; i < config.NumWorkers; i++ {
 		control.channels[i] = make(chan *coligatePacketProcessor, config.MaxQueueSizePerThread)
 		control.reservationChannels[i] = make(chan *reservation.ReservationTask, config.MaxQueueSizePerThread)
-		go func(i int) {
-			defer log.HandlePanic()
-			control.threadReceiveEntry(control.channels[i], control.reservationChannels[i], config, uint32(i), uint32(config.ColibriGatewayID))
+		func(i int) {
+			g.Go(func() error {
+				defer log.HandlePanic()
+				return control.threadReceiveEntry(control.channels[i], control.reservationChannels[i], config, uint32(i), uint32(config.ColibriGatewayID))
+			})
 		}(i)
 	}
 
-	err := control.initCleanupRoutine()
+	control.initCleanupRoutine(g)
+	err := control.initControlPlane(config, cleanup, serverAddr, g)
 	if err != nil {
 		return err
 	}
-	err = control.initControlPlane(config, cleanup, serverAddr)
+	control.loadActiveReservationsFromColibriService(ctx, colibiServiceAddr, g)
+	err = control.initDataPlane(config, egressMapping, g)
 	if err != nil {
 		return err
 	}
 
-	err = control.loadActiveReservationsFromColibriService(ctx, colibiServiceAddr)
-	if err != nil {
-		return err
-	}
-
-	err = control.initDataPlane(config, egressMapping)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
-func (control *control) loadActiveReservationsFromColibriService(ctx context.Context, colibiServiceAddr *net.UDPAddr) error {
-	grpcconn, err := grpc.Dial(colibiServiceAddr.String())
-	if err != nil {
-		return err
-	}
-	copbservice := copb.NewColibriServiceClient(grpcconn)
-	response, err := copbservice.ActiveIndices(ctx, &copb.ActiveIndicesRequest{})
-	if err != nil {
-		return err
-	}
-	for _, respReservation := range response.Reservations {
-		highestValidity := time.Unix(0, 0)
-		res := &reservation.Reservation{
-			ReservationId: strconv.FormatInt(int64(respReservation.Id.Asid), 10) + string(respReservation.Id.Suffix),
-			Rlc:           0, //TODO
-			Versions:      make(map[uint8]*reservation.ReservationVersion),
-			Hops: []reservation.HopField{ //TODO add other hop fields too
-				{
-					EgressId: uint16(respReservation.Egress),
-				},
-			},
-		}
-		for _, respReservationVersion := range respReservation.Versions {
-			resver := &reservation.ReservationVersion{
-				Version:  uint8(respReservationVersion.Index),
-				Validity: util.SecsToTime(respReservationVersion.ExpirationTime),
-				BwCls:    uint8(respReservationVersion.AllocBw),
-				Macs:     respReservationVersion.Sigmas,
+// Loads the active EE Reservations from the colibri service
+func (control *control) loadActiveReservationsFromColibriService(ctx context.Context, colibiServiceAddr *net.UDPAddr, g *errgroup.Group) {
+	g.Go(func() error {
+		defer log.HandlePanic()
+		log.Info("load active reservations from colibri service")
+		var grpcconn *grpc.ClientConn
+		var err error
+		var copbservice copb.ColibriServiceClient
+		var response *copb.ActiveIndicesResponse
+		success := false
+		for !success {
+			time.Sleep(1 * time.Second)
+			grpcconn, err = grpc.Dial(colibiServiceAddr.String(), grpc.WithInsecure()) //TODO add transport security
+			if err != nil {
+				log.Debug("Error while loading reservation indices from colibri service. Retrying...", "error", err.Error())
+				continue
 			}
-			res.Versions[uint8(respReservationVersion.Index)] = resver
-			if resver.Validity.Sub(highestValidity) > 0 {
-				highestValidity = resver.Validity
+			copbservice = copb.NewColibriServiceClient(grpcconn)
+			response, err = copbservice.ActiveIndices(ctx, &copb.ActiveIndicesRequest{})
+			if err != nil {
+				log.Debug("Error while loading reservation indices from colibri service. Retrying...", "error", err.Error())
+				continue
 			}
+			success = true
 		}
-		task := &reservation.ReservationTask{
-			ResId:           res.ReservationId,
-			Reservation:     res,
-			HighestValidity: highestValidity,
-		}
-		control.cleanupChannel <- task
-		control.reservationChannels[hash(task.ResId, control.salt)] <- task
-	}
 
-	return nil
+		for _, respReservation := range response.Reservations {
+			highestValidity := time.Unix(0, 0)
+			res := &reservation.Reservation{
+				ReservationId: strconv.FormatInt(int64(respReservation.Id.Asid), 10) + string(respReservation.Id.Suffix),
+				Rlc:           0, //TODO
+				Indices:       make(map[uint8]*reservation.ReservationIndex),
+				Hops: []reservation.HopField{ //TODO add other hop fields too
+					{
+						EgressId: uint16(respReservation.Egress),
+					},
+				},
+			}
+			for _, respReservationVersion := range respReservation.Indices {
+				resver := &reservation.ReservationIndex{
+					Version:  uint8(respReservationVersion.Index),
+					Validity: util.SecsToTime(respReservationVersion.ExpirationTime),
+					BwCls:    uint8(respReservationVersion.AllocBw),
+					Macs:     respReservationVersion.Sigmas,
+				}
+				res.Indices[uint8(respReservationVersion.Index)] = resver
+				if resver.Validity.Sub(highestValidity) > 0 {
+					highestValidity = resver.Validity
+				}
+			}
+			task := &reservation.ReservationTask{
+				ResId:           res.ReservationId,
+				Reservation:     res,
+				HighestValidity: highestValidity,
+			}
+			control.cleanupChannel <- task
+			control.reservationChannels[hash(task.ResId, control.salt)] <- task
+		}
+		log.Info("Successfully loaded reservations from colibri service")
+		return nil
+	})
+
 }
 
 // initializes the cleanup routine that removes outdated reservations
-func (control *control) initCleanupRoutine() error {
-	go func() {
+func (control *control) initCleanupRoutine(g *errgroup.Group) {
+	g.Go(func() error {
 		defer log.HandlePanic()
+		log.Info("Init cleanup routine")
 		data := make(map[string]time.Time)
-		for {
+		for !control.exit {
 			for resId, val := range data {
 				select {
 				case task := <-control.cleanupChannel:
@@ -168,13 +191,15 @@ func (control *control) initCleanupRoutine() error {
 					}
 				}
 			}
+			time.Sleep(100 * time.Millisecond)
 		}
-	}()
-	return nil
+		return nil
+	})
 }
 
 // The function to initialize the control plane of the colibri gateway.
-func (control *control) initControlPlane(config *config.ColigateConfig, cleanup *app.Cleanup, serverAddr *snet.UDPAddr) error {
+func (control *control) initControlPlane(config *config.ColigateConfig, cleanup *app.Cleanup, serverAddr *snet.UDPAddr, g *errgroup.Group) error {
+	log.Info("Init control plane")
 	lis, err := net.ListenTCP("tcp", &net.TCPAddr{
 		IP:   serverAddr.Host.IP,
 		Port: serverAddr.Host.Port,
@@ -183,25 +208,26 @@ func (control *control) initControlPlane(config *config.ColigateConfig, cleanup 
 	if err != nil {
 		return err
 	}
-	s := grpc.NewServer()
+
+	s := grpc.NewServer(libgrpc.UnaryServerInterceptor())
 	coligate := &cggrpc.Coligate{
 		Salt:                control.salt,
 		ReservationChannels: control.reservationChannels,
 		CleanupChannel:      control.cleanupChannel,
 	}
 	cgpb.RegisterColibriGatewayServer(s, coligate)
-	go func() {
+	g.Go(func() error {
 		defer log.HandlePanic()
-		s.Serve(lis)
-	}()
+		return s.Serve(lis)
+	})
 	cleanup.Add(func() error { s.GracefulStop(); return nil })
 	return nil
 }
 
 // The function to initialize the data plane of the colibri gateway.
-func (control *control) initDataPlane(config *config.ColigateConfig, egressMapping *map[uint16]*net.UDPAddr) error {
+func (control *control) initDataPlane(config *config.ColigateConfig, egressMapping *map[uint16]*net.UDPAddr, g *errgroup.Group) error {
 	//creates the channels and goroutines that
-
+	log.Info("Init data plane")
 	udpAddr, err := net.ResolveUDPAddr("udp", ":30042") //TODO check port
 	if err != nil {
 		return err
@@ -219,9 +245,10 @@ func (control *control) initDataPlane(config *config.ColigateConfig, egressMappi
 	}
 
 	var ipv4Conn *ipv4.PacketConn = ipv4.NewPacketConn(udpConn)
-	go func() {
+	g.Go(func() error {
 		defer log.HandlePanic()
-		for {
+
+		for !control.exit {
 			numPkts, err := ipv4Conn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
 			if err != nil {
 				//do something
@@ -245,7 +272,8 @@ func (control *control) initDataPlane(config *config.ColigateConfig, egressMappi
 			}
 
 		}
-	}()
+		return nil
+	})
 	return nil
 }
 
@@ -270,17 +298,18 @@ func hash(s string, salt string) uint32 {
 
 // configures a goroutine to listen for the data plane channel and reservation updates
 func (c *control) threadReceiveEntry(ch chan *coligatePacketProcessor, chres chan *reservation.ReservationTask,
-	config *config.ColigateConfig, workerId uint32, gatewayId uint32) {
-
+	config *config.ColigateConfig, workerId uint32, gatewayId uint32) error {
+	log.Info("Init worker", "workerId", workerId)
 	worker := Worker{}
 	worker.InitWorker(config, workerId, gatewayId)
 
 	writeMsgs := make([]ipv4.Message, 1)
 	writeMsgs[0].Buffers = [][]byte{make([]byte, bufSize)} //TODO check capacity
 
-	for {
+	for !c.exit {
 		select {
 		case proc := <-ch: //data plane packet received
+			log.Debug("Worker received data packet", "workerId", workerId, "resId", string(proc.colibriPath.InfoField.ResIdSuffix))
 			addr, err := c.getBorderRouterAddress(proc)
 			if err != nil {
 				continue
@@ -290,6 +319,7 @@ func (c *control) threadReceiveEntry(ch chan *coligatePacketProcessor, chres cha
 			worker.ColigatePacketProcessor = proc
 			err = worker.process()
 			if err != nil {
+				log.Debug("Worker received error while processing.", "workerId", workerId, "error", err.Error())
 				continue
 			}
 
@@ -297,9 +327,11 @@ func (c *control) threadReceiveEntry(ch chan *coligatePacketProcessor, chres cha
 			writeMsgs[0].Addr = addr
 
 			borderRouterConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
-		case proc := <-chres: //reservation update received
-			worker.handleReservationTask(proc)
+		case task := <-chres: //reservation update received
+			log.Debug("Worker received reservation update", "workerId", workerId, "resId", task.ResId)
+			worker.handleReservationTask(task)
 		}
 
 	}
+	return nil
 }

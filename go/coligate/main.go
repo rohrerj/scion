@@ -45,7 +45,7 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 	topo, err := topology.NewLoader(topology.LoaderCfg{
 		File:      cfg.General.Topology(),
 		Reload:    app.SIGHUPChannel(ctx),
-		Validator: &topology.ColibriValidator{ID: cfg.General.ID},
+		Validator: &topology.DefaultValidator{},
 		// Metrics: , // TODO(justin) add observability to the gateway
 	})
 	if err != nil {
@@ -71,7 +71,11 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 	}
 
 	//init
-	err = processing.Init(ctx, &cfg.Coligate, &cleanup, &egressMapping, serverAddr, topo.ColibriServiceAddress(cfg.General.ID))
+	colibriServiceAddresses := topo.ColibriServiceAddresses()
+	if len(colibriServiceAddresses) < 1 {
+		return serrors.New("No instance of colibri service found in local AS.")
+	}
+	err = processing.Init(ctx, &cfg.Coligate, &cleanup, &egressMapping, serverAddr, colibriServiceAddresses[0], g)
 	if err != nil {
 		return err
 	}

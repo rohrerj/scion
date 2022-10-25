@@ -60,6 +60,7 @@ pkg_tar(
         "//go/acceptance/sig_ping_acceptance",
         "//go/integration/braccept",
         "//go/integration/colibri",
+        "//go/integration/coligate_integration",
         "//go/integration/end2end",
         "//go/integration/end2end_integration",
         "//go/integration/scion_integration",
