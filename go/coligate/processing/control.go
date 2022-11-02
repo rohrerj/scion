@@ -96,7 +96,9 @@ func Init(ctx context.Context, config *config.ColigateConfig, cleanup *app.Clean
 	}
 
 	//we start the data plane as soon as we retrieved the active reservations from colibri service
-	control.loadActiveReservationsFromColibriService(ctx, config, colibiServiceAddr, g, common.CreateFnv1aHasher(control.salt), config.COSyncTimeout)
+	if err := control.loadActiveReservationsFromColibriService(ctx, config, colibiServiceAddr, g, common.CreateFnv1aHasher(control.salt), config.COSyncTimeout); err != nil {
+		return err
+	}
 	if err := control.initDataPlane(config, gatewayAddr, g); err != nil {
 		return err
 	}
