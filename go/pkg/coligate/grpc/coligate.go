@@ -1,12 +1,27 @@
+// Copyright 2022 ETH Zurich
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package grpc
 
 import (
 	"context"
-	"hash/fnv"
-	"strconv"
 
 	"github.com/scionproto/scion/go/coligate/reservation"
+	libaddr "github.com/scionproto/scion/go/lib/addr"
+	libtypes "github.com/scionproto/scion/go/lib/colibri/reservation"
 	"github.com/scionproto/scion/go/lib/util"
+	common "github.com/scionproto/scion/go/pkg/coligate"
 	cgpb "github.com/scionproto/scion/go/pkg/proto/coligate"
 )
 
@@ -19,15 +34,23 @@ type Coligate struct {
 var _ cgpb.ColibriGatewayServer = (*Coligate)(nil)
 
 func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasRequest) (*cgpb.UpdateSigmasResponse, error) {
-	task := &reservation.ReservationTask{}
-	task.ResId = strconv.FormatInt(int64(msg.GetAsid()), 10) + string(msg.GetSuffix())
-	task.Reservation = &reservation.Reservation{}
-	task.Reservation.ReservationId = task.ResId
-	task.Reservation.Rlc = uint8(msg.Rlc)
+	id, err := libtypes.NewID(libaddr.AS(msg.Asid), msg.Suffix)
+	if err != nil {
+		return nil, err
+	}
+	resId := string(id.ToRaw())
 
-	task.HighestValidity = util.SecsToTime(msg.ExpirationTime)
+	task := &reservation.ReservationTask{
+		ResId: resId,
+		Reservation: &reservation.Reservation{
+			ReservationId: resId,
+			Rlc:           uint8(msg.Rlc),
+			Indices:       make(map[uint8]*reservation.ReservationIndex),
+			Hops:          make([]reservation.HopField, len(msg.HopInterfaces)),
+		},
+		HighestValidity: util.SecsToTime(msg.ExpirationTime),
+	}
 
-	task.Reservation.Indices = make(map[uint8]*reservation.ReservationIndex)
 	task.Reservation.Indices[uint8(msg.Index)] = &reservation.ReservationIndex{
 		Index:    uint8(msg.Index),
 		Validity: task.HighestValidity,
@@ -35,22 +58,15 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 		Macs:     msg.Macs,
 	}
 
-	task.Reservation.Hops = make([]reservation.HopField, len(msg.HopInterfaces))
 	for i, hop := range msg.HopInterfaces {
 		task.Reservation.Hops[i].EgressId = uint16(hop.Egressid)
 		task.Reservation.Hops[i].IngressId = uint16(hop.Ingressid)
 	}
 
 	s.CleanupChannel <- task
-	s.ReservationChannels[hash(task.ResId, s.Salt)] <- task
+
+	//we have to create a new hasher because of concurrency
+	s.ReservationChannels[common.CreateFnv1aHasher(s.Salt).Hash(task.ResId)] <- task
 
 	return nil, nil
-}
-
-// Internal method to calculate the hash value of a input string with a
-// salt value. It uses the fnv-1a algorithm.
-func hash(s string, salt string) uint32 {
-	h := fnv.New32a()
-	h.Write([]byte(s + salt))
-	return h.Sum32()
 }

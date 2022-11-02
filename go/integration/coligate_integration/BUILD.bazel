@@ -1,0 +1,23 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary")
+load("//:scion.bzl", "scion_go_binary")
+load("//lint:go.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = ["main.go"],
+    importpath = "github.com/scionproto/scion/go/integration/coligate_integration",
+    visibility = ["//visibility:private"],
+    deps = ["//go/lib/log:go_default_library"],
+)
+
+scion_go_binary(
+    name = "coligate",
+    embed = [":go_default_library"],
+    visibility = ["//visibility:public"],
+)
+
+go_binary(
+    name = "coligate_integration",
+    embed = [":go_default_library"],
+    visibility = ["//visibility:public"],
+)

@@ -46,7 +46,7 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 		File:      cfg.General.Topology(),
 		Reload:    app.SIGHUPChannel(ctx),
 		Validator: &topology.DefaultValidator{},
-		// Metrics: , // TODO(justin) add observability to the gateway
+		// Metrics: , // TODO(rohrerj) add observability to the gateway
 	})
 	if err != nil {
 		return serrors.WrapStr("creating topology loader", err)
@@ -63,11 +63,17 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 
 	for ifid, info := range topo.InterfaceInfoMap() {
 		egressMapping[uint16(ifid)] = info.InternalAddr
+		log.Debug("Found Border Router", "ifid", ifid, "internal_addr", info.InternalAddr)
 	}
 
-	serverAddr := &snet.UDPAddr{
+	coligateInfo, err := topo.ColibriGatewayAddress(cfg.General.ID)
+	if err != nil {
+		return err
+	}
+
+	serviceAddr := &snet.UDPAddr{
 		IA:   topo.IA(),
-		Host: topo.ColibriGatewayServiceAddress(cfg.General.ID),
+		Host: coligateInfo.ServiceAddr.SCIONAddress,
 	}
 
 	//init
@@ -75,7 +81,8 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 	if len(colibriServiceAddresses) < 1 {
 		return serrors.New("No instance of colibri service found in local AS.")
 	}
-	err = processing.Init(ctx, &cfg.Coligate, &cleanup, &egressMapping, serverAddr, colibriServiceAddresses[0], g)
+
+	err = processing.Init(ctx, &cfg.Coligate, &cleanup, &egressMapping, serviceAddr, coligateInfo.GatewayAddr, colibriServiceAddresses[0], g)
 	if err != nil {
 		return err
 	}

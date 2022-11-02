@@ -1,7 +1,23 @@
+// Copyright 2022 ETH Zurich
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package reservation
 
 import (
 	"time"
+
+	"github.com/scionproto/scion/go/lib/log"
 )
 
 type ReservationStorage struct {
@@ -26,10 +42,11 @@ type ReservationIndex struct {
 }
 
 type ReservationTask struct {
-	Reservation     *Reservation
-	ResId           string
-	IsDeleteQuery   bool
-	HighestValidity time.Time //The validity of the longest (but possible not active) reservation index.
+	Reservation       *Reservation
+	ResId             string
+	IsDeleteQuery     bool
+	HighestValidity   time.Time //The validity of the longest (but possible not active) reservation index.
+	IsInitReservation bool      //Is used to signalize the reservation cleanup routine to fast progress and not re-check other reservations
 }
 
 // Returns the active reservation index. If the active reservation id is not valid (anymore) nil is returned.
@@ -53,12 +70,15 @@ func (store *ReservationStorage) InitStorageWithData(data map[string]*Reservatio
 // Checks whether the reservation exists and is valid. If the reservation exists but is not valid anymore, it will be removed.
 // If the reservation exists and is valid, the reservation is returned.
 func (store *ReservationStorage) UseReservation(resId string, providexIndex uint8, pktTime time.Time) (*Reservation, bool) {
+	log.Debug("use resId", "resId", resId)
 	res, found := store.reservations[resId]
 	if !found {
+		log.Debug("reservation not found")
 		return nil, false
 	}
 	index, found := res.Indices[providexIndex]
 	if !found {
+		log.Debug("reservation index not found")
 		return nil, false
 	}
 	defer res.deleteOlderIndices()
@@ -84,6 +104,7 @@ func (store *ReservationStorage) UseReservation(resId string, providexIndex uint
 func (store *ReservationStorage) Update(task *ReservationTask) {
 	res, found := store.reservations[task.ResId]
 	if found {
+		defer res.deleteOlderIndices()
 		for indexNumber, reservationIndex := range task.Reservation.Indices {
 			res.Indices[indexNumber] = reservationIndex
 		}

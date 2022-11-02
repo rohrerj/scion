@@ -192,11 +192,11 @@ func (l *Loader) ColibriServiceAddress(id string) *net.UDPAddr {
 	return l.topo.PublicAddress(addr.SvcCOL, id)
 }
 
-func (l *Loader) ColibriGatewayServiceAddress(id string) *net.UDPAddr {
+func (l *Loader) ColibriGatewayAddress(id string) (ColigateInfo, error) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	return l.topo.PublicAddress(addr.SvcCOLGATE, id)
+	return l.topo.ColibriGateway(id)
 }
 
 // TODO(lukedirtwalker): remove error and simplify struct in the return type.

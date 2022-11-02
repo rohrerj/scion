@@ -73,6 +73,9 @@ type Topology interface {
 	//
 	// XXX(scrye): Return value is a shallow copy.
 	BR(name string) (BRInfo, bool)
+
+	ColibriGateway(name string) (ColigateInfo, error)
+
 	// IFInfoMap returns the mapping between interface IDs an internal addresses.
 	//
 	// FIXME(scrye): Simplify return type and make it topology format agnostic.
@@ -220,6 +223,14 @@ func (t *topologyS) BR(name string) (BRInfo, bool) {
 	return br, ok
 }
 
+func (t *topologyS) ColibriGateway(name string) (ColigateInfo, error) {
+	coligateInfo, ok := t.Topology.COLGATE[name]
+	if !ok {
+		return coligateInfo, serrors.New("Colibri Gateway not found", "name", name)
+	}
+	return coligateInfo, nil
+}
+
 func (t *topologyS) PublicAddress(svc addr.HostSVC, name string) *net.UDPAddr {
 	topoAddr := t.topoAddress(svc, name)
 	if topoAddr == nil {
@@ -238,7 +249,8 @@ func (t *topologyS) topoAddress(svc addr.HostSVC, name string) *TopoAddr {
 	case addr.SvcCOL:
 		addresses = t.Topology.CO
 	case addr.SvcCOLGATE:
-		addresses = t.Topology.COLGATE
+		a, _ := t.Topology.getSvcInfo(ColibriGateway)
+		addresses = a.idTopoAddrMap
 	}
 	if addresses == nil {
 		return nil
@@ -382,7 +394,8 @@ func (t *topologyS) SVCNames(svc addr.HostSVC) ServiceNames {
 	case addr.SvcCOL:
 		m = t.Topology.CO
 	case addr.SvcCOLGATE:
-		m = t.Topology.COLGATE
+		a, _ := t.Topology.getSvcInfo(ColibriGateway)
+		m = a.idTopoAddrMap
 	}
 
 	var names ServiceNames

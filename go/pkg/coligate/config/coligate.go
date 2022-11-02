@@ -19,6 +19,7 @@ import (
 	"math"
 
 	"github.com/scionproto/scion/go/lib/config"
+	"github.com/scionproto/scion/go/lib/serrors"
 )
 
 type ColigateConfig struct {
@@ -27,25 +28,26 @@ type ColigateConfig struct {
 	NumBitsForWorkerId         int `toml:"NumBitsForWorkerId"`
 	NumBitsForPerWorkerCounter int `toml:"NumBitsForPerWorkerCounter"`
 
+	//Timeout in sec
+	COSyncTimeout         int    `toml:"COSyncTimeout"`
 	ColibriGatewayID      int    `toml:"ColibriGatewayID"`
 	NumWorkers            int    `toml:"NumWorkers"`
-	MaxQueueSizePerThread int    `toml:"MaxQueueSizePerThread"`
+	MaxQueueSizePerWorker int    `toml:"MaxQueueSizePerWorker"`
 	Salt                  string `toml:"Salt"`
 }
 
 func (cfg *ColigateConfig) Validate() error {
-	var err error
 	if cfg.NumBitsForGatewayId+cfg.NumBitsForWorkerId+cfg.NumBitsForPerWorkerCounter != 32 {
-		return err
+		return serrors.New("NumBitsForGatewayId + NumBitsForWorkerId + NumBitsForPerWorkerCounter != 32")
 	}
 	if cfg.NumBitsForPerWorkerCounter < 8 {
-		return err
+		return serrors.New("NumBitsForPerWorkerCounter < 8")
 	}
 	if cfg.NumWorkers < 1 {
-		return err
+		return serrors.New("NumWorkers < 1")
 	}
 	if int(math.Pow(2, float64(cfg.NumBitsForWorkerId))-1) < cfg.NumWorkers {
-		return err
+		return serrors.New("Too small bit count for too many workers", "NumBitsForWorkerId", cfg.NumBitsForWorkerId, "NumWorkers", cfg.NumWorkers)
 	}
 	return nil
 }
@@ -55,13 +57,14 @@ func (cfg *ColigateConfig) InitDefaults() {
 	cfg.NumBitsForWorkerId = 8
 	cfg.NumBitsForPerWorkerCounter = 23
 	cfg.NumWorkers = 8
-	cfg.MaxQueueSizePerThread = 256
+	cfg.MaxQueueSizePerWorker = 256
 	cfg.Salt = ""
 	cfg.ColibriGatewayID = 1
+	cfg.COSyncTimeout = 10
 }
 
 func (cfg *ColigateConfig) Sample(dst io.Writer, _ config.Path, _ config.CtxMap) {
-	config.WriteString(dst, "") //TODO write coligate configuration sample
+	config.WriteString(dst, "") //TODO(rohrerj) write coligate configuration sample
 }
 
 func (cfg *ColigateConfig) ConfigName() string {

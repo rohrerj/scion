@@ -1,19 +1,35 @@
+// Copyright 2022 ETH Zurich
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package processing
 
 import (
-	"encoding/binary"
 	"math"
 	"time"
 
 	"github.com/google/gopacket"
 	"github.com/scionproto/scion/go/coligate/reservation"
 	Tokenbucket "github.com/scionproto/scion/go/coligate/tokenbucket"
-	"github.com/scionproto/scion/go/lib/scrypto"
+	libcolibri "github.com/scionproto/scion/go/lib/colibri/dataplane"
+	libtypes "github.com/scionproto/scion/go/lib/colibri/reservation"
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path/colibri"
 	"github.com/scionproto/scion/go/pkg/coligate/config"
 )
+
+//TODO(rohrerj) Add Unit tests
 
 type Worker struct {
 	InitialCoreIdCounter    uint32
@@ -40,14 +56,17 @@ func Parse(rawPacket []byte) (*coligatePacketProcessor, error) {
 	proc.rawPacket = rawPacket
 	proc.totalLength = uint32(len(rawPacket))
 	proc.scionLayer = &slayers.SCION{}
-	err := proc.scionLayer.DecodeFromBytes(rawPacket, gopacket.NilDecodeFeedback)
-	if err != nil {
+	var err error
+	if err := proc.scionLayer.DecodeFromBytes(rawPacket, gopacket.NilDecodeFeedback); err != nil {
 		return nil, err
 	}
 	var ok bool
-	proc.colibriPath, ok = proc.scionLayer.Path.(*colibri.ColibriPath)
+	p, ok := proc.scionLayer.Path.(*colibri.ColibriPathMinimal)
 	if !ok {
-		return nil, serrors.New("getting colibri path information failed")
+		return nil, serrors.New("getting colibri minmal path failed")
+	}
+	if proc.colibriPath, err = p.ToColibriPath(); err != nil {
+		return nil, serrors.New("expanding colibri path failed")
 	}
 	return &proc, nil
 }
@@ -109,10 +128,16 @@ func (w *Worker) validate() error {
 	C := w.ColigatePacketProcessor.colibriPath.InfoField.C
 	R := w.ColigatePacketProcessor.colibriPath.InfoField.R
 	S := w.ColigatePacketProcessor.colibriPath.InfoField.S
-	resID := w.ColigatePacketProcessor.colibriPath.InfoField.ResIdSuffix
-	if C || R || S { //TODO I assume reverse packets make no sense here?
+	resIDSuffix := w.ColigatePacketProcessor.colibriPath.InfoField.ResIdSuffix
+	if C || R || S { //TODO(rohrerj) I assume reverse packets make no sense here?
 		return serrors.New("Invalid flags", "S", S, "R", R, "C", C)
 	}
+	id, err := libtypes.NewID(w.ColigatePacketProcessor.scionLayer.SrcIA.AS(), resIDSuffix)
+	if err != nil {
+		return serrors.New("Cannot parse reservation id")
+	}
+	resID := string(id.ToRaw())
+
 	reservation, isValid := w.Storage.UseReservation(string(resID), w.ColigatePacketProcessor.colibriPath.InfoField.Ver, w.ColigatePacketProcessor.pktArrivalTime)
 	if !isValid {
 		return serrors.New("E2E reservation is invalid")
@@ -121,7 +146,7 @@ func (w *Worker) validate() error {
 		return serrors.New("Number of hopfields is invalid")
 	}
 	w.ColigatePacketProcessor.reservation = reservation
-	w.ColigatePacketProcessor.tokenbucketIdentifier = string(resID)
+	w.ColigatePacketProcessor.tokenbucketIdentifier = resID
 	return nil
 }
 
@@ -134,7 +159,7 @@ func (w *Worker) performTrafficMonitoring() error {
 	if !exists {
 		bucket = &Tokenbucket.TokenBucket{}
 		bucket.CurrentTokens = float64(realBandwidth)
-		bucket.TokenIntervalInMs = 1 //TODO use real value
+		bucket.TokenIntervalInMs = 1 //TODO(rohrerj) use real value
 		w.TokenBuckets[w.ColigatePacketProcessor.tokenbucketIdentifier] = bucket
 	}
 
@@ -149,16 +174,16 @@ func (w *Worker) performTrafficMonitoring() error {
 
 // update the colibri header fields
 func (w *Worker) updateFields() error {
-	currentVersion := w.ColigatePacketProcessor.reservation.Current()
-	var expTick int64 = currentVersion.Validity.Unix() / 4
-	var timestampNs int64 = (4*expTick - 16) * int64(math.Pow(10, 9))
-	var tsRel uint32 = uint32((currentVersion.Validity.Unix() - timestampNs) / int64(4*time.Nanosecond))
 
-	//Update Colibri Timestamp Field
-	w.ColigatePacketProcessor.colibriPath.PacketTimestamp = colibri.Timestamp{}
-	binary.BigEndian.PutUint32(w.ColigatePacketProcessor.colibriPath.PacketTimestamp[:3], tsRel)
+	currentVersion := w.ColigatePacketProcessor.reservation.Current()
+	var expTick uint32 = uint32(currentVersion.Validity.Unix() / 4)
+	tsRel, err := libcolibri.CreateTsRel(expTick, w.ColigatePacketProcessor.pktArrivalTime)
+	if err != nil {
+		return err
+	}
 	w.CoreIdCounter = w.InitialCoreIdCounter | (w.CoreIdCounter+1)%(1<<w.NumCounterBits)
-	binary.BigEndian.PutUint32(w.ColigatePacketProcessor.colibriPath.PacketTimestamp[4:], w.CoreIdCounter)
+
+	w.ColigatePacketProcessor.colibriPath.PacketTimestamp = libcolibri.CreateColibriTimestampCustom(tsRel, w.CoreIdCounter)
 
 	//Update InfoField
 	w.ColigatePacketProcessor.colibriPath.InfoField.BwCls = currentVersion.BwCls
@@ -168,8 +193,8 @@ func (w *Worker) updateFields() error {
 	w.ColigatePacketProcessor.colibriPath.InfoField.CurrHF = 0
 	w.ColigatePacketProcessor.colibriPath.InfoField.ExpTick = uint32(expTick)
 
-	//Update Hopfields and MACS
-	for i, mac := range currentVersion.Macs {
+	//Update Hopfields and MACS //TODO(rohrerj) add hop updates and mac computation
+	/*for i, _ := range currentVersion.Macs {
 		sizeBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(sizeBytes, w.ColigatePacketProcessor.totalLength)
 
@@ -185,9 +210,9 @@ func (w *Worker) updateFields() error {
 		if err != nil {
 			return err
 		}
-		w.ColigatePacketProcessor.colibriPath.HopFields[i].Mac = hash.Sum(nil)[:3]
+		w.ColigatePacketProcessor.colibriPath.HopFields[i].Mac = hash.Sum(nil)[:4]
 		w.ColigatePacketProcessor.colibriPath.HopFields[i].IngressId = w.ColigatePacketProcessor.reservation.Hops[i].IngressId
 		w.ColigatePacketProcessor.colibriPath.HopFields[i].EgressId = w.ColigatePacketProcessor.reservation.Hops[i].EgressId
-	}
+	}*/
 	return nil
 }

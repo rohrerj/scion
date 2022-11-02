@@ -5,6 +5,7 @@ go_library(
     srcs = ["reservations.go"],
     importpath = "github.com/scionproto/scion/go/coligate/reservation",
     visibility = ["//visibility:public"],
+    deps = ["//go/lib/log:go_default_library"],
 )
 
 go_test(
