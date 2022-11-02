@@ -186,11 +186,7 @@ func (control *Control) initCleanupRoutine(g *errgroup.Group, hasher common.Salt
 
 		handleTask := (func(task *reservation.ReservationTask) {
 			res, exists := data[task.ResId]
-			if exists {
-				if task.HighestValidity.Sub(res) > 0 {
-					data[task.ResId] = task.HighestValidity
-				}
-			} else {
+			if !exists || task.HighestValidity.Sub(res) > 0 {
 				data[task.ResId] = task.HighestValidity
 			}
 		})
