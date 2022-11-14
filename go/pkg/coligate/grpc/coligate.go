@@ -45,17 +45,17 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 		Reservation: &reservation.Reservation{
 			ReservationId: resId,
 			Rlc:           uint8(msg.Rlc),
-			Indices:       make(map[uint8]*reservation.ReservationIndex),
-			Hops:          make([]reservation.HopField, len(msg.HopInterfaces)),
+			Indices: map[uint8]*reservation.ReservationIndex{
+				uint8(msg.Index): {
+					Index:    uint8(msg.Index),
+					Validity: util.SecsToTime(msg.ExpirationTime),
+					BwCls:    uint8(msg.Bwcls),
+					Macs:     msg.Macs,
+				},
+			},
+			Hops: make([]reservation.HopField, len(msg.HopInterfaces)),
 		},
 		HighestValidity: util.SecsToTime(msg.ExpirationTime),
-	}
-
-	task.Reservation.Indices[uint8(msg.Index)] = &reservation.ReservationIndex{
-		Index:    uint8(msg.Index),
-		Validity: task.HighestValidity,
-		BwCls:    uint8(msg.Bwcls),
-		Macs:     msg.Macs,
 	}
 
 	for i, hop := range msg.HopInterfaces {
