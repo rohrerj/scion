@@ -103,7 +103,7 @@ func Init(ctx context.Context, config *config.ColigateConfig, cleanup *app.Clean
 	}
 
 	// we start the data plane as soon as we retrieved the active reservations from colibri service
-	if err := control.loadActiveReservationsFromColibriService(ctx, config, colibiServiceAddr, g,
+	if err := control.loadActiveReservationsFromColibriService(ctx, config, colibiServiceAddr,
 		common.CreateFnv1aHasher(control.salt), config.COSyncTimeout); err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func Init(ctx context.Context, config *config.ColigateConfig, cleanup *app.Clean
 
 // Loads the active EE Reservations from the colibri service
 func (control *Control) loadActiveReservationsFromColibriService(ctx context.Context,
-	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr, g *errgroup.Group,
+	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr,
 	hasher common.SaltHasher, timeout int) error {
 
 	log.Info("Loading active reservation indices from colibri service")
