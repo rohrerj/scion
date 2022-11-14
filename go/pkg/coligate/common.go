@@ -40,9 +40,32 @@ func (h *Fnv1aWithSalt) Hash(s string) uint32 {
 	return h.hash.Sum32()
 }
 
+func (h *Fnv1aWithSalt) Hash2(s string) uint32 {
+	hh := fnv.New32a()
+	hh.Write([]byte(s + h.salt))
+	return hh.Sum32()
+}
+
 // Creates and returns an newly initialized Fnv1a hasher
 func CreateFnv1aHasher(salt string) *Fnv1aWithSalt {
 	h := &Fnv1aWithSalt{}
 	h.Init(salt)
 	return h
+}
+
+type AnotherHasher struct {
+	salt []byte
+}
+
+func NewAnotherHasher(salt []byte) *AnotherHasher {
+	return &AnotherHasher{
+		salt: salt,
+	}
+}
+
+func (h *AnotherHasher) Hash(b []byte) uint32 {
+	hasher := fnv.New32a()
+	hasher.Write(b)
+	hasher.Write(h.salt)
+	return hasher.Sum32()
 }
