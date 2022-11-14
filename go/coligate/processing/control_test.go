@@ -19,11 +19,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"golang.org/x/sync/errgroup"
+
 	proc "github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/coligate/reservation"
 	common "github.com/scionproto/scion/go/pkg/coligate"
-	"github.com/stretchr/testify/assert"
-	"golang.org/x/sync/errgroup"
 )
 
 func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {

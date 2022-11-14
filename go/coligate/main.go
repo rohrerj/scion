@@ -82,7 +82,8 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 		return serrors.New("No instance of colibri service found in local AS.")
 	}
 
-	err = processing.Init(ctx, &cfg.Coligate, &cleanup, &egressMapping, serviceAddr, coligateInfo.GatewayAddr, colibriServiceAddresses[0], g)
+	err = processing.Init(ctx, &cfg.Coligate, &cleanup, &egressMapping, serviceAddr,
+		coligateInfo.GatewayAddr, colibriServiceAddresses[0], g)
 	if err != nil {
 		return err
 	}
