@@ -63,10 +63,14 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 			ResId:           "A" + fmt.Sprint(i),
 			HighestValidity: now.Add(1 * time.Millisecond),
 		}
-		task := <-reservationChannels[0]
-		assert.NotNil(t, task)
-		assert.Equal(t, "A"+fmt.Sprint(i), task.ResId)
-		assert.Equal(t, true, task.IsDeleteQuery)
+		select {
+		case task := <-reservationChannels[0]:
+			assert.NotNil(t, task)
+			assert.Equal(t, "A"+fmt.Sprint(i), task.ResId)
+			assert.Equal(t, true, task.IsDeleteQuery)
+		case <-time.After(1 * time.Second):
+			assert.Fail(t, "reservation not deleted")
+		}
 	}
 
 	c.Exit()
