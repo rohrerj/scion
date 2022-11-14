@@ -17,10 +17,11 @@ package processing_test
 import (
 	"testing"
 
-	"github.com/scionproto/scion/go/coligate/processing"
-	"github.com/scionproto/scion/go/pkg/coligate/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/scionproto/scion/go/coligate/processing"
+	"github.com/scionproto/scion/go/pkg/coligate/config"
 )
 
 func getColigateConfiguration() *config.ColigateConfig {

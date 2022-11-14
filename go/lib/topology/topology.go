@@ -69,16 +69,11 @@ type (
 
 		CS                        IDAddrMap
 		CO                        IDAddrMap
-		COLGATE                   map[string]ColigateInfo
+		COLGATE                   map[string]*net.UDPAddr
 		DS                        IDAddrMap
 		HiddenSegmentLookup       IDAddrMap
 		HiddenSegmentRegistration IDAddrMap
 		SIG                       map[string]GatewayInfo
-	}
-
-	ColigateInfo struct {
-		GatewayAddr *net.UDPAddr
-		ServiceAddr *TopoAddr
 	}
 
 	// GatewayInfo describes a scion gateway.
@@ -149,7 +144,7 @@ func NewRWTopology() *RWTopology {
 		BR:                        make(map[string]BRInfo),
 		CS:                        make(IDAddrMap),
 		CO:                        make(IDAddrMap),
-		COLGATE:                   make(map[string]ColigateInfo),
+		COLGATE:                   make(map[string]*net.UDPAddr),
 		DS:                        make(IDAddrMap),
 		HiddenSegmentLookup:       make(IDAddrMap),
 		HiddenSegmentRegistration: make(IDAddrMap),
@@ -371,12 +366,6 @@ func (t *RWTopology) getSvcInfo(svc ServiceType) (*svcInfo, error) {
 		return &svcInfo{idTopoAddrMap: t.CS}, nil
 	case Colibri:
 		return &svcInfo{idTopoAddrMap: t.CO}, nil
-	case ColibriGateway:
-		m := make(IDAddrMap)
-		for k, v := range t.COLGATE {
-			m[k] = *v.ServiceAddr
-		}
-		return &svcInfo{idTopoAddrMap: m}, nil
 	case HiddenSegmentLookup:
 		return &svcInfo{idTopoAddrMap: t.HiddenSegmentLookup}, nil
 	case HiddenSegmentRegistration:
@@ -417,17 +406,13 @@ func (t *RWTopology) Copy() *RWTopology {
 	}
 }
 
-func copyColigateMap(m map[string]ColigateInfo) map[string]ColigateInfo {
+func copyColigateMap(m map[string]*net.UDPAddr) map[string]*net.UDPAddr {
 	if m == nil {
 		return nil
 	}
-	ret := make(map[string]ColigateInfo)
+	ret := make(map[string]*net.UDPAddr)
 	for k, v := range m {
-		e := ColigateInfo{
-			ServiceAddr: v.ServiceAddr.copy(),
-			GatewayAddr: copyUDPAddr(v.GatewayAddr),
-		}
-		ret[k] = e
+		ret[k] = copyUDPAddr(v)
 	}
 	return ret
 }
@@ -506,23 +491,15 @@ func (svc *svcInfo) getAllTopoAddrs() []TopoAddr {
 	return topoAddrs
 }
 
-func coligateMapFromRaw(ras map[string]*jsontopo.ColigateInfo) (map[string]ColigateInfo, error) {
-	coligateMap := make(map[string]ColigateInfo)
+func coligateMapFromRaw(ras map[string]*jsontopo.ServerInfo) (map[string]*net.UDPAddr, error) {
+	coligateMap := make(map[string]*net.UDPAddr)
 	for name, svc := range ras {
-		gatewayAddr, err := rawAddrToUDPAddr(svc.GatewayAddr)
+		gatewayAddr, err := rawAddrToUDPAddr(svc.Addr)
 		if err != nil {
 			return nil, serrors.WrapStr("could not parse address", err,
-				"address", svc.GatewayAddr, "process_name", name)
+				"address", svc.Addr, "process_name", name)
 		}
-		serviceAddr, err := rawAddrToTopoAddr(svc.ServiceAddr)
-		if err != nil {
-			return nil, serrors.WrapStr("could not parse address", err,
-				"address", svc.ServiceAddr, "process_name", name)
-		}
-		coligateMap[name] = ColigateInfo{
-			GatewayAddr: gatewayAddr,
-			ServiceAddr: serviceAddr,
-		}
+		coligateMap[name] = gatewayAddr
 	}
 	return coligateMap, nil
 }

@@ -18,8 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scionproto/scion/go/coligate/reservation"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/scionproto/scion/go/coligate/reservation"
 )
 
 func TestReservationNotFound(t *testing.T) {

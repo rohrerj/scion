@@ -22,46 +22,19 @@ import (
 )
 
 func TestFnvlaWithSalt(t *testing.T) {
-	salt := "some salt"
-	data := "some text"
-	h := coligate.CreateFnv1aHasher(salt)
+	salt := []byte("some salt")
+	data := []byte("some text")
+	h := coligate.NewFnv1aHasher(salt)
 
 	hashed := h.Hash(data)
 	got := h.Hash(data)
 	require.Equal(t, hashed, got)
-
-	hh := coligate.NewAnotherHasher([]byte(salt))
-	got = hh.Hash([]byte(data))
-	require.Equal(t, hashed, got)
-
-	got = hh.Hash([]byte(data))
-	require.Equal(t, hashed, got)
 }
 
 func BenchmarkHash(b *testing.B) {
-	salt := "some salt"
-	data := "some text"
-	h := coligate.CreateFnv1aHasher(salt)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		h.Hash(data)
-	}
-}
-
-func BenchmarkHash2(b *testing.B) {
-	salt := "some salt"
-	data := "some text"
-	h := coligate.CreateFnv1aHasher(salt)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		h.Hash2(data)
-	}
-}
-
-func BenchmarkHash1(b *testing.B) {
 	salt := []byte("some salt")
 	data := []byte("some text")
-	h := coligate.NewAnotherHasher(salt)
+	h := coligate.NewFnv1aHasher(salt)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		h.Hash(data)

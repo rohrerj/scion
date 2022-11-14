@@ -34,6 +34,7 @@ type ColigateConfig struct {
 	NumWorkers            int    `toml:"NumWorkers"`
 	MaxQueueSizePerWorker int    `toml:"MaxQueueSizePerWorker"`
 	Salt                  string `toml:"Salt"`
+	ColigateGRPCAddr      string `toml:"ColigateGRPCAddr"`
 }
 
 func (cfg *ColigateConfig) Validate() error {

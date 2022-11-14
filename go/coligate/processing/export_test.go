@@ -17,11 +17,13 @@ package processing
 import (
 	"github.com/scionproto/scion/go/coligate/reservation"
 	common "github.com/scionproto/scion/go/pkg/coligate"
-	"golang.org/x/sync/errgroup"
 )
 
-func (control *Control) InitCleanupRoutine(g *errgroup.Group, hasher common.SaltHasher) {
-	control.initCleanupRoutine(g, hasher)
+func (control *Control) InitCleanupRoutine() {
+	control.initCleanupRoutine()
+}
+func (control *Control) SetHasher(salt []byte) {
+	control.saltHasher = common.NewFnv1aHasher(salt)
 }
 
 func (control *Control) CreateCleanupChannel(maxQueueSize int) chan *reservation.ReservationTask {
@@ -47,4 +49,5 @@ func (control *Control) CreateReservationChannels(numberWorkers int, maxQueueSiz
 
 func (control *Control) Exit() {
 	control.exit = true
+	//close(control.cleanupChannel)
 }

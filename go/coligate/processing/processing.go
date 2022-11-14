@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/gopacket"
+
 	"github.com/scionproto/scion/go/coligate/reservation"
 	Tokenbucket "github.com/scionproto/scion/go/coligate/tokenbucket"
 	libcolibri "github.com/scionproto/scion/go/lib/colibri/dataplane"

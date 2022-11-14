@@ -15,55 +15,24 @@
 package coligate
 
 import (
-	"hash"
 	"hash/fnv"
 )
 
 type SaltHasher interface {
-	Init(string)
-	Hash(string) uint32
+	Hash([]byte) uint32
 }
 
 type Fnv1aWithSalt struct {
-	salt string
-	hash hash.Hash32
-}
-
-func (h *Fnv1aWithSalt) Init(salt string) {
-	h.hash = fnv.New32a()
-	h.salt = salt
-}
-
-func (h *Fnv1aWithSalt) Hash(s string) uint32 {
-	h.hash.Reset()
-	h.hash.Write([]byte(s + h.salt))
-	return h.hash.Sum32()
-}
-
-func (h *Fnv1aWithSalt) Hash2(s string) uint32 {
-	hh := fnv.New32a()
-	hh.Write([]byte(s + h.salt))
-	return hh.Sum32()
-}
-
-// Creates and returns an newly initialized Fnv1a hasher
-func CreateFnv1aHasher(salt string) *Fnv1aWithSalt {
-	h := &Fnv1aWithSalt{}
-	h.Init(salt)
-	return h
-}
-
-type AnotherHasher struct {
 	salt []byte
 }
 
-func NewAnotherHasher(salt []byte) *AnotherHasher {
-	return &AnotherHasher{
+func NewFnv1aHasher(salt []byte) *Fnv1aWithSalt {
+	return &Fnv1aWithSalt{
 		salt: salt,
 	}
 }
 
-func (h *AnotherHasher) Hash(b []byte) uint32 {
+func (h *Fnv1aWithSalt) Hash(b []byte) uint32 {
 	hasher := fnv.New32a()
 	hasher.Write(b)
 	hasher.Write(h.salt)

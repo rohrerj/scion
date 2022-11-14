@@ -15,6 +15,7 @@
 package processing_test
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -24,9 +25,25 @@ import (
 
 	proc "github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/coligate/reservation"
-	common "github.com/scionproto/scion/go/pkg/coligate"
 )
 
+func ErrGroupWait(e *errgroup.Group, duration time.Duration) error {
+	c := make(chan struct{})
+	var err error
+	go func() {
+		defer close(c)
+		err = e.Wait()
+	}()
+	select {
+	case <-c:
+		return err
+	case <-time.After(duration):
+		return errors.New("Wait group did not finish in time")
+	}
+}
+
+// Tests sequentially that write-read-repeat returns all reservations
+// and that the channel is empty after the exit.
 func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	L := 10
 	errGroup := &errgroup.Group{}
@@ -35,7 +52,12 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	reservationChannels := c.CreateReservationChannels(1, L)
 	now := time.Now()
 
-	c.InitCleanupRoutine(errGroup, common.CreateFnv1aHasher("salt"))
+	c.SetHasher([]byte("salt"))
+	errGroup.Go(func() error {
+		c.InitCleanupRoutine()
+		return nil
+	})
+
 	for i := 0; i < L; i++ {
 		cleanupChannel <- &reservation.ReservationTask{
 			ResId:           "A" + fmt.Sprint(i),
@@ -46,16 +68,19 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 		assert.Equal(t, "A"+fmt.Sprint(i), task.ResId)
 		assert.Equal(t, true, task.IsDeleteQuery)
 	}
+
+	c.Exit()
+	assert.NoError(t, ErrGroupWait(errGroup, 1*time.Second))
+
 	select {
 	case task := <-reservationChannels[0]:
 		assert.Fail(t, "cleanup routine returned unexpected value", "ResId", task.ResId)
-	case <-time.After(1 * time.Second):
+	default:
 	}
-
-	c.Exit()
-	errGroup.Wait()
 }
 
+// Tests that the cleanup routine returns all reservations (in any order) once
+// they are expired.
 func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 	L := 10
 	errGroup := &errgroup.Group{}
@@ -63,7 +88,11 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 	cleanupChannel := c.CreateCleanupChannel(L)
 	reservationChannels := c.CreateReservationChannels(1, L)
 
-	c.InitCleanupRoutine(errGroup, common.CreateFnv1aHasher("salt"))
+	c.SetHasher([]byte("salt"))
+	errGroup.Go(func() error {
+		c.InitCleanupRoutine()
+		return nil
+	})
 
 	now := time.Now()
 	for i := 0; i < L; i++ {
@@ -78,59 +107,61 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 		select {
 		case <-reservationChannels[0]:
 			reportedReservations++
-		case <-time.After(1 * time.Second):
+		case <-time.After(20 * time.Millisecond):
 			exit = true
 		}
 	}
 	assert.Equal(t, L, reportedReservations)
 	c.Exit()
-	errGroup.Wait()
+	assert.NoError(t, ErrGroupWait(errGroup, 1*time.Second))
 }
 
-func TestCleanupRoutineParallel(t *testing.T) {
+// Tests that the validity of a currently stored reservation is
+// extended if a new index arrives with longer validity
+func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	L := 100
 	errGroup := &errgroup.Group{}
 	c := &proc.Control{}
 	cleanupChannel := c.CreateCleanupChannel(L)
 	reservationChannels := c.CreateReservationChannels(1, L)
 
-	c.InitCleanupRoutine(errGroup, common.CreateFnv1aHasher("salt"))
+	c.SetHasher([]byte("salt"))
+	errGroup.Go(func() error {
+		c.InitCleanupRoutine()
+		return nil
+	})
 	now := time.Now()
 
-	errGroup.Go(func() error {
-		for i := 0; i < L; i++ {
-			cleanupChannel <- &reservation.ReservationTask{
-				ResId:           "A" + fmt.Sprint(i),
-				HighestValidity: now.Add(1 * time.Second),
-			}
+	for i := 0; i < L; i++ {
+		cleanupChannel <- &reservation.ReservationTask{
+			ResId:           "A" + fmt.Sprint(i),
+			HighestValidity: now.Add(10 * time.Millisecond),
 		}
+	}
 
-		return nil
-	})
-
-	errGroup.Go(func() error {
-		for i := L - 1; i >= 0; i-- {
-			cleanupChannel <- &reservation.ReservationTask{
-				ResId:           "A" + fmt.Sprint(i),
-				HighestValidity: now.Add(2 * time.Second),
-			}
+	for i := 0; i < L; i++ {
+		cleanupChannel <- &reservation.ReservationTask{
+			ResId:           "A" + fmt.Sprint(i),
+			HighestValidity: now.Add(20 * time.Millisecond),
 		}
-		return nil
-	})
+	}
 
 	reportedReservations := 0
 	exit := false
 	for !exit {
 		select {
 		case task := <-reservationChannels[0]:
-			assert.Equal(t, now.Add(2*time.Second), task.HighestValidity)
+			if task.HighestValidity == now.Add(10*time.Millisecond) {
+				continue
+			}
+			assert.Equal(t, now.Add(20*time.Millisecond), task.HighestValidity)
 			reportedReservations++
-		case <-time.After(3 * time.Second):
+		case <-time.After(40 * time.Millisecond):
 			exit = true
 		}
 	}
 	assert.Equal(t, L, reportedReservations)
 	c.Exit()
 
-	errGroup.Wait()
+	assert.NoError(t, ErrGroupWait(errGroup, 1*time.Second))
 }

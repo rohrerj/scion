@@ -26,7 +26,7 @@ import (
 )
 
 type Coligate struct {
-	Salt                string
+	Hasher              common.SaltHasher
 	ReservationChannels []chan *reservation.ReservationTask
 	CleanupChannel      chan *reservation.ReservationTask
 }
@@ -65,8 +65,7 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 
 	s.CleanupChannel <- task
 
-	//we have to create a new hasher because of concurrency
-	s.ReservationChannels[common.CreateFnv1aHasher(s.Salt).Hash(task.ResId)] <- task
+	s.ReservationChannels[s.Hasher.Hash(id.ToRaw())] <- task
 
 	return nil, nil
 }

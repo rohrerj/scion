@@ -74,7 +74,7 @@ type Topology interface {
 	// XXX(scrye): Return value is a shallow copy.
 	BR(name string) (BRInfo, bool)
 
-	ColibriGateway(name string) (ColigateInfo, error)
+	ColibriGateway(name string) (*net.UDPAddr, error)
 
 	// IFInfoMap returns the mapping between interface IDs an internal addresses.
 	//
@@ -223,7 +223,7 @@ func (t *topologyS) BR(name string) (BRInfo, bool) {
 	return br, ok
 }
 
-func (t *topologyS) ColibriGateway(name string) (ColigateInfo, error) {
+func (t *topologyS) ColibriGateway(name string) (*net.UDPAddr, error) {
 	coligateInfo, ok := t.Topology.COLGATE[name]
 	if !ok {
 		return coligateInfo, serrors.New("Colibri Gateway not found", "name", name)

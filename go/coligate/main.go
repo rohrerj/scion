@@ -16,17 +16,16 @@ package main
 
 import (
 	"context"
-	"net"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/serrors"
-	"github.com/scionproto/scion/go/lib/snet"
 	"github.com/scionproto/scion/go/lib/topology"
 	"github.com/scionproto/scion/go/pkg/app"
 	"github.com/scionproto/scion/go/pkg/app/launcher"
 	"github.com/scionproto/scion/go/pkg/coligate/config"
-	"golang.org/x/sync/errgroup"
 )
 
 func main() {
@@ -59,31 +58,7 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 
 	var cleanup app.Cleanup
 
-	var egressMapping map[uint16]*net.UDPAddr = make(map[uint16]*net.UDPAddr)
-
-	for ifid, info := range topo.InterfaceInfoMap() {
-		egressMapping[uint16(ifid)] = info.InternalAddr
-		log.Debug("Found Border Router", "ifid", ifid, "internal_addr", info.InternalAddr)
-	}
-
-	coligateInfo, err := topo.ColibriGatewayAddress(cfg.General.ID)
-	if err != nil {
-		return err
-	}
-
-	serviceAddr := &snet.UDPAddr{
-		IA:   topo.IA(),
-		Host: coligateInfo.ServiceAddr.SCIONAddress,
-	}
-
-	//init
-	colibriServiceAddresses := topo.ColibriServiceAddresses()
-	if len(colibriServiceAddresses) < 1 {
-		return serrors.New("No instance of colibri service found in local AS.")
-	}
-
-	err = processing.Init(ctx, &cfg.Coligate, &cleanup, &egressMapping, serviceAddr,
-		coligateInfo.GatewayAddr, colibriServiceAddresses[0], g)
+	err = processing.Init(ctx, cfg, &cleanup, g, topo)
 	if err != nil {
 		return err
 	}

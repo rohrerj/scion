@@ -192,7 +192,7 @@ func (l *Loader) ColibriServiceAddress(id string) *net.UDPAddr {
 	return l.topo.PublicAddress(addr.SvcCOL, id)
 }
 
-func (l *Loader) ColibriGatewayAddress(id string) (ColigateInfo, error) {
+func (l *Loader) ColibriGatewayAddress(id string) (*net.UDPAddr, error) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
