@@ -26,12 +26,14 @@ type Fnv1aWithSalt struct {
 	salt []byte
 }
 
+// NewFnv1aHasher creates a new Fnv1aHasher and returns it.
 func NewFnv1aHasher(salt []byte) *Fnv1aWithSalt {
 	return &Fnv1aWithSalt{
 		salt: salt,
 	}
 }
 
+// Hash hashes the provided byte array with the Fnv1a algorithm.
 func (h *Fnv1aWithSalt) Hash(b []byte) uint32 {
 	hasher := fnv.New32a()
 	hasher.Write(b)

@@ -12,15 +12,6 @@ import (
 	"github.com/scionproto/scion/go/lib/topology"
 )
 
-func InitTracer(tracing env.Tracing, id string) (io.Closer, error) {
-	tracer, trCloser, err := tracing.NewTracer(id)
-	if err != nil {
-		return nil, err
-	}
-	opentracing.SetGlobalTracer(tracer)
-	return trCloser, nil
-}
-
 type Metrics struct {
 	UpdateSigmasTotal             *prometheus.CounterVec
 	DataPacketInTotal             *prometheus.CounterVec
@@ -35,6 +26,17 @@ type Metrics struct {
 	CleanupReservationDeleted     *prometheus.CounterVec
 }
 
+// InitTracer initializes the tracer
+func InitTracer(tracing env.Tracing, id string) (io.Closer, error) {
+	tracer, trCloser, err := tracing.NewTracer(id)
+	if err != nil {
+		return nil, err
+	}
+	opentracing.SetGlobalTracer(tracer)
+	return trCloser, nil
+}
+
+// NewMetrics creates a new Metrics struct and returns it.
 func NewMetrics() *Metrics {
 	return &Metrics{
 		UpdateSigmasTotal: promauto.NewCounterVec(
@@ -117,6 +119,7 @@ func NewMetrics() *Metrics {
 	}
 }
 
+// NewTopologyLoader returns new topology.LoaderMetrics.
 func (m *Metrics) NewTopologyLoader() topology.LoaderMetrics {
 	updates := prom.NewCounterVec("", "",
 		"topology_updates_total",

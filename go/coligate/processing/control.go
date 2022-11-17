@@ -69,7 +69,7 @@ func (c *Control) shutdown() {
 	}
 }
 
-// Initializes the colibri gateway. Configures the channels, goroutines,
+// Init initializes the colibri gateway. Configures the channels, goroutines,
 // and the control plane and the data plane.
 func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	g *errgroup.Group, topo *topology.Loader, metrics *common.Metrics) error {

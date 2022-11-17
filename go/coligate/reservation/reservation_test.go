@@ -25,7 +25,7 @@ import (
 
 func TestReservationNotFound(t *testing.T) {
 	storage := &reservation.ReservationStorage{}
-	storage.InitStorage()
+	storage.InitStorageWithData(nil)
 	res, found := storage.UseReservation("A", 0, time.Now())
 	assert.False(t, found)
 	assert.Nil(t, res)

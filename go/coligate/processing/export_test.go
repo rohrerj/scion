@@ -15,7 +15,12 @@
 package processing
 
 import (
+	"time"
+
 	"github.com/scionproto/scion/go/coligate/reservation"
+	Tokenbucket "github.com/scionproto/scion/go/coligate/tokenbucket"
+	"github.com/scionproto/scion/go/lib/slayers"
+	"github.com/scionproto/scion/go/lib/slayers/path/colibri"
 	common "github.com/scionproto/scion/go/pkg/coligate"
 )
 
@@ -49,4 +54,42 @@ func (control *Control) CreateReservationChannels(numberWorkers int, maxQueueSiz
 
 func (control *Control) Shutdown() {
 	control.shutdown()
+}
+
+type ColigatePacketProcessor struct {
+	TotalLength    uint32
+	PktArrivalTime time.Time
+	ScionLayer     *slayers.SCION
+	ColibriPath    *colibri.ColibriPath
+	Reservation    *reservation.Reservation
+	RawPacket      []byte
+}
+
+func internalParse(proc *ColigatePacketProcessor) *coligatePacketProcessor {
+	return &coligatePacketProcessor{
+		totalLength:    proc.TotalLength,
+		pktArrivalTime: proc.PktArrivalTime,
+		scionLayer:     proc.ScionLayer,
+		colibriPath:    proc.ColibriPath,
+		reservation:    proc.Reservation,
+		rawPacket:      proc.RawPacket,
+	}
+}
+
+func (w *Worker) HandleReservationTask(task *reservation.ReservationTask) error {
+	return w.handleReservationTask(task)
+}
+
+func (w *Worker) Validate(proc *ColigatePacketProcessor) error {
+	w.ColigatePacketProcessor = internalParse(proc)
+	return w.validate()
+}
+
+func (w *Worker) PerformTrafficMonitoring(proc *ColigatePacketProcessor) error {
+	w.ColigatePacketProcessor = internalParse(proc)
+	return w.performTrafficMonitoring()
+}
+
+func (w *Worker) ResetTokenBucket() {
+	w.TokenBuckets = make(map[string]*Tokenbucket.TokenBucket)
 }

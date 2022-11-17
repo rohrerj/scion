@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// The TokenBucket struct that stores all the informations needed for the Token Bucket algorithm.
+// The TokenBucket struct that stores all the information needed for the Token Bucket algorithm.
 type TokenBucket struct {
 	CIRInBytes        uint64
 	CurrentTokens     float64
@@ -47,7 +47,7 @@ func (bucket *TokenBucket) ValidateBandwidth(entry *TokenBucketEntry) bool {
 		return false
 	}
 	//calculates the time difference between the last and the current packet
-	//and subtracts the part that is not divisible by the token intervall.
+	//and subtracts the part that is not divisible by the token interval.
 	var currentTime time.Time = entry.ArrivalTime
 	var timeDiff time.Duration = currentTime.Sub(bucket.LastPacketTime)
 	timeDiff = timeDiff - time.Duration(timeDiff.Milliseconds()%int64(bucket.TokenIntervalInMs)*int64(time.Millisecond))

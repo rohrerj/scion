@@ -15,7 +15,6 @@
 package processing
 
 import (
-	"math"
 	"time"
 
 	"github.com/google/gopacket"
@@ -42,21 +41,21 @@ type Worker struct {
 }
 
 type coligatePacketProcessor struct {
-	totalLength           uint32
-	pktArrivalTime        time.Time
-	scionLayer            *slayers.SCION
-	colibriPath           *colibri.ColibriPath
-	reservation           *reservation.Reservation
-	tokenbucketIdentifier string
-	rawPacket             []byte
+	totalLength    uint32
+	pktArrivalTime time.Time
+	scionLayer     *slayers.SCION
+	colibriPath    *colibri.ColibriPath
+	reservation    *reservation.Reservation
+	rawPacket      []byte
 }
 
-// Parses the scion and colibri header from a raw packet
+// Parse parses the scion and colibri header from a raw packet
 func Parse(rawPacket []byte) (*coligatePacketProcessor, error) {
-	proc := coligatePacketProcessor{}
-	proc.rawPacket = rawPacket
-	proc.totalLength = uint32(len(rawPacket))
-	proc.scionLayer = &slayers.SCION{}
+	proc := coligatePacketProcessor{
+		rawPacket:   rawPacket,
+		totalLength: uint32(len(rawPacket)),
+		scionLayer:  &slayers.SCION{},
+	}
 	var err error
 	if err := proc.scionLayer.DecodeFromBytes(rawPacket, gopacket.NilDecodeFeedback); err != nil {
 		return nil, err
@@ -64,7 +63,7 @@ func Parse(rawPacket []byte) (*coligatePacketProcessor, error) {
 	var ok bool
 	p, ok := proc.scionLayer.Path.(*colibri.ColibriPathMinimal)
 	if !ok {
-		return nil, serrors.New("getting colibri minmal path failed")
+		return nil, serrors.New("getting colibri minimal path failed")
 	}
 	if proc.colibriPath, err = p.ToColibriPath(); err != nil {
 		return nil, serrors.New("expanding colibri path failed")
@@ -72,7 +71,7 @@ func Parse(rawPacket []byte) (*coligatePacketProcessor, error) {
 	return &proc, nil
 }
 
-// initializes the worker with his id, tokenbuckets and reservations
+// InitWorker initializes the worker with his id, tokenbuckets and reservations
 func (w *Worker) InitWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32) error {
 
 	w.CoreIdCounter = (gatewayId << (32 - config.NumBitsForGatewayId)) | (workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId))
@@ -83,7 +82,7 @@ func (w *Worker) InitWorker(config *config.ColigateConfig, workerId uint32, gate
 	w.ColigatePacketProcessor = &coligatePacketProcessor{}
 
 	w.Storage = &reservation.ReservationStorage{}
-	w.Storage.InitStorage()
+	w.Storage.InitStorageWithData(nil)
 	return nil
 }
 
@@ -126,11 +125,10 @@ func (w *Worker) process() error {
 // validates the fields in the colibri header and checks that a valid reservation exists
 func (w *Worker) validate() error {
 	C := w.ColigatePacketProcessor.colibriPath.InfoField.C
-	R := w.ColigatePacketProcessor.colibriPath.InfoField.R
 	S := w.ColigatePacketProcessor.colibriPath.InfoField.S
 	resIDSuffix := w.ColigatePacketProcessor.colibriPath.InfoField.ResIdSuffix
-	if C || R || S { //TODO(rohrerj) I assume reverse packets make no sense here?
-		return serrors.New("Invalid flags", "S", S, "R", R, "C", C)
+	if C || S {
+		return serrors.New("Invalid flags", "S", S, "C", C)
 	}
 	id, err := libtypes.NewID(w.ColigatePacketProcessor.scionLayer.SrcIA.AS(), resIDSuffix)
 	if err != nil {
@@ -146,21 +144,23 @@ func (w *Worker) validate() error {
 		return serrors.New("Number of hopfields is invalid")
 	}
 	w.ColigatePacketProcessor.reservation = reservation
-	w.ColigatePacketProcessor.tokenbucketIdentifier = resID
 	return nil
 }
 
 // checks that the reservation is not overused
 func (w *Worker) performTrafficMonitoring() error {
-	bucket, exists := w.TokenBuckets[w.ColigatePacketProcessor.tokenbucketIdentifier]
+	bucket, exists := w.TokenBuckets[w.ColigatePacketProcessor.reservation.ReservationId]
 	entry := Tokenbucket.TokenBucketEntry{Length: uint64(w.ColigatePacketProcessor.totalLength), ArrivalTime: w.ColigatePacketProcessor.pktArrivalTime}
-	realBandwidth := uint64(8192 * math.Sqrt(math.Pow(2, float64(w.ColigatePacketProcessor.reservation.Current().BwCls-1))))
+
+	realBandwidth := 1024 * libtypes.BWCls(w.ColigatePacketProcessor.reservation.Current().BwCls).ToKbps()
 
 	if !exists {
-		bucket = &Tokenbucket.TokenBucket{}
-		bucket.CurrentTokens = float64(realBandwidth)
-		bucket.TokenIntervalInMs = 1 //TODO(rohrerj) use real value
-		w.TokenBuckets[w.ColigatePacketProcessor.tokenbucketIdentifier] = bucket
+		bucket = &Tokenbucket.TokenBucket{
+			CurrentTokens:     float64(realBandwidth),
+			LastPacketTime:    w.ColigatePacketProcessor.pktArrivalTime,
+			TokenIntervalInMs: 1, //TODO(rohrerj) use real value,
+		}
+		w.TokenBuckets[w.ColigatePacketProcessor.reservation.ReservationId] = bucket
 	}
 
 	bucket.CIRInBytes = realBandwidth
@@ -168,7 +168,6 @@ func (w *Worker) performTrafficMonitoring() error {
 	if !ok {
 		return serrors.New("data packet exceeded bandwidth")
 	}
-
 	return nil
 }
 
