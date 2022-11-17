@@ -110,7 +110,6 @@ func (w *Worker) process() error {
 	if w.ColigatePacketProcessor == nil {
 		return serrors.New("coligate packet processor must not be nil")
 	}
-	w.ColigatePacketProcessor.pktArrivalTime = time.Now()
 	var err error
 	err = w.validate()
 	if err != nil {

@@ -199,6 +199,13 @@ func (l *Loader) ColibriGatewayAddress(id string) (*net.UDPAddr, error) {
 	return l.topo.ColibriGateway(id)
 }
 
+func (l *Loader) ColibriGatewayAddresses() ([]*net.UDPAddr, error) {
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+
+	return l.topo.ColibriGateways()
+}
+
 // TODO(lukedirtwalker): remove error and simplify struct in the return type.
 func (l *Loader) Gateways() ([]GatewayInfo, error) {
 	l.mtx.Lock()

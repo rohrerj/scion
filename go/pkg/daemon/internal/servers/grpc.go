@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strconv"
 	"time"
 
 	durationpb "github.com/golang/protobuf/ptypes/duration"
@@ -51,6 +50,7 @@ type Topology interface {
 	InterfaceIDs() []uint16
 	UnderlayNextHop(uint16) *net.UDPAddr
 	ControlServiceAddresses() []*net.UDPAddr
+	ColibriGatewayAddresses() ([]*net.UDPAddr, error)
 }
 
 // DaemonServer handles gRPC requests to the SCION daemon.
@@ -424,17 +424,11 @@ func (s *DaemonServer) ColibriSetupRsv(ctx context.Context, req *sdpb.ColibriSet
 		return res, err
 	}
 	if res.Base.Success != nil {
-		egress, err := strconv.Atoi(res.Base.Success.NextHop)
+		coligateAddresses, err := s.Topology.ColibriGatewayAddresses()
 		if err != nil {
-			return nil, serrors.WrapStr("obtaining next hop from egress", err,
-				"egress", res.Base.Success.NextHop)
+			return res, err
 		}
-
-		addr := s.Topology.UnderlayNextHop(uint16(egress))
-		if addr == nil {
-			return nil, serrors.New("obtaining next hop from egress id, egress not present",
-				"egress", egress)
-		}
+		addr := coligateAddresses[0]
 		res.Base.Success.NextHop = addr.String()
 	}
 	return res, nil

@@ -19,8 +19,8 @@ import (
 	common "github.com/scionproto/scion/go/pkg/coligate"
 )
 
-func (control *Control) InitCleanupRoutine() {
-	control.initCleanupRoutine()
+func (control *Control) InitCleanupRoutine(metrics *common.Metrics) {
+	control.initCleanupRoutine(metrics)
 }
 func (control *Control) SetHasher(salt []byte) {
 	control.saltHasher = common.NewFnv1aHasher(salt)
@@ -47,7 +47,6 @@ func (control *Control) CreateReservationChannels(numberWorkers int, maxQueueSiz
 	return control.reservationChannels
 }
 
-func (control *Control) Exit() {
-	control.exit = true
-	//close(control.cleanupChannel)
+func (control *Control) Shutdown() {
+	control.shutdown()
 }

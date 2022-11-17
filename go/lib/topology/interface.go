@@ -75,6 +75,7 @@ type Topology interface {
 	BR(name string) (BRInfo, bool)
 
 	ColibriGateway(name string) (*net.UDPAddr, error)
+	ColibriGateways() ([]*net.UDPAddr, error)
 
 	// IFInfoMap returns the mapping between interface IDs an internal addresses.
 	//
@@ -229,6 +230,17 @@ func (t *topologyS) ColibriGateway(name string) (*net.UDPAddr, error) {
 		return coligateInfo, serrors.New("Colibri Gateway not found", "name", name)
 	}
 	return coligateInfo, nil
+}
+
+func (t *topologyS) ColibriGateways() ([]*net.UDPAddr, error) {
+	v := make([]*net.UDPAddr, 0, len(t.Topology.COLGATE))
+	if len(t.Topology.COLGATE) == 0 {
+		return v, serrors.New("No Colibri Gateway found")
+	}
+	for _, addr := range t.Topology.COLGATE {
+		v = append(v, addr)
+	}
+	return v, nil
 }
 
 func (t *topologyS) PublicAddress(svc addr.HostSVC, name string) *net.UDPAddr {

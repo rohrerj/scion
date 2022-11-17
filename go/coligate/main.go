@@ -25,6 +25,7 @@ import (
 	"github.com/scionproto/scion/go/lib/topology"
 	"github.com/scionproto/scion/go/pkg/app"
 	"github.com/scionproto/scion/go/pkg/app/launcher"
+	common "github.com/scionproto/scion/go/pkg/coligate"
 	"github.com/scionproto/scion/go/pkg/coligate/config"
 )
 
@@ -41,11 +42,12 @@ func main() {
 }
 
 func realMain(ctx context.Context, cfg *config.Config) error {
+	metrics := common.NewMetrics()
 	topo, err := topology.NewLoader(topology.LoaderCfg{
 		File:      cfg.General.Topology(),
 		Reload:    app.SIGHUPChannel(ctx),
 		Validator: &topology.DefaultValidator{},
-		// Metrics: , // TODO(rohrerj) add observability to the gateway
+		Metrics:   metrics.NewTopologyLoader(),
 	})
 	if err != nil {
 		return serrors.WrapStr("creating topology loader", err)
@@ -56,12 +58,23 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 		return topo.Run(errCtx)
 	})
 
+	closer, err := common.InitTracer(cfg.Tracing, cfg.General.ID)
+	if err != nil {
+		return serrors.WrapStr("initializing tracer", err)
+	}
+	defer closer.Close()
+
 	var cleanup app.Cleanup
 
-	err = processing.Init(ctx, cfg, &cleanup, g, topo)
+	err = processing.Init(ctx, cfg, &cleanup, g, topo, metrics)
 	if err != nil {
 		return err
 	}
+
+	g.Go(func() error {
+		defer log.HandlePanic()
+		return cfg.Metrics.ServePrometheus(errCtx)
+	})
 
 	// cleanup when exit
 	g.Go(func() error {

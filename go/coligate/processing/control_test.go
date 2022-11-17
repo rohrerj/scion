@@ -25,6 +25,7 @@ import (
 
 	proc "github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/coligate/reservation"
+	common "github.com/scionproto/scion/go/pkg/coligate"
 )
 
 func ErrGroupWait(e *errgroup.Group, duration time.Duration) error {
@@ -54,7 +55,7 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 
 	c.SetHasher([]byte("salt"))
 	errGroup.Go(func() error {
-		c.InitCleanupRoutine()
+		c.InitCleanupRoutine(metrics)
 		return nil
 	})
 
@@ -73,12 +74,12 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 		}
 	}
 
-	c.Exit()
+	c.Shutdown()
 	assert.NoError(t, ErrGroupWait(errGroup, 1*time.Second))
 
 	select {
 	case task := <-reservationChannels[0]:
-		assert.Fail(t, "cleanup routine returned unexpected value", "ResId", task.ResId)
+		assert.Nil(t, task)
 	default:
 	}
 }
@@ -94,7 +95,7 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 
 	c.SetHasher([]byte("salt"))
 	errGroup.Go(func() error {
-		c.InitCleanupRoutine()
+		c.InitCleanupRoutine(metrics)
 		return nil
 	})
 
@@ -116,9 +117,11 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 		}
 	}
 	assert.Equal(t, L, reportedReservations)
-	c.Exit()
+	c.Shutdown()
 	assert.NoError(t, ErrGroupWait(errGroup, 1*time.Second))
 }
+
+var metrics *common.Metrics = common.NewMetrics()
 
 // Tests that the validity of a currently stored reservation is
 // extended if a new index arrives with longer validity
@@ -131,7 +134,7 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 
 	c.SetHasher([]byte("salt"))
 	errGroup.Go(func() error {
-		c.InitCleanupRoutine()
+		c.InitCleanupRoutine(metrics)
 		return nil
 	})
 	now := time.Now()
@@ -165,7 +168,7 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 		}
 	}
 	assert.Equal(t, L, reportedReservations)
-	c.Exit()
+	c.Shutdown()
 
 	assert.NoError(t, ErrGroupWait(errGroup, 1*time.Second))
 }
