@@ -15,6 +15,7 @@
 package processing_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func getColigateConfiguration() *config.ColigateConfig {
 // TestMasking tests that the coreIdCounter is correctly assigned in InitWorker depending on
 // the number of bits for the GatewayId, WorkerId, PerWorkerCounter.
 func TestMasking(t *testing.T) {
-	worker := processing.NewWorker(getColigateConfiguration(), 1, 1)
+	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
 	expectedInitialValue := uint32(2147483648 + 8388608) //2^31 + 2^23
 	assert.Equal(t, expectedInitialValue, worker.CoreIdCounter)
 
@@ -60,7 +61,7 @@ func TestMasking(t *testing.T) {
 }
 
 func TestHandleReservationTask(t *testing.T) {
-	worker := processing.NewWorker(getColigateConfiguration(), 1, 1)
+	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
 	reservations := make(map[string]*reservation.Reservation)
 	worker.Storage.InitStorageWithData(reservations)
 	var startTime = time.Now()
@@ -148,8 +149,8 @@ func TestHandleReservationTask(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	type entry struct {
-		proc    processing.DataPacket
-		success bool
+		proc processing.DataPacket
+		err  string
 	}
 
 	type test struct {
@@ -157,7 +158,7 @@ func TestValidate(t *testing.T) {
 		entries  []entry
 		resStore map[string]*reservation.Reservation
 	}
-	worker := processing.NewWorker(getColigateConfiguration(), 1, 1)
+	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
 
 	var startTime = time.Unix(0, 0)
 
@@ -174,7 +175,7 @@ func TestValidate(t *testing.T) {
 							},
 						},
 					},
-					success: false,
+					err: "Invalid flags",
 				},
 			},
 		},
@@ -190,7 +191,7 @@ func TestValidate(t *testing.T) {
 							},
 						},
 					},
-					success: false,
+					err: "Invalid flags",
 				},
 			},
 		},
@@ -206,7 +207,41 @@ func TestValidate(t *testing.T) {
 							},
 						},
 					},
-					success: false,
+					err: "Invalid flags",
+				},
+			},
+		},
+		{
+			name: "TestValidateReservationBelongsToOtherAS",
+			resStore: map[string]*reservation.Reservation{
+				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
+					ReservationId: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Hops:          make([]reservation.HopField, 1),
+					ActiveIndexId: 0,
+					Indices: map[uint8]*reservation.ReservationIndex{
+						0: {
+							Index:    0,
+							Validity: startTime.Add(1),
+							BwCls:    1,
+							Macs:     make([][]byte, 1),
+						},
+					},
+				},
+			},
+			entries: []entry{
+				{
+					proc: processing.DataPacket{
+						PktArrivalTime: startTime,
+						ColibriPath: &colibri.ColibriPath{
+							InfoField: &colibri.InfoField{
+								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							},
+						},
+						ScionLayer: &slayers.SCION{
+							SrcIA: addr.MustIAFrom(1, 2),
+						},
+					},
+					err: "Reservation does not belong to local AS",
 				},
 			},
 		},
@@ -225,7 +260,7 @@ func TestValidate(t *testing.T) {
 							SrcIA: addr.MustIAFrom(1, 1),
 						},
 					},
-					success: false,
+					err: "E2E reservation is invalid",
 				},
 			},
 		},
@@ -259,47 +294,12 @@ func TestValidate(t *testing.T) {
 							SrcIA: addr.MustIAFrom(1, 1),
 						},
 					},
-					success: false,
+					err: "Number of hopfields is invalid",
 				},
 			},
 		},
 		{
-			name: "TestValidateSFlagIsSet",
-			entries: []entry{
-				{
-					proc: processing.DataPacket{
-						PktArrivalTime: startTime,
-						ColibriPath: &colibri.ColibriPath{
-							InfoField: &colibri.InfoField{
-								S: true,
-							},
-						},
-					},
-					success: false,
-				},
-			},
-		},
-		{
-			name: "TestValidateReservationDoesNotExist",
-			entries: []entry{
-				{
-					proc: processing.DataPacket{
-						PktArrivalTime: startTime,
-						ColibriPath: &colibri.ColibriPath{
-							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-							},
-						},
-						ScionLayer: &slayers.SCION{
-							SrcIA: addr.MustIAFrom(1, 1),
-						},
-					},
-					success: false,
-				},
-			},
-		},
-		{
-			name: "TestValidateAllValid",
+			name: "TestValidateCurrHFIsInvalid",
 			resStore: map[string]*reservation.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
 					ReservationId: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
@@ -322,6 +322,7 @@ func TestValidate(t *testing.T) {
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
 								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								CurrHF:      1,
 							},
 							HopFields: make([]*colibri.HopField, 1),
 						},
@@ -329,7 +330,276 @@ func TestValidate(t *testing.T) {
 							SrcIA: addr.MustIAFrom(1, 1),
 						},
 					},
-					success: true,
+					err: "CurrHF is invalid",
+				},
+			},
+		},
+		{
+			name: "TestValidateBwClsIsInvalid",
+			resStore: map[string]*reservation.Reservation{
+				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
+					ReservationId: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Hops:          make([]reservation.HopField, 1),
+					ActiveIndexId: 0,
+					Indices: map[uint8]*reservation.ReservationIndex{
+						0: {
+							Index:    0,
+							Validity: startTime.Add(1),
+							BwCls:    1,
+							Macs:     make([][]byte, 1),
+						},
+					},
+				},
+			},
+			entries: []entry{
+				{
+					proc: processing.DataPacket{
+						PktArrivalTime: startTime,
+						ColibriPath: &colibri.ColibriPath{
+							InfoField: &colibri.InfoField{
+								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								CurrHF:      0,
+								BwCls:       2,
+							},
+							HopFields: make([]*colibri.HopField, 1),
+						},
+						ScionLayer: &slayers.SCION{
+							SrcIA: addr.MustIAFrom(1, 1),
+						},
+					},
+					err: "Bandwidth class is invalid",
+				},
+			},
+		},
+		{
+			name: "TestValidateRlcIsInvalid",
+			resStore: map[string]*reservation.Reservation{
+				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
+					ReservationId: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Hops:          make([]reservation.HopField, 1),
+					ActiveIndexId: 0,
+					Indices: map[uint8]*reservation.ReservationIndex{
+						0: {
+							Index:    0,
+							Validity: startTime.Add(1),
+							BwCls:    1,
+							Macs:     make([][]byte, 1),
+						},
+					},
+					Rlc: 1,
+				},
+			},
+			entries: []entry{
+				{
+					proc: processing.DataPacket{
+						PktArrivalTime: startTime,
+						ColibriPath: &colibri.ColibriPath{
+							InfoField: &colibri.InfoField{
+								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								CurrHF:      0,
+								BwCls:       1,
+								Rlc:         2,
+							},
+							HopFields: make([]*colibri.HopField, 1),
+						},
+						ScionLayer: &slayers.SCION{
+							SrcIA: addr.MustIAFrom(1, 1),
+						},
+					},
+					err: "Latency class is invalid",
+				},
+			},
+		},
+		{
+			name: "TestValidateExpTickIsInvalid",
+			resStore: map[string]*reservation.Reservation{
+				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
+					ReservationId: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Hops:          make([]reservation.HopField, 1),
+					ActiveIndexId: 0,
+					Indices: map[uint8]*reservation.ReservationIndex{
+						0: {
+							Index:    0,
+							Validity: startTime.Add(100 * time.Second),
+							BwCls:    1,
+							Macs:     make([][]byte, 1),
+						},
+					},
+					Rlc: 1,
+				},
+			},
+			entries: []entry{
+				{
+					proc: processing.DataPacket{
+						PktArrivalTime: startTime,
+						ColibriPath: &colibri.ColibriPath{
+							InfoField: &colibri.InfoField{
+								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								CurrHF:      0,
+								BwCls:       1,
+								Rlc:         1,
+								ExpTick:     1,
+							},
+							HopFields: make([]*colibri.HopField, 1),
+						},
+						ScionLayer: &slayers.SCION{
+							SrcIA: addr.MustIAFrom(1, 1),
+						},
+					},
+					err: "ExpTick is invalid",
+				},
+			},
+		},
+		{
+			name: "TestValidateInvalidIngressId",
+			resStore: map[string]*reservation.Reservation{
+				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
+					ReservationId: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Hops: []reservation.HopField{
+						{
+							IngressId: 1,
+							EgressId:  2,
+						},
+					},
+					ActiveIndexId: 0,
+					Rlc:           1,
+					Indices: map[uint8]*reservation.ReservationIndex{
+						0: {
+							Index:    0,
+							Validity: startTime.Add(100 * time.Second),
+							BwCls:    1,
+							Macs:     make([][]byte, 1),
+						},
+					},
+				},
+			},
+			entries: []entry{
+				{
+					proc: processing.DataPacket{
+						PktArrivalTime: startTime,
+						ColibriPath: &colibri.ColibriPath{
+							InfoField: &colibri.InfoField{
+								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								Ver:         0,
+								BwCls:       1,
+								Rlc:         1,
+								HFCount:     1,
+								ExpTick:     uint32(startTime.Add(100*time.Second).Unix() / 4),
+							},
+							HopFields: []*colibri.HopField{
+								{
+									IngressId: 3,
+									EgressId:  2,
+								},
+							},
+						},
+						ScionLayer: &slayers.SCION{
+							SrcIA: addr.MustIAFrom(1, 1),
+						},
+					},
+					err: "IngressId is invalid",
+				},
+			},
+		},
+		{
+			name: "TestValidateInvalidEgressId",
+			resStore: map[string]*reservation.Reservation{
+				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
+					ReservationId: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Hops: []reservation.HopField{
+						{
+							IngressId: 1,
+							EgressId:  2,
+						},
+					},
+					ActiveIndexId: 0,
+					Rlc:           1,
+					Indices: map[uint8]*reservation.ReservationIndex{
+						0: {
+							Index:    0,
+							Validity: startTime.Add(100 * time.Second),
+							BwCls:    1,
+							Macs:     make([][]byte, 1),
+						},
+					},
+				},
+			},
+			entries: []entry{
+				{
+					proc: processing.DataPacket{
+						PktArrivalTime: startTime,
+						ColibriPath: &colibri.ColibriPath{
+							InfoField: &colibri.InfoField{
+								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								Ver:         0,
+								BwCls:       1,
+								Rlc:         1,
+								HFCount:     1,
+								ExpTick:     uint32(startTime.Add(100*time.Second).Unix() / 4),
+							},
+							HopFields: []*colibri.HopField{
+								{
+									IngressId: 1,
+									EgressId:  3,
+								},
+							},
+						},
+						ScionLayer: &slayers.SCION{
+							SrcIA: addr.MustIAFrom(1, 1),
+						},
+					},
+					err: "EgressId is invalid",
+				},
+			},
+		},
+		{
+			name: "TestValidateAllValid",
+			resStore: map[string]*reservation.Reservation{
+				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
+					ReservationId: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Hops: []reservation.HopField{
+						{
+							IngressId: 1,
+							EgressId:  2,
+						},
+					},
+					ActiveIndexId: 0,
+					Rlc:           1,
+					Indices: map[uint8]*reservation.ReservationIndex{
+						0: {
+							Index:    0,
+							Validity: startTime.Add(100 * time.Second),
+							BwCls:    1,
+							Macs:     make([][]byte, 1),
+						},
+					},
+				},
+			},
+			entries: []entry{
+				{
+					proc: processing.DataPacket{
+						PktArrivalTime: startTime,
+						ColibriPath: &colibri.ColibriPath{
+							InfoField: &colibri.InfoField{
+								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								Ver:         0,
+								BwCls:       1,
+								Rlc:         1,
+								HFCount:     1,
+								ExpTick:     uint32(startTime.Add(100*time.Second).Unix() / 4),
+							},
+							HopFields: []*colibri.HopField{
+								{
+									IngressId: 1,
+									EgressId:  2,
+								},
+							},
+						},
+						ScionLayer: &slayers.SCION{
+							SrcIA: addr.MustIAFrom(1, 1),
+						},
+					},
+					err: "",
 				},
 			},
 		},
@@ -340,7 +610,11 @@ func TestValidate(t *testing.T) {
 			worker.Storage.InitStorageWithData(tc.resStore)
 			for _, en := range tc.entries {
 				err := worker.Validate(&en.proc)
-				assert.True(t, (err == nil && en.success) || (err != nil && !en.success))
+				if en.err == "" {
+					assert.NoError(t, err)
+				} else {
+					assert.True(t, strings.HasPrefix(err.Error(), en.err), err.Error())
+				}
 			}
 		})
 	}
@@ -356,7 +630,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 		name    string
 		entries []entry
 	}
-	worker := processing.NewWorker(getColigateConfiguration(), 1, 1)
+	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
 
 	var startTime = time.Unix(0, 0)
 

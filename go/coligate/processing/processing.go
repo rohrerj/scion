@@ -21,6 +21,7 @@ import (
 
 	"github.com/scionproto/scion/go/coligate/reservation"
 	Tokenbucket "github.com/scionproto/scion/go/coligate/tokenbucket"
+	libaddr "github.com/scionproto/scion/go/lib/addr"
 	libcolibri "github.com/scionproto/scion/go/lib/colibri/dataplane"
 	libtypes "github.com/scionproto/scion/go/lib/colibri/reservation"
 	"github.com/scionproto/scion/go/lib/serrors"
@@ -35,6 +36,7 @@ type Worker struct {
 	NumCounterBits       int
 	Storage              *reservation.Storage
 	TokenBuckets         map[string]*Tokenbucket.TokenBucket //every worker has its own map of tokenbuckets that it is responsible for
+	LocalAS              libaddr.AS
 }
 
 type dataPacket struct {
@@ -67,15 +69,15 @@ func Parse(rawPacket []byte) (*dataPacket, error) { //TODO(rohrerj) This parses 
 }
 
 // NewWorker initializes the worker with his id, tokenbuckets and reservations
-func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32) *Worker {
-	w := &Worker{}
-	w.CoreIdCounter = (gatewayId << (32 - config.NumBitsForGatewayId)) | (workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId))
+func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32, localAS libaddr.AS) *Worker {
+	w := &Worker{
+		CoreIdCounter:  (gatewayId << (32 - config.NumBitsForGatewayId)) | (workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId)),
+		NumCounterBits: config.NumBitsForPerWorkerCounter,
+		TokenBuckets:   make(map[string]*Tokenbucket.TokenBucket),
+		LocalAS:        localAS,
+		Storage:        &reservation.Storage{},
+	}
 	w.InitialCoreIdCounter = w.CoreIdCounter
-	w.NumCounterBits = config.NumBitsForPerWorkerCounter
-
-	w.TokenBuckets = make(map[string]*Tokenbucket.TokenBucket)
-
-	w.Storage = &reservation.Storage{}
 	w.Storage.InitStorageWithData(nil)
 	return w
 }
@@ -119,10 +121,11 @@ func (w *Worker) process(d *dataPacket) error {
 
 // Validates the fields in the colibri header and checks that a valid reservation exists
 func (w *Worker) validate(d *dataPacket) error {
-	C := d.colibriPath.InfoField.C
-	R := d.colibriPath.InfoField.R
-	S := d.colibriPath.InfoField.S
-	resIDSuffix := d.colibriPath.InfoField.ResIdSuffix
+	infoField := d.colibriPath.InfoField
+	C := infoField.C
+	R := infoField.R
+	S := infoField.S
+	resIDSuffix := infoField.ResIdSuffix
 	if C || R || S {
 		return serrors.New("Invalid flags", "S", S, "R", R, "C", C)
 	}
@@ -130,16 +133,41 @@ func (w *Worker) validate(d *dataPacket) error {
 	if err != nil {
 		return serrors.New("Cannot parse reservation id")
 	}
+	if id.ASID != w.LocalAS {
+		return serrors.New("Reservation does not belong to local AS")
+	}
 	resID := string(id.ToRaw())
 
-	reservation, isValid := w.Storage.UseReservation(string(resID), d.colibriPath.InfoField.Ver, d.pktArrivalTime)
+	reservation, isValid := w.Storage.UseReservation(resID, infoField.Ver, d.pktArrivalTime)
 	if !isValid {
 		return serrors.New("E2E reservation is invalid")
 	}
-	if len(reservation.Current().Macs) != len(d.colibriPath.HopFields) {
-		return serrors.New("Number of hopfields is invalid")
-	}
 	d.reservation = reservation
+	currentIndex := d.reservation.Current()
+
+	if len(d.colibriPath.HopFields) != len(currentIndex.Macs) {
+		return serrors.New("Number of hopfields is invalid", "expected", len(currentIndex.Macs), "actual", len(d.colibriPath.HopFields))
+	}
+	if infoField.CurrHF != 0 {
+		return serrors.New("CurrHF is invalid", "expected", 0, "actual", infoField.CurrHF)
+	}
+	if infoField.BwCls != currentIndex.BwCls {
+		return serrors.New("Bandwidth class is invalid", "expected", currentIndex.BwCls, "actual", infoField.BwCls)
+	}
+	if infoField.Rlc != d.reservation.Rlc {
+		return serrors.New("Latency class is invalid", "expected", d.reservation.Rlc, "actual", infoField.Rlc)
+	}
+	if infoField.ExpTick != uint32(currentIndex.Validity.Unix()/4) {
+		return serrors.New("ExpTick is invalid", "expected", currentIndex.Validity.Unix()/4, "actual", infoField.ExpTick)
+	}
+	for i, hop := range d.reservation.Hops {
+		if d.colibriPath.HopFields[i].EgressId != hop.EgressId {
+			return serrors.New("EgressId is invalid", "expected", hop.EgressId, "actual", d.colibriPath.HopFields[i].EgressId)
+		}
+		if d.colibriPath.HopFields[i].IngressId != hop.IngressId {
+			return serrors.New("IngressId is invalid", "expected", hop.IngressId, "actual", d.colibriPath.HopFields[i].IngressId)
+		}
+	}
 	return nil
 }
 
@@ -175,45 +203,17 @@ func (w *Worker) performTrafficMonitoring(d *dataPacket) error {
 
 // Update the colibri header fields
 func (w *Worker) updateFields(d *dataPacket) error {
-
-	currentVersion := d.reservation.Current()
-	var expTick uint32 = uint32(currentVersion.Validity.Unix() / 4)
-	tsRel, err := libcolibri.CreateTsRel(expTick, d.pktArrivalTime)
+	currentIndex := d.reservation.Current()
+	tsRel, err := libcolibri.CreateTsRel(d.colibriPath.InfoField.ExpTick, d.pktArrivalTime)
 	if err != nil {
 		return err
 	}
 	w.CoreIdCounter = w.InitialCoreIdCounter | (w.CoreIdCounter+1)%(1<<w.NumCounterBits)
 
 	d.colibriPath.PacketTimestamp = libcolibri.CreateColibriTimestampCustom(tsRel, w.CoreIdCounter)
-
-	//Update InfoField
-	d.colibriPath.InfoField.BwCls = currentVersion.BwCls
-	d.colibriPath.InfoField.Rlc = d.reservation.Rlc
-	d.colibriPath.InfoField.HFCount = uint8(len(currentVersion.Macs))
-	d.colibriPath.InfoField.Ver = uint8(currentVersion.Index)
-	d.colibriPath.InfoField.CurrHF = 0
-	d.colibriPath.InfoField.ExpTick = uint32(expTick)
-
-	//Update Hopfields and MACS //TODO(rohrerj) add hop updates and mac computation
-	/*for i, _ := range currentVersion.Macs {
-		sizeBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(sizeBytes, w.ColigatePacketProcessor.totalLength)
-
-		hash, err := scrypto.InitMac(mac)
-		if err != nil {
-			return err
-		}
-		_, err = hash.Write(w.ColigatePacketProcessor.colibriPath.PacketTimestamp[:])
-		if err != nil {
-			return err
-		}
-		_, err = hash.Write(sizeBytes)
-		if err != nil {
-			return err
-		}
-		w.ColigatePacketProcessor.colibriPath.HopFields[i].Mac = hash.Sum(nil)[:4]
-		w.ColigatePacketProcessor.colibriPath.HopFields[i].IngressId = w.ColigatePacketProcessor.reservation.Hops[i].IngressId
-		w.ColigatePacketProcessor.colibriPath.HopFields[i].EgressId = w.ColigatePacketProcessor.reservation.Hops[i].EgressId
-	}*/
+	//Set HVF values //TODO(rohrerj) add hvf computation
+	for i, sigma := range currentIndex.Macs {
+		d.colibriPath.HopFields[i].Mac = sigma
+	}
 	return d.colibriPath.SerializeTo(d.rawPacket[slayers.CmnHdrLen+d.scionLayer.AddrHdrLen():])
 }

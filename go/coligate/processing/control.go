@@ -97,6 +97,8 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		return serrors.New("No instance of colibri service found in local AS.")
 	}
 
+	localAS := topo.IA().AS()
+
 	// Loads the salt for load balancing from the config.
 	// If the salt is empty a random value will be chosen
 	salt := []byte(config.Salt)
@@ -128,7 +130,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 				defer log.HandlePanic()
 				return control.workerReceiveEntry(control.dataChannels[i],
 					control.controlChannels[i], config,
-					uint32(i), uint32(config.ColibriGatewayID), metrics,
+					uint32(i), uint32(config.ColibriGatewayID), metrics, localAS,
 				)
 			})
 		}(i)
@@ -398,10 +400,10 @@ func (c *Control) getBorderRouterConnection(proc *dataPacket) (*ipv4.PacketConn,
 // Configures a goroutine to listen for the data plane channel and reservation updates
 func (c *Control) workerReceiveEntry(ch chan *dataPacket,
 	chres chan *reservation.ReservationTask, config *config.ColigateConfig, workerId uint32,
-	gatewayId uint32, metrics *common.Metrics) error {
+	gatewayId uint32, metrics *common.Metrics, localAS libaddr.AS) error {
 
 	log.Info("Init worker", "workerId", workerId)
-	worker := NewWorker(config, workerId, gatewayId)
+	worker := NewWorker(config, workerId, gatewayId, localAS)
 
 	workerPacketInTotalPromCounter := libmetrics.NewPromCounter(metrics.WorkerPacketInTotal)
 	workerPacketInInvalidPromCounter := libmetrics.NewPromCounter(metrics.WorkerPacketInInvalid)
