@@ -179,6 +179,22 @@ func TestValidate(t *testing.T) {
 			},
 		},
 		{
+			name: "TestValidateRFlagIsSet",
+			entries: []entry{
+				{
+					proc: processing.DataPacket{
+						PktArrivalTime: startTime,
+						ColibriPath: &colibri.ColibriPath{
+							InfoField: &colibri.InfoField{
+								R: true,
+							},
+						},
+					},
+					success: false,
+				},
+			},
+		},
+		{
 			name: "TestValidateSFlagIsSet",
 			entries: []entry{
 				{

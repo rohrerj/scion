@@ -120,10 +120,11 @@ func (w *Worker) process(d *dataPacket) error {
 // Validates the fields in the colibri header and checks that a valid reservation exists
 func (w *Worker) validate(d *dataPacket) error {
 	C := d.colibriPath.InfoField.C
+	R := d.colibriPath.InfoField.R
 	S := d.colibriPath.InfoField.S
 	resIDSuffix := d.colibriPath.InfoField.ResIdSuffix
-	if C || S {
-		return serrors.New("Invalid flags", "S", S, "C", C)
+	if C || R || S {
+		return serrors.New("Invalid flags", "S", S, "R", R, "C", C)
 	}
 	id, err := libtypes.NewID((d).scionLayer.SrcIA.AS(), resIDSuffix)
 	if err != nil {
