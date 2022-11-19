@@ -36,28 +36,27 @@ func (control *Control) CreateCleanupChannel(maxQueueSize int) chan *reservation
 	return control.cleanupChannel
 }
 
-func (control *Control) CreateDataChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *coligatePacketProcessor {
-	control.dataChannels = make([]chan *coligatePacketProcessor, numberWorkers)
+func (control *Control) CreateDataChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *dataPacket {
+	control.dataChannels = make([]chan *dataPacket, numberWorkers)
 	for i := 0; i < numberWorkers; i++ {
-		control.dataChannels[i] = make(chan *coligatePacketProcessor, maxQueueSizePerWorker)
+		control.dataChannels[i] = make(chan *dataPacket, maxQueueSizePerWorker)
 	}
 	return control.dataChannels
 }
 
-func (control *Control) CreateReservationChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *reservation.ReservationTask {
-	control.reservationChannels = make([]chan *reservation.ReservationTask, numberWorkers)
+func (control *Control) CreateControlChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *reservation.ReservationTask {
+	control.controlChannels = make([]chan *reservation.ReservationTask, numberWorkers)
 	for i := 0; i < numberWorkers; i++ {
-		control.reservationChannels[i] = make(chan *reservation.ReservationTask, maxQueueSizePerWorker)
+		control.controlChannels[i] = make(chan *reservation.ReservationTask, maxQueueSizePerWorker)
 	}
-	return control.reservationChannels
+	return control.controlChannels
 }
 
 func (control *Control) Shutdown() {
 	control.shutdown()
 }
 
-type ColigatePacketProcessor struct {
-	TotalLength    uint32
+type DataPacket struct {
 	PktArrivalTime time.Time
 	ScionLayer     *slayers.SCION
 	ColibriPath    *colibri.ColibriPath
@@ -65,9 +64,8 @@ type ColigatePacketProcessor struct {
 	RawPacket      []byte
 }
 
-func internalParse(proc *ColigatePacketProcessor) *coligatePacketProcessor {
-	return &coligatePacketProcessor{
-		totalLength:    proc.TotalLength,
+func internalParse(proc *DataPacket) *dataPacket {
+	return &dataPacket{
 		pktArrivalTime: proc.PktArrivalTime,
 		scionLayer:     proc.ScionLayer,
 		colibriPath:    proc.ColibriPath,
@@ -80,14 +78,12 @@ func (w *Worker) HandleReservationTask(task *reservation.ReservationTask) error 
 	return w.handleReservationTask(task)
 }
 
-func (w *Worker) Validate(proc *ColigatePacketProcessor) error {
-	w.ColigatePacketProcessor = internalParse(proc)
-	return w.validate()
+func (w *Worker) Validate(proc *DataPacket) error {
+	return w.validate(internalParse(proc))
 }
 
-func (w *Worker) PerformTrafficMonitoring(proc *ColigatePacketProcessor) error {
-	w.ColigatePacketProcessor = internalParse(proc)
-	return w.performTrafficMonitoring()
+func (w *Worker) PerformTrafficMonitoring(proc *DataPacket) error {
+	return w.performTrafficMonitoring(internalParse(proc))
 }
 
 func (w *Worker) ResetTokenBucket() {

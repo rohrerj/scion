@@ -29,19 +29,15 @@ import (
 	"github.com/scionproto/scion/go/pkg/coligate/config"
 )
 
-//TODO(rohrerj) Add Unit tests
-
 type Worker struct {
-	InitialCoreIdCounter    uint32
-	CoreIdCounter           uint32
-	NumCounterBits          int
-	Storage                 *reservation.ReservationStorage
-	ColigatePacketProcessor *coligatePacketProcessor
-	TokenBuckets            map[string]*Tokenbucket.TokenBucket //every worker has its own map of tokenbuckets that it is responsible for
+	InitialCoreIdCounter uint32
+	CoreIdCounter        uint32
+	NumCounterBits       int
+	Storage              *reservation.Storage
+	TokenBuckets         map[string]*Tokenbucket.TokenBucket //every worker has its own map of tokenbuckets that it is responsible for
 }
 
-type coligatePacketProcessor struct {
-	totalLength    uint32
+type dataPacket struct {
 	pktArrivalTime time.Time
 	scionLayer     *slayers.SCION
 	colibriPath    *colibri.ColibriPath
@@ -50,11 +46,10 @@ type coligatePacketProcessor struct {
 }
 
 // Parse parses the scion and colibri header from a raw packet
-func Parse(rawPacket []byte) (*coligatePacketProcessor, error) {
-	proc := coligatePacketProcessor{
-		rawPacket:   rawPacket,
-		totalLength: uint32(len(rawPacket)),
-		scionLayer:  &slayers.SCION{},
+func Parse(rawPacket []byte) (*dataPacket, error) { //TODO(rohrerj) This parses the path twice, optimize
+	proc := dataPacket{
+		rawPacket:  rawPacket,
+		scionLayer: &slayers.SCION{},
 	}
 	var err error
 	if err := proc.scionLayer.DecodeFromBytes(rawPacket, gopacket.NilDecodeFeedback); err != nil {
@@ -71,27 +66,27 @@ func Parse(rawPacket []byte) (*coligatePacketProcessor, error) {
 	return &proc, nil
 }
 
-// InitWorker initializes the worker with his id, tokenbuckets and reservations
-func (w *Worker) InitWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32) error {
-
+// NewWorker initializes the worker with his id, tokenbuckets and reservations
+func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32) *Worker {
+	w := &Worker{}
 	w.CoreIdCounter = (gatewayId << (32 - config.NumBitsForGatewayId)) | (workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId))
 	w.InitialCoreIdCounter = w.CoreIdCounter
 	w.NumCounterBits = config.NumBitsForPerWorkerCounter
 
 	w.TokenBuckets = make(map[string]*Tokenbucket.TokenBucket)
-	w.ColigatePacketProcessor = &coligatePacketProcessor{}
 
-	w.Storage = &reservation.ReservationStorage{}
+	w.Storage = &reservation.Storage{}
 	w.Storage.InitStorageWithData(nil)
-	return nil
+	return w
 }
 
-// updates, creates or deletes a reservation depending on the reservation task
+// Updates, creates or deletes a reservation depending on the reservation task
 func (w *Worker) handleReservationTask(task *reservation.ReservationTask) error {
 	if w == nil || w.Storage == nil || task == nil {
 		return serrors.New("handleReservationTask requires a valid worker and task")
 	}
 	if task.IsDeleteQuery {
+		delete(w.TokenBuckets, task.ResId)
 		w.Storage.Delete(task)
 	} else {
 		w.Storage.Update(task)
@@ -100,70 +95,76 @@ func (w *Worker) handleReservationTask(task *reservation.ReservationTask) error 
 	return nil
 }
 
-// processes the current packet based on the current coligatePacketProcessor
-func (w *Worker) process() error {
+// Processes the current packet based on the current dataPacket
+func (w *Worker) process(d *dataPacket) error {
 	if w == nil {
 		return serrors.New("worker must not be nil")
 	}
 
-	if w.ColigatePacketProcessor == nil {
-		return serrors.New("coligate packet processor must not be nil")
+	if d == nil {
+		return serrors.New("datapacket must not be nil")
 	}
 	var err error
-	err = w.validate()
+	err = w.validate(d)
 	if err != nil {
 		return err
 	}
-	err = w.performTrafficMonitoring()
+	err = w.performTrafficMonitoring(d)
 	if err != nil {
 		return err
 	}
 
-	return w.updateFields()
+	return w.updateFields(d)
 }
 
-// validates the fields in the colibri header and checks that a valid reservation exists
-func (w *Worker) validate() error {
-	C := w.ColigatePacketProcessor.colibriPath.InfoField.C
-	S := w.ColigatePacketProcessor.colibriPath.InfoField.S
-	resIDSuffix := w.ColigatePacketProcessor.colibriPath.InfoField.ResIdSuffix
+// Validates the fields in the colibri header and checks that a valid reservation exists
+func (w *Worker) validate(d *dataPacket) error {
+	C := d.colibriPath.InfoField.C
+	S := d.colibriPath.InfoField.S
+	resIDSuffix := d.colibriPath.InfoField.ResIdSuffix
 	if C || S {
 		return serrors.New("Invalid flags", "S", S, "C", C)
 	}
-	id, err := libtypes.NewID(w.ColigatePacketProcessor.scionLayer.SrcIA.AS(), resIDSuffix)
+	id, err := libtypes.NewID((d).scionLayer.SrcIA.AS(), resIDSuffix)
 	if err != nil {
 		return serrors.New("Cannot parse reservation id")
 	}
 	resID := string(id.ToRaw())
 
-	reservation, isValid := w.Storage.UseReservation(string(resID), w.ColigatePacketProcessor.colibriPath.InfoField.Ver, w.ColigatePacketProcessor.pktArrivalTime)
+	reservation, isValid := w.Storage.UseReservation(string(resID), d.colibriPath.InfoField.Ver, d.pktArrivalTime)
 	if !isValid {
 		return serrors.New("E2E reservation is invalid")
 	}
-	if len(reservation.Current().Macs) != len(w.ColigatePacketProcessor.colibriPath.HopFields) {
+	if len(reservation.Current().Macs) != len(d.colibriPath.HopFields) {
 		return serrors.New("Number of hopfields is invalid")
 	}
-	w.ColigatePacketProcessor.reservation = reservation
+	d.reservation = reservation
 	return nil
 }
 
-// checks that the reservation is not overused
-func (w *Worker) performTrafficMonitoring() error {
-	bucket, exists := w.TokenBuckets[w.ColigatePacketProcessor.reservation.ReservationId]
-	entry := Tokenbucket.TokenBucketEntry{Length: uint64(w.ColigatePacketProcessor.totalLength), ArrivalTime: w.ColigatePacketProcessor.pktArrivalTime}
-
-	realBandwidth := 1024 * libtypes.BWCls(w.ColigatePacketProcessor.reservation.Current().BwCls).ToKbps()
-
-	if !exists {
+// Checks that the reservation is not overused
+func (w *Worker) performTrafficMonitoring(d *dataPacket) error {
+	bucket, exists := w.TokenBuckets[d.reservation.ReservationId]
+	entry := Tokenbucket.Entry{Length: uint64(len(d.rawPacket)), ArrivalTime: d.pktArrivalTime}
+	currentBwCls := d.reservation.Current().BwCls
+	if exists {
+		if bucket.LastBwCls != currentBwCls {
+			realBandwidth := 1024 * libtypes.BWCls(currentBwCls).ToKbps()
+			bucket.CIRInBytes = realBandwidth
+			bucket.LastBwCls = currentBwCls
+		}
+	} else {
+		realBandwidth := 1024 * libtypes.BWCls(currentBwCls).ToKbps()
 		bucket = &Tokenbucket.TokenBucket{
 			CurrentTokens:     float64(realBandwidth),
-			LastPacketTime:    w.ColigatePacketProcessor.pktArrivalTime,
+			LastPacketTime:    d.pktArrivalTime,
 			TokenIntervalInMs: 1, //TODO(rohrerj) use real value,
+			LastBwCls:         currentBwCls,
+			CIRInBytes:        realBandwidth,
 		}
-		w.TokenBuckets[w.ColigatePacketProcessor.reservation.ReservationId] = bucket
+		w.TokenBuckets[d.reservation.ReservationId] = bucket
 	}
 
-	bucket.CIRInBytes = realBandwidth
 	ok := bucket.ValidateBandwidth(&entry)
 	if !ok {
 		return serrors.New("data packet exceeded bandwidth")
@@ -171,26 +172,26 @@ func (w *Worker) performTrafficMonitoring() error {
 	return nil
 }
 
-// update the colibri header fields
-func (w *Worker) updateFields() error {
+// Update the colibri header fields
+func (w *Worker) updateFields(d *dataPacket) error {
 
-	currentVersion := w.ColigatePacketProcessor.reservation.Current()
+	currentVersion := d.reservation.Current()
 	var expTick uint32 = uint32(currentVersion.Validity.Unix() / 4)
-	tsRel, err := libcolibri.CreateTsRel(expTick, w.ColigatePacketProcessor.pktArrivalTime)
+	tsRel, err := libcolibri.CreateTsRel(expTick, d.pktArrivalTime)
 	if err != nil {
 		return err
 	}
 	w.CoreIdCounter = w.InitialCoreIdCounter | (w.CoreIdCounter+1)%(1<<w.NumCounterBits)
 
-	w.ColigatePacketProcessor.colibriPath.PacketTimestamp = libcolibri.CreateColibriTimestampCustom(tsRel, w.CoreIdCounter)
+	d.colibriPath.PacketTimestamp = libcolibri.CreateColibriTimestampCustom(tsRel, w.CoreIdCounter)
 
 	//Update InfoField
-	w.ColigatePacketProcessor.colibriPath.InfoField.BwCls = currentVersion.BwCls
-	w.ColigatePacketProcessor.colibriPath.InfoField.Rlc = w.ColigatePacketProcessor.reservation.Rlc
-	w.ColigatePacketProcessor.colibriPath.InfoField.HFCount = uint8(len(currentVersion.Macs))
-	w.ColigatePacketProcessor.colibriPath.InfoField.Ver = uint8(currentVersion.Index)
-	w.ColigatePacketProcessor.colibriPath.InfoField.CurrHF = 0
-	w.ColigatePacketProcessor.colibriPath.InfoField.ExpTick = uint32(expTick)
+	d.colibriPath.InfoField.BwCls = currentVersion.BwCls
+	d.colibriPath.InfoField.Rlc = d.reservation.Rlc
+	d.colibriPath.InfoField.HFCount = uint8(len(currentVersion.Macs))
+	d.colibriPath.InfoField.Ver = uint8(currentVersion.Index)
+	d.colibriPath.InfoField.CurrHF = 0
+	d.colibriPath.InfoField.ExpTick = uint32(expTick)
 
 	//Update Hopfields and MACS //TODO(rohrerj) add hop updates and mac computation
 	/*for i, _ := range currentVersion.Macs {
@@ -213,5 +214,5 @@ func (w *Worker) updateFields() error {
 		w.ColigatePacketProcessor.colibriPath.HopFields[i].IngressId = w.ColigatePacketProcessor.reservation.Hops[i].IngressId
 		w.ColigatePacketProcessor.colibriPath.HopFields[i].EgressId = w.ColigatePacketProcessor.reservation.Hops[i].EgressId
 	}*/
-	return nil
+	return d.colibriPath.SerializeTo(d.rawPacket[slayers.CmnHdrLen+d.scionLayer.AddrHdrLen():])
 }

@@ -24,7 +24,7 @@ import (
 )
 
 type entry struct {
-	entry  Tokenbucket.TokenBucketEntry
+	entry  Tokenbucket.Entry
 	result bool
 }
 type test struct {
@@ -49,35 +49,35 @@ func TestGroupForTokenBucketAlgorithm(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(0 * 256 * time.Millisecond)),
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(1 * 256 * time.Millisecond)),
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(2 * 256 * time.Millisecond)),
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(3 * 256 * time.Millisecond)),
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(4 * 256 * time.Millisecond)),
 					},
@@ -94,21 +94,21 @@ func TestGroupForTokenBucketAlgorithm(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1000,
 						ArrivalTime: startTime,
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime,
 					},
 					result: false,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      24,
 						ArrivalTime: startTime,
 					},
@@ -125,14 +125,14 @@ func TestGroupForTokenBucketAlgorithm(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1024,
 						ArrivalTime: startTime,
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1,
 						ArrivalTime: startTime,
 					},
@@ -149,7 +149,7 @@ func TestGroupForTokenBucketAlgorithm(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      2048,
 						ArrivalTime: startTime,
 					},
@@ -166,56 +166,56 @@ func TestGroupForTokenBucketAlgorithm(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(249 * time.Millisecond)),
 					},
 					result: false,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(250 * time.Millisecond)),
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(499 * time.Millisecond)),
 					},
 					result: false,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(500 * time.Millisecond)),
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(749 * time.Millisecond)),
 					},
 					result: false,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(750 * time.Millisecond)),
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(999 * time.Millisecond)),
 					},
 					result: false,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime.Add(time.Duration(1000 * time.Millisecond)),
 					},
@@ -232,34 +232,34 @@ func TestGroupForTokenBucketAlgorithm(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime,
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime,
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime,
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      256,
 						ArrivalTime: startTime,
 					}, result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1,
 						ArrivalTime: startTime,
 					},
@@ -276,21 +276,21 @@ func TestGroupForTokenBucketAlgorithm(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1024,
 						ArrivalTime: startTime,
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1024,
 						ArrivalTime: startTime.Add(time.Duration(999 * time.Millisecond)),
 					},
 					result: false,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1024,
 						ArrivalTime: startTime.Add(time.Duration(1000 * time.Millisecond)),
 					},
@@ -307,28 +307,28 @@ func TestGroupForTokenBucketAlgorithm(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1024,
 						ArrivalTime: startTime,
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1025,
 						ArrivalTime: startTime.Add(time.Duration(24 * time.Hour)),
 					},
 					result: false,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1024,
 						ArrivalTime: startTime.Add(time.Duration(24 * time.Hour)),
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1,
 						ArrivalTime: startTime.Add(time.Duration(24 * time.Hour)),
 					},
@@ -345,42 +345,42 @@ func TestGroupForTokenBucketAlgorithm(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      107374182400,
 						ArrivalTime: startTime.Add(time.Duration(999 * time.Millisecond)),
 					},
 					result: false,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      107374182400,
 						ArrivalTime: startTime.Add(time.Duration(1000 * time.Millisecond)),
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1073741824,
 						ArrivalTime: startTime.Add(time.Duration(1009 * time.Millisecond)),
 					},
 					result: false,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      1073741824,
 						ArrivalTime: startTime.Add(time.Duration(1010 * time.Millisecond)),
 					},
 					result: true,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      107374182401,
 						ArrivalTime: startTime.Add(time.Duration(24 * time.Hour)),
 					},
 					result: false,
 				},
 				{
-					entry: Tokenbucket.TokenBucketEntry{
+					entry: Tokenbucket.Entry{
 						Length:      107374182400,
 						ArrivalTime: startTime.Add(time.Duration(24 * time.Hour)),
 					},

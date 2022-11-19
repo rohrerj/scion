@@ -50,7 +50,7 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	errGroup := &errgroup.Group{}
 	c := &proc.Control{}
 	cleanupChannel := c.CreateCleanupChannel(L)
-	reservationChannels := c.CreateReservationChannels(1, L)
+	reservationChannels := c.CreateControlChannels(1, L)
 	now := time.Now()
 
 	c.SetHasher([]byte("salt"))
@@ -91,7 +91,7 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 	errGroup := &errgroup.Group{}
 	c := &proc.Control{}
 	cleanupChannel := c.CreateCleanupChannel(L)
-	reservationChannels := c.CreateReservationChannels(1, L)
+	reservationChannels := c.CreateControlChannels(1, L)
 
 	c.SetHasher([]byte("salt"))
 	errGroup.Go(func() error {
@@ -130,7 +130,7 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	errGroup := &errgroup.Group{}
 	c := &proc.Control{}
 	cleanupChannel := c.CreateCleanupChannel(L)
-	reservationChannels := c.CreateReservationChannels(1, L)
+	reservationChannels := c.CreateControlChannels(1, L)
 
 	c.SetHasher([]byte("salt"))
 	errGroup.Go(func() error {

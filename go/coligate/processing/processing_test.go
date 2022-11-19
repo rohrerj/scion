@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/coligate/reservation"
@@ -45,9 +44,7 @@ func getColigateConfiguration() *config.ColigateConfig {
 // TestMasking tests that the coreIdCounter is correctly assigned in InitWorker depending on
 // the number of bits for the GatewayId, WorkerId, PerWorkerCounter.
 func TestMasking(t *testing.T) {
-	worker := processing.Worker{}
-	err := worker.InitWorker(getColigateConfiguration(), 1, 1)
-	require.NoError(t, err)
+	worker := processing.NewWorker(getColigateConfiguration(), 1, 1)
 	expectedInitialValue := uint32(2147483648 + 8388608) //2^31 + 2^23
 	assert.Equal(t, expectedInitialValue, worker.CoreIdCounter)
 
@@ -63,16 +60,14 @@ func TestMasking(t *testing.T) {
 }
 
 func TestHandleReservationTask(t *testing.T) {
-	worker := processing.Worker{}
-	err := worker.InitWorker(getColigateConfiguration(), 1, 1)
+	worker := processing.NewWorker(getColigateConfiguration(), 1, 1)
 	reservations := make(map[string]*reservation.Reservation)
 	worker.Storage.InitStorageWithData(reservations)
-	require.NoError(t, err)
 	var startTime = time.Now()
 
 	//test that sending a delete query for a non existing reservation
 	//does not create an error
-	err = worker.HandleReservationTask(&reservation.ReservationTask{
+	err := worker.HandleReservationTask(&reservation.ReservationTask{
 		IsDeleteQuery: true,
 		ResId:         "A",
 	})
@@ -153,7 +148,7 @@ func TestHandleReservationTask(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	type entry struct {
-		proc    processing.ColigatePacketProcessor
+		proc    processing.DataPacket
 		success bool
 	}
 
@@ -162,9 +157,7 @@ func TestValidate(t *testing.T) {
 		entries  []entry
 		resStore map[string]*reservation.Reservation
 	}
-	worker := processing.Worker{}
-	err := worker.InitWorker(getColigateConfiguration(), 1, 1)
-	require.NoError(t, err)
+	worker := processing.NewWorker(getColigateConfiguration(), 1, 1)
 
 	var startTime = time.Unix(0, 0)
 
@@ -173,7 +166,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateCFlagIsSet",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
+					proc: processing.DataPacket{
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
@@ -189,7 +182,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateSFlagIsSet",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
+					proc: processing.DataPacket{
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
@@ -205,7 +198,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateReservationDoesNotExist",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
+					proc: processing.DataPacket{
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
@@ -239,7 +232,7 @@ func TestValidate(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
+					proc: processing.DataPacket{
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
@@ -258,7 +251,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateSFlagIsSet",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
+					proc: processing.DataPacket{
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
@@ -274,7 +267,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateReservationDoesNotExist",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
+					proc: processing.DataPacket{
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
@@ -308,7 +301,7 @@ func TestValidate(t *testing.T) {
 			},
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
+					proc: processing.DataPacket{
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
@@ -339,7 +332,7 @@ func TestValidate(t *testing.T) {
 
 func TestPerformTrafficMonitoring(t *testing.T) {
 	type entry struct {
-		proc    processing.ColigatePacketProcessor
+		proc    processing.DataPacket
 		success bool
 	}
 
@@ -347,9 +340,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 		name    string
 		entries []entry
 	}
-	worker := processing.Worker{}
-	err := worker.InitWorker(getColigateConfiguration(), 1, 1)
-	require.NoError(t, err)
+	worker := processing.NewWorker(getColigateConfiguration(), 1, 1)
 
 	var startTime = time.Unix(0, 0)
 
@@ -358,8 +349,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			name: "TestPerformTrafficMonitoringOnePacketFullBandwidth",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    16384,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -376,8 +367,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					success: true,
 				},
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    1,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -399,8 +390,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			name: "TestPerformTrafficMonitoringSeveralPacketsTotalFullBandwidth",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    4096,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 4096),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -417,8 +408,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					success: true,
 				},
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    4096,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 4096),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -435,8 +426,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					success: true,
 				},
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    4096,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 4096),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -453,8 +444,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					success: true,
 				},
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    4096,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 4096),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -471,8 +462,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					success: true,
 				},
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    1,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -494,8 +485,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			name: "TestPerformTrafficMonitoringDifferentReservationsHaveNoImpact",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    16384,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -512,8 +503,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					success: true,
 				},
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    16384,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "B",
@@ -535,8 +526,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			name: "TestPerformTrafficMonitoringSeveralReservationIndicesMapToSameBucket",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    16384,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -553,8 +544,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					success: true,
 				},
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    1,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -581,8 +572,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			name: "TestPerformTrafficMonitoringIncreasedBandwidth",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    16384,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -599,8 +590,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					success: true,
 				},
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    22528,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 22528),
 						PktArrivalTime: startTime.Add(1 * time.Second),
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -627,8 +618,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			name: "TestPerformTrafficMonitoringDecreasedBandwidth",
 			entries: []entry{
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    22528,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 22528),
 						PktArrivalTime: startTime,
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -645,8 +636,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					success: true,
 				},
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    16384,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime.Add(1 * time.Second),
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",
@@ -663,8 +654,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					success: true,
 				},
 				{
-					proc: processing.ColigatePacketProcessor{
-						TotalLength:    1,
+					proc: processing.DataPacket{
+						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime.Add(1 * time.Second),
 						Reservation: &reservation.Reservation{
 							ReservationId: "A",

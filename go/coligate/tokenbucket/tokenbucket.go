@@ -24,10 +24,11 @@ type TokenBucket struct {
 	CurrentTokens     float64
 	LastPacketTime    time.Time
 	TokenIntervalInMs uint64 //any value in [1,1000]
+	LastBwCls         uint8
 }
 
 // A placeholder packet struct.
-type TokenBucketEntry struct {
+type Entry struct {
 	Length      uint64
 	ArrivalTime time.Time
 }
@@ -42,7 +43,7 @@ func min(a float64, b float64) float64 {
 }
 
 // ValidateBandwidth checks whether a packet fits in the Token Bucket or drops it. The success is indicated by a bool.
-func (bucket *TokenBucket) ValidateBandwidth(entry *TokenBucketEntry) bool {
+func (bucket *TokenBucket) ValidateBandwidth(entry *Entry) bool {
 	if bucket == nil || entry == nil {
 		return false
 	}

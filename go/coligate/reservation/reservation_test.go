@@ -24,7 +24,7 @@ import (
 )
 
 func TestReservationNotFound(t *testing.T) {
-	storage := &reservation.ReservationStorage{}
+	storage := &reservation.Storage{}
 	storage.InitStorageWithData(nil)
 	res, found := storage.UseReservation("A", 0, time.Now())
 	assert.False(t, found)
@@ -32,7 +32,7 @@ func TestReservationNotFound(t *testing.T) {
 }
 
 func TestReservationVersionNotFound(t *testing.T) {
-	storage := &reservation.ReservationStorage{}
+	storage := &reservation.Storage{}
 	resmap := make(map[string]*reservation.Reservation)
 	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	resvmap[0] = &reservation.ReservationIndex{
@@ -53,7 +53,7 @@ func TestReservationVersionNotFound(t *testing.T) {
 }
 
 func TestActiveVersionIsProvidedVersion(t *testing.T) {
-	storage := &reservation.ReservationStorage{}
+	storage := &reservation.Storage{}
 	resmap := make(map[string]*reservation.Reservation)
 	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	resvmap[0] = &reservation.ReservationIndex{
@@ -74,7 +74,7 @@ func TestActiveVersionIsProvidedVersion(t *testing.T) {
 }
 
 func TestActiveVersionOlder(t *testing.T) {
-	storage := &reservation.ReservationStorage{}
+	storage := &reservation.Storage{}
 	resmap := make(map[string]*reservation.Reservation)
 	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	resvmap[0] = &reservation.ReservationIndex{
@@ -102,7 +102,7 @@ func TestActiveVersionOlder(t *testing.T) {
 }
 
 func TestActiveVersionNewer(t *testing.T) {
-	storage := &reservation.ReservationStorage{}
+	storage := &reservation.Storage{}
 	resmap := make(map[string]*reservation.Reservation)
 	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	resvmap[0] = &reservation.ReservationIndex{
@@ -127,7 +127,7 @@ func TestActiveVersionNewer(t *testing.T) {
 }
 
 func TestPacketValidityIsChecked(t *testing.T) {
-	storage := &reservation.ReservationStorage{}
+	storage := &reservation.Storage{}
 	resmap := make(map[string]*reservation.Reservation)
 	resvmap := make(map[uint8]*reservation.ReservationIndex)
 	now := time.Now()

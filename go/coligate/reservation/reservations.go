@@ -20,7 +20,7 @@ import (
 	"github.com/scionproto/scion/go/lib/log"
 )
 
-type ReservationStorage struct {
+type Storage struct {
 	reservations map[string]*Reservation
 }
 type HopField struct {
@@ -59,7 +59,7 @@ func (res *Reservation) Current() *ReservationIndex {
 }
 
 // InitStorageWithData initializes the reservation storage
-func (store *ReservationStorage) InitStorageWithData(data map[string]*Reservation) {
+func (store *Storage) InitStorageWithData(data map[string]*Reservation) {
 	if data == nil {
 		store.reservations = make(map[string]*Reservation)
 	} else {
@@ -69,7 +69,7 @@ func (store *ReservationStorage) InitStorageWithData(data map[string]*Reservatio
 
 // UseReservation checks whether the reservation index exists and is valid. If the reservation exists but contains no longer valid indices,
 // they will be removed. If the reservation index exists and is valid, the reservation is returned.
-func (store *ReservationStorage) UseReservation(resId string, providedIndex uint8, pktTime time.Time) (*Reservation, bool) {
+func (store *Storage) UseReservation(resId string, providedIndex uint8, pktTime time.Time) (*Reservation, bool) {
 	log.Debug("use resId", "resId", resId)
 	res, found := store.reservations[resId]
 	if !found {
@@ -101,7 +101,7 @@ func (store *ReservationStorage) UseReservation(resId string, providedIndex uint
 
 // Update merges (overwrites if exists in both) all provided reservation indices with the currently stored indices.
 // Creates a new entry if no reservation exists.
-func (store *ReservationStorage) Update(task *ReservationTask) {
+func (store *Storage) Update(task *ReservationTask) {
 	res, found := store.reservations[task.ResId]
 	if found {
 		defer res.deleteOlderIndices()
@@ -131,6 +131,6 @@ func (res *Reservation) deleteOlderIndices() {
 }
 
 // Delete deletes a stored reservation with its indicies by providing its reservation ID.
-func (store *ReservationStorage) Delete(task *ReservationTask) {
+func (store *Storage) Delete(task *ReservationTask) {
 	delete(store.reservations, task.ResId)
 }
