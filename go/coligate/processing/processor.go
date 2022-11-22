@@ -365,6 +365,10 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 					dataPacketInInvalidPromCounter.Add(1)
 					continue
 				}
+				if pkt.N == bufSize && int(d.scionLayer.PayloadLen) != len(d.scionLayer.Payload) {
+					// Packet larger than buffer, drop it
+					continue
+				}
 				d.pktArrivalTime = time.Now()
 				id, err := libtypes.NewID(d.scionLayer.SrcIA.AS(),
 					d.colibriPath.InfoField.ResIdSuffix)
