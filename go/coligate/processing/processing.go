@@ -211,9 +211,16 @@ func (w *Worker) updateFields(d *dataPacket) error {
 	w.CoreIdCounter = w.InitialCoreIdCounter | (w.CoreIdCounter+1)%(1<<w.NumCounterBits)
 
 	d.colibriPath.PacketTimestamp = libcolibri.CreateColibriTimestampCustom(tsRel, w.CoreIdCounter)
-	//Set HVF values //TODO(rohrerj) add hvf computation
+	//Set HVF values
 	for i, sigma := range currentIndex.Macs {
-		d.colibriPath.HopFields[i].Mac = sigma
+		cipher, err := libcolibri.InitColibriKey(sigma)
+		if err != nil {
+			return err
+		}
+		if err = libcolibri.MACE2E(d.colibriPath.HopFields[i].Mac, cipher, d.colibriPath.InfoField, d.colibriPath.PacketTimestamp,
+			d.colibriPath.HopFields[i], d.scionLayer); err != nil {
+			return err
+		}
 	}
 	return d.colibriPath.SerializeTo(d.rawPacket[slayers.CmnHdrLen+d.scionLayer.AddrHdrLen():])
 }

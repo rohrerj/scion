@@ -24,6 +24,7 @@ import (
 	"github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/coligate/reservation"
 	"github.com/scionproto/scion/go/lib/addr"
+	libcolibri "github.com/scionproto/scion/go/lib/colibri/dataplane"
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path/colibri"
 	"github.com/scionproto/scion/go/pkg/coligate/config"
@@ -974,4 +975,75 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			worker.ResetTokenBucket()
 		})
 	}
+}
+
+// TestUpdateMacs tests that for a valid sigma, UpdateFields computes the correct mac values that
+// can be verified with the help of the private key.
+func TestUpdateMacs(t *testing.T) {
+	privateKey := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	privateKeyCipher, err := libcolibri.InitColibriKey(privateKey)
+	assert.NoError(t, err)
+
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+
+	d := &processing.DataPacket{
+		PktArrivalTime: time.Unix(0, 0),
+		RawPacket:      make([]byte, 200),
+		ColibriPath: &colibri.ColibriPath{
+			InfoField: &colibri.InfoField{
+				ExpTick:     1,
+				OrigPayLen:  0,
+				HFCount:     1,
+				ResIdSuffix: make([]byte, 12),
+			},
+			HopFields: []*colibri.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       make([]byte, 4),
+				},
+			},
+		},
+		ScionLayer: &slayers.SCION{
+			SrcAddrType: slayers.T4Ip,
+			DstAddrType: slayers.T4Ip,
+			SrcAddrLen:  slayers.AddrLen4,
+			DstAddrLen:  slayers.AddrLen4,
+			RawSrcAddr:  []byte("1234"),
+			RawDstAddr:  []byte("5678"),
+			SrcIA:       addr.MustIAFrom(1, 1),
+			DstIA:       addr.MustIAFrom(2, 2),
+			PathType:    colibri.PathType,
+		},
+		Reservation: &reservation.Reservation{
+			ReservationId: "A",
+			ActiveIndexId: 0,
+			Hops: []reservation.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
+			},
+			Indices: map[uint8]*reservation.ReservationIndex{
+				0: {
+					Index: 0,
+					Macs:  make([][]byte, 1),
+				},
+			},
+		},
+	}
+	//create the sigma that colibri service would later send to colibri gateway
+	sigmaBuffer := make([]byte, 16)
+	err = libcolibri.MACSigma(sigmaBuffer, privateKeyCipher, d.ColibriPath.InfoField, d.ColibriPath.HopFields[0], d.ScionLayer)
+	assert.NoError(t, err)
+
+	//update mac fields of EE data packet with the help from the sigma
+	d.Reservation.Indices[0].Macs[0] = sigmaBuffer
+	err = w.UpdateFields(d)
+	assert.NoError(t, err)
+
+	//validate the computed mac
+	err = libcolibri.MACE2E(d.ColibriPath.HopFields[0].Mac, privateKeyCipher, d.ColibriPath.InfoField,
+		d.ColibriPath.PacketTimestamp, d.ColibriPath.HopFields[0], d.ScionLayer)
+	assert.NoError(t, err)
 }

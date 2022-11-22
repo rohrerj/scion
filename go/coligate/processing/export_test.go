@@ -89,3 +89,7 @@ func (w *Worker) PerformTrafficMonitoring(proc *DataPacket) error {
 func (w *Worker) ResetTokenBucket() {
 	w.TokenBuckets = make(map[string]*Tokenbucket.TokenBucket)
 }
+
+func (w *Worker) UpdateFields(d *DataPacket) error {
+	return w.updateFields(internalParse((d)))
+}
