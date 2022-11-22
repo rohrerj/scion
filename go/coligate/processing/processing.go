@@ -19,7 +19,7 @@ import (
 
 	"github.com/google/gopacket"
 
-	"github.com/scionproto/scion/go/coligate/reservation"
+	"github.com/scionproto/scion/go/coligate/storage"
 	"github.com/scionproto/scion/go/coligate/tokenbucket"
 	libaddr "github.com/scionproto/scion/go/lib/addr"
 	libcolibri "github.com/scionproto/scion/go/lib/colibri/dataplane"
@@ -34,7 +34,7 @@ type Worker struct {
 	InitialCoreIdCounter uint32
 	CoreIdCounter        uint32
 	NumCounterBits       int
-	Storage              *reservation.Storage
+	Storage              *storage.Storage
 	TrafficMonitors      map[string]*trafficMonitor // Every worker has its own map of tokenbuckets that it is responsible for
 	LocalAS              libaddr.AS
 }
@@ -48,7 +48,7 @@ type dataPacket struct {
 	pktArrivalTime time.Time
 	scionLayer     *slayers.SCION
 	colibriPath    *colibri.ColibriPath
-	reservation    *reservation.Reservation
+	reservation    *storage.Reservation
 	rawPacket      []byte
 }
 
@@ -81,7 +81,7 @@ func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32,
 		NumCounterBits:  config.NumBitsForPerWorkerCounter,
 		TrafficMonitors: make(map[string]*trafficMonitor),
 		LocalAS:         localAS,
-		Storage:         &reservation.Storage{},
+		Storage:         &storage.Storage{},
 	}
 	w.InitialCoreIdCounter = w.CoreIdCounter
 	w.Storage.InitStorageWithData(nil)
@@ -89,7 +89,7 @@ func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32,
 }
 
 // Updates, creates or deletes a reservation depending on the reservation task
-func (w *Worker) handleReservationTask(task *reservation.ReservationTask) error {
+func (w *Worker) handleReservationTask(task *storage.ReservationTask) error {
 	if w == nil || w.Storage == nil || task == nil {
 		return serrors.New("handleReservationTask requires a valid worker and task")
 	}

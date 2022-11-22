@@ -17,7 +17,7 @@ package grpc
 import (
 	"context"
 
-	"github.com/scionproto/scion/go/coligate/reservation"
+	"github.com/scionproto/scion/go/coligate/storage"
 	libaddr "github.com/scionproto/scion/go/lib/addr"
 	libtypes "github.com/scionproto/scion/go/lib/colibri/reservation"
 	libmetrics "github.com/scionproto/scion/go/lib/metrics"
@@ -28,8 +28,8 @@ import (
 
 type Coligate struct {
 	Hasher                       common.SaltHasher
-	ReservationChannels          []chan *reservation.ReservationTask
-	CleanupChannel               chan *reservation.ReservationTask
+	ReservationChannels          []chan *storage.ReservationTask
+	CleanupChannel               chan *storage.ReservationTask
 	UpdateSigmasTotalPromCounter libmetrics.Counter
 }
 
@@ -42,12 +42,12 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 	}
 	resId := string(id.ToRaw())
 	s.UpdateSigmasTotalPromCounter.Add(1)
-	task := &reservation.ReservationTask{
+	task := &storage.ReservationTask{
 		ResId: resId,
-		Reservation: &reservation.Reservation{
+		Reservation: &storage.Reservation{
 			Id:  resId,
 			Rlc: uint8(msg.Rlc),
-			Indices: map[uint8]*reservation.ReservationIndex{
+			Indices: map[uint8]*storage.ReservationIndex{
 				uint8(msg.Index): {
 					Index:    uint8(msg.Index),
 					Validity: util.SecsToTime(msg.ExpirationTime),
@@ -55,7 +55,7 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 					Sigmas:   msg.Macs,
 				},
 			},
-			Hops: make([]reservation.HopField, len(msg.HopInterfaces)),
+			Hops: make([]storage.HopField, len(msg.HopInterfaces)),
 		},
 		HighestValidity: util.SecsToTime(msg.ExpirationTime),
 	}

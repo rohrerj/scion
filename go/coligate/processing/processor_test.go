@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	proc "github.com/scionproto/scion/go/coligate/processing"
-	"github.com/scionproto/scion/go/coligate/reservation"
+	"github.com/scionproto/scion/go/coligate/storage"
 	common "github.com/scionproto/scion/go/pkg/coligate"
 )
 
@@ -60,7 +60,7 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	})
 
 	for i := 0; i < L; i++ {
-		cleanupChannel <- &reservation.ReservationTask{
+		cleanupChannel <- &storage.ReservationTask{
 			ResId:           "A" + fmt.Sprint(i),
 			HighestValidity: now.Add(1 * time.Millisecond),
 		}
@@ -101,7 +101,7 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 
 	now := time.Now()
 	for i := 0; i < L; i++ {
-		cleanupChannel <- &reservation.ReservationTask{
+		cleanupChannel <- &storage.ReservationTask{
 			ResId:           "A" + fmt.Sprint(i),
 			HighestValidity: now.Add(1 * time.Millisecond),
 		}
@@ -140,14 +140,14 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	now := time.Now()
 
 	for i := 0; i < L; i++ {
-		cleanupChannel <- &reservation.ReservationTask{
+		cleanupChannel <- &storage.ReservationTask{
 			ResId:           "A" + fmt.Sprint(i),
 			HighestValidity: now.Add(10 * time.Millisecond),
 		}
 	}
 
 	for i := 0; i < L; i++ {
-		cleanupChannel <- &reservation.ReservationTask{
+		cleanupChannel <- &storage.ReservationTask{
 			ResId:           "A" + fmt.Sprint(i),
 			HighestValidity: now.Add(20 * time.Millisecond),
 		}

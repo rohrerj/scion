@@ -17,7 +17,7 @@ package processing
 import (
 	"time"
 
-	"github.com/scionproto/scion/go/coligate/reservation"
+	"github.com/scionproto/scion/go/coligate/storage"
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path/colibri"
 	common "github.com/scionproto/scion/go/pkg/coligate"
@@ -30,8 +30,8 @@ func (p *Processor) SetHasher(salt []byte) {
 	p.saltHasher = common.NewFnv1aHasher(salt)
 }
 
-func (p *Processor) CreateCleanupChannel(maxQueueSize int) chan *reservation.ReservationTask {
-	p.cleanupChannel = make(chan *reservation.ReservationTask, maxQueueSize)
+func (p *Processor) CreateCleanupChannel(maxQueueSize int) chan *storage.ReservationTask {
+	p.cleanupChannel = make(chan *storage.ReservationTask, maxQueueSize)
 	return p.cleanupChannel
 }
 
@@ -43,10 +43,10 @@ func (p *Processor) CreateDataChannels(numberWorkers int, maxQueueSizePerWorker 
 	return p.dataChannels
 }
 
-func (p *Processor) CreateControlChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *reservation.ReservationTask {
-	p.controlChannels = make([]chan *reservation.ReservationTask, numberWorkers)
+func (p *Processor) CreateControlChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *storage.ReservationTask {
+	p.controlChannels = make([]chan *storage.ReservationTask, numberWorkers)
 	for i := 0; i < numberWorkers; i++ {
-		p.controlChannels[i] = make(chan *reservation.ReservationTask, maxQueueSizePerWorker)
+		p.controlChannels[i] = make(chan *storage.ReservationTask, maxQueueSizePerWorker)
 	}
 	return p.controlChannels
 }
@@ -59,7 +59,7 @@ type DataPacket struct {
 	PktArrivalTime time.Time
 	ScionLayer     *slayers.SCION
 	ColibriPath    *colibri.ColibriPath
-	Reservation    *reservation.Reservation
+	Reservation    *storage.Reservation
 	RawPacket      []byte
 }
 
@@ -73,7 +73,7 @@ func internalParse(proc *DataPacket) *dataPacket {
 	}
 }
 
-func (w *Worker) HandleReservationTask(task *reservation.ReservationTask) error {
+func (w *Worker) HandleReservationTask(task *storage.ReservationTask) error {
 	return w.handleReservationTask(task)
 }
 

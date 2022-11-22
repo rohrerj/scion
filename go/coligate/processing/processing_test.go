@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/scionproto/scion/go/coligate/processing"
-	"github.com/scionproto/scion/go/coligate/reservation"
+	"github.com/scionproto/scion/go/coligate/storage"
 	"github.com/scionproto/scion/go/lib/addr"
 	libcolibri "github.com/scionproto/scion/go/lib/colibri/dataplane"
 	"github.com/scionproto/scion/go/lib/slayers"
@@ -63,13 +63,13 @@ func TestMasking(t *testing.T) {
 
 func TestHandleReservationTask(t *testing.T) {
 	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
-	reservations := make(map[string]*reservation.Reservation)
+	reservations := make(map[string]*storage.Reservation)
 	worker.Storage.InitStorageWithData(reservations)
 	var startTime = time.Now()
 
 	// Test that sending a delete query for a non existing reservation
 	// does not create an error
-	err := worker.HandleReservationTask(&reservation.ReservationTask{
+	err := worker.HandleReservationTask(&storage.ReservationTask{
 		IsDeleteQuery: true,
 		ResId:         "A",
 	})
@@ -77,12 +77,12 @@ func TestHandleReservationTask(t *testing.T) {
 	assert.Equal(t, 0, len(reservations))
 
 	// Test that a new reservation was stored
-	err = worker.HandleReservationTask(&reservation.ReservationTask{
+	err = worker.HandleReservationTask(&storage.ReservationTask{
 		ResId:           "A",
 		HighestValidity: startTime.Add(1 * time.Second),
-		Reservation: &reservation.Reservation{
+		Reservation: &storage.Reservation{
 			Id: "A",
-			Indices: map[uint8]*reservation.ReservationIndex{
+			Indices: map[uint8]*storage.ReservationIndex{
 				0: {
 					Index:    0,
 					Validity: startTime.Add(1 * time.Second),
@@ -97,12 +97,12 @@ func TestHandleReservationTask(t *testing.T) {
 
 	// Test that an older index does not get deleted if it is still valid and no active index
 	// exists when updating
-	err = worker.HandleReservationTask(&reservation.ReservationTask{
+	err = worker.HandleReservationTask(&storage.ReservationTask{
 		ResId:           "A",
 		HighestValidity: startTime.Add(2 * time.Second),
-		Reservation: &reservation.Reservation{
+		Reservation: &storage.Reservation{
 			Id: "A",
-			Indices: map[uint8]*reservation.ReservationIndex{
+			Indices: map[uint8]*storage.ReservationIndex{
 				1: {
 					Index:    0,
 					Validity: startTime.Add(2 * time.Second),
@@ -119,12 +119,12 @@ func TestHandleReservationTask(t *testing.T) {
 	// Now we activate index 1 and call again update for a new index with the same expiration time as index 1.
 	// Now we test that index 0 is removed and 1 and 2 still exist.
 	reservations["A"].ActiveIndexId = 1
-	err = worker.HandleReservationTask(&reservation.ReservationTask{
+	err = worker.HandleReservationTask(&storage.ReservationTask{
 		ResId:           "A",
 		HighestValidity: startTime.Add(2 * time.Second),
-		Reservation: &reservation.Reservation{
+		Reservation: &storage.Reservation{
 			Id: "A",
-			Indices: map[uint8]*reservation.ReservationIndex{
+			Indices: map[uint8]*storage.ReservationIndex{
 				2: {
 					Index:    0,
 					Validity: startTime.Add(2 * time.Second),
@@ -140,7 +140,7 @@ func TestHandleReservationTask(t *testing.T) {
 	assert.NotNil(t, reservations["A"].Indices[2])
 
 	// Now we execute a delete query to delete the entire reservation
-	err = worker.HandleReservationTask(&reservation.ReservationTask{
+	err = worker.HandleReservationTask(&storage.ReservationTask{
 		IsDeleteQuery: true,
 		ResId:         "A",
 	})
@@ -157,7 +157,7 @@ func TestValidate(t *testing.T) {
 	type test struct {
 		name     string
 		entries  []entry
-		resStore map[string]*reservation.Reservation
+		resStore map[string]*storage.Reservation
 	}
 	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
 
@@ -214,12 +214,12 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "TestValidateReservationBelongsToOtherAS",
-			resStore: map[string]*reservation.Reservation{
+			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
 					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
-					Hops:          make([]reservation.HopField, 1),
+					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
-					Indices: map[uint8]*reservation.ReservationIndex{
+					Indices: map[uint8]*storage.ReservationIndex{
 						0: {
 							Index:    0,
 							Validity: startTime.Add(1),
@@ -267,12 +267,12 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "TestValidateInvalidNumberOfHopfields",
-			resStore: map[string]*reservation.Reservation{
+			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
 					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
-					Hops:          make([]reservation.HopField, 1),
+					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
-					Indices: map[uint8]*reservation.ReservationIndex{
+					Indices: map[uint8]*storage.ReservationIndex{
 						0: {
 							Index:    0,
 							Validity: startTime.Add(1),
@@ -301,12 +301,12 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "TestValidateCurrHFIsInvalid",
-			resStore: map[string]*reservation.Reservation{
+			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
 					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
-					Hops:          make([]reservation.HopField, 1),
+					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
-					Indices: map[uint8]*reservation.ReservationIndex{
+					Indices: map[uint8]*storage.ReservationIndex{
 						0: {
 							Index:    0,
 							Validity: startTime.Add(1),
@@ -337,12 +337,12 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "TestValidateBwClsIsInvalid",
-			resStore: map[string]*reservation.Reservation{
+			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
 					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
-					Hops:          make([]reservation.HopField, 1),
+					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
-					Indices: map[uint8]*reservation.ReservationIndex{
+					Indices: map[uint8]*storage.ReservationIndex{
 						0: {
 							Index:    0,
 							Validity: startTime.Add(1),
@@ -374,12 +374,12 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "TestValidateRlcIsInvalid",
-			resStore: map[string]*reservation.Reservation{
+			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
 					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
-					Hops:          make([]reservation.HopField, 1),
+					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
-					Indices: map[uint8]*reservation.ReservationIndex{
+					Indices: map[uint8]*storage.ReservationIndex{
 						0: {
 							Index:    0,
 							Validity: startTime.Add(1),
@@ -413,12 +413,12 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "TestValidateExpTickIsInvalid",
-			resStore: map[string]*reservation.Reservation{
+			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
 					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
-					Hops:          make([]reservation.HopField, 1),
+					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
-					Indices: map[uint8]*reservation.ReservationIndex{
+					Indices: map[uint8]*storage.ReservationIndex{
 						0: {
 							Index:    0,
 							Validity: startTime.Add(100 * time.Second),
@@ -453,10 +453,10 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "TestValidateInvalidIngressId",
-			resStore: map[string]*reservation.Reservation{
+			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
 					Id: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
-					Hops: []reservation.HopField{
+					Hops: []storage.HopField{
 						{
 							IngressId: 1,
 							EgressId:  2,
@@ -464,7 +464,7 @@ func TestValidate(t *testing.T) {
 					},
 					ActiveIndexId: 0,
 					Rlc:           1,
-					Indices: map[uint8]*reservation.ReservationIndex{
+					Indices: map[uint8]*storage.ReservationIndex{
 						0: {
 							Index:    0,
 							Validity: startTime.Add(100 * time.Second),
@@ -504,10 +504,10 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "TestValidateInvalidEgressId",
-			resStore: map[string]*reservation.Reservation{
+			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
 					Id: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
-					Hops: []reservation.HopField{
+					Hops: []storage.HopField{
 						{
 							IngressId: 1,
 							EgressId:  2,
@@ -515,7 +515,7 @@ func TestValidate(t *testing.T) {
 					},
 					ActiveIndexId: 0,
 					Rlc:           1,
-					Indices: map[uint8]*reservation.ReservationIndex{
+					Indices: map[uint8]*storage.ReservationIndex{
 						0: {
 							Index:    0,
 							Validity: startTime.Add(100 * time.Second),
@@ -555,10 +555,10 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "TestValidateAllValid",
-			resStore: map[string]*reservation.Reservation{
+			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
 					Id: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
-					Hops: []reservation.HopField{
+					Hops: []storage.HopField{
 						{
 							IngressId: 1,
 							EgressId:  2,
@@ -566,7 +566,7 @@ func TestValidate(t *testing.T) {
 					},
 					ActiveIndexId: 0,
 					Rlc:           1,
-					Indices: map[uint8]*reservation.ReservationIndex{
+					Indices: map[uint8]*storage.ReservationIndex{
 						0: {
 							Index:    0,
 							Validity: startTime.Add(100 * time.Second),
@@ -643,10 +643,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -661,10 +661,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -684,10 +684,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 4096),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -702,10 +702,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 4096),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -720,10 +720,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 4096),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -738,10 +738,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 4096),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -756,10 +756,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -779,10 +779,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -797,10 +797,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "B",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -820,10 +820,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -838,10 +838,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 1,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -866,10 +866,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -884,10 +884,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 22528),
 						PktArrivalTime: startTime.Add(1 * time.Second),
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 1,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -912,10 +912,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 22528),
 						PktArrivalTime: startTime,
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 0,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
 									Index:    0,
 									Validity: startTime.Add(1),
@@ -930,10 +930,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 16384),
 						PktArrivalTime: startTime.Add(1 * time.Second),
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 1,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								1: {
 									Index:    1,
 									Validity: startTime.Add(2 * time.Second),
@@ -948,10 +948,10 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 					proc: processing.DataPacket{
 						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime.Add(1 * time.Second),
-						Reservation: &reservation.Reservation{
+						Reservation: &storage.Reservation{
 							Id:            "A",
 							ActiveIndexId: 1,
-							Indices: map[uint8]*reservation.ReservationIndex{
+							Indices: map[uint8]*storage.ReservationIndex{
 								1: {
 									Index:    1,
 									Validity: startTime.Add(2 * time.Second),
@@ -1015,16 +1015,16 @@ func TestUpdateMacs(t *testing.T) {
 			DstIA:       addr.MustIAFrom(2, 2),
 			PathType:    colibri.PathType,
 		},
-		Reservation: &reservation.Reservation{
+		Reservation: &storage.Reservation{
 			Id:            "A",
 			ActiveIndexId: 0,
-			Hops: []reservation.HopField{
+			Hops: []storage.HopField{
 				{
 					IngressId: 1,
 					EgressId:  2,
 				},
 			},
-			Indices: map[uint8]*reservation.ReservationIndex{
+			Indices: map[uint8]*storage.ReservationIndex{
 				0: {
 					Index:  0,
 					Sigmas: make([][]byte, 1),

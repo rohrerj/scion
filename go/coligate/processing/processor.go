@@ -25,7 +25,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"github.com/scionproto/scion/go/coligate/reservation"
+	"github.com/scionproto/scion/go/coligate/storage"
 	libaddr "github.com/scionproto/scion/go/lib/addr"
 	libtypes "github.com/scionproto/scion/go/lib/colibri/reservation"
 	"github.com/scionproto/scion/go/lib/log"
@@ -46,8 +46,8 @@ import (
 
 type Processor struct {
 	dataChannels    []chan *dataPacket
-	controlChannels []chan *reservation.ReservationTask
-	cleanupChannel  chan *reservation.ReservationTask
+	controlChannels []chan *storage.ReservationTask
+	cleanupChannel  chan *storage.ReservationTask
 	borderRouters   map[uint16]*ipv4.PacketConn
 	saltHasher      common.SaltHasher
 	exit            bool
@@ -110,9 +110,9 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	p := Processor{
 		borderRouters:   borderRouters,
-		cleanupChannel:  make(chan *reservation.ReservationTask, 1000), // TODO(rohrerj) check channel capacity
+		cleanupChannel:  make(chan *storage.ReservationTask, 1000), // TODO(rohrerj) check channel capacity
 		dataChannels:    make([]chan *dataPacket, config.NumWorkers),
-		controlChannels: make([]chan *reservation.ReservationTask, config.NumWorkers),
+		controlChannels: make([]chan *storage.ReservationTask, config.NumWorkers),
 		saltHasher:      common.NewFnv1aHasher(salt),
 	}
 
@@ -124,7 +124,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	// Creates all the channels and starts the go routines
 	for i := 0; i < config.NumWorkers; i++ {
 		p.dataChannels[i] = make(chan *dataPacket, config.MaxQueueSizePerWorker)
-		p.controlChannels[i] = make(chan *reservation.ReservationTask,
+		p.controlChannels[i] = make(chan *storage.ReservationTask,
 			config.MaxQueueSizePerWorker)
 		func(i int) {
 			g.Go(func() error {
@@ -195,18 +195,18 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 			log.Debug("error parsing reservation id", "err", err)
 			continue
 		}
-		res := &reservation.Reservation{
+		res := &storage.Reservation{
 			Id:      string(id.ToRaw()),
 			Rlc:     0, // TODO(rohrerj)
-			Indices: make(map[uint8]*reservation.ReservationIndex),
-			Hops: []reservation.HopField{ // TODO(rohrerj) add other hop fields too
+			Indices: make(map[uint8]*storage.ReservationIndex),
+			Hops: []storage.HopField{ // TODO(rohrerj) add other hop fields too
 				{
 					EgressId: uint16(respReservation.Egress),
 				},
 			},
 		}
 		for _, respReservationVersion := range respReservation.Indices {
-			resver := &reservation.ReservationIndex{
+			resver := &storage.ReservationIndex{
 				Index:    uint8(respReservationVersion.Index),
 				Validity: util.SecsToTime(respReservationVersion.ExpirationTime),
 				BwCls:    uint8(respReservationVersion.AllocBw),
@@ -217,7 +217,7 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 				highestValidity = resver.Validity
 			}
 		}
-		task := &reservation.ReservationTask{
+		task := &storage.ReservationTask{
 			ResId:             res.Id,
 			Reservation:       res,
 			HighestValidity:   highestValidity,
@@ -243,7 +243,7 @@ func (p *Processor) initCleanupRoutine(metrics *common.Metrics) {
 	data := make(map[string]time.Time)
 	numWorkers := len(p.controlChannels)
 
-	handleTask := (func(task *reservation.ReservationTask) {
+	handleTask := (func(task *storage.ReservationTask) {
 		cleanupReservationUpdateTotalPromCounter.Add(1)
 		res, exists := data[task.ResId]
 		if !exists || task.HighestValidity.Sub(res) > 0 {
@@ -284,7 +284,7 @@ func (p *Processor) initCleanupRoutine(metrics *common.Metrics) {
 				}
 			}
 			if time.Until(val) < 0 {
-				deletionTask := &reservation.ReservationTask{
+				deletionTask := &storage.ReservationTask{
 					IsDeleteQuery:   true,
 					ResId:           resId,
 					HighestValidity: val,

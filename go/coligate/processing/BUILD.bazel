@@ -3,13 +3,13 @@ load("//lint:go.bzl", "go_library", "go_test")
 go_library(
     name = "go_default_library",
     srcs = [
-        "control.go",
         "processing.go",
+        "processor.go",
     ],
     importpath = "github.com/scionproto/scion/go/coligate/processing",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/coligate/reservation:go_default_library",
+        "//go/coligate/storage:go_default_library",
         "//go/coligate/tokenbucket:go_default_library",
         "//go/lib/addr:go_default_library",
         "//go/lib/colibri/dataplane:go_default_library",
@@ -38,21 +38,20 @@ go_library(
 go_test(
     name = "go_default_test",
     srcs = [
-        "control_test.go",
         "export_test.go",
         "processing_test.go",
+        "processor_test.go",
     ],
     embed = [":go_default_library"],
     deps = [
-        "//go/coligate/reservation:go_default_library",
-        "//go/coligate/tokenbucket:go_default_library",
+        "//go/coligate/storage:go_default_library",
         "//go/lib/addr:go_default_library",
+        "//go/lib/colibri/dataplane:go_default_library",
         "//go/lib/slayers:go_default_library",
         "//go/lib/slayers/path/colibri:go_default_library",
         "//go/pkg/coligate:go_default_library",
         "//go/pkg/coligate/config:go_default_library",
         "@com_github_stretchr_testify//assert:go_default_library",
-        "@com_github_stretchr_testify//require:go_default_library",
         "@org_golang_x_sync//errgroup:go_default_library",
     ],
 )
