@@ -18,42 +18,41 @@ import (
 	"time"
 
 	"github.com/scionproto/scion/go/coligate/reservation"
-	Tokenbucket "github.com/scionproto/scion/go/coligate/tokenbucket"
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path/colibri"
 	common "github.com/scionproto/scion/go/pkg/coligate"
 )
 
-func (control *Control) InitCleanupRoutine(metrics *common.Metrics) {
-	control.initCleanupRoutine(metrics)
+func (p *Processor) InitCleanupRoutine(metrics *common.Metrics) {
+	p.initCleanupRoutine(metrics)
 }
-func (control *Control) SetHasher(salt []byte) {
-	control.saltHasher = common.NewFnv1aHasher(salt)
-}
-
-func (control *Control) CreateCleanupChannel(maxQueueSize int) chan *reservation.ReservationTask {
-	control.cleanupChannel = make(chan *reservation.ReservationTask, maxQueueSize)
-	return control.cleanupChannel
+func (p *Processor) SetHasher(salt []byte) {
+	p.saltHasher = common.NewFnv1aHasher(salt)
 }
 
-func (control *Control) CreateDataChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *dataPacket {
-	control.dataChannels = make([]chan *dataPacket, numberWorkers)
+func (p *Processor) CreateCleanupChannel(maxQueueSize int) chan *reservation.ReservationTask {
+	p.cleanupChannel = make(chan *reservation.ReservationTask, maxQueueSize)
+	return p.cleanupChannel
+}
+
+func (p *Processor) CreateDataChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *dataPacket {
+	p.dataChannels = make([]chan *dataPacket, numberWorkers)
 	for i := 0; i < numberWorkers; i++ {
-		control.dataChannels[i] = make(chan *dataPacket, maxQueueSizePerWorker)
+		p.dataChannels[i] = make(chan *dataPacket, maxQueueSizePerWorker)
 	}
-	return control.dataChannels
+	return p.dataChannels
 }
 
-func (control *Control) CreateControlChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *reservation.ReservationTask {
-	control.controlChannels = make([]chan *reservation.ReservationTask, numberWorkers)
+func (p *Processor) CreateControlChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *reservation.ReservationTask {
+	p.controlChannels = make([]chan *reservation.ReservationTask, numberWorkers)
 	for i := 0; i < numberWorkers; i++ {
-		control.controlChannels[i] = make(chan *reservation.ReservationTask, maxQueueSizePerWorker)
+		p.controlChannels[i] = make(chan *reservation.ReservationTask, maxQueueSizePerWorker)
 	}
-	return control.controlChannels
+	return p.controlChannels
 }
 
-func (control *Control) Shutdown() {
-	control.shutdown()
+func (p *Processor) Shutdown() {
+	p.shutdown()
 }
 
 type DataPacket struct {
@@ -86,10 +85,10 @@ func (w *Worker) PerformTrafficMonitoring(proc *DataPacket) error {
 	return w.performTrafficMonitoring(internalParse(proc))
 }
 
-func (w *Worker) ResetTokenBucket() {
-	w.TokenBuckets = make(map[string]*Tokenbucket.TokenBucket)
+func (w *Worker) ResetTrafficMonitors() {
+	w.TrafficMonitors = make(map[string]*trafficMonitor)
 }
 
-func (w *Worker) UpdateFields(d *DataPacket) error {
-	return w.updateFields(internalParse((d)))
+func (w *Worker) Stamp(d *DataPacket) error {
+	return w.stamp(internalParse((d)))
 }

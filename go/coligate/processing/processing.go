@@ -20,7 +20,7 @@ import (
 	"github.com/google/gopacket"
 
 	"github.com/scionproto/scion/go/coligate/reservation"
-	Tokenbucket "github.com/scionproto/scion/go/coligate/tokenbucket"
+	"github.com/scionproto/scion/go/coligate/tokenbucket"
 	libaddr "github.com/scionproto/scion/go/lib/addr"
 	libcolibri "github.com/scionproto/scion/go/lib/colibri/dataplane"
 	libtypes "github.com/scionproto/scion/go/lib/colibri/reservation"
@@ -35,8 +35,13 @@ type Worker struct {
 	CoreIdCounter        uint32
 	NumCounterBits       int
 	Storage              *reservation.Storage
-	TokenBuckets         map[string]*Tokenbucket.TokenBucket //every worker has its own map of tokenbuckets that it is responsible for
+	TrafficMonitors      map[string]*trafficMonitor // Every worker has its own map of tokenbuckets that it is responsible for
 	LocalAS              libaddr.AS
+}
+
+type trafficMonitor struct {
+	bucket    *tokenbucket.TokenBucket
+	lastBwcls uint8
 }
 
 type dataPacket struct {
@@ -48,7 +53,8 @@ type dataPacket struct {
 }
 
 // Parse parses the scion and colibri header from a raw packet
-func Parse(rawPacket []byte) (*dataPacket, error) { //TODO(rohrerj) This parses the path twice, optimize
+// TODO(rohrerj) This parses the path twice, optimize
+func Parse(rawPacket []byte) (*dataPacket, error) {
 	proc := dataPacket{
 		rawPacket:  rawPacket,
 		scionLayer: &slayers.SCION{},
@@ -68,14 +74,14 @@ func Parse(rawPacket []byte) (*dataPacket, error) { //TODO(rohrerj) This parses 
 	return &proc, nil
 }
 
-// NewWorker initializes the worker with his id, tokenbuckets and reservations
+// NewWorker initializes the worker with its id, tokenbuckets and reservations
 func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32, localAS libaddr.AS) *Worker {
 	w := &Worker{
-		CoreIdCounter:  (gatewayId << (32 - config.NumBitsForGatewayId)) | (workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId)),
-		NumCounterBits: config.NumBitsForPerWorkerCounter,
-		TokenBuckets:   make(map[string]*Tokenbucket.TokenBucket),
-		LocalAS:        localAS,
-		Storage:        &reservation.Storage{},
+		CoreIdCounter:   (gatewayId << (32 - config.NumBitsForGatewayId)) | (workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId)),
+		NumCounterBits:  config.NumBitsForPerWorkerCounter,
+		TrafficMonitors: make(map[string]*trafficMonitor),
+		LocalAS:         localAS,
+		Storage:         &reservation.Storage{},
 	}
 	w.InitialCoreIdCounter = w.CoreIdCounter
 	w.Storage.InitStorageWithData(nil)
@@ -88,7 +94,7 @@ func (w *Worker) handleReservationTask(task *reservation.ReservationTask) error 
 		return serrors.New("handleReservationTask requires a valid worker and task")
 	}
 	if task.IsDeleteQuery {
-		delete(w.TokenBuckets, task.ResId)
+		delete(w.TrafficMonitors, task.ResId)
 		w.Storage.Delete(task)
 	} else {
 		w.Storage.Update(task)
@@ -116,7 +122,7 @@ func (w *Worker) process(d *dataPacket) error {
 		return err
 	}
 
-	return w.updateFields(d)
+	return w.stamp(d)
 }
 
 // Validates the fields in the colibri header and checks that a valid reservation exists
@@ -129,7 +135,7 @@ func (w *Worker) validate(d *dataPacket) error {
 	if C || R || S {
 		return serrors.New("Invalid flags", "S", S, "R", R, "C", C)
 	}
-	id, err := libtypes.NewID((d).scionLayer.SrcIA.AS(), resIDSuffix)
+	id, err := libtypes.NewID((d).scionLayer.SrcIA.AS(), resIDSuffix) // TODO(rohrerj) change mapping of reservation id
 	if err != nil {
 		return serrors.New("Cannot parse reservation id")
 	}
@@ -145,8 +151,8 @@ func (w *Worker) validate(d *dataPacket) error {
 	d.reservation = reservation
 	currentIndex := d.reservation.Current()
 
-	if len(d.colibriPath.HopFields) != len(currentIndex.Macs) {
-		return serrors.New("Number of hopfields is invalid", "expected", len(currentIndex.Macs), "actual", len(d.colibriPath.HopFields))
+	if len(d.colibriPath.HopFields) != len(currentIndex.Sigmas) {
+		return serrors.New("Number of hopfields is invalid", "expected", len(currentIndex.Sigmas), "actual", len(d.colibriPath.HopFields))
 	}
 	if infoField.CurrHF != 0 {
 		return serrors.New("CurrHF is invalid", "expected", 0, "actual", infoField.CurrHF)
@@ -173,52 +179,50 @@ func (w *Worker) validate(d *dataPacket) error {
 
 // Checks that the reservation is not overused
 func (w *Worker) performTrafficMonitoring(d *dataPacket) error {
-	bucket, exists := w.TokenBuckets[d.reservation.ReservationId]
-	entry := Tokenbucket.Entry{Length: uint64(len(d.rawPacket)), ArrivalTime: d.pktArrivalTime}
+	monitor, exists := w.TrafficMonitors[d.reservation.Id]
 	currentBwCls := d.reservation.Current().BwCls
 	if exists {
-		if bucket.LastBwCls != currentBwCls {
+		if monitor.lastBwcls != currentBwCls {
 			realBandwidth := 1024 * libtypes.BWCls(currentBwCls).ToKbps()
-			bucket.CIRInBytes = realBandwidth
-			bucket.LastBwCls = currentBwCls
+			monitor.bucket.SetRate(float64(realBandwidth))
+			monitor.bucket.SetBurstSize(float64(realBandwidth))
+			monitor.lastBwcls = currentBwCls
 		}
 	} else {
 		realBandwidth := 1024 * libtypes.BWCls(currentBwCls).ToKbps()
-		bucket = &Tokenbucket.TokenBucket{
-			CurrentTokens:     float64(realBandwidth),
-			LastPacketTime:    d.pktArrivalTime,
-			TokenIntervalInMs: 1, //TODO(rohrerj) use real value,
-			LastBwCls:         currentBwCls,
-			CIRInBytes:        realBandwidth,
+		monitor = &trafficMonitor{
+			bucket:    tokenbucket.NewTokenBucket(d.pktArrivalTime, float64(realBandwidth), float64(realBandwidth)),
+			lastBwcls: currentBwCls,
 		}
-		w.TokenBuckets[d.reservation.ReservationId] = bucket
+		w.TrafficMonitors[d.reservation.Id] = monitor
 	}
-
-	ok := bucket.ValidateBandwidth(&entry)
-	if !ok {
+	if !monitor.bucket.Apply(len(d.rawPacket), d.pktArrivalTime) {
 		return serrors.New("data packet exceeded bandwidth")
 	}
 	return nil
 }
 
-// Update the colibri header fields
-func (w *Worker) updateFields(d *dataPacket) error {
+func (w *Worker) updateCounter() {
+	w.CoreIdCounter = w.InitialCoreIdCounter | (w.CoreIdCounter+1)%(1<<w.NumCounterBits)
+}
+
+// Updates the timestamp and HFVs
+func (w *Worker) stamp(d *dataPacket) error {
 	currentIndex := d.reservation.Current()
 	tsRel, err := libcolibri.CreateTsRel(d.colibriPath.InfoField.ExpTick, d.pktArrivalTime)
 	if err != nil {
 		return err
 	}
-	w.CoreIdCounter = w.InitialCoreIdCounter | (w.CoreIdCounter+1)%(1<<w.NumCounterBits)
+	w.updateCounter()
 
 	d.colibriPath.PacketTimestamp = libcolibri.CreateColibriTimestampCustom(tsRel, w.CoreIdCounter)
-	//Set HVF values
-	for i, sigma := range currentIndex.Macs {
+	// Set HVF values
+	for i, sigma := range currentIndex.Sigmas {
 		cipher, err := libcolibri.InitColibriKey(sigma)
 		if err != nil {
 			return err
 		}
-		if err = libcolibri.MACE2E(d.colibriPath.HopFields[i].Mac, cipher, d.colibriPath.InfoField, d.colibriPath.PacketTimestamp,
-			d.colibriPath.HopFields[i], d.scionLayer); err != nil {
+		if err = libcolibri.MACE2EFromSigma(d.colibriPath.HopFields[i].Mac, cipher, d.colibriPath.InfoField, d.colibriPath.PacketTimestamp, d.scionLayer); err != nil {
 			return err
 		}
 	}

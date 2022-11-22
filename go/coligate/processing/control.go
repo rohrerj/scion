@@ -44,7 +44,7 @@ import (
 
 // TODO(rohrerj) Add Unit tests
 
-type Control struct {
+type Processor struct {
 	dataChannels    []chan *dataPacket
 	controlChannels []chan *reservation.ReservationTask
 	cleanupChannel  chan *reservation.ReservationTask
@@ -54,8 +54,9 @@ type Control struct {
 }
 
 const bufSize int = 9000
+const numOfMessages int = 10 // TODO(rohrerj) check msg size
 
-func (c *Control) shutdown() {
+func (c *Processor) shutdown() {
 	if c.exit {
 		return
 	}
@@ -107,29 +108,28 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		rand.Read(salt)
 	}
 
-	control := Control{
+	p := Processor{
 		borderRouters:   borderRouters,
-		cleanupChannel:  make(chan *reservation.ReservationTask, 1000), //TODO(rohrerj) check channel capacity
+		cleanupChannel:  make(chan *reservation.ReservationTask, 1000), // TODO(rohrerj) check channel capacity
 		dataChannels:    make([]chan *dataPacket, config.NumWorkers),
 		controlChannels: make([]chan *reservation.ReservationTask, config.NumWorkers),
 		saltHasher:      common.NewFnv1aHasher(salt),
 	}
 
 	cleanup.Add(func() error {
-		control.shutdown()
+		p.shutdown()
 		return nil
 	})
 
-	//Creates all the channels and starts the go routines
+	// Creates all the channels and starts the go routines
 	for i := 0; i < config.NumWorkers; i++ {
-		control.dataChannels[i] = make(chan *dataPacket, config.MaxQueueSizePerWorker)
-		control.controlChannels[i] = make(chan *reservation.ReservationTask,
+		p.dataChannels[i] = make(chan *dataPacket, config.MaxQueueSizePerWorker)
+		p.controlChannels[i] = make(chan *reservation.ReservationTask,
 			config.MaxQueueSizePerWorker)
 		func(i int) {
 			g.Go(func() error {
 				defer log.HandlePanic()
-				return control.workerReceiveEntry(control.dataChannels[i],
-					control.controlChannels[i], config,
+				return p.workerReceiveEntry(config,
 					uint32(i), uint32(config.ColibriGatewayID), metrics, localAS,
 				)
 			})
@@ -138,21 +138,21 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	g.Go(func() error {
 		defer log.HandlePanic()
-		control.initCleanupRoutine(metrics)
+		p.initCleanupRoutine(metrics)
 		return nil
 	})
 
 	g.Go(func() error {
 		defer log.HandlePanic()
-		return control.initControlPlane(config, cleanup, grpcAddr, metrics)
+		return p.initControlPlane(config, cleanup, grpcAddr, metrics)
 	})
 
-	// we start the data plane as soon as we retrieved the active reservations from colibri service
-	if err := control.loadActiveReservationsFromColibriService(ctx, config, colibriServiceAddresses[0],
+	// We start the data plane as soon as we retrieved the active reservations from colibri service
+	if err := p.loadActiveReservationsFromColibriService(ctx, config, colibriServiceAddresses[0],
 		config.COSyncTimeout, metrics); err != nil {
 		return err
 	}
-	if err := control.initDataPlane(config, coligateAddr, g, cleanup, metrics); err != nil {
+	if err := p.initDataPlane(config, coligateAddr, g, cleanup, metrics); err != nil {
 		return err
 	}
 
@@ -160,7 +160,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 }
 
 // Loads the active EE Reservations from the colibri service
-func (control *Control) loadActiveReservationsFromColibriService(ctx context.Context,
+func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context,
 	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr, timeout int, metrics *common.Metrics) error {
 
 	log.Info("Loading active reservation indices from colibri service")
@@ -176,7 +176,7 @@ func (control *Control) loadActiveReservationsFromColibriService(ctx context.Con
 			return serrors.New(
 				"Loading active reservation indices from colibri service failed after timeout")
 		}
-		grpcconn, err = grpc.Dial(colibiServiceAddr.String(), grpc.WithInsecure()) //TODO(rohrerj) add transport security
+		grpcconn, err = grpc.Dial(colibiServiceAddr.String(), grpc.WithInsecure()) // TODO(rohrerj) add transport security
 		if err != nil {
 			continue
 		}
@@ -196,10 +196,10 @@ func (control *Control) loadActiveReservationsFromColibriService(ctx context.Con
 			continue
 		}
 		res := &reservation.Reservation{
-			ReservationId: string(id.ToRaw()),
-			Rlc:           0, //TODO(rohrerj)
-			Indices:       make(map[uint8]*reservation.ReservationIndex),
-			Hops: []reservation.HopField{ //TODO(rohrerj) add other hop fields too
+			Id:      string(id.ToRaw()),
+			Rlc:     0, // TODO(rohrerj)
+			Indices: make(map[uint8]*reservation.ReservationIndex),
+			Hops: []reservation.HopField{ // TODO(rohrerj) add other hop fields too
 				{
 					EgressId: uint16(respReservation.Egress),
 				},
@@ -210,7 +210,7 @@ func (control *Control) loadActiveReservationsFromColibriService(ctx context.Con
 				Index:    uint8(respReservationVersion.Index),
 				Validity: util.SecsToTime(respReservationVersion.ExpirationTime),
 				BwCls:    uint8(respReservationVersion.AllocBw),
-				Macs:     respReservationVersion.Sigmas,
+				Sigmas:   respReservationVersion.Sigmas,
 			}
 			res.Indices[uint8(respReservationVersion.Index)] = resver
 			if resver.Validity.Sub(highestValidity) > 0 {
@@ -218,22 +218,22 @@ func (control *Control) loadActiveReservationsFromColibriService(ctx context.Con
 			}
 		}
 		task := &reservation.ReservationTask{
-			ResId:             res.ReservationId,
+			ResId:             res.Id,
 			Reservation:       res,
 			HighestValidity:   highestValidity,
 			IsInitReservation: true,
 		}
 
-		control.cleanupChannel <- task
+		p.cleanupChannel <- task
 
-		control.controlChannels[control.saltHasher.Hash([]byte(task.ResId))%uint32(config.NumWorkers)] <- task
+		p.controlChannels[p.saltHasher.Hash([]byte(task.ResId))%uint32(config.NumWorkers)] <- task
 	}
 	log.Info("Successfully loaded active reservation indices from colibri service")
 	return nil
 }
 
-// initializes the cleanup routine that removes outdated reservations
-func (control *Control) initCleanupRoutine(metrics *common.Metrics) {
+// Initializes the cleanup routine that removes outdated reservations
+func (p *Processor) initCleanupRoutine(metrics *common.Metrics) {
 	log.Info("Init cleanup routine")
 
 	cleanupReservationUpdateTotalPromCounter := libmetrics.NewPromCounter(metrics.CleanupReservationUpdateTotal)
@@ -241,7 +241,7 @@ func (control *Control) initCleanupRoutine(metrics *common.Metrics) {
 	cleanupReservationDeletedPromCounter := libmetrics.NewPromCounter(metrics.CleanupReservationDeleted)
 
 	data := make(map[string]time.Time)
-	numWorkers := len(control.controlChannels)
+	numWorkers := len(p.controlChannels)
 
 	handleTask := (func(task *reservation.ReservationTask) {
 		cleanupReservationUpdateTotalPromCounter.Add(1)
@@ -252,9 +252,9 @@ func (control *Control) initCleanupRoutine(metrics *common.Metrics) {
 		}
 	})
 	numIterations := 0
-	for !control.exit { //TODO(rohrerj) check CPU usage
+	for !p.exit { // TODO(rohrerj) check CPU usage
 		if len(data) == 0 {
-			task := <-control.cleanupChannel
+			task := <-p.cleanupChannel
 			if task == nil {
 				return
 			}
@@ -263,23 +263,23 @@ func (control *Control) initCleanupRoutine(metrics *common.Metrics) {
 		for resId, val := range data {
 			if numIterations == 0 {
 				select {
-				case task := <-control.cleanupChannel:
+				case task := <-p.cleanupChannel:
 					if task == nil {
 						return
 					}
 					handleTask(task)
 					if task.IsInitReservation {
-						// faster progress when loading a huge amount of reservations on startup
+						// Faster progress when loading a huge amount of reservations on startup
 						continue
 					}
 					if task.ResId == resId {
-						val = data[resId] // updated current value in case it got changed
+						val = data[resId] // Updated current value in case it got changed
 					}
-					// for every new reservation check at least 10 current reservations:
+					// For every new reservation check at least 10 current reservations:
 					numIterations = 10
 				default:
-					// if no new reservation is available check
-					// at least 100 current reservations:
+					// If no new reservation is available check
+					// At least 100 current reservations:
 					numIterations = 100
 				}
 			}
@@ -291,7 +291,7 @@ func (control *Control) initCleanupRoutine(metrics *common.Metrics) {
 				}
 				cleanupReservationDeletedPromCounter.Add(1)
 
-				control.controlChannels[control.saltHasher.
+				p.controlChannels[p.saltHasher.
 					Hash([]byte(resId))%uint32(numWorkers)] <- deletionTask
 				delete(data, resId)
 			}
@@ -301,7 +301,7 @@ func (control *Control) initCleanupRoutine(metrics *common.Metrics) {
 }
 
 // The function to initialize the control plane of the colibri gateway.
-func (control *Control) initControlPlane(config *config.ColigateConfig, cleanup *app.Cleanup,
+func (p *Processor) initControlPlane(config *config.ColigateConfig, cleanup *app.Cleanup,
 	serverAddr *net.TCPAddr, metrics *common.Metrics) error {
 
 	log.Info("Init control plane")
@@ -312,9 +312,9 @@ func (control *Control) initControlPlane(config *config.ColigateConfig, cleanup 
 
 	s := grpc.NewServer(libgrpc.UnaryServerInterceptor())
 	coligate := &cggrpc.Coligate{
-		Hasher:                       control.saltHasher,
-		ReservationChannels:          control.controlChannels,
-		CleanupChannel:               control.cleanupChannel,
+		Hasher:                       p.saltHasher,
+		ReservationChannels:          p.controlChannels,
+		CleanupChannel:               p.cleanupChannel,
 		UpdateSigmasTotalPromCounter: libmetrics.NewPromCounter(metrics.UpdateSigmasTotal),
 	}
 	cgpb.RegisterColibriGatewayServer(s, coligate)
@@ -324,7 +324,7 @@ func (control *Control) initControlPlane(config *config.ColigateConfig, cleanup 
 }
 
 // The function to initialize the data plane of the colibri gateway.
-func (control *Control) initDataPlane(config *config.ColigateConfig, gatewayAddr *net.UDPAddr,
+func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *net.UDPAddr,
 	g *errgroup.Group, cleanup *app.Cleanup, metrics *common.Metrics) error {
 
 	log.Info("Init data plane")
@@ -333,8 +333,8 @@ func (control *Control) initDataPlane(config *config.ColigateConfig, gatewayAddr
 		return err
 	}
 	cleanup.Add(func() error { udpConn.Close(); return nil })
-	msgs := make([]ipv4.Message, 10) //TODO(rohrerj) check msg size
-	for i := 0; i < 10; i++ {
+	msgs := make([]ipv4.Message, numOfMessages)
+	for i := 0; i < numOfMessages; i++ {
 		msgs[i].Buffers = [][]byte{make([]byte, bufSize)}
 	}
 
@@ -345,10 +345,9 @@ func (control *Control) initDataPlane(config *config.ColigateConfig, gatewayAddr
 		dataPacketInTotalPromCounter := libmetrics.NewPromCounter(metrics.DataPacketInTotal)
 		dataPacketInInvalidPromCounter := libmetrics.NewPromCounter(metrics.DataPacketInInvalid)
 
-		for !control.exit {
+		for !p.exit {
 			numPkts, err := ipv4Conn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
 			if err != nil {
-				//do something
 				log.Debug("error while reading from network", "err", err)
 				continue
 			}
@@ -357,26 +356,27 @@ func (control *Control) initDataPlane(config *config.ColigateConfig, gatewayAddr
 			}
 			log.Debug("received data packets")
 			dataPacketInTotalPromCounter.Add(float64(numPkts))
-			for _, p := range msgs[:numPkts] {
-				var proc *dataPacket
-				proc, err = Parse(p.Buffers[0][:p.N])
+			for _, pkt := range msgs[:numPkts] {
+				var d *dataPacket
+
+				d, err = Parse(pkt.Buffers[0][:pkt.N])
 				if err != nil {
 					log.Debug("error while parsing headers", "err", err)
 					dataPacketInInvalidPromCounter.Add(1)
 					continue
 				}
-				proc.pktArrivalTime = time.Now()
-				id, err := libtypes.NewID(proc.scionLayer.SrcIA.AS(),
-					proc.colibriPath.InfoField.ResIdSuffix)
+				d.pktArrivalTime = time.Now()
+				id, err := libtypes.NewID(d.scionLayer.SrcIA.AS(),
+					d.colibriPath.InfoField.ResIdSuffix)
 				if err != nil {
 					log.Debug("cannot parse reservation id")
 					continue
 				}
-				var selectedChannel uint32 = control.saltHasher.Hash(id.ToRaw()) % uint32(config.NumWorkers)
+				var selectedChannel uint32 = p.saltHasher.Hash(id.ToRaw()) % uint32(config.NumWorkers)
 				select {
-				case control.dataChannels[selectedChannel] <- proc:
+				case p.dataChannels[selectedChannel] <- d:
 				default:
-					continue //packet dropped
+					continue // Packet dropped
 				}
 			}
 
@@ -388,18 +388,17 @@ func (control *Control) initDataPlane(config *config.ColigateConfig, gatewayAddr
 
 // Internal method to get the address of the corresponding border router
 // to forward the outgoing packets
-func (c *Control) getBorderRouterConnection(proc *dataPacket) (*ipv4.PacketConn, error) {
+func (p *Processor) getBorderRouterConnection(proc *dataPacket) (*ipv4.PacketConn, error) {
 	var egressId uint16 = proc.colibriPath.GetCurrentHopField().EgressId
-	conn, found := c.borderRouters[egressId]
+	conn, found := p.borderRouters[egressId]
 	if !found {
 		return nil, serrors.New("egress interface is invalid:", "egressId", egressId)
 	}
 	return conn, nil
 }
 
-// Configures a goroutine to listen for the data plane channel and reservation updates
-func (c *Control) workerReceiveEntry(ch chan *dataPacket,
-	chres chan *reservation.ReservationTask, config *config.ColigateConfig, workerId uint32,
+// Configures a goroutine to listen for the data plane channel and control plane reservation updates
+func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId uint32,
 	gatewayId uint32, metrics *common.Metrics, localAS libaddr.AS) error {
 
 	log.Info("Init worker", "workerId", workerId)
@@ -413,36 +412,39 @@ func (c *Control) workerReceiveEntry(ch chan *dataPacket,
 	writeMsgs := make([]ipv4.Message, 1)
 	writeMsgs[0].Buffers = [][]byte{make([]byte, bufSize)}
 
-	for !c.exit {
+	ch := p.dataChannels[workerId]
+	chres := p.controlChannels[workerId]
+
+	for !p.exit {
 		select {
-		case proc := <-ch: //data plane packet received
-			if proc == nil { //if proc is nil it is meant to be a exit sequence
+		case d := <-ch: // Data plane packet received
+			if d == nil { //If d is nil it is meant to be a exit sequence
 				return nil
 			}
 			log.Debug("Worker received data packet", "workerId", workerId,
-				"resId", string(proc.colibriPath.InfoField.ResIdSuffix))
+				"resId", string(d.colibriPath.InfoField.ResIdSuffix))
 			workerPacketInTotalPromCounter.Add(1)
-			borderRouterConn, err := c.getBorderRouterConnection(proc)
+			borderRouterConn, err := p.getBorderRouterConnection(d)
 			if err != nil {
 				log.Debug("Error getting border router connection", "err", err)
 				workerPacketInInvalidPromCounter.Add(1)
 				continue
 			}
-			if err = worker.process(proc); err != nil {
+			if err = worker.process(d); err != nil {
 				log.Debug("Worker received error while processing.", "workerId", workerId,
 					"error", err.Error())
 				workerPacketInInvalidPromCounter.Add(1)
 				continue
 			}
 
-			writeMsgs[0].Buffers[0] = proc.rawPacket
+			writeMsgs[0].Buffers[0] = d.rawPacket
 			writeMsgs[0].Addr = borderRouterConn.LocalAddr()
 
 			borderRouterConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
 			workerPacketOutTotalPromCounter.Add(1)
 			log.Debug("Worker forwarded packet", "workerId", workerId,
 				"border router", borderRouterConn.LocalAddr().String())
-		case task := <-chres: //reservation update received
+		case task := <-chres: // Reservation update received
 			if task == nil {
 				return nil
 			}

@@ -48,7 +48,7 @@ func ErrGroupWait(e *errgroup.Group, duration time.Duration) error {
 func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	L := 10
 	errGroup := &errgroup.Group{}
-	c := &proc.Control{}
+	c := &proc.Processor{}
 	cleanupChannel := c.CreateCleanupChannel(L)
 	reservationChannels := c.CreateControlChannels(1, L)
 	now := time.Now()
@@ -89,7 +89,7 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 	L := 10
 	errGroup := &errgroup.Group{}
-	c := &proc.Control{}
+	c := &proc.Processor{}
 	cleanupChannel := c.CreateCleanupChannel(L)
 	reservationChannels := c.CreateControlChannels(1, L)
 
@@ -128,7 +128,7 @@ var metrics *common.Metrics = common.NewMetrics()
 func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	L := 100
 	errGroup := &errgroup.Group{}
-	c := &proc.Control{}
+	c := &proc.Processor{}
 	cleanupChannel := c.CreateCleanupChannel(L)
 	reservationChannels := c.CreateControlChannels(1, L)
 

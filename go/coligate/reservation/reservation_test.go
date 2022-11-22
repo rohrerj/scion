@@ -41,7 +41,7 @@ func TestReservationVersionNotFound(t *testing.T) {
 	}
 
 	resmap["A"] = &reservation.Reservation{
-		ReservationId: "A",
+		Id:            "A",
 		Indices:       resvmap,
 		ActiveIndexId: 0,
 	}
@@ -62,7 +62,7 @@ func TestActiveVersionIsProvidedVersion(t *testing.T) {
 	}
 
 	resmap["A"] = &reservation.Reservation{
-		ReservationId: "A",
+		Id:            "A",
 		Indices:       resvmap,
 		ActiveIndexId: 0,
 	}
@@ -87,7 +87,7 @@ func TestActiveVersionOlder(t *testing.T) {
 	}
 
 	resmap["A"] = &reservation.Reservation{
-		ReservationId: "A",
+		Id:            "A",
 		Indices:       resvmap,
 		ActiveIndexId: 0,
 	}
@@ -115,7 +115,7 @@ func TestActiveVersionNewer(t *testing.T) {
 	}
 
 	resmap["A"] = &reservation.Reservation{
-		ReservationId: "A",
+		Id:            "A",
 		Indices:       resvmap,
 		ActiveIndexId: 0,
 	}
@@ -137,7 +137,7 @@ func TestPacketValidityIsChecked(t *testing.T) {
 	}
 
 	resmap["A"] = &reservation.Reservation{
-		ReservationId: "A",
+		Id:            "A",
 		Indices:       resvmap,
 		ActiveIndexId: 0,
 	}
@@ -145,7 +145,7 @@ func TestPacketValidityIsChecked(t *testing.T) {
 
 	res, found := storage.UseReservation("A", 0, now)
 	assert.True(t, found)
-	assert.Equal(t, "A", res.ReservationId)
+	assert.Equal(t, "A", res.Id)
 	res, found = storage.UseReservation("A", 0, now.Add(1*time.Second))
 	assert.False(t, found)
 	assert.Nil(t, res)

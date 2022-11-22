@@ -23,21 +23,21 @@ import (
 type Storage struct {
 	reservations map[string]*Reservation
 }
-type HopField struct {
-	IngressId uint16
-	EgressId  uint16
-}
 type Reservation struct {
-	ReservationId string
+	Id            string
 	Hops          []HopField
 	Rlc           uint8
 	ActiveIndexId uint8
 	Indices       map[uint8]*ReservationIndex
 }
+type HopField struct {
+	IngressId uint16
+	EgressId  uint16
+}
 type ReservationIndex struct {
 	Index    uint8
 	Validity time.Time
-	Macs     [][]byte
+	Sigmas   [][]byte
 	BwCls    uint8
 }
 
@@ -45,8 +45,8 @@ type ReservationTask struct {
 	Reservation       *Reservation
 	ResId             string
 	IsDeleteQuery     bool
-	HighestValidity   time.Time //The validity of the longest (but possible not active) reservation index.
-	IsInitReservation bool      //Is used to signalize the reservation cleanup routine to fast progress and not re-check other reservations
+	HighestValidity   time.Time // The validity of the longest (but possible not active) reservation index.
+	IsInitReservation bool      // Is used to signalize the reservation cleanup routine to fast progress and not re-check other reservations
 }
 
 // Current returns the active reservation index. If the active reservation index does not exist (anymore) nil is returned.
@@ -67,11 +67,24 @@ func (store *Storage) InitStorageWithData(data map[string]*Reservation) {
 	}
 }
 
+func (store *Storage) get(resId string) (*Reservation, bool) {
+	res, found := store.reservations[resId]
+	return res, found
+}
+
+func (store *Storage) store(resId string, reservation *Reservation) {
+	store.reservations[resId] = reservation
+}
+
+func (store *Storage) remove(resId string) {
+	delete(store.reservations, resId)
+}
+
 // UseReservation checks whether the reservation index exists and is valid. If the reservation exists but contains no longer valid indices,
 // they will be removed. If the reservation index exists and is valid, the reservation is returned.
 func (store *Storage) UseReservation(resId string, providedIndex uint8, pktTime time.Time) (*Reservation, bool) {
 	log.Debug("use resId", "resId", resId)
-	res, found := store.reservations[resId]
+	res, found := store.get(resId)
 	if !found {
 		log.Debug("reservation not found")
 		return nil, false
@@ -85,7 +98,7 @@ func (store *Storage) UseReservation(resId string, providedIndex uint8, pktTime 
 
 	if res.ActiveIndexId != providedIndex {
 		activeVer, found := res.Indices[res.ActiveIndexId]
-		if found && activeVer.Validity.After(index.Validity) { //active index exists but has longer validity than provided index
+		if found && activeVer.Validity.After(index.Validity) { // Active index exists but has longer validity than provided index
 			return nil, false
 		} else {
 			res.ActiveIndexId = providedIndex
@@ -102,14 +115,14 @@ func (store *Storage) UseReservation(resId string, providedIndex uint8, pktTime 
 // Update merges (overwrites if exists in both) all provided reservation indices with the currently stored indices.
 // Creates a new entry if no reservation exists.
 func (store *Storage) Update(task *ReservationTask) {
-	res, found := store.reservations[task.ResId]
+	res, found := store.get(task.ResId)
 	if found {
 		defer res.deleteOlderIndices()
 		for indexNumber, reservationIndex := range task.Reservation.Indices {
 			res.Indices[indexNumber] = reservationIndex
 		}
 	} else {
-		store.reservations[task.ResId] = task.Reservation
+		store.store(task.ResId, task.Reservation)
 	}
 }
 
@@ -132,5 +145,5 @@ func (res *Reservation) deleteOlderIndices() {
 
 // Delete deletes a stored reservation with its indicies by providing its reservation ID.
 func (store *Storage) Delete(task *ReservationTask) {
-	delete(store.reservations, task.ResId)
+	store.remove(task.ResId)
 }

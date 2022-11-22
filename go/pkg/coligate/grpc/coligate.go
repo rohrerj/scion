@@ -45,14 +45,14 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 	task := &reservation.ReservationTask{
 		ResId: resId,
 		Reservation: &reservation.Reservation{
-			ReservationId: resId,
-			Rlc:           uint8(msg.Rlc),
+			Id:  resId,
+			Rlc: uint8(msg.Rlc),
 			Indices: map[uint8]*reservation.ReservationIndex{
 				uint8(msg.Index): {
 					Index:    uint8(msg.Index),
 					Validity: util.SecsToTime(msg.ExpirationTime),
 					BwCls:    uint8(msg.Bwcls),
-					Macs:     msg.Macs,
+					Sigmas:   msg.Macs,
 				},
 			},
 			Hops: make([]reservation.HopField, len(msg.HopInterfaces)),

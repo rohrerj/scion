@@ -12,55 +12,61 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package Tokenbucket
+package tokenbucket
 
 import (
 	"time"
 )
 
-// The TokenBucket struct that stores all the information needed for the Token Bucket algorithm.
 type TokenBucket struct {
-	CIRInBytes        uint64
-	CurrentTokens     float64
-	LastPacketTime    time.Time
-	TokenIntervalInMs uint64 //any value in [1,1000]
-	LastBwCls         uint8
+	CurrentTokens   float64
+	LastTimeApplied time.Time
+
+	//Burst Size
+	CBS float64
+
+	//In bytes per second
+	CIR float64
 }
 
-// A placeholder packet struct.
-type Entry struct {
-	Length      uint64
-	ArrivalTime time.Time
+func NewTokenBucket(initialTime time.Time, burstSize float64, rate float64) *TokenBucket {
+	return &TokenBucket{
+		CurrentTokens:   rate,
+		CIR:             rate,
+		CBS:             burstSize,
+		LastTimeApplied: initialTime,
+	}
 }
 
-// this function calculates the minimal value of two floats.
+func (t *TokenBucket) SetRate(rate float64) {
+	t.CIR = rate
+}
+
+func (t *TokenBucket) SetBurstSize(burstSize float64) {
+	t.CBS = burstSize
+}
+
+// Apply calculates the current available tokens and checks whether there are enough tokens available. The success is indicated by a bool.
+func (t *TokenBucket) Apply(size int, now time.Time) bool {
+	if !now.Before(t.LastTimeApplied) {
+		t.CurrentTokens += now.Sub(t.LastTimeApplied).Seconds() * t.CIR
+		t.CurrentTokens = min(t.CurrentTokens, t.CBS)
+		t.LastTimeApplied = now
+		if t.CurrentTokens >= float64(size) {
+			t.CurrentTokens -= float64(size)
+			return true
+		} else {
+			return false
+		}
+	}
+	return false
+}
+
+// This function calculates the minimal value of two float64.
 func min(a float64, b float64) float64 {
 	if a > b {
 		return b
 	} else {
 		return a
-	}
-}
-
-// ValidateBandwidth checks whether a packet fits in the Token Bucket or drops it. The success is indicated by a bool.
-func (bucket *TokenBucket) ValidateBandwidth(entry *Entry) bool {
-	if bucket == nil || entry == nil {
-		return false
-	}
-	//calculates the time difference between the last and the current packet
-	//and subtracts the part that is not divisible by the token interval.
-	var currentTime time.Time = entry.ArrivalTime
-	var timeDiff time.Duration = currentTime.Sub(bucket.LastPacketTime)
-	timeDiff = timeDiff - time.Duration(timeDiff.Milliseconds()%int64(bucket.TokenIntervalInMs)*int64(time.Millisecond))
-
-	//calculates the current amount of tokens given the calculated time difference
-	bucket.CurrentTokens = min(float64(bucket.CIRInBytes), bucket.CurrentTokens+float64(bucket.CIRInBytes)*float64(timeDiff.Milliseconds())/1000)
-	bucket.LastPacketTime = bucket.LastPacketTime.Add(timeDiff)
-
-	if entry.Length <= uint64(bucket.CurrentTokens) {
-		bucket.CurrentTokens -= float64(entry.Length)
-		return true
-	} else {
-		return false
 	}
 }
