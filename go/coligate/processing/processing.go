@@ -126,6 +126,15 @@ func (w *Worker) validate(d *dataPacket) error {
 		return serrors.New("E2E reservation is invalid")
 	}
 	d.reservation = reservation
+
+	return w.validateFields(d)
+}
+
+// Validates the colibri header fields
+// TODO(rohrerj) Requires further discussions. Checks might be removed. Make sure that
+// coligate cannot crash if those checks are removed.
+func (w *Worker) validateFields(d *dataPacket) error {
+	infoField := d.colibriPath.InfoField
 	currentIndex := d.reservation.Current()
 
 	if len(d.colibriPath.HopFields) != len(currentIndex.Sigmas) {
