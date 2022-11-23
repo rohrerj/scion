@@ -35,13 +35,7 @@ type Worker struct {
 	CoreIdCounter        uint32
 	NumCounterBits       int
 	Storage              *storage.Storage
-	TrafficMonitors      map[string]*trafficMonitor // Every worker has its own map of tokenbuckets that it is responsible for
 	LocalAS              libaddr.AS
-}
-
-type trafficMonitor struct {
-	bucket    *tokenbucket.TokenBucket
-	lastBwcls uint8
 }
 
 type dataPacket struct {
@@ -77,30 +71,14 @@ func Parse(rawPacket []byte) (*dataPacket, error) {
 // NewWorker initializes the worker with its id, tokenbuckets and reservations
 func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32, localAS libaddr.AS) *Worker {
 	w := &Worker{
-		CoreIdCounter:   (gatewayId << (32 - config.NumBitsForGatewayId)) | (workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId)),
-		NumCounterBits:  config.NumBitsForPerWorkerCounter,
-		TrafficMonitors: make(map[string]*trafficMonitor),
-		LocalAS:         localAS,
-		Storage:         &storage.Storage{},
+		CoreIdCounter:  (gatewayId << (32 - config.NumBitsForGatewayId)) | (workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId)),
+		NumCounterBits: config.NumBitsForPerWorkerCounter,
+		LocalAS:        localAS,
+		Storage:        &storage.Storage{},
 	}
 	w.InitialCoreIdCounter = w.CoreIdCounter
 	w.Storage.InitStorageWithData(nil)
 	return w
-}
-
-// Updates, creates or deletes a reservation depending on the reservation task
-func (w *Worker) handleReservationTask(task *storage.ReservationTask) error {
-	if w == nil || w.Storage == nil || task == nil {
-		return serrors.New("handleReservationTask requires a valid worker and task")
-	}
-	if task.IsDeleteQuery {
-		delete(w.TrafficMonitors, task.ResId)
-		w.Storage.Delete(task)
-	} else {
-		w.Storage.Update(task)
-	}
-
-	return nil
 }
 
 // Processes the current packet based on the current dataPacket
@@ -179,24 +157,26 @@ func (w *Worker) validate(d *dataPacket) error {
 
 // Checks that the reservation is not overused
 func (w *Worker) performTrafficMonitoring(d *dataPacket) error {
-	monitor, exists := w.TrafficMonitors[d.reservation.Id]
+	monitor := d.reservation.TrafficMonitor
 	currentBwCls := d.reservation.Current().BwCls
-	if exists {
-		if monitor.lastBwcls != currentBwCls {
+	if monitor != nil {
+		if monitor.LastBwcls != currentBwCls {
 			realBandwidth := 1024 * libtypes.BWCls(currentBwCls).ToKbps()
-			monitor.bucket.SetRate(float64(realBandwidth))
-			monitor.bucket.SetBurstSize(float64(realBandwidth))
-			monitor.lastBwcls = currentBwCls
+			monitor.Bucket.SetRate(float64(realBandwidth))
+			monitor.Bucket.SetBurstSize(float64(realBandwidth))
+			monitor.LastBwcls = currentBwCls
 		}
 	} else {
 		realBandwidth := 1024 * libtypes.BWCls(currentBwCls).ToKbps()
-		monitor = &trafficMonitor{
-			bucket:    tokenbucket.NewTokenBucket(d.pktArrivalTime, float64(realBandwidth), float64(realBandwidth)),
-			lastBwcls: currentBwCls,
+		// TODO(rohrerj) set correct value for burst size
+		monitor = &storage.TrafficMonitor{
+			Bucket:    tokenbucket.NewTokenBucket(d.pktArrivalTime, float64(realBandwidth), float64(realBandwidth)),
+			LastBwcls: currentBwCls,
 		}
-		w.TrafficMonitors[d.reservation.Id] = monitor
+		d.reservation.TrafficMonitor = monitor
 	}
-	if !monitor.bucket.Apply(len(d.rawPacket), d.pktArrivalTime) {
+
+	if !monitor.Bucket.Apply(len(d.rawPacket), d.pktArrivalTime) {
 		return serrors.New("data packet exceeded bandwidth")
 	}
 	return nil

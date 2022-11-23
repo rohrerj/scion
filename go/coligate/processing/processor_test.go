@@ -60,15 +60,17 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	})
 
 	for i := 0; i < L; i++ {
-		cleanupChannel <- &storage.ReservationTask{
-			ResId:           "A" + fmt.Sprint(i),
+		cleanupChannel <- &storage.UpdateTask{
+			Reservation: &storage.Reservation{
+				Id: "A" + fmt.Sprint(i),
+			},
 			HighestValidity: now.Add(1 * time.Millisecond),
 		}
 		select {
 		case task := <-reservationChannels[0]:
 			assert.NotNil(t, task)
-			assert.Equal(t, "A"+fmt.Sprint(i), task.ResId)
-			assert.Equal(t, true, task.IsDeleteQuery)
+			assert.IsType(t, &storage.DeletionTask{}, task)
+			assert.Equal(t, "A"+fmt.Sprint(i), task.(*storage.DeletionTask).ResId)
 		case <-time.After(1 * time.Second):
 			assert.Fail(t, "reservation not deleted")
 		}
@@ -101,8 +103,10 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 
 	now := time.Now()
 	for i := 0; i < L; i++ {
-		cleanupChannel <- &storage.ReservationTask{
-			ResId:           "A" + fmt.Sprint(i),
+		cleanupChannel <- &storage.UpdateTask{
+			Reservation: &storage.Reservation{
+				Id: "A" + fmt.Sprint(i),
+			},
 			HighestValidity: now.Add(1 * time.Millisecond),
 		}
 	}
@@ -140,15 +144,19 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	now := time.Now()
 
 	for i := 0; i < L; i++ {
-		cleanupChannel <- &storage.ReservationTask{
-			ResId:           "A" + fmt.Sprint(i),
+		cleanupChannel <- &storage.UpdateTask{
+			Reservation: &storage.Reservation{
+				Id: "A" + fmt.Sprint(i),
+			},
 			HighestValidity: now.Add(10 * time.Millisecond),
 		}
 	}
 
 	for i := 0; i < L; i++ {
-		cleanupChannel <- &storage.ReservationTask{
-			ResId:           "A" + fmt.Sprint(i),
+		cleanupChannel <- &storage.UpdateTask{
+			Reservation: &storage.Reservation{
+				Id: "A" + fmt.Sprint(i),
+			},
 			HighestValidity: now.Add(20 * time.Millisecond),
 		}
 	}
@@ -158,10 +166,7 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	for !exit {
 		select {
 		case task := <-reservationChannels[0]:
-			if task.HighestValidity == now.Add(10*time.Millisecond) {
-				continue
-			}
-			assert.Equal(t, now.Add(20*time.Millisecond), task.HighestValidity)
+			assert.IsType(t, &storage.DeletionTask{}, task)
 			reportedReservations++
 		case <-time.After(40 * time.Millisecond):
 			exit = true

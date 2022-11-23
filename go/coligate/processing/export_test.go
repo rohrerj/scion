@@ -30,8 +30,8 @@ func (p *Processor) SetHasher(salt []byte) {
 	p.saltHasher = common.NewFnv1aHasher(salt)
 }
 
-func (p *Processor) CreateCleanupChannel(maxQueueSize int) chan *storage.ReservationTask {
-	p.cleanupChannel = make(chan *storage.ReservationTask, maxQueueSize)
+func (p *Processor) CreateCleanupChannel(maxQueueSize int) chan *storage.UpdateTask {
+	p.cleanupChannel = make(chan *storage.UpdateTask, maxQueueSize)
 	return p.cleanupChannel
 }
 
@@ -43,10 +43,10 @@ func (p *Processor) CreateDataChannels(numberWorkers int, maxQueueSizePerWorker 
 	return p.dataChannels
 }
 
-func (p *Processor) CreateControlChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *storage.ReservationTask {
-	p.controlChannels = make([]chan *storage.ReservationTask, numberWorkers)
+func (p *Processor) CreateControlChannels(numberWorkers int, maxQueueSizePerWorker int) []chan storage.Task {
+	p.controlChannels = make([]chan storage.Task, numberWorkers)
 	for i := 0; i < numberWorkers; i++ {
-		p.controlChannels[i] = make(chan *storage.ReservationTask, maxQueueSizePerWorker)
+		p.controlChannels[i] = make(chan storage.Task, maxQueueSizePerWorker)
 	}
 	return p.controlChannels
 }
@@ -73,20 +73,12 @@ func internalParse(proc *DataPacket) *dataPacket {
 	}
 }
 
-func (w *Worker) HandleReservationTask(task *storage.ReservationTask) error {
-	return w.handleReservationTask(task)
-}
-
 func (w *Worker) Validate(proc *DataPacket) error {
 	return w.validate(internalParse(proc))
 }
 
 func (w *Worker) PerformTrafficMonitoring(proc *DataPacket) error {
 	return w.performTrafficMonitoring(internalParse(proc))
-}
-
-func (w *Worker) ResetTrafficMonitors() {
-	w.TrafficMonitors = make(map[string]*trafficMonitor)
 }
 
 func (w *Worker) Stamp(d *DataPacket) error {

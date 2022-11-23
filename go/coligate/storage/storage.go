@@ -17,6 +17,7 @@ package storage
 import (
 	"time"
 
+	"github.com/scionproto/scion/go/coligate/tokenbucket"
 	"github.com/scionproto/scion/go/lib/log"
 )
 
@@ -24,11 +25,12 @@ type Storage struct {
 	reservations map[string]*Reservation
 }
 type Reservation struct {
-	Id            string
-	Hops          []HopField
-	Rlc           uint8
-	ActiveIndexId uint8
-	Indices       map[uint8]*ReservationIndex
+	Id             string
+	Hops           []HopField
+	Rlc            uint8
+	ActiveIndexId  uint8
+	Indices        map[uint8]*ReservationIndex
+	TrafficMonitor *TrafficMonitor
 }
 type HopField struct {
 	IngressId uint16
@@ -41,12 +43,41 @@ type ReservationIndex struct {
 	BwCls    uint8
 }
 
-type ReservationTask struct {
+type TrafficMonitor struct {
+	Bucket    *tokenbucket.TokenBucket
+	LastBwcls uint8
+}
+
+type Task interface {
+	Execute(*Storage)
+}
+
+type UpdateTask struct {
 	Reservation       *Reservation
-	ResId             string
-	IsDeleteQuery     bool
 	HighestValidity   time.Time // The validity of the longest (but possible not active) reservation index.
 	IsInitReservation bool      // Is used to signalize the reservation cleanup routine to fast progress and not re-check other reservations
+}
+
+type DeletionTask struct {
+	ResId string
+}
+
+// Update merges (overwrites if exists in both) all provided reservation indices with the currently stored indices.
+// Creates a new entry if no reservation exists.
+func (task *UpdateTask) Execute(store *Storage) {
+	res, found := store.get(task.Reservation.Id)
+	if found {
+		defer res.deleteOlderIndices()
+		for indexNumber, reservationIndex := range task.Reservation.Indices {
+			res.Indices[indexNumber] = reservationIndex
+		}
+	} else {
+		store.store(task.Reservation.Id, task.Reservation)
+	}
+}
+
+func (task *DeletionTask) Execute(store *Storage) {
+	store.remove(task.ResId)
 }
 
 // Current returns the active reservation index. If the active reservation index does not exist (anymore) nil is returned.
@@ -112,20 +143,6 @@ func (store *Storage) UseReservation(resId string, providedIndex uint8, pktTime 
 	return nil, false
 }
 
-// Update merges (overwrites if exists in both) all provided reservation indices with the currently stored indices.
-// Creates a new entry if no reservation exists.
-func (store *Storage) Update(task *ReservationTask) {
-	res, found := store.get(task.ResId)
-	if found {
-		defer res.deleteOlderIndices()
-		for indexNumber, reservationIndex := range task.Reservation.Indices {
-			res.Indices[indexNumber] = reservationIndex
-		}
-	} else {
-		store.store(task.ResId, task.Reservation)
-	}
-}
-
 // Compares the validity of all indices with the active index and deletes all indices whose validity is behind the active index.
 // If the active index is not valid, it will do the comparison with the current time.
 func (res *Reservation) deleteOlderIndices() {
@@ -141,9 +158,4 @@ func (res *Reservation) deleteOlderIndices() {
 			delete(res.Indices, uint8(ver.Index))
 		}
 	}
-}
-
-// Delete deletes a stored reservation with its indicies by providing its reservation ID.
-func (store *Storage) Delete(task *ReservationTask) {
-	store.remove(task.ResId)
 }

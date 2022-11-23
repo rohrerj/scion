@@ -46,8 +46,8 @@ import (
 
 type Processor struct {
 	dataChannels    []chan *dataPacket
-	controlChannels []chan *storage.ReservationTask
-	cleanupChannel  chan *storage.ReservationTask
+	controlChannels []chan storage.Task
+	cleanupChannel  chan *storage.UpdateTask
 	borderRouters   map[uint16]*ipv4.PacketConn
 	saltHasher      common.SaltHasher
 	exit            bool
@@ -110,9 +110,9 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	p := Processor{
 		borderRouters:   borderRouters,
-		cleanupChannel:  make(chan *storage.ReservationTask, 1000), // TODO(rohrerj) check channel capacity
+		cleanupChannel:  make(chan *storage.UpdateTask, 1000), // TODO(rohrerj) check channel capacity
 		dataChannels:    make([]chan *dataPacket, config.NumWorkers),
-		controlChannels: make([]chan *storage.ReservationTask, config.NumWorkers),
+		controlChannels: make([]chan storage.Task, config.NumWorkers),
 		saltHasher:      common.NewFnv1aHasher(salt),
 	}
 
@@ -124,7 +124,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	// Creates all the channels and starts the go routines
 	for i := 0; i < config.NumWorkers; i++ {
 		p.dataChannels[i] = make(chan *dataPacket, config.MaxQueueSizePerWorker)
-		p.controlChannels[i] = make(chan *storage.ReservationTask,
+		p.controlChannels[i] = make(chan storage.Task,
 			config.MaxQueueSizePerWorker)
 		func(i int) {
 			g.Go(func() error {
@@ -217,8 +217,7 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 				highestValidity = resver.Validity
 			}
 		}
-		task := &storage.ReservationTask{
-			ResId:             res.Id,
+		task := &storage.UpdateTask{
 			Reservation:       res,
 			HighestValidity:   highestValidity,
 			IsInitReservation: true,
@@ -226,7 +225,7 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 
 		p.cleanupChannel <- task
 
-		p.controlChannels[p.saltHasher.Hash([]byte(task.ResId))%uint32(config.NumWorkers)] <- task
+		p.controlChannels[p.saltHasher.Hash([]byte(task.Reservation.Id))%uint32(config.NumWorkers)] <- task
 	}
 	log.Info("Successfully loaded active reservation indices from colibri service")
 	return nil
@@ -243,12 +242,12 @@ func (p *Processor) initCleanupRoutine(metrics *common.Metrics) {
 	data := make(map[string]time.Time)
 	numWorkers := len(p.controlChannels)
 
-	handleTask := (func(task *storage.ReservationTask) {
+	handleTask := (func(task *storage.UpdateTask) {
 		cleanupReservationUpdateTotalPromCounter.Add(1)
-		res, exists := data[task.ResId]
+		res, exists := data[task.Reservation.Id]
 		if !exists || task.HighestValidity.Sub(res) > 0 {
 			cleanupReservationUpdateNewPromCounter.Add(1)
-			data[task.ResId] = task.HighestValidity
+			data[task.Reservation.Id] = task.HighestValidity
 		}
 	})
 	numIterations := 0
@@ -272,7 +271,7 @@ func (p *Processor) initCleanupRoutine(metrics *common.Metrics) {
 						// Faster progress when loading a huge amount of reservations on startup
 						continue
 					}
-					if task.ResId == resId {
+					if task.Reservation.Id == resId {
 						val = data[resId] // Updated current value in case it got changed
 					}
 					// For every new reservation check at least 10 current reservations:
@@ -284,10 +283,8 @@ func (p *Processor) initCleanupRoutine(metrics *common.Metrics) {
 				}
 			}
 			if time.Until(val) < 0 {
-				deletionTask := &storage.ReservationTask{
-					IsDeleteQuery:   true,
-					ResId:           resId,
-					HighestValidity: val,
+				deletionTask := &storage.DeletionTask{
+					ResId: resId,
 				}
 				cleanupReservationDeletedPromCounter.Add(1)
 
@@ -452,10 +449,9 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 			if task == nil {
 				return nil
 			}
-			log.Debug("Worker received reservation update", "workerId", workerId,
-				"resId", task.ResId)
+			log.Debug("Worker received reservation update", "workerId", workerId)
 			workerReservationUpdateTotalPromCounter.Add(1)
-			worker.handleReservationTask(task)
+			task.Execute(worker.Storage)
 		}
 
 	}

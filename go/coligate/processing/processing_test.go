@@ -61,93 +61,6 @@ func TestMasking(t *testing.T) {
 	assert.Equal(t, expectedInitialValue, worker.CoreIdCounter)
 }
 
-func TestHandleReservationTask(t *testing.T) {
-	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
-	reservations := make(map[string]*storage.Reservation)
-	worker.Storage.InitStorageWithData(reservations)
-	var startTime = time.Now()
-
-	// Test that sending a delete query for a non existing reservation
-	// does not create an error
-	err := worker.HandleReservationTask(&storage.ReservationTask{
-		IsDeleteQuery: true,
-		ResId:         "A",
-	})
-	assert.NoError(t, err)
-	assert.Equal(t, 0, len(reservations))
-
-	// Test that a new reservation was stored
-	err = worker.HandleReservationTask(&storage.ReservationTask{
-		ResId:           "A",
-		HighestValidity: startTime.Add(1 * time.Second),
-		Reservation: &storage.Reservation{
-			Id: "A",
-			Indices: map[uint8]*storage.ReservationIndex{
-				0: {
-					Index:    0,
-					Validity: startTime.Add(1 * time.Second),
-				},
-			},
-		},
-	})
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(reservations))
-	assert.Equal(t, 1, len(reservations["A"].Indices))
-	assert.NotNil(t, reservations["A"].Indices[0])
-
-	// Test that an older index does not get deleted if it is still valid and no active index
-	// exists when updating
-	err = worker.HandleReservationTask(&storage.ReservationTask{
-		ResId:           "A",
-		HighestValidity: startTime.Add(2 * time.Second),
-		Reservation: &storage.Reservation{
-			Id: "A",
-			Indices: map[uint8]*storage.ReservationIndex{
-				1: {
-					Index:    0,
-					Validity: startTime.Add(2 * time.Second),
-				},
-			},
-		},
-	})
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(reservations))
-	assert.Equal(t, 2, len(reservations["A"].Indices))
-	assert.NotNil(t, reservations["A"].Indices[0])
-	assert.NotNil(t, reservations["A"].Indices[1])
-
-	// Now we activate index 1 and call again update for a new index with the same expiration time as index 1.
-	// Now we test that index 0 is removed and 1 and 2 still exist.
-	reservations["A"].ActiveIndexId = 1
-	err = worker.HandleReservationTask(&storage.ReservationTask{
-		ResId:           "A",
-		HighestValidity: startTime.Add(2 * time.Second),
-		Reservation: &storage.Reservation{
-			Id: "A",
-			Indices: map[uint8]*storage.ReservationIndex{
-				2: {
-					Index:    0,
-					Validity: startTime.Add(2 * time.Second),
-				},
-			},
-		},
-	})
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(reservations))
-	assert.Equal(t, 2, len(reservations["A"].Indices))
-	assert.Nil(t, reservations["A"].Indices[0])
-	assert.NotNil(t, reservations["A"].Indices[1])
-	assert.NotNil(t, reservations["A"].Indices[2])
-
-	// Now we execute a delete query to delete the entire reservation
-	err = worker.HandleReservationTask(&storage.ReservationTask{
-		IsDeleteQuery: true,
-		ResId:         "A",
-	})
-	assert.NoError(t, err)
-	assert.Equal(t, 0, len(reservations))
-}
-
 func TestValidate(t *testing.T) {
 	type entry struct {
 		proc processing.DataPacket
@@ -968,11 +881,14 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			m := make(map[string]*storage.TrafficMonitor)
 			for _, en := range tc.entries {
+				monitor := m[en.proc.Reservation.Id]
+				en.proc.Reservation.TrafficMonitor = monitor
 				err := worker.PerformTrafficMonitoring(&en.proc)
+				m[en.proc.Reservation.Id] = en.proc.Reservation.TrafficMonitor
 				assert.True(t, (err == nil && en.success) || (err != nil && !en.success))
 			}
-			worker.ResetTrafficMonitors()
 		})
 	}
 }

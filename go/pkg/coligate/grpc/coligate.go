@@ -28,8 +28,8 @@ import (
 
 type Coligate struct {
 	Hasher                       common.SaltHasher
-	ReservationChannels          []chan *storage.ReservationTask
-	CleanupChannel               chan *storage.ReservationTask
+	ReservationChannels          []chan storage.Task
+	CleanupChannel               chan *storage.UpdateTask
 	UpdateSigmasTotalPromCounter libmetrics.Counter
 }
 
@@ -42,8 +42,7 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 	}
 	resId := string(id.ToRaw())
 	s.UpdateSigmasTotalPromCounter.Add(1)
-	task := &storage.ReservationTask{
-		ResId: resId,
+	task := &storage.UpdateTask{
 		Reservation: &storage.Reservation{
 			Id:  resId,
 			Rlc: uint8(msg.Rlc),
