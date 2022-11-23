@@ -84,3 +84,7 @@ func (w *Worker) PerformTrafficMonitoring(proc *DataPacket) error {
 func (w *Worker) Stamp(d *DataPacket) error {
 	return w.stamp(internalParse((d)))
 }
+
+func (w *Worker) UpdateCounter() {
+	w.updateCounter()
+}

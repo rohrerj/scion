@@ -43,24 +43,6 @@ func getColigateConfiguration() *config.ColigateConfig {
 	return cfg
 }
 
-// TestMasking tests that the coreIdCounter is correctly assigned in InitWorker depending on
-// the number of bits for the GatewayId, WorkerId, PerWorkerCounter.
-func TestMasking(t *testing.T) {
-	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
-	expectedInitialValue := uint32(2147483648 + 8388608) //2^31 + 2^23
-	assert.Equal(t, expectedInitialValue, worker.CoreIdCounter)
-
-	worker.CoreIdCounter = worker.InitialCoreIdCounter | (worker.CoreIdCounter+1)%(1<<worker.NumCounterBits)
-	assert.Equal(t, expectedInitialValue+1, worker.CoreIdCounter)
-
-	worker.CoreIdCounter = worker.InitialCoreIdCounter | (worker.CoreIdCounter+1)%(1<<worker.NumCounterBits)
-	assert.Equal(t, expectedInitialValue+2, worker.CoreIdCounter)
-
-	worker.CoreIdCounter = expectedInitialValue + 8388607 //+ 2^23 -1
-	worker.CoreIdCounter = worker.InitialCoreIdCounter | (worker.CoreIdCounter+1)%(1<<worker.NumCounterBits)
-	assert.Equal(t, expectedInitialValue, worker.CoreIdCounter)
-}
-
 func TestValidate(t *testing.T) {
 	type entry struct {
 		proc processing.DataPacket
@@ -891,6 +873,32 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpdateCounter(t *testing.T) {
+	w := processing.NewWorker(&config.ColigateConfig{
+		NumBitsForGatewayId:        8,
+		NumBitsForWorkerId:         8,
+		NumBitsForPerWorkerCounter: 16,
+	}, 13, 3, 1)
+	// Check that it starts with the correct value
+	assert.Equal(t, uint32(0x30d0000), w.CoreIdCounter)
+
+	// Check that increments in the first few bits works
+	for i := 1; i <= 16; i++ {
+		w.UpdateCounter()
+		assert.Equal(t, uint32(0x30d0000+i), w.CoreIdCounter)
+	}
+
+	// Check that increments in the last few bits works
+	w.CoreIdCounter = 0x30dfff0
+	for i := 0xfff1; i <= 0xffff; i++ {
+		w.UpdateCounter()
+		assert.Equal(t, uint32(0x30d0000+i), w.CoreIdCounter)
+	}
+	// Check that the wraparound works
+	w.UpdateCounter()
+	assert.Equal(t, uint32(0x30d0000), w.CoreIdCounter)
 }
 
 // TestUpdateMacs tests that for a valid sigma, UpdateFields computes the correct mac values that

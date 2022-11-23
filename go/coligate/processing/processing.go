@@ -31,11 +31,11 @@ import (
 )
 
 type Worker struct {
-	InitialCoreIdCounter uint32
-	CoreIdCounter        uint32
-	NumCounterBits       int
-	Storage              *storage.Storage
-	LocalAS              libaddr.AS
+	CoreIdCounter  uint32
+	NumCounterBits int
+
+	Storage *storage.Storage
+	LocalAS libaddr.AS
 }
 
 type dataPacket struct {
@@ -76,7 +76,6 @@ func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32,
 		LocalAS:        localAS,
 		Storage:        &storage.Storage{},
 	}
-	w.InitialCoreIdCounter = w.CoreIdCounter
 	w.Storage.InitStorageWithData(nil)
 	return w
 }
@@ -183,7 +182,9 @@ func (w *Worker) performTrafficMonitoring(d *dataPacket) error {
 }
 
 func (w *Worker) updateCounter() {
-	w.CoreIdCounter = w.InitialCoreIdCounter | (w.CoreIdCounter+1)%(1<<w.NumCounterBits)
+	a := uint32(1<<(w.NumCounterBits) - 1)
+	b := a << (32 - w.NumCounterBits)
+	w.CoreIdCounter = w.CoreIdCounter&b + a&(w.CoreIdCounter+1)
 }
 
 // Updates the timestamp and HFVs
