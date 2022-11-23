@@ -1990,12 +1990,8 @@ func computeColibriMac(t *testing.T, key cipher.Block, cpath *colibri.ColibriPat
 			cpath.HopFields[hopIndex], spkt.SrcIA.AS(), spkt.DstIA.AS())
 		require.NoError(t, err)
 	case false:
-		// TODO(juagargi) revert comments after fixing how we compute the E2E MAC
-		// err = libcolibri.MACE2E(mac[:], key, cpath.InfoField, packetTimestamp,
-		// 	cpath.HopFields[hopIndex], spkt)
-		// require.NoError(t, err)
-		err = libcolibri.MACStatic(mac[:], key, cpath.InfoField,
-			cpath.HopFields[hopIndex], spkt.SrcIA.AS(), spkt.DstIA.AS())
+		err = libcolibri.MACE2E(mac[:], key, cpath.InfoField, packetTimestamp,
+			cpath.HopFields[hopIndex], spkt)
 		require.NoError(t, err)
 	}
 
