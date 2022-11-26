@@ -23,11 +23,15 @@ import (
 	common "github.com/scionproto/scion/go/pkg/coligate"
 )
 
-func (p *Processor) InitCleanupRoutine(metrics *common.Metrics) {
-	p.initCleanupRoutine(metrics)
+func (p *Processor) InitCleanupRoutine() {
+	p.initCleanupRoutine()
 }
 func (p *Processor) SetHasher(salt []byte) {
 	p.saltHasher = common.NewFnv1aHasher(salt)
+}
+
+func (p *Processor) SetNumWorkers(numWorkers int) {
+	p.numWorkers = numWorkers
 }
 
 func (p *Processor) CreateCleanupChannel(maxQueueSize int) chan *storage.UpdateTask {
@@ -49,6 +53,14 @@ func (p *Processor) CreateControlChannels(numberWorkers int, maxQueueSizePerWork
 		p.controlChannels[i] = make(chan storage.Task, maxQueueSizePerWorker)
 	}
 	return p.controlChannels
+}
+
+func InitializeMetrics() *ColigateMetrics {
+	return initializeMetrics(common.NewMetrics())
+}
+
+func (p *Processor) SetMetrics(m *ColigateMetrics) {
+	p.metrics = m
 }
 
 func (p *Processor) Shutdown() {

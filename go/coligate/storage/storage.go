@@ -62,7 +62,7 @@ type DeletionTask struct {
 	ResId string
 }
 
-// Update merges (overwrites if exists in both) all provided reservation indices with the currently stored indices.
+// Execute merges (overwrites if exists in both) all provided reservation indices with the currently stored indices.
 // Creates a new entry if no reservation exists.
 func (task *UpdateTask) Execute(store *Storage) {
 	res, found := store.get(task.Reservation.Id)
@@ -109,6 +109,34 @@ func (store *Storage) store(resId string, reservation *Reservation) {
 
 func (store *Storage) remove(resId string) {
 	delete(store.reservations, resId)
+}
+
+func NewReservation(resId string, hops []HopField) *Reservation {
+	return &Reservation{
+		Id:      resId,
+		Rlc:     0, //TODO(rohrerj)
+		Indices: make(map[uint8]*ReservationIndex),
+		Hops:    hops,
+	}
+}
+func NewIndex(index uint8, validity time.Time, bwCls uint8, sigmas [][]byte) *ReservationIndex {
+	return &ReservationIndex{
+		Index:    index,
+		Validity: validity,
+		BwCls:    bwCls,
+		Sigmas:   sigmas,
+	}
+}
+func NewUpdateTask(res *Reservation, highestValidity time.Time) *UpdateTask {
+	return &UpdateTask{
+		Reservation:     res,
+		HighestValidity: highestValidity,
+	}
+}
+func NewDeletionTask(resId string) *DeletionTask {
+	return &DeletionTask{
+		ResId: resId,
+	}
 }
 
 // UseReservation checks whether the reservation index exists and is valid. If the reservation exists but contains no longer valid indices,

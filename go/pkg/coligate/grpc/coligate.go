@@ -22,15 +22,14 @@ import (
 	libtypes "github.com/scionproto/scion/go/lib/colibri/reservation"
 	libmetrics "github.com/scionproto/scion/go/lib/metrics"
 	"github.com/scionproto/scion/go/lib/util"
-	common "github.com/scionproto/scion/go/pkg/coligate"
 	cgpb "github.com/scionproto/scion/go/pkg/proto/coligate"
 )
 
 type Coligate struct {
-	Hasher                       common.SaltHasher
 	ReservationChannels          []chan storage.Task
 	CleanupChannel               chan *storage.UpdateTask
 	UpdateSigmasTotalPromCounter libmetrics.Counter
+	FindWorker                   func([]byte) uint32
 }
 
 var _ cgpb.ColibriGatewayServer = (*Coligate)(nil)
@@ -66,7 +65,7 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 
 	s.CleanupChannel <- task
 
-	s.ReservationChannels[s.Hasher.Hash(id.ToRaw())] <- task
+	s.ReservationChannels[s.FindWorker(id.ToRaw())] <- task
 
 	return nil, nil
 }

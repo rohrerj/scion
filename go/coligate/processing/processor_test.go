@@ -25,7 +25,6 @@ import (
 
 	proc "github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/coligate/storage"
-	common "github.com/scionproto/scion/go/pkg/coligate"
 )
 
 func ErrGroupWait(e *errgroup.Group, duration time.Duration) error {
@@ -43,19 +42,23 @@ func ErrGroupWait(e *errgroup.Group, duration time.Duration) error {
 	}
 }
 
+var coligateMetrics *proc.ColigateMetrics = proc.InitializeMetrics()
+
 // Tests sequentially that write-read-repeat returns all reservations
 // and that the channel is empty after the exit.
 func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	L := 10
 	errGroup := &errgroup.Group{}
 	c := &proc.Processor{}
+	c.SetMetrics(coligateMetrics)
 	cleanupChannel := c.CreateCleanupChannel(L)
 	reservationChannels := c.CreateControlChannels(1, L)
+	c.SetNumWorkers(1)
 	now := time.Now()
 
 	c.SetHasher([]byte("salt"))
 	errGroup.Go(func() error {
-		c.InitCleanupRoutine(metrics)
+		c.InitCleanupRoutine()
 		return nil
 	})
 
@@ -92,12 +95,14 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 	L := 10
 	errGroup := &errgroup.Group{}
 	c := &proc.Processor{}
+	c.SetMetrics(coligateMetrics)
 	cleanupChannel := c.CreateCleanupChannel(L)
 	reservationChannels := c.CreateControlChannels(1, L)
+	c.SetNumWorkers(1)
 
 	c.SetHasher([]byte("salt"))
 	errGroup.Go(func() error {
-		c.InitCleanupRoutine(metrics)
+		c.InitCleanupRoutine()
 		return nil
 	})
 
@@ -125,20 +130,20 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 	assert.NoError(t, ErrGroupWait(errGroup, 1*time.Second))
 }
 
-var metrics *common.Metrics = common.NewMetrics()
-
 // Tests that the validity of a currently stored reservation is
 // extended if a new index arrives with longer validity
 func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	L := 100
 	errGroup := &errgroup.Group{}
 	c := &proc.Processor{}
+	c.SetMetrics(coligateMetrics)
 	cleanupChannel := c.CreateCleanupChannel(L)
 	reservationChannels := c.CreateControlChannels(1, L)
+	c.SetNumWorkers(1)
 
 	c.SetHasher([]byte("salt"))
 	errGroup.Go(func() error {
-		c.InitCleanupRoutine(metrics)
+		c.InitCleanupRoutine()
 		return nil
 	})
 	now := time.Now()
