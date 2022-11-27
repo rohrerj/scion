@@ -50,11 +50,12 @@ type dataPacket struct {
 // TODO(rohrerj) This parses the path twice, optimize
 func Parse(rawPacket []byte) (*dataPacket, error) {
 	proc := dataPacket{
-		rawPacket:  rawPacket,
+		rawPacket:  make([]byte, len(rawPacket)),
 		scionLayer: &slayers.SCION{},
 	}
+	copy(proc.rawPacket, rawPacket)
 	var err error
-	if err := proc.scionLayer.DecodeFromBytes(rawPacket, gopacket.NilDecodeFeedback); err != nil {
+	if err := proc.scionLayer.DecodeFromBytes(proc.rawPacket, gopacket.NilDecodeFeedback); err != nil {
 		return nil, err
 	}
 	var ok bool

@@ -371,8 +371,8 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 					dataPacketInInvalidPromCounter.Add(1)
 					continue
 				}
-				if pkt.N == bufSize && int(d.scionLayer.PayloadLen) != len(d.scionLayer.Payload) {
-					// Packet larger than buffer, drop it
+				if int(d.scionLayer.PayloadLen) != len(d.scionLayer.Payload) || d.scionLayer.PayloadLen != d.colibriPath.InfoField.OrigPayLen {
+					// Packet too large or inconsistent payload size.
 					continue
 				}
 				d.pktArrivalTime = time.Now()
@@ -448,12 +448,10 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 			}
 
 			writeMsgs[0].Buffers[0] = d.rawPacket
-			writeMsgs[0].Addr = borderRouterConn.LocalAddr()
 
 			borderRouterConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
 			workerPacketOutTotalPromCounter.Add(1)
-			log.Debug("Worker forwarded packet", "workerId", workerId,
-				"border router", borderRouterConn.LocalAddr().String())
+			log.Debug("Worker forwarded packet", "workerId", workerId)
 		case task := <-chres: // Reservation update received
 			if task == nil {
 				return nil
