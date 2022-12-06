@@ -47,12 +47,20 @@ func (p *Processor) CreateDataChannels(numberWorkers int, maxQueueSizePerWorker 
 	return p.dataChannels
 }
 
-func (p *Processor) CreateControlChannels(numberWorkers int, maxQueueSizePerWorker int) []chan storage.Task {
-	p.controlChannels = make([]chan storage.Task, numberWorkers)
+func (p *Processor) CreateControlUpdateChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *storage.UpdateTask {
+	p.controlUpdateChannels = make([]chan *storage.UpdateTask, numberWorkers)
 	for i := 0; i < numberWorkers; i++ {
-		p.controlChannels[i] = make(chan storage.Task, maxQueueSizePerWorker)
+		p.controlUpdateChannels[i] = make(chan *storage.UpdateTask, maxQueueSizePerWorker)
 	}
-	return p.controlChannels
+	return p.controlUpdateChannels
+}
+
+func (p *Processor) CreateControlDeletionChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *storage.DeletionTask {
+	p.controlDeletionChannels = make([]chan *storage.DeletionTask, numberWorkers)
+	for i := 0; i < numberWorkers; i++ {
+		p.controlDeletionChannels[i] = make(chan *storage.DeletionTask, maxQueueSizePerWorker)
+	}
+	return p.controlDeletionChannels
 }
 
 func InitializeMetrics() *ColigateMetrics {

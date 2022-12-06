@@ -26,7 +26,7 @@ import (
 )
 
 type Coligate struct {
-	ReservationChannels          []chan storage.Task
+	ReservationChannels          []chan *storage.UpdateTask
 	CleanupChannel               chan *storage.UpdateTask
 	UpdateSigmasTotalPromCounter libmetrics.Counter
 	FindWorker                   func([]byte) uint32

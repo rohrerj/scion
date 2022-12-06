@@ -45,14 +45,15 @@ import (
 // TODO(rohrerj) Add Unit tests
 
 type Processor struct {
-	dataChannels    []chan *dataPacket
-	controlChannels []chan storage.Task
-	cleanupChannel  chan *storage.UpdateTask
-	borderRouters   map[uint16]*ipv4.PacketConn
-	saltHasher      common.SaltHasher
-	exit            bool
-	metrics         *ColigateMetrics
-	numWorkers      int
+	dataChannels            []chan *dataPacket
+	controlUpdateChannels   []chan *storage.UpdateTask
+	controlDeletionChannels []chan *storage.DeletionTask
+	cleanupChannel          chan *storage.UpdateTask
+	borderRouters           map[uint16]*ipv4.PacketConn
+	saltHasher              common.SaltHasher
+	exit                    bool
+	metrics                 *ColigateMetrics
+	numWorkers              int
 }
 
 // BufSize is the maximum size of a datapacket including all the headers.
@@ -70,8 +71,11 @@ func (c *Processor) shutdown() {
 	for i := 0; i < len(c.dataChannels); i++ {
 		c.dataChannels[i] <- nil
 	}
-	for i := 0; i < len(c.controlChannels); i++ {
-		c.controlChannels[i] <- nil
+	for i := 0; i < len(c.controlUpdateChannels); i++ {
+		c.controlUpdateChannels[i] <- nil
+	}
+	for i := 0; i < len(c.controlDeletionChannels); i++ {
+		c.controlDeletionChannels[i] <- nil
 	}
 }
 
@@ -114,13 +118,14 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	}
 
 	p := Processor{
-		borderRouters:   borderRouters,
-		cleanupChannel:  make(chan *storage.UpdateTask, 1000), // TODO(rohrerj) check channel capacity
-		dataChannels:    make([]chan *dataPacket, config.NumWorkers),
-		controlChannels: make([]chan storage.Task, config.NumWorkers),
-		saltHasher:      common.NewFnv1aHasher(salt),
-		metrics:         initializeMetrics(metrics),
-		numWorkers:      config.NumWorkers,
+		borderRouters:           borderRouters,
+		cleanupChannel:          make(chan *storage.UpdateTask, 1000), // TODO(rohrerj) check channel capacity
+		dataChannels:            make([]chan *dataPacket, config.NumWorkers),
+		controlUpdateChannels:   make([]chan *storage.UpdateTask, config.NumWorkers),
+		controlDeletionChannels: make([]chan *storage.DeletionTask, config.NumWorkers),
+		saltHasher:              common.NewFnv1aHasher(salt),
+		metrics:                 initializeMetrics(metrics),
+		numWorkers:              config.NumWorkers,
 	}
 
 	cleanup.Add(func() error {
@@ -131,8 +136,9 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	// Creates all the channels and starts the go routines
 	for i := 0; i < p.numWorkers; i++ {
 		p.dataChannels[i] = make(chan *dataPacket, config.MaxQueueSizePerWorker)
-		p.controlChannels[i] = make(chan storage.Task,
+		p.controlUpdateChannels[i] = make(chan *storage.UpdateTask,
 			config.MaxQueueSizePerWorker)
+		p.controlDeletionChannels[i] = make(chan *storage.DeletionTask, 1000) //TODO(rohrerj) Check size
 		func(i int) {
 			g.Go(func() error {
 				defer log.HandlePanic()
@@ -248,7 +254,7 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 		// Registers the reservation for deletion once it expires
 		p.cleanupChannel <- task
 
-		p.controlChannels[p.getWorkerForResId([]byte(task.Reservation.Id))] <- task
+		p.controlUpdateChannels[p.getWorkerForResId([]byte(task.Reservation.Id))] <- task
 	}
 	log.Info("Successfully loaded active reservation indices from colibri service")
 	return nil
@@ -299,7 +305,7 @@ func (p *Processor) initCleanupRoutine() {
 			if time.Until(val) < 0 {
 				p.metrics.CleanupReservationDeleted.Add(1)
 
-				p.controlChannels[p.getWorkerForResId([]byte(resId))] <- storage.NewDeletionTask(resId)
+				p.controlDeletionChannels[p.getWorkerForResId([]byte(resId))] <- storage.NewDeletionTask(resId)
 				delete(reservationExpirations, resId)
 			}
 		}
@@ -318,7 +324,7 @@ func (p *Processor) initControlPlane(config *config.ColigateConfig, cleanup *app
 
 	s := grpc.NewServer(libgrpc.UnaryServerInterceptor())
 	coligate := &cggrpc.Coligate{
-		ReservationChannels:          p.controlChannels,
+		ReservationChannels:          p.controlUpdateChannels,
 		CleanupChannel:               p.cleanupChannel,
 		UpdateSigmasTotalPromCounter: p.metrics.UpdateSigmasTotal,
 		FindWorker:                   p.getWorkerForResId,
@@ -420,12 +426,26 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 	workerReservationUpdateTotalPromCounter := p.metrics.WorkerReservationUpdateTotal
 
 	writeMsgs := make([]ipv4.Message, 1)
-	writeMsgs[0].Buffers = [][]byte{make([]byte, bufSize)}
+	writeMsgs[0].Buffers = [][]byte{make([]byte, bufSize)} // TODO(rohrerj) Check for optimizations
 
 	ch := p.dataChannels[workerId]
-	chres := p.controlChannels[workerId]
+	chres := p.controlUpdateChannels[workerId]
+	chresD := p.controlDeletionChannels[workerId]
 
 	for !p.exit {
+		// Check whether new reservation indices have to be processed. This has priority above the data plane packets.
+		select {
+		case task := <-chres:
+			if task == nil {
+				return nil
+			}
+			log.Debug("Worker received reservation update", "workerId", workerId)
+			workerReservationUpdateTotalPromCounter.Add(1)
+			task.Execute(worker.Storage)
+			continue
+		default:
+		}
+
 		select {
 		case d := <-ch: // Data plane packet received
 			if d == nil { //If d is nil it is meant to be a exit sequence
@@ -452,11 +472,11 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 			borderRouterConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
 			workerPacketOutTotalPromCounter.Add(1)
 			log.Debug("Worker forwarded packet", "workerId", workerId)
-		case task := <-chres: // Reservation update received
+		case task := <-chresD: // Reservation deletion received.
 			if task == nil {
 				return nil
 			}
-			log.Debug("Worker received reservation update", "workerId", workerId)
+			log.Debug("Worker received reservation deletion", "workerId", workerId)
 			workerReservationUpdateTotalPromCounter.Add(1)
 			task.Execute(worker.Storage)
 		}

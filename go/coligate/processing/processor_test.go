@@ -52,7 +52,7 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	c := &proc.Processor{}
 	c.SetMetrics(coligateMetrics)
 	cleanupChannel := c.CreateCleanupChannel(L)
-	reservationChannels := c.CreateControlChannels(1, L)
+	reservationDeletionChannels := c.CreateControlDeletionChannels(1, L)
 	c.SetNumWorkers(1)
 	now := time.Now()
 
@@ -70,10 +70,10 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 			HighestValidity: now.Add(1 * time.Millisecond),
 		}
 		select {
-		case task := <-reservationChannels[0]:
+		case task := <-reservationDeletionChannels[0]:
 			assert.NotNil(t, task)
 			assert.IsType(t, &storage.DeletionTask{}, task)
-			assert.Equal(t, "A"+fmt.Sprint(i), task.(*storage.DeletionTask).ResId)
+			assert.Equal(t, "A"+fmt.Sprint(i), task.ResId)
 		case <-time.After(1 * time.Second):
 			assert.Fail(t, "reservation not deleted")
 		}
@@ -83,7 +83,7 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	assert.NoError(t, ErrGroupWait(errGroup, 1*time.Second))
 
 	select {
-	case task := <-reservationChannels[0]:
+	case task := <-reservationDeletionChannels[0]:
 		assert.Nil(t, task)
 	default:
 	}
@@ -97,7 +97,7 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 	c := &proc.Processor{}
 	c.SetMetrics(coligateMetrics)
 	cleanupChannel := c.CreateCleanupChannel(L)
-	reservationChannels := c.CreateControlChannels(1, L)
+	reservationDeletionChannels := c.CreateControlDeletionChannels(1, L)
 	c.SetNumWorkers(1)
 
 	c.SetHasher([]byte("salt"))
@@ -119,7 +119,7 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 	reportedReservations := 0
 	for !exit {
 		select {
-		case <-reservationChannels[0]:
+		case <-reservationDeletionChannels[0]:
 			reportedReservations++
 		case <-time.After(20 * time.Millisecond):
 			exit = true
@@ -138,7 +138,7 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	c := &proc.Processor{}
 	c.SetMetrics(coligateMetrics)
 	cleanupChannel := c.CreateCleanupChannel(L)
-	reservationChannels := c.CreateControlChannels(1, L)
+	reservationDeletionChannels := c.CreateControlDeletionChannels(1, L)
 	c.SetNumWorkers(1)
 
 	c.SetHasher([]byte("salt"))
@@ -170,7 +170,7 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	exit := false
 	for !exit {
 		select {
-		case task := <-reservationChannels[0]:
+		case task := <-reservationDeletionChannels[0]:
 			assert.IsType(t, &storage.DeletionTask{}, task)
 			reportedReservations++
 		case <-time.After(40 * time.Millisecond):
