@@ -23,14 +23,13 @@ service ColibriGateway {
 }
 
 message UpdateSigmasRequest {
-    uint64 asid = 1;
     bytes suffix = 2;
     uint32 index = 3;
     uint32 bwcls = 4;
     uint32 rlc = 5;
     uint32 expiration_time = 6;
     repeated HopInterfaces hopInterfaces = 7;
-    repeated bytes macs = 8;
+    repeated bytes sigmas = 8;
     // TODO(justin)
 }
 
