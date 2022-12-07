@@ -451,7 +451,7 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 
 		select {
 		case d := <-ch: // Data plane packet received
-			if d == nil { //If d is nil it is meant to be a exit sequence
+			if d == nil { // If d is nil it is meant to be a exit sequence
 				return nil
 			}
 			log.Debug("Worker received data packet", "workerId", workerId,
@@ -475,6 +475,13 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 			borderRouterConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
 			workerPacketOutTotalPromCounter.Add(1)
 			log.Debug("Worker forwarded packet", "workerId", workerId)
+		case task := <-chres:
+			if task == nil {
+				return nil
+			}
+			log.Debug("Worker received reservation update", "workerId", workerId)
+			workerReservationUpdateTotalPromCounter.Add(1)
+			task.Execute(worker.Storage)
 		case task := <-chresD: // Reservation deletion received.
 			if task == nil {
 				return nil
