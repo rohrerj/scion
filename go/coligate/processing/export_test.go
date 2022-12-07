@@ -18,9 +18,12 @@ import (
 	"time"
 
 	"github.com/scionproto/scion/go/coligate/storage"
+	libaddr "github.com/scionproto/scion/go/lib/addr"
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path/colibri"
 	common "github.com/scionproto/scion/go/pkg/coligate"
+	"github.com/scionproto/scion/go/pkg/coligate/config"
+	"golang.org/x/net/ipv4"
 )
 
 func (p *Processor) InitCleanupRoutine() {
@@ -63,6 +66,11 @@ func (p *Processor) CreateControlDeletionChannels(numberWorkers int, maxQueueSiz
 	return p.controlDeletionChannels
 }
 
+func (p *Processor) WorkerReceiveEntry(config *config.ColigateConfig, workerId uint32,
+	gatewayId uint32, localAS libaddr.AS) error {
+	return p.workerReceiveEntry(config, workerId, gatewayId, localAS)
+}
+
 func InitializeMetrics() *ColigateMetrics {
 	return initializeMetrics(common.NewMetrics())
 }
@@ -75,6 +83,10 @@ func (p *Processor) Shutdown() {
 	p.shutdown()
 }
 
+func (p *Processor) SetBorderRouterConnections(conn map[uint16]*ipv4.PacketConn) {
+	p.borderRouters = conn
+}
+
 type DataPacket struct {
 	PktArrivalTime time.Time
 	ScionLayer     *slayers.SCION
@@ -83,7 +95,7 @@ type DataPacket struct {
 	RawPacket      []byte
 }
 
-func internalParse(proc *DataPacket) *dataPacket {
+func (proc *DataPacket) Parse() *dataPacket {
 	return &dataPacket{
 		pktArrivalTime: proc.PktArrivalTime,
 		scionLayer:     proc.ScionLayer,
@@ -94,15 +106,15 @@ func internalParse(proc *DataPacket) *dataPacket {
 }
 
 func (w *Worker) Validate(proc *DataPacket) error {
-	return w.validate(internalParse(proc))
+	return w.validate(proc.Parse())
 }
 
 func (w *Worker) PerformTrafficMonitoring(proc *DataPacket) error {
-	return w.performTrafficMonitoring(internalParse(proc))
+	return w.performTrafficMonitoring(proc.Parse())
 }
 
 func (w *Worker) Stamp(d *DataPacket) error {
-	return w.stamp(internalParse((d)))
+	return w.stamp(d.Parse())
 }
 
 func (w *Worker) UpdateCounter() {

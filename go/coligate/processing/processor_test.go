@@ -17,14 +17,19 @@ package processing_test
 import (
 	"errors"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/net/ipv4"
 	"golang.org/x/sync/errgroup"
 
 	proc "github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/coligate/storage"
+	"github.com/scionproto/scion/go/lib/addr"
+	"github.com/scionproto/scion/go/lib/slayers"
+	colipath "github.com/scionproto/scion/go/lib/slayers/path/colibri"
 )
 
 func ErrGroupWait(e *errgroup.Group, duration time.Duration) error {
@@ -181,4 +186,127 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	c.Shutdown()
 
 	assert.NoError(t, ErrGroupWait(errGroup, 1*time.Second))
+}
+
+func BenchmarkWorker(b *testing.B) {
+	c := &proc.Processor{}
+	c.SetMetrics(coligateMetrics)
+	updateChannels := c.CreateControlUpdateChannels(1, 1000)
+	c.CreateControlDeletionChannels(1, 1)
+	dataChannels := c.CreateDataChannels(1, 1000)
+	errGroup := &errgroup.Group{}
+	errGroup.Go(func() error {
+		return c.WorkerReceiveEntry(getColigateConfiguration(), 0, 1, addr.MustIAFrom(1, 1).AS())
+	})
+
+	borderRouterConnection := make(map[uint16]*ipv4.PacketConn)
+	borderRouterAddr, err := net.ResolveUDPAddr("udp", "localhost:30000")
+	if err != nil {
+		b.Error(err)
+	}
+	conn, _ := net.DialUDP("udp", nil, borderRouterAddr)
+	borderRouterConnection[uint16(2)] = ipv4.NewPacketConn(conn)
+	c.SetBorderRouterConnections(borderRouterConnection)
+	now := time.Now()
+	updateChannels[0] <- &storage.UpdateTask{
+		Reservation: &storage.Reservation{
+			Id: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+			Indices: map[uint8]*storage.ReservationIndex{
+				1: {
+					Index:    0,
+					Validity: now.Add(12 * time.Second),
+					Sigmas: [][]byte{
+						{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+						{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1},
+						{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2},
+						{4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3},
+						{5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4},
+						{6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5},
+					},
+					BwCls: 60,
+				},
+			},
+			Hops: []storage.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
+				{
+					IngressId: 3,
+					EgressId:  4,
+				},
+				{
+					IngressId: 5,
+					EgressId:  6,
+				},
+				{
+					IngressId: 7,
+					EgressId:  8,
+				},
+				{
+					IngressId: 9,
+					EgressId:  10,
+				},
+				{
+					IngressId: 11,
+					EgressId:  12,
+				},
+			},
+		},
+	}
+	defaultPkt := &proc.DataPacket{
+		PktArrivalTime: time.Now(),
+		ScionLayer: &slayers.SCION{
+			PathType: 4,
+			SrcIA:    addr.MustIAFrom(1, 1),
+		},
+		ColibriPath: &colipath.ColibriPath{
+			InfoField: &colipath.InfoField{
+				Ver:         1,
+				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+				BwCls:       60,
+				ExpTick:     uint32(now.Add(12*time.Second).Unix() / 4),
+			},
+			HopFields: []*colipath.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 3,
+					EgressId:  4,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 5,
+					EgressId:  6,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 7,
+					EgressId:  8,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 9,
+					EgressId:  10,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 11,
+					EgressId:  12,
+					Mac:       make([]byte, 4),
+				},
+			},
+		},
+		RawPacket: make([]byte, 400),
+	}
+	time.Sleep(1 * time.Millisecond)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		dataChannels[0] <- defaultPkt.Parse()
+	}
+	dataChannels[0] <- nil
+	errGroup.Wait()
 }
