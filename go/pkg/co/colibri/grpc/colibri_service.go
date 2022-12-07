@@ -33,14 +33,18 @@ import (
 	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/serrors"
 	slayerspath "github.com/scionproto/scion/go/lib/slayers/path"
+	colpath "github.com/scionproto/scion/go/lib/slayers/path/colibri"
 	"github.com/scionproto/scion/go/lib/slayers/path/empty"
 	"github.com/scionproto/scion/go/lib/snet"
 	"github.com/scionproto/scion/go/lib/util"
+	libgrpc "github.com/scionproto/scion/go/pkg/grpc"
 	colpb "github.com/scionproto/scion/go/pkg/proto/colibri"
+	gtepb "github.com/scionproto/scion/go/pkg/proto/coligate"
 )
 
 type ColibriService struct {
-	Store reservationstorage.Store
+	Store     reservationstorage.Store
+	Coligates []*net.TCPAddr // TODO(justin) maybe a map egressID -> coligate would make more sense?
 }
 
 var _ colpb.ColibriServiceServer = (*ColibriService)(nil)
@@ -308,9 +312,11 @@ func (s *ColibriService) SetupReservation(ctx context.Context, msg *colpb.SetupR
 			},
 		}, nil
 	}
+
 	pbMsg := &colpb.SetupReservationResponse{
 		Authenticators: &colpb.Authenticators{},
 	}
+
 	switch res := res.(type) {
 	case *e2e.SetupResponseFailure:
 		pbMsg.Authenticators.Macs = res.Authenticators
@@ -330,6 +336,10 @@ func (s *ColibriService) SetupReservation(ctx context.Context, msg *colpb.SetupR
 			return nil, serrors.WrapStr("decoding token in colibri service", err)
 		}
 		path := e2e.DeriveColibriPath(&req.ID, token)
+
+		// contact the colibri gateway to update the sigmas:
+		s.updateSigmas(ctx, path, token)
+
 		egressId := ""
 		if len(path.HopFields) > 0 {
 			egressId = fmt.Sprintf("%d", path.HopFields[0].EgressId)
@@ -424,6 +434,54 @@ func (s *ColibriService) ActiveIndices(ctx context.Context, req *colpb.ActiveInd
 	}
 
 	return s.Store.GetActiveIndicesAtSource(ctx, req)
+}
+
+func (s *ColibriService) updateSigmas(ctx context.Context, colPath *colpath.ColibriPath,
+	token *reservation.Token) {
+
+	inf := colPath.InfoField
+	hopFields := make([]*gtepb.HopInterfaces, len(colPath.HopFields))
+	sigmas := make([][]byte, len(hopFields))
+	for i, hf := range colPath.HopFields {
+		hopFields[i] = &gtepb.HopInterfaces{
+			Ingressid: uint32(hf.IngressId),
+			Egressid:  uint32(hf.EgressId),
+		}
+		sigmas[i] = append(hf.Mac[:0:0], hf.Mac...)
+	}
+	req := &gtepb.UpdateSigmasRequest{
+		Suffix:         append(inf.ResIdSuffix[:0:0], inf.ResIdSuffix...),
+		Index:          uint32(token.Idx),
+		Bwcls:          uint32(token.BWCls),
+		Rlc:            uint32(token.RLC),
+		ExpirationTime: util.TimeToSecs(token.ExpirationTick.ToTime()),
+		HopInterfaces:  hopFields,
+		Sigmas:         sigmas,
+	}
+
+	// Send the request to all colibri gateways
+	for _, address := range s.Coligates {
+		// Spawn a new go routine for each colibri gateway
+		go func(address net.Addr) {
+			defer log.HandlePanic()
+
+			var connDialer libgrpc.SimpleDialer
+			conn, err := connDialer.Dial(ctx, address)
+			if err != nil {
+				log.Info("error dialing the colibri gateway",
+					"address", address)
+				return
+			}
+			client := gtepb.NewColibriGatewayClient(conn)
+			res, err := client.UpdateSigmas(ctx, req)
+			if err != nil {
+				log.Info("error updating sigmas at the colibri gateway",
+					"address", address, "err", err)
+				return
+			}
+			_ = res // TODO(justin) define what the response will be. Just empty?
+		}(address)
+	}
 }
 
 // checkLocalCaller prevents the service from doing anything if the caller is not from the local AS.
