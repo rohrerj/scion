@@ -26,6 +26,7 @@ import (
 )
 
 type Coligate struct {
+	LocalIA                      libaddr.IA
 	ReservationChannels          []chan *storage.UpdateTask
 	CleanupChannel               chan *storage.UpdateTask
 	UpdateSigmasTotalPromCounter libmetrics.Counter
@@ -34,8 +35,10 @@ type Coligate struct {
 
 var _ cgpb.ColibriGatewayServer = (*Coligate)(nil)
 
-func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasRequest) (*cgpb.UpdateSigmasResponse, error) {
-	id, err := libtypes.NewID(libaddr.AS(msg.Asid), msg.Suffix)
+func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasRequest) (
+	*cgpb.UpdateSigmasResponse, error) {
+
+	id, err := libtypes.NewID(s.LocalIA.AS(), msg.Suffix)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +53,7 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 					Index:    uint8(msg.Index),
 					Validity: util.SecsToTime(msg.ExpirationTime),
 					BwCls:    uint8(msg.Bwcls),
-					Sigmas:   msg.Macs,
+					Sigmas:   msg.Sigmas,
 				},
 			},
 			Hops: make([]storage.HopField, len(msg.HopInterfaces)),

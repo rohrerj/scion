@@ -45,6 +45,7 @@ import (
 // TODO(rohrerj) Add Unit tests
 
 type Processor struct {
+	localIA                 libaddr.IA
 	dataChannels            []chan *dataPacket
 	controlUpdateChannels   []chan *storage.UpdateTask
 	controlDeletionChannels []chan *storage.DeletionTask
@@ -118,6 +119,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	}
 
 	p := Processor{
+		localIA:                 topo.IA(),
 		borderRouters:           borderRouters,
 		cleanupChannel:          make(chan *storage.UpdateTask, 1000), // TODO(rohrerj) check channel capacity
 		dataChannels:            make([]chan *dataPacket, config.NumWorkers),
@@ -324,6 +326,7 @@ func (p *Processor) initControlPlane(config *config.ColigateConfig, cleanup *app
 
 	s := grpc.NewServer(libgrpc.UnaryServerInterceptor())
 	coligate := &cggrpc.Coligate{
+		LocalIA:                      p.localIA,
 		ReservationChannels:          p.controlUpdateChannels,
 		CleanupChannel:               p.cleanupChannel,
 		UpdateSigmasTotalPromCounter: p.metrics.UpdateSigmasTotal,
