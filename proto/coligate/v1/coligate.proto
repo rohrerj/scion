@@ -1,0 +1,54 @@
+// Copyright 2022 ETH Zurich
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+option go_package = "github.com/scionproto/scion/go/pkg/proto/coligate";
+
+package proto.coligate.v1;
+
+service ColibriGatewayService {
+    // UpdateSigmas is used by the colibri service to send the sigmas
+    // to the colibri gateway.
+    rpc UpdateSigmas(UpdateSigmasRequest) returns (UpdateSigmasResponse) {}
+}
+
+message UpdateSigmasRequest {
+    // The reservation id suffix.
+    bytes suffix = 1;
+    // The reservation index.
+    uint32 index = 2;
+    // The bandwidth class of the reservation.
+    uint32 bwcls = 3;
+    // The latency class of the reservation.
+    uint32 rlc = 4;
+    // The expiration time of the reservation index.
+    uint32 expiration_time = 5;
+    // The hop fields of the reservation.
+    repeated HopInterface hop_interfaces = 6;
+    // The sigmas of the reservation index.
+    repeated bytes sigmas = 7;
+    // TODO(justin)
+}
+
+message HopInterface {
+    // The ingress id of the hop field.
+    uint32 ingressid = 1;
+    // The egress id of the hop field.
+    uint32 egressid = 2;
+}
+
+message UpdateSigmasResponse {
+    // TODO(justin)
+}

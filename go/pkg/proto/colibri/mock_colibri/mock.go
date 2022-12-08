@@ -56,6 +56,26 @@ func (mr *MockColibriServiceClientMockRecorder) ActivateSegmentIndex(arg0, arg1 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ActivateSegmentIndex", reflect.TypeOf((*MockColibriServiceClient)(nil).ActivateSegmentIndex), varargs...)
 }
 
+// ActiveIndices mocks base method.
+func (m *MockColibriServiceClient) ActiveIndices(arg0 context.Context, arg1 *colibri.ActiveIndicesRequest, arg2 ...grpc.CallOption) (*colibri.ActiveIndicesResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{arg0, arg1}
+	for _, a := range arg2 {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "ActiveIndices", varargs...)
+	ret0, _ := ret[0].(*colibri.ActiveIndicesResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ActiveIndices indicates an expected call of ActiveIndices.
+func (mr *MockColibriServiceClientMockRecorder) ActiveIndices(arg0, arg1 interface{}, arg2 ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{arg0, arg1}, arg2...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ActiveIndices", reflect.TypeOf((*MockColibriServiceClient)(nil).ActiveIndices), varargs...)
+}
+
 // AddAdmissionEntry mocks base method.
 func (m *MockColibriServiceClient) AddAdmissionEntry(arg0 context.Context, arg1 *colibri.AddAdmissionEntryRequest, arg2 ...grpc.CallOption) (*colibri.AddAdmissionEntryResponse, error) {
 	m.ctrl.T.Helper()
@@ -312,6 +332,21 @@ func (m *MockColibriServiceServer) ActivateSegmentIndex(arg0 context.Context, ar
 func (mr *MockColibriServiceServerMockRecorder) ActivateSegmentIndex(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ActivateSegmentIndex", reflect.TypeOf((*MockColibriServiceServer)(nil).ActivateSegmentIndex), arg0, arg1)
+}
+
+// ActiveIndices mocks base method.
+func (m *MockColibriServiceServer) ActiveIndices(arg0 context.Context, arg1 *colibri.ActiveIndicesRequest) (*colibri.ActiveIndicesResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ActiveIndices", arg0, arg1)
+	ret0, _ := ret[0].(*colibri.ActiveIndicesResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ActiveIndices indicates an expected call of ActiveIndices.
+func (mr *MockColibriServiceServerMockRecorder) ActiveIndices(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ActiveIndices", reflect.TypeOf((*MockColibriServiceServer)(nil).ActiveIndices), arg0, arg1)
 }
 
 // AddAdmissionEntry mocks base method.

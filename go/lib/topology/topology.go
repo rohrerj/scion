@@ -69,6 +69,7 @@ type (
 
 		CS                        IDAddrMap
 		CO                        IDAddrMap
+		COLGATE                   map[string]*net.UDPAddr
 		DS                        IDAddrMap
 		HiddenSegmentLookup       IDAddrMap
 		HiddenSegmentRegistration IDAddrMap
@@ -143,6 +144,7 @@ func NewRWTopology() *RWTopology {
 		BR:                        make(map[string]BRInfo),
 		CS:                        make(IDAddrMap),
 		CO:                        make(IDAddrMap),
+		COLGATE:                   make(map[string]*net.UDPAddr),
 		DS:                        make(IDAddrMap),
 		HiddenSegmentLookup:       make(IDAddrMap),
 		HiddenSegmentRegistration: make(IDAddrMap),
@@ -298,6 +300,10 @@ func (t *RWTopology) populateServices(raw *jsontopo.Topology) error {
 	if err != nil {
 		return serrors.WrapStr("unable to extract CO address", err)
 	}
+	t.COLGATE, err = coligateMapFromRaw(raw.ColibriGateway)
+	if err != nil {
+		return serrors.WrapStr("unable to extract COLGATE address", err)
+	}
 	t.SIG, err = gatewayMapFromRaw(raw.SIG)
 	if err != nil {
 		return serrors.WrapStr("unable to extract SIG address", err)
@@ -392,11 +398,23 @@ func (t *RWTopology) Copy() *RWTopology {
 
 		CS:                        t.CS.copy(),
 		CO:                        t.CO.copy(),
+		COLGATE:                   copyColigateMap(t.COLGATE),
 		DS:                        t.DS.copy(),
 		SIG:                       copySIGMap(t.SIG),
 		HiddenSegmentLookup:       t.HiddenSegmentLookup.copy(),
 		HiddenSegmentRegistration: t.HiddenSegmentRegistration.copy(),
 	}
+}
+
+func copyColigateMap(m map[string]*net.UDPAddr) map[string]*net.UDPAddr {
+	if m == nil {
+		return nil
+	}
+	ret := make(map[string]*net.UDPAddr)
+	for k, v := range m {
+		ret[k] = copyUDPAddr(v)
+	}
+	return ret
 }
 
 func copySIGMap(m map[string]GatewayInfo) map[string]GatewayInfo {
@@ -471,6 +489,19 @@ func (svc *svcInfo) getAllTopoAddrs() []TopoAddr {
 		topoAddrs = append(topoAddrs, topoAddr)
 	}
 	return topoAddrs
+}
+
+func coligateMapFromRaw(ras map[string]*jsontopo.ServerInfo) (map[string]*net.UDPAddr, error) {
+	coligateMap := make(map[string]*net.UDPAddr)
+	for name, svc := range ras {
+		gatewayAddr, err := rawAddrToUDPAddr(svc.Addr)
+		if err != nil {
+			return nil, serrors.WrapStr("could not parse address", err,
+				"address", svc.Addr, "process_name", name)
+		}
+		coligateMap[name] = gatewayAddr
+	}
+	return coligateMap, nil
 }
 
 func svcMapFromRaw(ras map[string]*jsontopo.ServerInfo) (IDAddrMap, error) {

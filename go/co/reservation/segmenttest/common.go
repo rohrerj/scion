@@ -27,12 +27,6 @@ import (
 	"github.com/scionproto/scion/go/lib/xtest"
 )
 
-func NewReservation() *segment.Reservation {
-	return NewRsv(
-		WithID("ff00:0:1", "beefcafe"),
-		WithPath("1-ff00:0:1", 1, 1, "1-ff00:0:2"))
-}
-
 // ReservationMod allows the configuration of reservations via function calls, aka
 // functional options.
 // As this signature is used only in tests, it doesn't return an error: it assumes that
@@ -60,16 +54,6 @@ func NewRsvs(n int, mods ...ReservationMod) []*segment.Reservation {
 		rsvs[i] = NewRsv(mods...)
 	}
 	return rsvs
-}
-
-// ModRsvs modifies existing reservations  via functional options.
-func ModRsvs(rsvs []*segment.Reservation, mods ...ReservationMod) {
-	for i, rsv := range rsvs {
-		for _, mod := range mods {
-			rsv = mod(rsv)
-		}
-		rsvs[i] = rsv
-	}
 }
 
 // WithID sets the ID specified with as and suffix to the reservation.
@@ -182,6 +166,8 @@ func AddIndex(idx int, mods ...IndexMod) ReservationMod {
 			panic(err)
 		}
 		index := rsv.Index(idx)
+		// set the token's path type to something valid
+		index.Token.PathType = reservation.CorePath
 		for _, mod := range mods {
 			mod(index)
 		}
@@ -214,6 +200,9 @@ func WithBW(min, max, alloc int) IndexMod {
 		}
 		if alloc > 0 {
 			index.AllocBW = reservation.BWCls(alloc)
+			if index.Token != nil {
+				index.Token.BWCls = reservation.BWCls(alloc)
+			}
 		}
 	}
 }

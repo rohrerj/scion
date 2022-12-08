@@ -382,6 +382,42 @@ func (s *Store) InitTearDownSegmentReservation(ctx context.Context, req *base.Re
 	return s.TearDownSegmentReservation(ctx, req, rawPath)
 }
 
+func (s *Store) GetActiveIndicesAtSource(ctx context.Context, req *colpb.ActiveIndicesRequest,
+) (*colpb.ActiveIndicesResponse, error) {
+
+	log.Info("colibri gateway trying to synchronize with service")
+	rsvs, err := s.db.GetActiveEERs(ctx)
+	if err != nil {
+		log.Info("error obtaining active segment reservations ")
+	}
+	reservations := make([]*colpb.ActiveIndicesResponse_Reservation, 0)
+	for _, r := range rsvs {
+		reservationIndices := make([]*colpb.ActiveIndicesResponse_ReservationIndex, 0)
+		for _, idx := range r.Indices {
+			sigmas := make([][]byte, len(idx.Token.HopFields))
+			for i, hf := range idx.Token.HopFields {
+				sigmas[i] = make([]byte, len(hf.Mac))
+				copy(sigmas[i], hf.Mac[:])
+			}
+			reservationIndices = append(reservationIndices, &colpb.ActiveIndicesResponse_ReservationIndex{
+				Index:          uint32(idx.Idx),
+				ExpirationTime: util.TimeToSecs(idx.Expiration),
+				AllocBw:        uint32(idx.AllocBW),
+				Sigmas:         sigmas,
+			})
+		}
+		reservations = append(reservations, &colpb.ActiveIndicesResponse_Reservation{
+			Id:      translate.PBufID(&r.ID),
+			Egress:  uint32(r.Steps[r.CurrentStep].Egress),
+			Indices: reservationIndices,
+		})
+	}
+	res := &colpb.ActiveIndicesResponse{
+		Reservations: reservations,
+	}
+	return res, nil
+}
+
 func (s *Store) ListReservations(ctx context.Context, dstIA addr.IA,
 	pathType reservation.PathType) ([]*colibri.ReservationLooks, error) {
 	rsvs, err := s.db.GetSegmentRsvsFromSrcDstIA(ctx, s.localIA, dstIA, pathType)

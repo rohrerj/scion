@@ -73,6 +73,10 @@ type Topology interface {
 	//
 	// XXX(scrye): Return value is a shallow copy.
 	BR(name string) (BRInfo, bool)
+
+	ColibriGateway(name string) (*net.UDPAddr, error)
+	ColibriGateways() ([]*net.UDPAddr, error)
+
 	// IFInfoMap returns the mapping between interface IDs an internal addresses.
 	//
 	// FIXME(scrye): Simplify return type and make it topology format agnostic.
@@ -220,6 +224,25 @@ func (t *topologyS) BR(name string) (BRInfo, bool) {
 	return br, ok
 }
 
+func (t *topologyS) ColibriGateway(name string) (*net.UDPAddr, error) {
+	coligateInfo, ok := t.Topology.COLGATE[name]
+	if !ok {
+		return coligateInfo, serrors.New("Colibri Gateway not found", "name", name)
+	}
+	return coligateInfo, nil
+}
+
+func (t *topologyS) ColibriGateways() ([]*net.UDPAddr, error) {
+	v := make([]*net.UDPAddr, 0, len(t.Topology.COLGATE))
+	if len(t.Topology.COLGATE) == 0 {
+		return v, serrors.New("No Colibri Gateway found")
+	}
+	for _, addr := range t.Topology.COLGATE {
+		v = append(v, addr)
+	}
+	return v, nil
+}
+
 func (t *topologyS) PublicAddress(svc addr.HostSVC, name string) *net.UDPAddr {
 	topoAddr := t.topoAddress(svc, name)
 	if topoAddr == nil {
@@ -237,6 +260,9 @@ func (t *topologyS) topoAddress(svc addr.HostSVC, name string) *TopoAddr {
 		addresses = t.Topology.CS
 	case addr.SvcCOL:
 		addresses = t.Topology.CO
+	case addr.SvcCOLGATE:
+		a, _ := t.Topology.getSvcInfo(ColibriGateway)
+		addresses = a.idTopoAddrMap
 	}
 	if addresses == nil {
 		return nil
@@ -296,7 +322,7 @@ func (t *topologyS) UnderlayAnycast(svc addr.HostSVC) (*net.UDPAddr, error) {
 
 func supportedSVC(svc addr.HostSVC) bool {
 	b := svc.Base()
-	return b == addr.SvcDS || b == addr.SvcCS || b == addr.SvcCOL
+	return b == addr.SvcDS || b == addr.SvcCS || b == addr.SvcCOL || b == addr.SvcCOLGATE
 }
 
 func (t *topologyS) UnderlayMulticast(svc addr.HostSVC) ([]*net.UDPAddr, error) {
@@ -355,6 +381,8 @@ func toServiceType(svc addr.HostSVC) (ServiceType, error) {
 		return Control, nil
 	case addr.SvcCOL:
 		return Colibri, nil
+	case addr.SvcCOLGATE:
+		return ColibriGateway, nil
 	default:
 		return 0, serrors.WithCtx(addr.ErrUnsupportedSVCAddress, "svc", svc)
 	}
@@ -377,6 +405,9 @@ func (t *topologyS) SVCNames(svc addr.HostSVC) ServiceNames {
 		m = t.Topology.CS
 	case addr.SvcCOL:
 		m = t.Topology.CO
+	case addr.SvcCOLGATE:
+		a, _ := t.Topology.getSvcInfo(ColibriGateway)
+		m = a.idTopoAddrMap
 	}
 
 	var names ServiceNames
