@@ -440,10 +440,10 @@ func (s *ColibriService) updateSigmas(ctx context.Context, colPath *colpath.Coli
 	token *reservation.Token) {
 
 	inf := colPath.InfoField
-	hopFields := make([]*gtepb.HopInterfaces, len(colPath.HopFields))
+	hopFields := make([]*gtepb.HopInterface, len(colPath.HopFields))
 	sigmas := make([][]byte, len(hopFields))
 	for i, hf := range colPath.HopFields {
-		hopFields[i] = &gtepb.HopInterfaces{
+		hopFields[i] = &gtepb.HopInterface{
 			Ingressid: uint32(hf.IngressId),
 			Egressid:  uint32(hf.EgressId),
 		}
@@ -472,7 +472,7 @@ func (s *ColibriService) updateSigmas(ctx context.Context, colPath *colpath.Coli
 					"address", address)
 				return
 			}
-			client := gtepb.NewColibriGatewayClient(conn)
+			client := gtepb.NewColibriGatewayServiceClient(conn)
 			res, err := client.UpdateSigmas(ctx, req)
 			if err != nil {
 				log.Info("error updating sigmas at the colibri gateway",

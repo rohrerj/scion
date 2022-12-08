@@ -6,6 +6,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/scionproto/scion/go/lib/env"
 	"github.com/scionproto/scion/go/lib/metrics"
 	"github.com/scionproto/scion/go/lib/prom"
@@ -56,7 +57,8 @@ func NewMetrics() *Metrics {
 		DataPacketInInvalid: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "coligate_data_packet_in_invalid",
-				Help: "Total number of data packets received by the colibri gateway whose headers cannot be parsed correctly.",
+				Help: `"Total number of data packets received by the colibri gateway 
+				whose headers cannot be parsed correctly."`,
 			},
 			[]string{},
 		),
@@ -105,7 +107,8 @@ func NewMetrics() *Metrics {
 		CleanupReservationUpdateNew: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "coligate_cleanup_reservation_update_new",
-				Help: "Total number of reservation updates registered in the cleanup routine that extend the validity of a reservation.",
+				Help: `"Total number of reservation updates registered in the cleanup 
+				routine that extend the validity of a reservation."`,
 			},
 			[]string{},
 		),

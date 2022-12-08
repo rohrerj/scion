@@ -18,23 +18,34 @@ option go_package = "github.com/scionproto/scion/go/pkg/proto/coligate";
 
 package proto.coligate.v1;
 
-service ColibriGateway {
+service ColibriGatewayService {
+    // UpdateSigmas is used by the colibri service to send the sigmas
+    // to the colibri gateway.
     rpc UpdateSigmas(UpdateSigmasRequest) returns (UpdateSigmasResponse) {}
 }
 
 message UpdateSigmasRequest {
-    bytes suffix = 2;
-    uint32 index = 3;
-    uint32 bwcls = 4;
-    uint32 rlc = 5;
-    uint32 expiration_time = 6;
-    repeated HopInterfaces hopInterfaces = 7;
-    repeated bytes sigmas = 8;
+    // The reservation id suffix.
+    bytes suffix = 1;
+    // The reservation index.
+    uint32 index = 2;
+    // The bandwidth class of the reservation.
+    uint32 bwcls = 3;
+    // The latency class of the reservation.
+    uint32 rlc = 4;
+    // The expiration time of the reservation index.
+    uint32 expiration_time = 5;
+    // The hop fields of the reservation.
+    repeated HopInterface hop_interfaces = 6;
+    // The sigmas of the reservation index.
+    repeated bytes sigmas = 7;
     // TODO(justin)
 }
 
-message HopInterfaces {
+message HopInterface {
+    // The ingress id of the hop field.
     uint32 ingressid = 1;
+    // The egress id of the hop field.
     uint32 egressid = 2;
 }
 

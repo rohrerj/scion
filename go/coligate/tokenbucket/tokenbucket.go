@@ -46,7 +46,8 @@ func (t *TokenBucket) SetBurstSize(burstSize float64) {
 	t.CBS = burstSize
 }
 
-// Apply calculates the current available tokens and checks whether there are enough tokens available. The success is indicated by a bool.
+// Apply calculates the current available tokens and checks whether there
+// are enough tokens available. The success is indicated by a bool.
 func (t *TokenBucket) Apply(size int, now time.Time) bool {
 	if !now.Before(t.LastTimeApplied) {
 		t.CurrentTokens += now.Sub(t.LastTimeApplied).Seconds() * t.CIR

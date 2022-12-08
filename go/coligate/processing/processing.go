@@ -55,7 +55,8 @@ func Parse(rawPacket []byte) (*dataPacket, error) {
 	}
 	copy(proc.rawPacket, rawPacket)
 	var err error
-	if err := proc.scionLayer.DecodeFromBytes(proc.rawPacket, gopacket.NilDecodeFeedback); err != nil {
+	if err := proc.scionLayer.DecodeFromBytes(proc.rawPacket,
+		gopacket.NilDecodeFeedback); err != nil {
 		return nil, err
 	}
 	var ok bool
@@ -70,9 +71,11 @@ func Parse(rawPacket []byte) (*dataPacket, error) {
 }
 
 // NewWorker initializes the worker with its id, tokenbuckets and reservations
-func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32, localAS libaddr.AS) *Worker {
+func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32,
+	localAS libaddr.AS) *Worker {
 	w := &Worker{
-		CoreIdCounter:  (gatewayId << (32 - config.NumBitsForGatewayId)) | (workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId)),
+		CoreIdCounter: (gatewayId << (32 - config.NumBitsForGatewayId)) |
+			(workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId)),
 		NumCounterBits: config.NumBitsForPerWorkerCounter,
 		LocalAS:        localAS,
 		Storage:        &storage.Storage{},
@@ -113,7 +116,8 @@ func (w *Worker) validate(d *dataPacket) error {
 	if C || R || S {
 		return serrors.New("Invalid flags", "S", S, "R", R, "C", C)
 	}
-	id, err := libtypes.NewID((d).scionLayer.SrcIA.AS(), resIDSuffix) // TODO(rohrerj) change mapping of reservation id
+	// TODO(rohrerj) change mapping of reservation id
+	id, err := libtypes.NewID((d).scionLayer.SrcIA.AS(), resIDSuffix)
 	if err != nil {
 		return serrors.New("Cannot parse reservation id")
 	}
@@ -139,26 +143,32 @@ func (w *Worker) validateFields(d *dataPacket) error {
 	currentIndex := d.reservation.Current()
 
 	if len(d.colibriPath.HopFields) != len(currentIndex.Sigmas) {
-		return serrors.New("Number of hopfields is invalid", "expected", len(currentIndex.Sigmas), "actual", len(d.colibriPath.HopFields))
+		return serrors.New("Number of hopfields is invalid", "expected",
+			len(currentIndex.Sigmas), "actual", len(d.colibriPath.HopFields))
 	}
 	if infoField.CurrHF != 0 {
 		return serrors.New("CurrHF is invalid", "expected", 0, "actual", infoField.CurrHF)
 	}
 	if infoField.BwCls != currentIndex.BwCls {
-		return serrors.New("Bandwidth class is invalid", "expected", currentIndex.BwCls, "actual", infoField.BwCls)
+		return serrors.New("Bandwidth class is invalid", "expected",
+			currentIndex.BwCls, "actual", infoField.BwCls)
 	}
 	if infoField.Rlc != d.reservation.Rlc {
-		return serrors.New("Latency class is invalid", "expected", d.reservation.Rlc, "actual", infoField.Rlc)
+		return serrors.New("Latency class is invalid", "expected",
+			d.reservation.Rlc, "actual", infoField.Rlc)
 	}
 	if infoField.ExpTick != uint32(currentIndex.Validity.Unix()/4) {
-		return serrors.New("ExpTick is invalid", "expected", currentIndex.Validity.Unix()/4, "actual", infoField.ExpTick)
+		return serrors.New("ExpTick is invalid", "expected",
+			currentIndex.Validity.Unix()/4, "actual", infoField.ExpTick)
 	}
 	for i, hop := range d.reservation.Hops {
 		if d.colibriPath.HopFields[i].EgressId != hop.EgressId {
-			return serrors.New("EgressId is invalid", "expected", hop.EgressId, "actual", d.colibriPath.HopFields[i].EgressId)
+			return serrors.New("EgressId is invalid", "expected", hop.EgressId,
+				"actual", d.colibriPath.HopFields[i].EgressId)
 		}
 		if d.colibriPath.HopFields[i].IngressId != hop.IngressId {
-			return serrors.New("IngressId is invalid", "expected", hop.IngressId, "actual", d.colibriPath.HopFields[i].IngressId)
+			return serrors.New("IngressId is invalid", "expected", hop.IngressId,
+				"actual", d.colibriPath.HopFields[i].IngressId)
 		}
 	}
 	return nil
@@ -179,7 +189,8 @@ func (w *Worker) performTrafficMonitoring(d *dataPacket) error {
 		realBandwidth := 1024 * libtypes.BWCls(currentBwCls).ToKbps()
 		// TODO(rohrerj) set correct value for burst size
 		monitor = &storage.TrafficMonitor{
-			Bucket:    tokenbucket.NewTokenBucket(d.pktArrivalTime, float64(realBandwidth), float64(realBandwidth)),
+			Bucket: tokenbucket.NewTokenBucket(d.pktArrivalTime,
+				float64(realBandwidth), float64(realBandwidth)),
 			LastBwcls: currentBwCls,
 		}
 		d.reservation.TrafficMonitor = monitor
@@ -213,7 +224,8 @@ func (w *Worker) stamp(d *dataPacket) error {
 		if err != nil {
 			return err
 		}
-		if err = libcolibri.MACE2EFromSigma(d.colibriPath.HopFields[i].Mac, cipher, d.colibriPath.InfoField, d.colibriPath.PacketTimestamp, d.scionLayer); err != nil {
+		if err = libcolibri.MACE2EFromSigma(d.colibriPath.HopFields[i].Mac, cipher,
+			d.colibriPath.InfoField, d.colibriPath.PacketTimestamp, d.scionLayer); err != nil {
 			return err
 		}
 	}

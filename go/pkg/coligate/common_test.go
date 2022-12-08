@@ -17,8 +17,9 @@ package coligate_test
 import (
 	"testing"
 
-	"github.com/scionproto/scion/go/pkg/coligate"
 	"github.com/stretchr/testify/require"
+
+	"github.com/scionproto/scion/go/pkg/coligate"
 )
 
 func TestFnvlaWithSalt(t *testing.T) {

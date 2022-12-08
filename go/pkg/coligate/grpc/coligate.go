@@ -33,7 +33,7 @@ type Coligate struct {
 	FindWorker                   func([]byte) uint32
 }
 
-var _ cgpb.ColibriGatewayServer = (*Coligate)(nil)
+var _ cgpb.ColibriGatewayServiceServer = (*Coligate)(nil)
 
 func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasRequest) (
 	*cgpb.UpdateSigmasResponse, error) {

@@ -39,7 +39,8 @@ type ColigateConfig struct {
 
 func (cfg *ColigateConfig) Validate() error {
 	if cfg.NumBitsForGatewayId+cfg.NumBitsForWorkerId+cfg.NumBitsForPerWorkerCounter != 32 {
-		return serrors.New("NumBitsForGatewayId + NumBitsForWorkerId + NumBitsForPerWorkerCounter != 32")
+		return serrors.New(`"NumBitsForGatewayId + NumBitsForWorkerId +
+		NumBitsForPerWorkerCounter != 32"`)
 	}
 	if cfg.NumBitsForPerWorkerCounter < 8 {
 		return serrors.New("NumBitsForPerWorkerCounter < 8")
@@ -48,7 +49,8 @@ func (cfg *ColigateConfig) Validate() error {
 		return serrors.New("NumWorkers < 1")
 	}
 	if int(math.Pow(2, float64(cfg.NumBitsForWorkerId))-1) < cfg.NumWorkers {
-		return serrors.New("Too small bit count for too many workers", "NumBitsForWorkerId", cfg.NumBitsForWorkerId, "NumWorkers", cfg.NumWorkers)
+		return serrors.New("Too small bit count for too many workers", "NumBitsForWorkerId",
+			cfg.NumBitsForWorkerId, "NumWorkers", cfg.NumWorkers)
 	}
 	return nil
 }

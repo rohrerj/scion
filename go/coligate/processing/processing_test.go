@@ -111,7 +111,8 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateReservationBelongsToOtherAS",
 			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
-					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Id: string(
+						[]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -164,7 +165,8 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateInvalidNumberOfHopfields",
 			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
-					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Id: string(
+						[]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -198,7 +200,8 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateCurrHFIsInvalid",
 			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
-					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Id: string(
+						[]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -234,7 +237,8 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateBwClsIsInvalid",
 			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
-					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Id: string(
+						[]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -271,7 +275,8 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateRlcIsInvalid",
 			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
-					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Id: string(
+						[]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -310,7 +315,8 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateExpTickIsInvalid",
 			resStore: map[string]*storage.Reservation{
 				string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
-					Id:            string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+					Id: string(
+						[]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -958,7 +964,8 @@ func TestUpdateMacs(t *testing.T) {
 	}
 	// Create the sigma that colibri service would later send to colibri gateway
 	sigmaBuffer := make([]byte, 16)
-	err = libcolibri.MACSigma(sigmaBuffer, privateKeyCipher, d.ColibriPath.InfoField, d.ColibriPath.HopFields[0], d.ScionLayer)
+	err = libcolibri.MACSigma(sigmaBuffer, privateKeyCipher, d.ColibriPath.InfoField,
+		d.ColibriPath.HopFields[0], d.ScionLayer)
 	assert.NoError(t, err)
 
 	// Update mac fields of EE data packet with wrong sigma
@@ -966,7 +973,8 @@ func TestUpdateMacs(t *testing.T) {
 	err = w.Stamp(d)
 	assert.NoError(t, err)
 	// Validate the computed mac
-	err = libcolibri.VerifyMAC(privateKeyCipher, d.ColibriPath.PacketTimestamp, d.ColibriPath.InfoField, d.ColibriPath.HopFields[0], d.ScionLayer)
+	err = libcolibri.VerifyMAC(privateKeyCipher, d.ColibriPath.PacketTimestamp,
+		d.ColibriPath.InfoField, d.ColibriPath.HopFields[0], d.ScionLayer)
 	assert.Error(t, err)
 
 	// Update mac fields of EE data packet with correct sigma
@@ -974,6 +982,7 @@ func TestUpdateMacs(t *testing.T) {
 	err = w.Stamp(d)
 	assert.NoError(t, err)
 	// Validate the computed mac
-	err = libcolibri.VerifyMAC(privateKeyCipher, d.ColibriPath.PacketTimestamp, d.ColibriPath.InfoField, d.ColibriPath.HopFields[0], d.ScionLayer)
+	err = libcolibri.VerifyMAC(privateKeyCipher, d.ColibriPath.PacketTimestamp,
+		d.ColibriPath.InfoField, d.ColibriPath.HopFields[0], d.ScionLayer)
 	assert.NoError(t, err)
 }

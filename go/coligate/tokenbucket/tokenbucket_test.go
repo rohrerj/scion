@@ -18,8 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scionproto/scion/go/coligate/tokenbucket"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/scionproto/scion/go/coligate/tokenbucket"
 )
 
 type entry struct {

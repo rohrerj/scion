@@ -119,9 +119,10 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	}
 
 	p := Processor{
-		localIA:                 topo.IA(),
-		borderRouters:           borderRouters,
-		cleanupChannel:          make(chan *storage.UpdateTask, 1000), // TODO(rohrerj) check channel capacity
+		localIA:       topo.IA(),
+		borderRouters: borderRouters,
+		// TODO(rohrerj) check cleanupChannel capacity
+		cleanupChannel:          make(chan *storage.UpdateTask, 1000),
 		dataChannels:            make([]chan *dataPacket, config.NumWorkers),
 		controlUpdateChannels:   make([]chan *storage.UpdateTask, config.NumWorkers),
 		controlDeletionChannels: make([]chan *storage.DeletionTask, config.NumWorkers),
@@ -140,7 +141,8 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		p.dataChannels[i] = make(chan *dataPacket, config.MaxQueueSizePerWorker)
 		p.controlUpdateChannels[i] = make(chan *storage.UpdateTask,
 			config.MaxQueueSizePerWorker)
-		p.controlDeletionChannels[i] = make(chan *storage.DeletionTask, 1000) //TODO(rohrerj) Check size
+		// TODO(rohrerj) Check control deletion channel size
+		p.controlDeletionChannels[i] = make(chan *storage.DeletionTask, 1000)
 		func(i int) {
 			g.Go(func() error {
 				defer log.HandlePanic()
@@ -190,17 +192,28 @@ type ColigateMetrics struct {
 
 func initializeMetrics(metrics *common.Metrics) *ColigateMetrics {
 	c := &ColigateMetrics{
-		LoadActiveReservationsTotal:   libmetrics.NewPromCounter(metrics.LoadActiveReservationsTotal),
-		CleanupReservationUpdateTotal: libmetrics.NewPromCounter(metrics.CleanupReservationUpdateTotal),
-		CleanupReservationUpdateNew:   libmetrics.NewPromCounter(metrics.CleanupReservationUpdateNew),
-		CleanupReservationDeleted:     libmetrics.NewPromCounter(metrics.CleanupReservationDeleted),
-		UpdateSigmasTotal:             libmetrics.NewPromCounter(metrics.UpdateSigmasTotal),
-		DataPacketInTotal:             libmetrics.NewPromCounter(metrics.DataPacketInTotal),
-		DataPacketInInvalid:           libmetrics.NewPromCounter(metrics.DataPacketInInvalid),
-		WorkerPacketInTotal:           libmetrics.NewPromCounter(metrics.WorkerPacketInTotal),
-		WorkerPacketInInvalid:         libmetrics.NewPromCounter(metrics.WorkerPacketInInvalid),
-		WorkerPacketOutTotal:          libmetrics.NewPromCounter(metrics.WorkerPacketOutTotal),
-		WorkerReservationUpdateTotal:  libmetrics.NewPromCounter(metrics.WorkerReservationUpdateTotal),
+		LoadActiveReservationsTotal: libmetrics.NewPromCounter(
+			metrics.LoadActiveReservationsTotal),
+		CleanupReservationUpdateTotal: libmetrics.NewPromCounter(
+			metrics.CleanupReservationUpdateTotal),
+		CleanupReservationUpdateNew: libmetrics.NewPromCounter(
+			metrics.CleanupReservationUpdateNew),
+		CleanupReservationDeleted: libmetrics.NewPromCounter(
+			metrics.CleanupReservationDeleted),
+		UpdateSigmasTotal: libmetrics.NewPromCounter(
+			metrics.UpdateSigmasTotal),
+		DataPacketInTotal: libmetrics.NewPromCounter(
+			metrics.DataPacketInTotal),
+		DataPacketInInvalid: libmetrics.NewPromCounter(
+			metrics.DataPacketInInvalid),
+		WorkerPacketInTotal: libmetrics.NewPromCounter(
+			metrics.WorkerPacketInTotal),
+		WorkerPacketInInvalid: libmetrics.NewPromCounter(
+			metrics.WorkerPacketInInvalid),
+		WorkerPacketOutTotal: libmetrics.NewPromCounter(
+			metrics.WorkerPacketOutTotal),
+		WorkerReservationUpdateTotal: libmetrics.NewPromCounter(
+			metrics.WorkerReservationUpdateTotal),
 	}
 	return c
 }
@@ -217,7 +230,8 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 			return serrors.New(
 				"Loading active reservation indices from colibri service failed after timeout")
 		}
-		grpcconn, err := grpc.Dial(colibiServiceAddr.String(), grpc.WithInsecure()) // TODO(rohrerj) add transport security
+		// TODO(rohrerj) add transport security
+		grpcconn, err := grpc.Dial(colibiServiceAddr.String(), grpc.WithInsecure())
 		if err != nil {
 			continue
 		}
@@ -243,7 +257,8 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 				},
 			})
 		for _, respResIndex := range respReservation.Indices {
-			resIndex := storage.NewIndex(uint8(respResIndex.Index), util.SecsToTime(respResIndex.ExpirationTime),
+			resIndex := storage.NewIndex(uint8(respResIndex.Index),
+				util.SecsToTime(respResIndex.ExpirationTime),
 				uint8(respResIndex.AllocBw), respResIndex.Sigmas)
 
 			res.Indices[resIndex.Index] = resIndex
@@ -298,7 +313,8 @@ func (p *Processor) initCleanupRoutine() {
 					}
 					updateExpirationMapping(task)
 					if task.Reservation.Id == resId {
-						val = reservationExpirations[resId] // Updated current value in case it got changed
+						// Updated current value in case it got changed
+						val = reservationExpirations[resId]
 					}
 				default:
 					break out
@@ -307,7 +323,8 @@ func (p *Processor) initCleanupRoutine() {
 			if time.Until(val) < 0 {
 				p.metrics.CleanupReservationDeleted.Add(1)
 
-				p.controlDeletionChannels[p.getWorkerForResId([]byte(resId))] <- storage.NewDeletionTask(resId)
+				workerId := p.getWorkerForResId([]byte(resId))
+				p.controlDeletionChannels[workerId] <- storage.NewDeletionTask(resId)
 				delete(reservationExpirations, resId)
 			}
 		}
@@ -332,7 +349,7 @@ func (p *Processor) initControlPlane(config *config.ColigateConfig, cleanup *app
 		UpdateSigmasTotalPromCounter: p.metrics.UpdateSigmasTotal,
 		FindWorker:                   p.getWorkerForResId,
 	}
-	cgpb.RegisterColibriGatewayServer(s, coligate)
+	cgpb.RegisterColibriGatewayServiceServer(s, coligate)
 	cleanup.Add(func() error { s.GracefulStop(); return nil })
 
 	return s.Serve(lis)
@@ -380,7 +397,8 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 					dataPacketInInvalidPromCounter.Add(1)
 					continue
 				}
-				if int(d.scionLayer.PayloadLen) != len(d.scionLayer.Payload) || d.scionLayer.PayloadLen != d.colibriPath.InfoField.OrigPayLen {
+				if int(d.scionLayer.PayloadLen) != len(d.scionLayer.Payload) ||
+					d.scionLayer.PayloadLen != d.colibriPath.InfoField.OrigPayLen {
 					// Packet too large or inconsistent payload size.
 					continue
 				}
@@ -436,7 +454,8 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 	chresD := p.controlDeletionChannels[workerId]
 
 	for !p.exit {
-		// Check whether new reservation indices have to be processed. This has priority above the data plane packets.
+		// Check whether new reservation indices have to be processed.
+		// This has priority above the data plane packets.
 		select {
 		case task := <-chres:
 			if task == nil {

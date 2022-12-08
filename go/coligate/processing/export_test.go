@@ -17,13 +17,14 @@ package processing
 import (
 	"time"
 
+	"golang.org/x/net/ipv4"
+
 	"github.com/scionproto/scion/go/coligate/storage"
 	libaddr "github.com/scionproto/scion/go/lib/addr"
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path/colibri"
 	common "github.com/scionproto/scion/go/pkg/coligate"
 	"github.com/scionproto/scion/go/pkg/coligate/config"
-	"golang.org/x/net/ipv4"
 )
 
 func (p *Processor) InitCleanupRoutine() {
@@ -42,7 +43,8 @@ func (p *Processor) CreateCleanupChannel(maxQueueSize int) chan *storage.UpdateT
 	return p.cleanupChannel
 }
 
-func (p *Processor) CreateDataChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *dataPacket {
+func (p *Processor) CreateDataChannels(numberWorkers int,
+	maxQueueSizePerWorker int) []chan *dataPacket {
 	p.dataChannels = make([]chan *dataPacket, numberWorkers)
 	for i := 0; i < numberWorkers; i++ {
 		p.dataChannels[i] = make(chan *dataPacket, maxQueueSizePerWorker)
@@ -50,7 +52,8 @@ func (p *Processor) CreateDataChannels(numberWorkers int, maxQueueSizePerWorker 
 	return p.dataChannels
 }
 
-func (p *Processor) CreateControlUpdateChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *storage.UpdateTask {
+func (p *Processor) CreateControlUpdateChannels(numberWorkers int,
+	maxQueueSizePerWorker int) []chan *storage.UpdateTask {
 	p.controlUpdateChannels = make([]chan *storage.UpdateTask, numberWorkers)
 	for i := 0; i < numberWorkers; i++ {
 		p.controlUpdateChannels[i] = make(chan *storage.UpdateTask, maxQueueSizePerWorker)
@@ -58,7 +61,8 @@ func (p *Processor) CreateControlUpdateChannels(numberWorkers int, maxQueueSizeP
 	return p.controlUpdateChannels
 }
 
-func (p *Processor) CreateControlDeletionChannels(numberWorkers int, maxQueueSizePerWorker int) []chan *storage.DeletionTask {
+func (p *Processor) CreateControlDeletionChannels(numberWorkers int,
+	maxQueueSizePerWorker int) []chan *storage.DeletionTask {
 	p.controlDeletionChannels = make([]chan *storage.DeletionTask, numberWorkers)
 	for i := 0; i < numberWorkers; i++ {
 		p.controlDeletionChannels[i] = make(chan *storage.DeletionTask, maxQueueSizePerWorker)
@@ -66,8 +70,8 @@ func (p *Processor) CreateControlDeletionChannels(numberWorkers int, maxQueueSiz
 	return p.controlDeletionChannels
 }
 
-func (p *Processor) WorkerReceiveEntry(config *config.ColigateConfig, workerId uint32,
-	gatewayId uint32, localAS libaddr.AS) error {
+func (p *Processor) WorkerReceiveEntry(config *config.ColigateConfig,
+	workerId uint32, gatewayId uint32, localAS libaddr.AS) error {
 	return p.workerReceiveEntry(config, workerId, gatewayId, localAS)
 }
 
