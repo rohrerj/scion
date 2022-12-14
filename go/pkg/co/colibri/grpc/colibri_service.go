@@ -44,7 +44,7 @@ import (
 
 type ColibriService struct {
 	Store     reservationstorage.Store
-	Coligates []*net.TCPAddr // TODO(justin) maybe a map egressID -> coligate would make more sense?
+	Coligates map[uint32]*net.TCPAddr
 }
 
 var _ colpb.ColibriServiceServer = (*ColibriService)(nil)
@@ -337,13 +337,19 @@ func (s *ColibriService) SetupReservation(ctx context.Context, msg *colpb.SetupR
 		}
 		path := e2e.DeriveColibriPath(&req.ID, token)
 
-		// contact the colibri gateway to update the sigmas:
-		s.updateSigmas(ctx, path, token)
-
 		egressId := ""
 		if len(path.HopFields) > 0 {
 			egressId = fmt.Sprintf("%d", path.HopFields[0].EgressId)
+		} else {
+			return nil, serrors.New("at least one hopfield is required")
 		}
+
+		// contact the colibri gateway to update the sigmas:
+		err = s.updateSigmas(path, token)
+		if err != nil {
+			return nil, err
+		}
+
 		rawPath := make([]byte, path.Len())
 		err = path.SerializeTo(rawPath)
 		if err != nil {
@@ -436,8 +442,8 @@ func (s *ColibriService) ActiveIndices(ctx context.Context, req *colpb.ActiveInd
 	return s.Store.GetActiveIndicesAtSource(ctx, req)
 }
 
-func (s *ColibriService) updateSigmas(ctx context.Context, colPath *colpath.ColibriPath,
-	token *reservation.Token) {
+func (s *ColibriService) updateSigmas(colPath *colpath.ColibriPath,
+	token *reservation.Token) error {
 
 	inf := colPath.InfoField
 	hopFields := make([]*gtepb.HopInterface, len(colPath.HopFields))
@@ -459,29 +465,32 @@ func (s *ColibriService) updateSigmas(ctx context.Context, colPath *colpath.Coli
 		Sigmas:         sigmas,
 	}
 
-	// Send the request to all colibri gateways
-	for _, address := range s.Coligates {
-		// Spawn a new go routine for each colibri gateway
-		go func(address net.Addr) {
-			defer log.HandlePanic()
-
-			var connDialer libgrpc.SimpleDialer
-			conn, err := connDialer.Dial(ctx, address)
-			if err != nil {
-				log.Info("error dialing the colibri gateway",
-					"address", address)
-				return
-			}
-			client := gtepb.NewColibriGatewayServiceClient(conn)
-			res, err := client.UpdateSigmas(ctx, req)
-			if err != nil {
-				log.Info("error updating sigmas at the colibri gateway",
-					"address", address, "err", err)
-				return
-			}
-			_ = res // TODO(justin) define what the response will be. Just empty?
-		}(address)
+	// Send the request to the colibri gateway that is responsible for that egress id
+	coligateAddr, found := s.Coligates[hopFields[0].Egressid]
+	if !found {
+		return serrors.New("No Colibri Gateway found that is responsible for egress id", "egressId", hopFields[0].Egressid)
 	}
+	go func(address net.Addr) {
+		defer log.HandlePanic()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		var connDialer libgrpc.SimpleDialer
+		conn, err := connDialer.Dial(ctx, address)
+		if err != nil {
+			log.Info("error dialing the colibri gateway",
+				"address", address)
+			return
+		}
+		client := gtepb.NewColibriGatewayServiceClient(conn)
+		res, err := client.UpdateSigmas(ctx, req)
+		if err != nil {
+			log.Info("error updating sigmas at the colibri gateway",
+				"address", address, "err", err)
+			return
+		}
+		_ = res // TODO(rohrerj) define what the response will be. Just empty?
+	}(coligateAddr)
+	return nil
 }
 
 // checkLocalCaller prevents the service from doing anything if the caller is not from the local AS.

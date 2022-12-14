@@ -171,8 +171,23 @@ func setupColibri(g *errgroup.Group, cleanup *app.Cleanup, cfg *config.Config, c
 		return serrors.WrapStr("initializing colibri store", err)
 	}
 
+	coligateAddresses := make(map[uint32]*net.TCPAddr, len(cfg.Colibri.Gateways))
+	for _, coligate := range cfg.Colibri.Gateways {
+		coligateInfo, err := topo.ColibriGatewayAddress(coligate.Name)
+		if err != nil {
+			return err
+		}
+		for _, egress := range coligateInfo.Egresses {
+			coligateAddresses[egress], err = net.ResolveTCPAddr("tcp", coligate.Addr)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	colibriService := &colgrpc.ColibriService{
-		Store: colibriStore,
+		Store:     colibriStore,
+		Coligates: coligateAddresses,
 	}
 	colServer := coliquic.NewGrpcServer(libgrpc.UnaryServerInterceptor())
 	tcpColServer := grpc.NewServer(libgrpc.UnaryServerInterceptor())

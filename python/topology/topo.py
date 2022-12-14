@@ -52,6 +52,7 @@ from python.topology.net import (
 DEFAULT_BEACON_SERVERS = 1
 DEFAULT_CONTROL_SERVERS = 1
 DEFAULT_COLIBRI_SERVERS = 1
+DEFAULT_COLIGATE_SERVERS = 1
 
 UNDERLAY_4 = 'UDP/IPv4'
 UNDERLAY_6 = 'UDP/IPv6'
@@ -136,10 +137,12 @@ class TopoGenerator(object):
         self._iterate(self._write_as_topo)
         self._write_as_list()
         self._write_ifids()
+        self._iterate(self._store_coligate_addr)
         return self.topo_dicts, networks
 
     def _register_addrs(self, topo_id, as_conf):
         self._register_srv_entries(topo_id, as_conf)
+        self._register_cg_entries(topo_id, as_conf)
         self._register_br_entries(topo_id, as_conf)
         if self.args.sig:
             self._register_sig(topo_id, as_conf)
@@ -159,6 +162,16 @@ class TopoGenerator(object):
             if not self.args.docker:
                 self.args.port_gen.register(elem_id)
             self._reg_addr(topo_id, elem_id, addr_type)
+
+    def _register_cg_entries(self, topo_id, as_conf):
+        addr_type = addr_type_from_underlay(as_conf.get('underlay', DEFAULT_UNDERLAY))
+        for i in range(1, DEFAULT_COLIGATE_SERVERS + 1):
+            elem_id = "%s%s-%s" % ("cg", topo_id.file_fmt(), i)
+            if not self.args.docker:
+                self.args.port_gen.register(elem_id+"_service")
+                self.args.port_gen.register(elem_id+"_gateway")
+            self._reg_addr(topo_id, elem_id+"_service", addr_type)
+            self._reg_addr(topo_id, elem_id+"_gateway", addr_type)
 
     def _register_br_entries(self, topo_id, as_conf):
         addr_type = addr_type_from_underlay(as_conf.get('underlay', DEFAULT_UNDERLAY))
@@ -247,6 +260,7 @@ class TopoGenerator(object):
             self.topo_dicts[topo_id][i] = {}
         self._gen_srv_entries(topo_id, as_conf)
         self._gen_br_entries(topo_id, as_conf)
+        self._gen_cg_entries(topo_id, as_conf)
         if self.args.sig:
             self.topo_dicts[topo_id]['sigs'] = {}
             self._gen_sig_entries(topo_id, as_conf)
@@ -287,6 +301,34 @@ class TopoGenerator(object):
         if conf_key == "control_servers":
             count = 1
         return count
+
+    def _gen_cg_entries(self, topo_id, as_conf):
+        self.topo_dicts[topo_id]['colibri_gateway'] = {}
+        addr_type = addr_type_from_underlay(as_conf.get('underlay', DEFAULT_UNDERLAY))
+        for i in range(1, DEFAULT_COLIGATE_SERVERS + 1):
+            elem_id = "%s%s-%s" % ("cg", topo_id.file_fmt(), i)
+            coligate_gateway_port = 30042
+            if not self.args.docker:
+                coligate_gateway_port = self.args.port_gen.register(elem_id+"_gateway")
+            egresses = []
+            if i == 1:
+                for (linkto, remote, attrs, l_br, r_br, l_ifid, r_ifid) in self.links[topo_id]:
+                    egresses.append(l_ifid)
+            self.topo_dicts[topo_id]["colibri_gateway"][elem_id] = {
+                'addr': join_host_port(self._reg_addr(topo_id, elem_id+"_gateway", addr_type).ip, coligate_gateway_port),
+                'egresses': egresses,
+            }
+
+    #we generate the coligate grpc addresses but because they should not be part of the topology
+    # we add it after the topology.json file is created        
+    def _store_coligate_addr(self, topo_id, as_conf):
+        addr_type = addr_type_from_underlay(as_conf.get('underlay', DEFAULT_UNDERLAY))
+        for i in range(1, DEFAULT_COLIGATE_SERVERS + 1):
+            elem_id = "%s%s-%s" % ("cg", topo_id.file_fmt(), i)
+            coligate_service_port = 31088
+            if not self.args.docker:
+                coligate_service_port = self.args.port_gen.register(elem_id+"_service")
+            self.topo_dicts[topo_id]["colibri_gateway"][elem_id]["service_addr"] = join_host_port(self._reg_addr(topo_id, elem_id+"_service", addr_type).ip, coligate_service_port)
 
     def _gen_br_entries(self, topo_id, as_conf):
         addr_type = addr_type_from_underlay(as_conf.get('underlay', DEFAULT_UNDERLAY))

@@ -448,7 +448,8 @@ message AddAdmissionEntryResponse {
 }
 
 message ActiveIndicesRequest {
-    // TODO(justin) add drkey validation
+    string coligate_name = 1;
+    // TODO(rohrerj) add drkey validation
 }
 
 message ActiveIndicesResponse {
@@ -471,7 +472,7 @@ message ActiveIndicesResponse {
         repeated bytes sigmas = 4;
     }
 
-    // TODO(justing) add drkey validation
+    // TODO(rohrerj) add drkey validation
 
     repeated Reservation reservations = 1;
 }

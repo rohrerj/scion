@@ -46,6 +46,7 @@ from python.topology.prometheus import (
     SCIOND_PROM_PORT,
     DISP_PROM_PORT,
     CO_PROM_PORT,
+    COLIGATE_PROM_PORT,
 )
 
 # 1000000 Kbps = 1Gbps . This is enough to pass the integration test
@@ -146,6 +147,36 @@ class GoGenerator(object):
             raw_entry['ca'] = {'mode': 'in-process'}
         return raw_entry
 
+    def _build_coligate_conf(self, topo_id, ia, base, name, infra_elem):
+        config_dir = '/share/conf' if self.args.docker else base
+        grpcAddr = infra_elem['service_addr']
+        a = prom_addr(grpcAddr, COLIGATE_PROM_PORT)
+        
+        raw_entry = {
+            'general': {
+                'id': name,
+                'config_dir': config_dir,
+                'reconnect_to_dispatcher': True,
+            },
+            'log': self._log_entry(name),
+            'metrics': {
+                'prometheus': a,
+            },
+            'tracing': self._tracing_entry(),
+            'coligate': {
+                "ColigateGRPCAddr": grpcAddr
+                #TODO(rohrerj) add config entries once they are finalized
+            },
+        }
+        return raw_entry
+
+    def generate_coligate(self):
+        for topo_id, topo in self.args.topo_dicts.items():
+            for elem_id, elem in topo.get("colibri_gateway", {}).items():
+                base = topo_id.base_dir(self.args.output_dir)
+                co_conf = self._build_coligate_conf(topo_id, topo["isd_as"], base, elem_id, elem)
+                write_file(os.path.join(base, "%s.toml" % elem_id), toml.dumps(co_conf))
+
     def generate_co(self):
         for topo_id, topo in self.args.topo_dicts.items():
             for elem_id, elem in topo.get("colibri_service", {}).items():
@@ -183,9 +214,19 @@ class GoGenerator(object):
                 'db': {
                     'connection': os.path.join(self.db_dir, '%s.reservation.db' % name),
                 },
+                'gateways': self._coligate_svc_addresses(topo_id)
             },
         }
         return raw_entry
+
+    def _coligate_svc_addresses(self, topo_id):
+        x = []
+        for elem_id, elem in self.args.topo_dicts[topo_id].get("colibri_gateway", {}).items():
+            x.append({
+                "name": elem_id,
+                "addr": elem["service_addr"]
+            })
+        return x    
 
     def _build_co_capacities(self, ia):
         """

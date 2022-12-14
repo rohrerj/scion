@@ -20,6 +20,7 @@ import (
 	"github.com/scionproto/scion/go/coligate/storage"
 	libaddr "github.com/scionproto/scion/go/lib/addr"
 	libtypes "github.com/scionproto/scion/go/lib/colibri/reservation"
+	"github.com/scionproto/scion/go/lib/log"
 	libmetrics "github.com/scionproto/scion/go/lib/metrics"
 	"github.com/scionproto/scion/go/lib/util"
 	cgpb "github.com/scionproto/scion/go/pkg/proto/coligate"
@@ -38,6 +39,7 @@ var _ cgpb.ColibriGatewayServiceServer = (*Coligate)(nil)
 func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasRequest) (
 	*cgpb.UpdateSigmasResponse, error) {
 
+	log.Debug("Call to UpdateSigmas")
 	id, err := libtypes.NewID(s.LocalIA.AS(), msg.Suffix)
 	if err != nil {
 		return nil, err
@@ -65,10 +67,9 @@ func (s *Coligate) UpdateSigmas(ctx context.Context, msg *cgpb.UpdateSigmasReque
 		task.Reservation.Hops[i].EgressId = uint16(hop.Egressid)
 		task.Reservation.Hops[i].IngressId = uint16(hop.Ingressid)
 	}
-
 	s.CleanupChannel <- task
 
 	s.ReservationChannels[s.FindWorker(id.ToRaw())] <- task
 
-	return nil, nil
+	return &cgpb.UpdateSigmasResponse{}, nil
 }

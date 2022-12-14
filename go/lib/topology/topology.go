@@ -69,7 +69,7 @@ type (
 
 		CS                        IDAddrMap
 		CO                        IDAddrMap
-		COLGATE                   map[string]*net.UDPAddr
+		COLGATE                   map[string]ColigateInfo
 		DS                        IDAddrMap
 		HiddenSegmentLookup       IDAddrMap
 		HiddenSegmentRegistration IDAddrMap
@@ -82,6 +82,12 @@ type (
 		DataAddr        *net.UDPAddr
 		ProbeAddr       *net.UDPAddr
 		AllowInterfaces []uint64
+	}
+
+	ColigateInfo struct {
+		Addr     *net.UDPAddr
+		Name     string
+		Egresses []uint32
 	}
 
 	// BRInfo is a list of AS-wide unique interface IDs for a router. These IDs are also used
@@ -144,7 +150,7 @@ func NewRWTopology() *RWTopology {
 		BR:                        make(map[string]BRInfo),
 		CS:                        make(IDAddrMap),
 		CO:                        make(IDAddrMap),
-		COLGATE:                   make(map[string]*net.UDPAddr),
+		COLGATE:                   make(map[string]ColigateInfo),
 		DS:                        make(IDAddrMap),
 		HiddenSegmentLookup:       make(IDAddrMap),
 		HiddenSegmentRegistration: make(IDAddrMap),
@@ -406,13 +412,18 @@ func (t *RWTopology) Copy() *RWTopology {
 	}
 }
 
-func copyColigateMap(m map[string]*net.UDPAddr) map[string]*net.UDPAddr {
+func copyColigateMap(m map[string]ColigateInfo) map[string]ColigateInfo {
 	if m == nil {
 		return nil
 	}
-	ret := make(map[string]*net.UDPAddr)
+	ret := make(map[string]ColigateInfo)
 	for k, v := range m {
-		ret[k] = copyUDPAddr(v)
+		ret[k] = ColigateInfo{
+			Addr:     copyUDPAddr(v.Addr),
+			Egresses: make([]uint32, len(v.Egresses)),
+			Name:     v.Name,
+		}
+		copy(ret[k].Egresses, v.Egresses)
 	}
 	return ret
 }
@@ -491,15 +502,19 @@ func (svc *svcInfo) getAllTopoAddrs() []TopoAddr {
 	return topoAddrs
 }
 
-func coligateMapFromRaw(ras map[string]*jsontopo.ServerInfo) (map[string]*net.UDPAddr, error) {
-	coligateMap := make(map[string]*net.UDPAddr)
+func coligateMapFromRaw(ras map[string]*jsontopo.ColigateInfo) (map[string]ColigateInfo, error) {
+	coligateMap := make(map[string]ColigateInfo)
 	for name, svc := range ras {
 		gatewayAddr, err := rawAddrToUDPAddr(svc.Addr)
 		if err != nil {
 			return nil, serrors.WrapStr("could not parse address", err,
 				"address", svc.Addr, "process_name", name)
 		}
-		coligateMap[name] = gatewayAddr
+		coligateMap[name] = ColigateInfo{
+			Addr:     gatewayAddr,
+			Egresses: svc.Egresses,
+			Name:     name,
+		}
 	}
 	return coligateMap, nil
 }

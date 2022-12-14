@@ -68,6 +68,7 @@ class SupervisorGenerator(object):
         entries.extend(self._br_entries(topo, "bin/posix-router", base))
         entries.extend(self._control_service_entries(topo, base))
         entries.extend(self._colibri_service_entries(topo, base))
+        entries.extend(self._colibri_gateway_entries(topo, base))
         entries.append(self._sciond_entry(topo_id, base))
         return entries
 
@@ -97,6 +98,14 @@ class SupervisorGenerator(object):
                 conf = os.path.join(base, "%s.toml" % k)
                 prog = self._common_entry(k, ["bin/co", "--config", conf])
                 entries.append((k, prog))
+        return entries
+
+    def _colibri_gateway_entries(self, topo, base):
+        entries = []
+        for k, v in topo.get("colibri_gateway", {}).items():
+            conf = os.path.join(base, "%s.toml" % k)
+            prog = self._common_entry(k, ["bin/coligate", "--config", conf])
+            entries.append((k, prog))
         return entries
 
     def _sciond_entry(self, topo_id, conf_dir):

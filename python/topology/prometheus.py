@@ -42,6 +42,7 @@ CS_PROM_PORT = 30452
 SCIOND_PROM_PORT = 30455
 SIG_PROM_PORT = 30456
 CO_PROM_PORT = 30457
+COLIGATE_PROM_PORT = 30458
 DISP_PROM_PORT = 30441
 DEFAULT_BR_PROM_PORT = 30442
 
@@ -61,12 +62,14 @@ class PrometheusGenerator(object):
         "ControlService": "cs.yml",
         "Sciond": "sd.yml",
         "Dispatcher": "disp.yml",
+        "ColibriGateway": "coligate.yml",
     }
     JOB_NAMES = {
         "BorderRouters": "BR",
         "ControlService": "CS",
         "Sciond": "SD",
         "Dispatcher": "dispatcher",
+        "ColibriGateway": "Coligate"
     }
 
     def __init__(self, args):
@@ -86,6 +89,9 @@ class PrometheusGenerator(object):
             for elem_id, elem in as_topo["control_service"].items():
                 a = prom_addr(elem["addr"], CS_PROM_PORT)
                 ele_dict["ControlService"].append(a)
+            for elem_id, elem in as_topo["colibri_gateway"].items():
+                a = prom_addr(elem["service_addr"], COLIGATE_PROM_PORT)
+                ele_dict["ColibriGateway"].append(a)
             if self.args.docker:
                 host_dispatcher = prom_addr_dispatcher(self.args.docker, topo_id,
                                                        self.args.networks, DISP_PROM_PORT, "")
