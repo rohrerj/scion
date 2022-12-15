@@ -21,10 +21,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
+	"runtime"
 	"strings"
 	"time"
 
-	base "github.com/scionproto/scion/go/co/reservation"
 	"github.com/scionproto/scion/go/integration"
 	"github.com/scionproto/scion/go/lib/addr"
 	libcol "github.com/scionproto/scion/go/lib/colibri"
@@ -74,13 +75,34 @@ func realMain() int {
 		}.run()
 		return 0
 	}
-	c := *newClient(
-		integration.SDConn(),
-		timeout.Duration,
-		scionConnMetrics,
-		&remote,
-	)
-	return c.run()
+	pair := fmt.Sprintf("%s -> %s", integration.Local.IA, remote.IA)
+	log.Info("Starting", "pair", pair)
+	defer log.Info("Finished", "pair", pair)
+	defer integration.Done(integration.Local.IA, remote.IA)
+
+	if integration.Local.IA.Equal(remote.IA) {
+		log.Info("dst == src! Skipping test inside local AS")
+		return 0
+	}
+	fs := []func(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID){
+		generalTest,
+		invalidReservationTest,
+		exceedBandwidthTest,
+		renewReservationTest,
+		invalidIndexTest,
+		invalidBwClTest,
+	}
+	for _, f := range fs {
+		log.Info("Execute", "func", runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name())
+		c := *newClient(
+			integration.SDConn(),
+			timeout.Duration,
+			scionConnMetrics,
+			&remote,
+		)
+		c.run(f)
+	}
+	return 0
 }
 
 func addFlags(remote *snet.UDPAddr, timeout *util.DurWrap) {
@@ -143,7 +165,7 @@ func (s server) allowAdmission(daemon daemon.Connector, serverIP net.IP) {
 		ctx, cancelF := context.WithTimeout(context.Background(), s.Timeout)
 		entry := &libcol.AdmissionEntry{
 			DstHost:         serverIP, // could be empty to detect it automatically
-			ValidUntil:      time.Now().Add(time.Minute),
+			ValidUntil:      time.Now().Add(1 * time.Minute),
 			RegexpIA:        "", // from any AS
 			RegexpHost:      "", // from any host
 			AcceptAdmission: true,
@@ -174,7 +196,7 @@ func (s server) accept(conn *snet.Conn, buffer []byte) error {
 
 	data := buffer[:n]
 	if strings.HasPrefix(string(data), "Coligate Integration Test") {
-		log.Info("received coligate pattern", "sender", fromScion.String(), "str", string(data))
+		log.Info("received coligate pattern", "sender", fromScion.String())
 		n2, err := conn.WriteTo(data, from)
 		if err != nil {
 			return serrors.WrapStr("writing echo response from server", err)
@@ -235,18 +257,7 @@ func newClient(daemon daemon.Connector, timeout time.Duration, metrics snet.SCIO
 	}
 }
 
-func (c client) run() int {
-	// first check if src and dst are the same
-	pair := fmt.Sprintf("%s -> %s", integration.Local.IA, c.Remote.IA)
-	log.Info("Starting", "pair", pair)
-	defer log.Info("Finished", "pair", pair)
-	defer integration.Done(integration.Local.IA, c.Remote.IA)
-
-	if c.Local.IA.Equal(c.Remote.IA) {
-		log.Info("dst == src! Skipping test inside local AS")
-		return 0
-	}
-
+func (c client) run(f func(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID)) {
 	ctx, cancelF := context.WithTimeout(context.Background(), c.Timeout)
 	defer cancelF()
 	deadline, _ := ctx.Deadline()
@@ -297,32 +308,34 @@ func (c client) run() int {
 	}
 	log.Debug("listed reservations", "list", stitchable.String())
 	trips := libcol.CombineAll(stitchable)
-	log.Info("computed full trips", "count", len(trips))
+	log.Debug("computed full trips", "count", len(trips))
 	if len(trips) == 0 {
 		integration.LogFatal("no trips found")
 	}
 	// obtain a reservation
-	steps := trips[0].PathSteps()
-	rsvID, p, err := c.createRsv(ctx, trips[0], 1)
+	resID, p, err := c.createRsv(ctx, trips[0], 1)
 	if err != nil {
 		integration.LogFatal("creating reservation", "err", err)
 	}
+
 	// use the reservation
 	c.Remote.Path = p.Dataplane()
 	c.Remote.NextHop = p.UnderlayNextHop()
 
-	log.Info("NextHop", "hop", c.Remote.NextHop)
+	log.Debug("Colibri Gateway address:", "NextHop", c.Remote.NextHop)
 
-	messagePayload := "Coligate Integration Test " + c.Local.IA.String()
-
+	messagePayload := []byte("Coligate Integration Test " + c.Local.IA.String())
+	recBuff := make([]byte, 128)
 	time.Sleep(100 * time.Millisecond)
-	_, err = conn.WriteTo([]byte(messagePayload), c.Remote)
+
+	f(c, conn, messagePayload, recBuff, trips, resID)
+}
+
+func generalTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+	_, err := conn.WriteTo(messagePayload, c.Remote)
 	if err != nil {
 		integration.LogFatal("writing data with colibri", "err", err)
 	}
-
-	recBuff := make([]byte, 128)
-
 	// read echo back again
 	l, raddr, err := conn.ReadFrom(recBuff)
 	if err != nil {
@@ -356,15 +369,110 @@ func (c client) run() int {
 	if sraddrRawPath.Raw == nil {
 		integration.LogFatal("colibri path but empty raw", "path", sraddrRawPath)
 	}
-	if string(recBuff[:l]) != messagePayload {
+	if string(recBuff[:l]) != string(messagePayload) {
 		integration.LogFatal("Received incorrect response from server", "expected", messagePayload, "actual", string(recBuff[:l]))
 	}
 	log.Info("Received correct response from server", "msg", messagePayload)
-	// clean reservation up
-	if err = c.cleanRsv(ctx, &rsvID, 0, steps); err != nil {
-		integration.LogFatal("cleaning reservation up", "err", err)
+}
+
+func invalidReservationTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+	s := &colpath.ColibriPathMinimal{}
+	err := s.DecodeFromBytes(c.Remote.Path.(path.Colibri).Raw)
+	if err != nil {
+		integration.LogFatal("DecodeFromBytes", "err", err)
 	}
-	return 0
+	s.InfoField.ResIdSuffix = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	err = s.SerializeTo(c.Remote.Path.(path.Colibri).Raw)
+	if err != nil {
+		integration.LogFatal("SerializeTo", "err", err)
+	}
+	_, err = conn.WriteTo(messagePayload, c.Remote)
+	if err != nil {
+		integration.LogFatal("writing data with colibri", "err", err)
+	}
+	_, _, err = conn.ReadFrom(recBuff)
+	if err == nil {
+		integration.LogFatal("reading data", "err", err)
+	}
+}
+
+func exceedBandwidthTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+	time.Sleep(1 * time.Second) // Make sure we have the full bandwidth available
+	sendBuf := make([]byte, 5000)
+	messagePayload = append(messagePayload, sendBuf...)
+	for i := 0; i < 4; i++ {
+		_, err := conn.WriteTo(messagePayload, c.Remote)
+		if err != nil {
+			integration.LogFatal("writing data with colibri", "err", err)
+		}
+	}
+	for i := 0; i < 4; i++ {
+		_, _, err := conn.ReadFrom(recBuff)
+		if err != nil && i != 3 {
+			// The server will not send the last response because it never received it because
+			// the colibri gateway dropped it because of exceeded bandwidth.
+			integration.LogFatal("reading data", "err", err, "i", i)
+		}
+	}
+}
+
+func renewReservationTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+	ctx, cancelF := context.WithTimeout(context.Background(), c.Timeout)
+	defer cancelF()
+	_, err := c.renewRsv(ctx, trips[0], 1, resID, 1)
+	if err != nil {
+		integration.LogFatal("Reservation renewal failed", "err", err)
+	}
+	_, err = conn.WriteTo(messagePayload, c.Remote)
+	if err != nil {
+		integration.LogFatal("writing data with colibri", "err", err)
+	}
+	_, _, err = conn.ReadFrom(recBuff)
+	if err != nil {
+		integration.LogFatal("reading data", "err", err)
+	}
+}
+
+func invalidIndexTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+	s := &colpath.ColibriPathMinimal{}
+	err := s.DecodeFromBytes(c.Remote.Path.(path.Colibri).Raw)
+	if err != nil {
+		integration.LogFatal("DecodeFromBytes", "err", err)
+	}
+	s.InfoField.Ver = 100
+	err = s.SerializeTo(c.Remote.Path.(path.Colibri).Raw)
+	if err != nil {
+		integration.LogFatal("SerializeTo", "err", err)
+	}
+	_, err = conn.WriteTo(messagePayload, c.Remote)
+	if err != nil {
+		integration.LogFatal("writing data with colibri", "err", err)
+	}
+	_, _, err = conn.ReadFrom(recBuff)
+	if err == nil {
+		integration.LogFatal("reading data", "err", err)
+	}
+}
+
+func invalidBwClTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+	s := &colpath.ColibriPathMinimal{}
+	err := s.DecodeFromBytes(c.Remote.Path.(path.Colibri).Raw)
+	if err != nil {
+		integration.LogFatal("DecodeFromBytes", "err", err)
+	}
+	s.InfoField.BwCls = 2
+	err = s.SerializeTo(c.Remote.Path.(path.Colibri).Raw)
+	if err != nil {
+		integration.LogFatal("SerializeTo", "err", err)
+	}
+	_, err = conn.WriteTo(messagePayload, c.Remote)
+	if err != nil {
+		integration.LogFatal("writing data with colibri", "err", err)
+	}
+	_, _, err = conn.ReadFrom(recBuff)
+	if err == nil {
+		integration.LogFatal("reading data", "err", err)
+	}
 }
 
 func (c client) listRsvs(ctx context.Context) (
@@ -379,6 +487,35 @@ func (c client) listRsvs(ctx context.Context) (
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+func (c client) renewRsv(ctx context.Context, fullTrip *libcol.FullTrip,
+	requestBW reservation.BWCls, resID reservation.ID, index uint8) (snet.Path, error) {
+
+	now := time.Now()
+	setupReq, err := libcol.NewReservation(ctx, c.DRKeyFetcher, fullTrip, c.Local.Host.IP,
+		c.Remote.Host.IP, requestBW)
+	if err != nil {
+		return nil, err
+	}
+	setupReq.Id = resID
+	setupReq.Index = reservation.IndexNumber(index)
+	err = setupReq.CreateAuthenticators(ctx, c.DRKeyFetcher)
+	if err != nil {
+		return nil, err
+	}
+	res, err := c.Daemon.ColibriSetupRsv(ctx, setupReq)
+	if err != nil {
+		return nil, err
+	}
+	err = res.ValidateAuthenticators(ctx, c.DRKeyFetcher, fullTrip.PathSteps(), c.Local.Host.IP, now)
+	if err != nil {
+		return nil, err
+	}
+	if string(resID.Suffix) != string(setupReq.Id.Suffix) {
+		return nil, serrors.New("New id was created instead of using existing one")
+	}
+	return res.ColibriPath, nil
 }
 
 func (c client) createRsv(ctx context.Context, fullTrip *libcol.FullTrip,
@@ -399,23 +536,4 @@ func (c client) createRsv(ctx context.Context, fullTrip *libcol.FullTrip,
 		return reservation.ID{}, nil, err
 	}
 	return setupReq.Id, res.ColibriPath, nil
-}
-
-func (c client) cleanRsv(ctx context.Context, id *reservation.ID, idx reservation.IndexNumber,
-	steps base.PathSteps) error {
-
-	log.Debug("cleaning e2e rsv", "id", id)
-
-	req := &libcol.BaseRequest{
-		Id:        *id,
-		Index:     idx,
-		TimeStamp: time.Now(),
-		SrcHost:   c.Local.Host.IP,
-		DstHost:   c.Remote.Host.IP,
-	}
-	err := req.CreateAuthenticators(ctx, c.DRKeyFetcher, steps)
-	if err != nil {
-		return err
-	}
-	return c.Daemon.ColibriCleanupRsv(ctx, req, steps)
 }
