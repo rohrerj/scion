@@ -75,7 +75,7 @@ type Topology interface {
 	BR(name string) (BRInfo, bool)
 
 	ColibriGateway(name string) (ColigateInfo, error)
-	ColibriGatewayAddressByEgressId(id uint32) (ColigateInfo, error)
+	ColibriGatewayByEgressId(id uint32) (ColigateInfo, error)
 	ColibriGateways() ([]ColigateInfo, error)
 
 	// IFInfoMap returns the mapping between interface IDs an internal addresses.
@@ -145,7 +145,8 @@ func FromJSONBytes(raw []byte) (Topology, error) {
 }
 
 type topologyS struct {
-	Topology *RWTopology
+	Topology       *RWTopology
+	coligateEgrMap map[uint32]ColigateInfo
 }
 
 func (t *topologyS) IA() addr.IA {
@@ -226,33 +227,38 @@ func (t *topologyS) BR(name string) (BRInfo, bool) {
 }
 
 func (t *topologyS) ColibriGateway(name string) (ColigateInfo, error) {
-	coligateInfo, ok := t.Topology.COLGATE[name]
+	coligateInfo, ok := t.Topology.Coligate[name]
 	if !ok {
 		return coligateInfo, serrors.New("Colibri Gateway not found", "name", name)
 	}
 	return coligateInfo, nil
 }
 
-func (t *topologyS) ColibriGatewayAddressByEgressId(id uint32) (ColigateInfo, error) {
-	all, err := t.ColibriGateways()
-	if err == nil {
-		for _, coligate := range all {
-			for _, egress := range coligate.Egresses {
-				if egress == id {
-					return coligate, nil
+func (t *topologyS) ColibriGatewayByEgressId(id uint32) (ColigateInfo, error) {
+	if t.coligateEgrMap == nil {
+		t.coligateEgrMap = make(map[uint32]ColigateInfo)
+		all, err := t.ColibriGateways()
+		if err == nil {
+			for _, coligate := range all {
+				for _, egress := range coligate.Egresses {
+					t.coligateEgrMap[egress] = coligate
 				}
 			}
 		}
+	}
+	coligateInfo, found := t.coligateEgrMap[id]
+	if found {
+		return coligateInfo, nil
 	}
 	return ColigateInfo{}, serrors.New("Colibri Gateway not found", "id", id)
 }
 
 func (t *topologyS) ColibriGateways() ([]ColigateInfo, error) {
-	v := make([]ColigateInfo, 0, len(t.Topology.COLGATE))
-	if len(t.Topology.COLGATE) == 0 {
+	v := make([]ColigateInfo, 0, len(t.Topology.Coligate))
+	if len(t.Topology.Coligate) == 0 {
 		return v, nil
 	}
-	for _, addr := range t.Topology.COLGATE {
+	for _, addr := range t.Topology.Coligate {
 		v = append(v, addr)
 	}
 	return v, nil

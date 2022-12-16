@@ -84,7 +84,8 @@ func realMain() int {
 		log.Info("dst == src! Skipping test inside local AS")
 		return 0
 	}
-	fs := []func(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID){
+	fs := []func(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte,
+		trips []*libcol.FullTrip, resID reservation.ID){
 		generalTest,
 		invalidReservationTest,
 		exceedBandwidthTest,
@@ -257,7 +258,9 @@ func newClient(daemon daemon.Connector, timeout time.Duration, metrics snet.SCIO
 	}
 }
 
-func (c client) run(f func(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID)) {
+func (c client) run(f func(c client, conn *snet.Conn, messagePayload []byte,
+	recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID)) {
+
 	ctx, cancelF := context.WithTimeout(context.Background(), c.Timeout)
 	defer cancelF()
 	deadline, _ := ctx.Deadline()
@@ -320,6 +323,7 @@ func (c client) run(f func(c client, conn *snet.Conn, messagePayload []byte, rec
 
 	// use the reservation
 	c.Remote.Path = p.Dataplane()
+	// NextHop is the address of the colibri gateway
 	c.Remote.NextHop = p.UnderlayNextHop()
 
 	log.Debug("Colibri Gateway address:", "NextHop", c.Remote.NextHop)
@@ -331,7 +335,11 @@ func (c client) run(f func(c client, conn *snet.Conn, messagePayload []byte, rec
 	f(c, conn, messagePayload, recBuff, trips, resID)
 }
 
-func generalTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+// Tests that the data packet has correctly reached the other endhost and that the
+// other endhost responded with a colibri packet.
+func generalTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte,
+	trips []*libcol.FullTrip, resID reservation.ID) {
+
 	_, err := conn.WriteTo(messagePayload, c.Remote)
 	if err != nil {
 		integration.LogFatal("writing data with colibri", "err", err)
@@ -370,12 +378,16 @@ func generalTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byt
 		integration.LogFatal("colibri path but empty raw", "path", sraddrRawPath)
 	}
 	if string(recBuff[:l]) != string(messagePayload) {
-		integration.LogFatal("Received incorrect response from server", "expected", messagePayload, "actual", string(recBuff[:l]))
+		integration.LogFatal("Received incorrect response from server", "expected",
+			messagePayload, "actual", string(recBuff[:l]))
 	}
 	log.Info("Received correct response from server", "msg", messagePayload)
 }
 
-func invalidReservationTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+// Tests that no data packet can be sent over the colibri gateway with an invalid reservation.
+func invalidReservationTest(c client, conn *snet.Conn, messagePayload []byte,
+	recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+
 	s := &colpath.ColibriPathMinimal{}
 	err := s.DecodeFromBytes(c.Remote.Path.(path.Colibri).Raw)
 	if err != nil {
@@ -390,33 +402,39 @@ func invalidReservationTest(c client, conn *snet.Conn, messagePayload []byte, re
 	if err != nil {
 		integration.LogFatal("writing data with colibri", "err", err)
 	}
+	conn.SetReadDeadline(time.Now().Add(c.Timeout))
 	_, _, err = conn.ReadFrom(recBuff)
 	if err == nil {
 		integration.LogFatal("reading data", "err", err)
 	}
 }
 
-func exceedBandwidthTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+// Tests that packets that exceed the bandwidth are dropped.
+func exceedBandwidthTest(c client, conn *snet.Conn, messagePayload []byte,
+	recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+
 	time.Sleep(1 * time.Second) // Make sure we have the full bandwidth available
-	sendBuf := make([]byte, 5000)
+	sendBuf := make([]byte, 2500)
 	messagePayload = append(messagePayload, sendBuf...)
-	for i := 0; i < 4; i++ {
-		_, err := conn.WriteTo(messagePayload, c.Remote)
-		if err != nil {
-			integration.LogFatal("writing data with colibri", "err", err)
-		}
+
+	_, err := conn.WriteTo(messagePayload, c.Remote)
+	if err != nil {
+		integration.LogFatal("writing data with colibri", "err", err)
 	}
-	for i := 0; i < 4; i++ {
-		_, _, err := conn.ReadFrom(recBuff)
-		if err != nil && i != 3 {
-			// The server will not send the last response because it never received it because
-			// the colibri gateway dropped it because of exceeded bandwidth.
-			integration.LogFatal("reading data", "err", err, "i", i)
-		}
+	// Because the packet is larger than the bandwidth class allowes it exceeds the
+	// limit and get dropped.
+	conn.SetReadDeadline(time.Now().Add(c.Timeout))
+	_, _, err = conn.ReadFrom(recBuff)
+	if err == nil {
+		integration.LogFatal("reading data", "err", err)
 	}
 }
 
-func renewReservationTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+// Tests that we can send a data packet over the colibri gateway with another valid
+// reservation index.
+func renewReservationTest(c client, conn *snet.Conn, messagePayload []byte,
+	recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+
 	ctx, cancelF := context.WithTimeout(context.Background(), c.Timeout)
 	defer cancelF()
 	_, err := c.renewRsv(ctx, trips[0], 1, resID, 1)
@@ -433,7 +451,11 @@ func renewReservationTest(c client, conn *snet.Conn, messagePayload []byte, recB
 	}
 }
 
-func invalidIndexTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+// Tests that no packets with a valid reservation id but invalid reservation index
+// can be sent over the colibri gateway.
+func invalidIndexTest(c client, conn *snet.Conn, messagePayload []byte,
+	recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+
 	s := &colpath.ColibriPathMinimal{}
 	err := s.DecodeFromBytes(c.Remote.Path.(path.Colibri).Raw)
 	if err != nil {
@@ -448,13 +470,18 @@ func invalidIndexTest(c client, conn *snet.Conn, messagePayload []byte, recBuff 
 	if err != nil {
 		integration.LogFatal("writing data with colibri", "err", err)
 	}
+	conn.SetReadDeadline(time.Now().Add(c.Timeout))
 	_, _, err = conn.ReadFrom(recBuff)
 	if err == nil {
 		integration.LogFatal("reading data", "err", err)
 	}
 }
 
-func invalidBwClTest(c client, conn *snet.Conn, messagePayload []byte, recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+// Tests that a packet which contains a bandwidth class which is different to
+// the bandwidth class of the reservation is dropped.
+func invalidBwClTest(c client, conn *snet.Conn, messagePayload []byte,
+	recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
+
 	s := &colpath.ColibriPathMinimal{}
 	err := s.DecodeFromBytes(c.Remote.Path.(path.Colibri).Raw)
 	if err != nil {
@@ -469,6 +496,7 @@ func invalidBwClTest(c client, conn *snet.Conn, messagePayload []byte, recBuff [
 	if err != nil {
 		integration.LogFatal("writing data with colibri", "err", err)
 	}
+	conn.SetReadDeadline(time.Now().Add(c.Timeout))
 	_, _, err = conn.ReadFrom(recBuff)
 	if err == nil {
 		integration.LogFatal("reading data", "err", err)
@@ -508,7 +536,8 @@ func (c client) renewRsv(ctx context.Context, fullTrip *libcol.FullTrip,
 	if err != nil {
 		return nil, err
 	}
-	err = res.ValidateAuthenticators(ctx, c.DRKeyFetcher, fullTrip.PathSteps(), c.Local.Host.IP, now)
+	err = res.ValidateAuthenticators(ctx, c.DRKeyFetcher, fullTrip.PathSteps(),
+		c.Local.Host.IP, now)
 	if err != nil {
 		return nil, err
 	}
@@ -531,7 +560,8 @@ func (c client) createRsv(ctx context.Context, fullTrip *libcol.FullTrip,
 	if err != nil {
 		return reservation.ID{}, nil, err
 	}
-	err = res.ValidateAuthenticators(ctx, c.DRKeyFetcher, fullTrip.PathSteps(), c.Local.Host.IP, now)
+	err = res.ValidateAuthenticators(ctx, c.DRKeyFetcher, fullTrip.PathSteps(),
+		c.Local.Host.IP, now)
 	if err != nil {
 		return reservation.ID{}, nil, err
 	}

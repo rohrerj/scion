@@ -43,7 +43,9 @@ import (
 )
 
 type ColibriService struct {
-	Store     reservationstorage.Store
+	Store reservationstorage.Store
+	// Map from border router interface id to the corresponding colibri gateway's
+	// grpc TCP address.
 	Coligates map[uint32]*net.TCPAddr
 }
 
@@ -468,7 +470,8 @@ func (s *ColibriService) updateSigmas(colPath *colpath.ColibriPath,
 	// Send the request to the colibri gateway that is responsible for that egress id
 	coligateAddr, found := s.Coligates[hopFields[0].Egressid]
 	if !found {
-		return serrors.New("No Colibri Gateway found that is responsible for egress id", "egressId", hopFields[0].Egressid)
+		return serrors.New(`"No Colibri Gateway found that is responsible for
+		egress id"`, "egressId", hopFields[0].Egressid)
 	}
 	go func(address net.Addr) {
 		defer log.HandlePanic()

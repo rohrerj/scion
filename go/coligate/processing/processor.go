@@ -93,7 +93,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		log.Debug("Found Border Router", "ifid", ifid, "internal_addr", info.InternalAddr)
 	}
 
-	coligateInfo, err := topo.ColibriGatewayAddress(cfg.General.ID)
+	coligateInfo, err := topo.ColibriGateway(cfg.General.ID)
 	if err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func initializeMetrics(metrics *common.Metrics) *ColigateMetrics {
 
 // Loads the active EE Reservations from the colibri service
 func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context,
-	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr, timeout int, name string) error {
+	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr, timeout int, coligateId string) error {
 
 	log.Info("Loading active reservation indices from colibri service")
 	var response *copb.ActiveIndicesResponse
@@ -237,7 +237,7 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 		}
 		copbservice := copb.NewColibriServiceClient(grpcconn)
 		response, err = copbservice.ActiveIndices(ctx, &copb.ActiveIndicesRequest{
-			ColigateName: name,
+			ColigateId: coligateId,
 		})
 		if err != nil {
 			continue

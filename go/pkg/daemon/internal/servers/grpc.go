@@ -51,7 +51,7 @@ type Topology interface {
 	InterfaceIDs() []uint16
 	UnderlayNextHop(uint16) *net.UDPAddr
 	ControlServiceAddresses() []*net.UDPAddr
-	ColibriGatewayAddressByEgressId(uint32) (topology.ColigateInfo, error)
+	ColibriGatewayByEgressId(uint32) (topology.ColigateInfo, error)
 }
 
 // DaemonServer handles gRPC requests to the SCION daemon.
@@ -429,11 +429,11 @@ func (s *DaemonServer) ColibriSetupRsv(ctx context.Context, req *sdpb.ColibriSet
 		if err != nil {
 			return res, err
 		}
-		coligateAddresses, err := s.Topology.ColibriGatewayAddressByEgressId(uint32(egress))
+		coligateInfo, err := s.Topology.ColibriGatewayByEgressId(uint32(egress))
 		if err != nil {
 			return res, err
 		}
-		addr := coligateAddresses.Addr
+		addr := coligateInfo.Addr
 		res.Base.Success.NextHop = addr.String()
 	}
 	return res, nil

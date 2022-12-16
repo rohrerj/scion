@@ -171,17 +171,18 @@ func setupColibri(g *errgroup.Group, cleanup *app.Cleanup, cfg *config.Config, c
 		return serrors.WrapStr("initializing colibri store", err)
 	}
 
-	coligateAddresses := make(map[uint32]*net.TCPAddr, len(cfg.Colibri.Gateways))
+	coligateAddresses := make(map[uint32]*net.TCPAddr)
 	for _, coligate := range cfg.Colibri.Gateways {
-		coligateInfo, err := topo.ColibriGatewayAddress(coligate.Name)
+		coligateInfo, err := topo.ColibriGateway(coligate.Name)
+		if err != nil {
+			return err
+		}
+		tcpAddr, err := net.ResolveTCPAddr("tcp", coligate.Addr)
 		if err != nil {
 			return err
 		}
 		for _, egress := range coligateInfo.Egresses {
-			coligateAddresses[egress], err = net.ResolveTCPAddr("tcp", coligate.Addr)
-			if err != nil {
-				return err
-			}
+			coligateAddresses[egress] = tcpAddr
 		}
 	}
 

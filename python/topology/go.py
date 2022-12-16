@@ -226,7 +226,7 @@ class GoGenerator(object):
                 "name": elem_id,
                 "addr": elem["service_addr"]
             })
-        return x    
+        return x
 
     def _build_co_capacities(self, ia):
         """

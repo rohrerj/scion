@@ -48,14 +48,15 @@ const MaxAdmissionEntryValidity = time.Minute
 
 // Store is the reservation store.
 type Store struct {
-	localIA          addr.IA
-	isCore           bool
-	db               backend.DB                      // aka reservation map
-	admitter         admission.Admitter              // the chosen admission entity
-	operator         *coliquic.ServiceClientOperator // dials next colibri service
-	authenticator    Authenticator                   // source authentication based on drkey
-	colibriKey       cipher.Block                    // colibri secret key
-	coligateEgresses map[string][]uint32
+	localIA       addr.IA
+	isCore        bool
+	db            backend.DB                      // aka reservation map
+	admitter      admission.Admitter              // the chosen admission entity
+	operator      *coliquic.ServiceClientOperator // dials next colibri service
+	authenticator Authenticator                   // source authentication based on drkey
+	colibriKey    cipher.Block                    // colibri secret key
+	// stores the mapping of colibri gateway topology id to its responsible border router interfaces
+	coligateEgrMap map[string][]uint32
 }
 
 var _ reservationstorage.Store = (*Store)(nil)
@@ -83,24 +84,24 @@ func NewStore(topo *topology.Loader, tcpDialer libgrpc.Dialer,
 		return nil, err
 	}
 
-	coligateEgresses := make(map[string][]uint32)
-	coligateInfos, err := topo.ColibriGatewayAddresses()
+	coligateEgrMap := make(map[string][]uint32)
+	coligateInfos, err := topo.ColibriGateways()
 	if err != nil {
 		return nil, err
 	}
 	for _, coligateInfo := range coligateInfos {
-		coligateEgresses[coligateInfo.Name] = coligateInfo.Egresses
+		coligateEgrMap[coligateInfo.Name] = coligateInfo.Egresses
 	}
 
 	return &Store{
-		localIA:          topo.IA(),
-		isCore:           topo.Core(),
-		db:               db,
-		admitter:         admitter,
-		operator:         operator,
-		authenticator:    NewDRKeyAuthenticator(topo.IA(), tcpDialer),
-		colibriKey:       colibriKey,
-		coligateEgresses: coligateEgresses,
+		localIA:        topo.IA(),
+		isCore:         topo.Core(),
+		db:             db,
+		admitter:       admitter,
+		operator:       operator,
+		authenticator:  NewDRKeyAuthenticator(topo.IA(), tcpDialer),
+		colibriKey:     colibriKey,
+		coligateEgrMap: coligateEgrMap,
 	}, nil
 }
 
@@ -402,7 +403,7 @@ func (s *Store) GetActiveIndicesAtSource(ctx context.Context, req *colpb.ActiveI
 	if err != nil {
 		log.Info("error obtaining active segment reservations ")
 	}
-	egresses := s.coligateEgresses[req.ColigateName]
+	egresses := s.coligateEgrMap[req.ColigateId]
 	reservations := make([]*colpb.ActiveIndicesResponse_Reservation, 0)
 	for _, r := range rsvs {
 		// TODO(juagargi) move egress filtering to db query.

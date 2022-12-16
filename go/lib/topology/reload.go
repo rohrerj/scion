@@ -192,21 +192,21 @@ func (l *Loader) ColibriServiceAddress(id string) *net.UDPAddr {
 	return l.topo.PublicAddress(addr.SvcCOL, id)
 }
 
-func (l *Loader) ColibriGatewayAddressByEgressId(id uint32) (ColigateInfo, error) {
+func (l *Loader) ColibriGatewayByEgressId(id uint32) (ColigateInfo, error) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	return l.topo.ColibriGatewayAddressByEgressId(id)
+	return l.topo.ColibriGatewayByEgressId(id)
 }
 
-func (l *Loader) ColibriGatewayAddress(id string) (ColigateInfo, error) {
+func (l *Loader) ColibriGateway(name string) (ColigateInfo, error) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	return l.topo.ColibriGateway(id)
+	return l.topo.ColibriGateway(name)
 }
 
-func (l *Loader) ColibriGatewayAddresses() ([]ColigateInfo, error) {
+func (l *Loader) ColibriGateways() ([]ColigateInfo, error) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
