@@ -409,12 +409,15 @@ func invalidReservationTest(c client, conn *snet.Conn, messagePayload []byte,
 	}
 }
 
-// Tests that packets that exceed the bandwidth are dropped.
+// Tests that packets that exceed the bandwidth are dropped. The reservation uses
+// bandwidth class 1, which allows 2000 bytes per second, including the headers. The
+// burst size is also 2000 bytes per second. Since the payload + header size is larger
+// than 2000 bytes, the packet should be dropped.
 func exceedBandwidthTest(c client, conn *snet.Conn, messagePayload []byte,
 	recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
 
 	time.Sleep(1 * time.Second) // Make sure we have the full bandwidth available
-	sendBuf := make([]byte, 2500)
+	sendBuf := make([]byte, 2000)
 	messagePayload = append(messagePayload, sendBuf...)
 
 	_, err := conn.WriteTo(messagePayload, c.Remote)

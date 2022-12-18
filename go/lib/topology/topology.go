@@ -419,9 +419,9 @@ func copyColigateMap(m map[string]ColigateInfo) map[string]ColigateInfo {
 	ret := make(map[string]ColigateInfo)
 	for k, v := range m {
 		ret[k] = ColigateInfo{
+			Name:     v.Name,
 			Addr:     copyUDPAddr(v.Addr),
 			Egresses: append([]uint32(nil), v.Egresses...),
-			Name:     v.Name,
 		}
 	}
 	return ret

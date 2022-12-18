@@ -177,7 +177,7 @@ func setupColibri(g *errgroup.Group, cleanup *app.Cleanup, cfg *config.Config, c
 		if err != nil {
 			return err
 		}
-		tcpAddr, err := net.ResolveTCPAddr("tcp", coligate.Addr)
+		tcpAddr, err := net.ResolveTCPAddr("tcp", coligate.ControlAddr)
 		if err != nil {
 			return err
 		}

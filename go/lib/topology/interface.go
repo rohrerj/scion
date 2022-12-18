@@ -111,15 +111,18 @@ type Topology interface {
 // NewTopology creates a new empty topology.
 func NewTopology() Topology {
 	return &topologyS{
-		Topology: &RWTopology{},
+		Topology:       &RWTopology{},
+		coligateEgrMap: make(map[uint32]ColigateInfo),
 	}
 }
 
 // FromRWTopology wraps the high level topology interface API around a raw topology object.
 func FromRWTopology(topo *RWTopology) Topology {
-	return &topologyS{
+	s := &topologyS{
 		Topology: topo,
 	}
+	s.calculateColigateEgrMap()
+	return s
 }
 
 // FromJSONFile extracts the topology from a file containing the JSON representation of the
@@ -129,9 +132,11 @@ func FromJSONFile(path string) (Topology, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &topologyS{
+	s := &topologyS{
 		Topology: t,
-	}, nil
+	}
+	s.calculateColigateEgrMap()
+	return s, nil
 }
 
 func FromJSONBytes(raw []byte) (Topology, error) {
@@ -139,14 +144,28 @@ func FromJSONBytes(raw []byte) (Topology, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &topologyS{
+	s := &topologyS{
 		Topology: t,
-	}, nil
+	}
+	s.calculateColigateEgrMap()
+	return s, nil
 }
 
 type topologyS struct {
 	Topology       *RWTopology
 	coligateEgrMap map[uint32]ColigateInfo
+}
+
+func (t *topologyS) calculateColigateEgrMap() {
+	t.coligateEgrMap = make(map[uint32]ColigateInfo)
+	all, err := t.ColibriGateways()
+	if err == nil {
+		for _, coligate := range all {
+			for _, egress := range coligate.Egresses {
+				t.coligateEgrMap[egress] = coligate
+			}
+		}
+	}
 }
 
 func (t *topologyS) IA() addr.IA {
@@ -235,17 +254,6 @@ func (t *topologyS) ColibriGateway(name string) (ColigateInfo, error) {
 }
 
 func (t *topologyS) ColibriGatewayByEgressId(id uint32) (ColigateInfo, error) {
-	if t.coligateEgrMap == nil {
-		t.coligateEgrMap = make(map[uint32]ColigateInfo)
-		all, err := t.ColibriGateways()
-		if err == nil {
-			for _, coligate := range all {
-				for _, egress := range coligate.Egresses {
-					t.coligateEgrMap[egress] = coligate
-				}
-			}
-		}
-	}
 	coligateInfo, found := t.coligateEgrMap[id]
 	if found {
 		return coligateInfo, nil

@@ -34,8 +34,8 @@ type ColibriConfig struct {
 }
 
 type ColigateService struct {
-	Name string `toml:"name"`
-	Addr string `toml:"addr"` //the address for the grpc endpoint
+	Name        string `toml:"name"`
+	ControlAddr string `toml:"addr"` //the address for the grpc endpoint
 }
 
 func (cfg *ColibriConfig) Validate() error {
