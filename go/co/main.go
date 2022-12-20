@@ -185,7 +185,7 @@ func setupColibri(g *errgroup.Group, cleanup *app.Cleanup, cfg *config.Config, c
 			coligateAddresses[egress] = tcpAddr
 		}
 	}
-
+	// TODO(juagargi) Add security for connection with colibri gateway.
 	colibriService := &colgrpc.ColibriService{
 		Store:     colibriStore,
 		Coligates: coligateAddresses,

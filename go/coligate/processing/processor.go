@@ -230,7 +230,7 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 			return serrors.New(
 				"Loading active reservation indices from colibri service failed after timeout")
 		}
-		// TODO(rohrerj) add transport security
+		// TODO(rohrerj) Add security for connection with colibri service.
 		grpcconn, err := grpc.Dial(colibiServiceAddr.String(), grpc.WithInsecure())
 		if err != nil {
 			continue
