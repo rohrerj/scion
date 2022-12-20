@@ -149,7 +149,7 @@ class GoGenerator(object):
 
     def _build_coligate_conf(self, topo_id, ia, base, name, infra_elem):
         config_dir = '/share/conf' if self.args.docker else base
-        grpcAddr = infra_elem['service_addr']
+        grpcAddr = infra_elem['control_addr']
         a = prom_addr(grpcAddr, COLIGATE_PROM_PORT)
         
         raw_entry = {
@@ -224,7 +224,7 @@ class GoGenerator(object):
         for elem_id, elem in self.args.topo_dicts[topo_id].get("colibri_gateway", {}).items():
             x.append({
                 "name": elem_id,
-                "addr": elem["service_addr"]
+                "control_addr": elem["control_addr"]
             })
         return x
 

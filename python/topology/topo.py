@@ -328,7 +328,7 @@ class TopoGenerator(object):
             coligate_service_port = 31088
             if not self.args.docker:
                 coligate_service_port = self.args.port_gen.register(elem_id+"_service")
-            self.topo_dicts[topo_id]["colibri_gateway"][elem_id]["service_addr"] = join_host_port(self._reg_addr(topo_id, elem_id+"_service", addr_type).ip, coligate_service_port)
+            self.topo_dicts[topo_id]["colibri_gateway"][elem_id]["control_addr"] = join_host_port(self._reg_addr(topo_id, elem_id+"_service", addr_type).ip, coligate_service_port)
 
     def _gen_br_entries(self, topo_id, as_conf):
         addr_type = addr_type_from_underlay(as_conf.get('underlay', DEFAULT_UNDERLAY))

@@ -90,7 +90,7 @@ class PrometheusGenerator(object):
                 a = prom_addr(elem["addr"], CS_PROM_PORT)
                 ele_dict["ControlService"].append(a)
             for elem_id, elem in as_topo["colibri_gateway"].items():
-                a = prom_addr(elem["service_addr"], COLIGATE_PROM_PORT)
+                a = prom_addr(elem["control_addr"], COLIGATE_PROM_PORT)
                 ele_dict["ColibriGateway"].append(a)
             if self.args.docker:
                 host_dispatcher = prom_addr_dispatcher(self.args.docker, topo_id,
