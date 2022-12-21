@@ -30,6 +30,12 @@ type ColibriConfig struct {
 	ReservationsFile string                `toml:"reservations"`
 	Capacities       *colconf.Capacities   `toml:"omitempty"`
 	Reservations     *colconf.Reservations `toml:"omitempty"`
+	Gateways         []ColigateService     `toml:"gateways"`
+}
+
+type ColigateService struct {
+	Name        string `toml:"name"`
+	ControlAddr string `toml:"control_addr"` //the address for the grpc endpoint
 }
 
 func (cfg *ColibriConfig) Validate() error {

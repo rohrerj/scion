@@ -448,7 +448,7 @@ message AddAdmissionEntryResponse {
 }
 
 message ActiveIndicesRequest {
-    // TODO(justin) add drkey validation
+    string coligate_id = 1;
 }
 
 message ActiveIndicesResponse {
@@ -470,8 +470,6 @@ message ActiveIndicesResponse {
         // the N sigmas of the N ASes in the path.
         repeated bytes sigmas = 4;
     }
-
-    // TODO(justing) add drkey validation
 
     repeated Reservation reservations = 1;
 }

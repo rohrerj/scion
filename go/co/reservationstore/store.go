@@ -55,6 +55,8 @@ type Store struct {
 	operator      *coliquic.ServiceClientOperator // dials next colibri service
 	authenticator Authenticator                   // source authentication based on drkey
 	colibriKey    cipher.Block                    // colibri secret key
+	// stores the mapping of colibri gateway topology id to its responsible border router interfaces
+	coligateEgrMap map[string][]uint32
 }
 
 var _ reservationstorage.Store = (*Store)(nil)
@@ -81,14 +83,25 @@ func NewStore(topo *topology.Loader, tcpDialer libgrpc.Dialer,
 	if err != nil {
 		return nil, err
 	}
+
+	coligateEgrMap := make(map[string][]uint32)
+	coligateInfos, err := topo.ColibriGateways()
+	if err != nil {
+		return nil, err
+	}
+	for _, coligateInfo := range coligateInfos {
+		coligateEgrMap[coligateInfo.Name] = coligateInfo.Egresses
+	}
+
 	return &Store{
-		localIA:       topo.IA(),
-		isCore:        topo.Core(),
-		db:            db,
-		admitter:      admitter,
-		operator:      operator,
-		authenticator: NewDRKeyAuthenticator(topo.IA(), tcpDialer),
-		colibriKey:    colibriKey,
+		localIA:        topo.IA(),
+		isCore:         topo.Core(),
+		db:             db,
+		admitter:       admitter,
+		operator:       operator,
+		authenticator:  NewDRKeyAuthenticator(topo.IA(), tcpDialer),
+		colibriKey:     colibriKey,
+		coligateEgrMap: coligateEgrMap,
 	}, nil
 }
 
@@ -390,8 +403,20 @@ func (s *Store) GetActiveIndicesAtSource(ctx context.Context, req *colpb.ActiveI
 	if err != nil {
 		log.Info("error obtaining active segment reservations ")
 	}
+	egresses := s.coligateEgrMap[req.ColigateId]
 	reservations := make([]*colpb.ActiveIndicesResponse_Reservation, 0)
 	for _, r := range rsvs {
+		// TODO(juagargi) move egress filtering to db query.
+		found := false
+		for _, egress := range egresses {
+			if r.Steps[0].Egress == uint16(egress) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
 		reservationIndices := make([]*colpb.ActiveIndicesResponse_ReservationIndex, 0)
 		for _, idx := range r.Indices {
 			sigmas := make([][]byte, len(idx.Token.HopFields))

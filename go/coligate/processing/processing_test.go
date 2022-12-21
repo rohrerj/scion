@@ -542,7 +542,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 16384),
+						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
 							Id:            "A",
@@ -583,7 +583,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 4096),
+						RawPacket:      make([]byte, 500),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
 							Id:            "A",
@@ -601,7 +601,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 				},
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 4096),
+						RawPacket:      make([]byte, 500),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
 							Id:            "A",
@@ -619,7 +619,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 				},
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 4096),
+						RawPacket:      make([]byte, 500),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
 							Id:            "A",
@@ -637,7 +637,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 				},
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 4096),
+						RawPacket:      make([]byte, 500),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
 							Id:            "A",
@@ -678,7 +678,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 16384),
+						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
 							Id:            "A",
@@ -696,7 +696,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 				},
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 16384),
+						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
 							Id:            "B",
@@ -719,7 +719,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 16384),
+						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
 							Id:            "A",
@@ -765,7 +765,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 16384),
+						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
 							Id:            "A",
@@ -783,7 +783,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 				},
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 22528),
+						RawPacket:      make([]byte, 2750),
 						PktArrivalTime: startTime.Add(1 * time.Second),
 						Reservation: &storage.Reservation{
 							Id:            "A",
@@ -811,7 +811,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 22528),
+						RawPacket:      make([]byte, 2750),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
 							Id:            "A",
@@ -829,7 +829,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 				},
 				{
 					proc: processing.DataPacket{
-						RawPacket:      make([]byte, 16384),
+						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime.Add(1 * time.Second),
 						Reservation: &storage.Reservation{
 							Id:            "A",

@@ -39,7 +39,6 @@ message UpdateSigmasRequest {
     repeated HopInterface hop_interfaces = 6;
     // The sigmas of the reservation index.
     repeated bytes sigmas = 7;
-    // TODO(justin)
 }
 
 message HopInterface {
@@ -50,5 +49,4 @@ message HopInterface {
 }
 
 message UpdateSigmasResponse {
-    // TODO(justin)
 }

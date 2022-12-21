@@ -93,7 +93,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		log.Debug("Found Border Router", "ifid", ifid, "internal_addr", info.InternalAddr)
 	}
 
-	coligateAddr, err := topo.ColibriGatewayAddress(cfg.General.ID)
+	coligateInfo, err := topo.ColibriGateway(cfg.General.ID)
 	if err != nil {
 		return err
 	}
@@ -166,10 +166,10 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	// We start the data plane as soon as we retrieved the active reservations from colibri service
 	if err := p.loadActiveReservationsFromColibriService(ctx, config, colibriServiceAddresses[0],
-		config.COSyncTimeout); err != nil {
+		config.COSyncTimeout, cfg.General.ID); err != nil {
 		return err
 	}
-	if err := p.initDataPlane(config, coligateAddr, g, cleanup); err != nil {
+	if err := p.initDataPlane(config, coligateInfo.Addr, g, cleanup); err != nil {
 		return err
 	}
 
@@ -220,7 +220,7 @@ func initializeMetrics(metrics *common.Metrics) *ColigateMetrics {
 
 // Loads the active EE Reservations from the colibri service
 func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context,
-	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr, timeout int) error {
+	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr, timeout int, coligateId string) error {
 
 	log.Info("Loading active reservation indices from colibri service")
 	var response *copb.ActiveIndicesResponse
@@ -230,13 +230,15 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 			return serrors.New(
 				"Loading active reservation indices from colibri service failed after timeout")
 		}
-		// TODO(rohrerj) add transport security
+		// TODO(rohrerj) Add security for connection with colibri service.
 		grpcconn, err := grpc.Dial(colibiServiceAddr.String(), grpc.WithInsecure())
 		if err != nil {
 			continue
 		}
 		copbservice := copb.NewColibriServiceClient(grpcconn)
-		response, err = copbservice.ActiveIndices(ctx, &copb.ActiveIndicesRequest{})
+		response, err = copbservice.ActiveIndices(ctx, &copb.ActiveIndicesRequest{
+			ColigateId: coligateId,
+		})
 		if err != nil {
 			continue
 		}
@@ -335,7 +337,7 @@ func (p *Processor) initCleanupRoutine() {
 func (p *Processor) initControlPlane(config *config.ColigateConfig, cleanup *app.Cleanup,
 	serverAddr *net.TCPAddr) error {
 
-	log.Info("Init control plane")
+	log.Info("Init control plane", "addr", serverAddr)
 	lis, err := net.ListenTCP("tcp", serverAddr)
 	if err != nil {
 		return err

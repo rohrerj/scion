@@ -74,8 +74,9 @@ type Topology interface {
 	// XXX(scrye): Return value is a shallow copy.
 	BR(name string) (BRInfo, bool)
 
-	ColibriGateway(name string) (*net.UDPAddr, error)
-	ColibriGateways() ([]*net.UDPAddr, error)
+	ColibriGateway(name string) (ColigateInfo, error)
+	ColibriGatewayByEgressId(id uint32) (ColigateInfo, error)
+	ColibriGateways() ([]ColigateInfo, error)
 
 	// IFInfoMap returns the mapping between interface IDs an internal addresses.
 	//
@@ -110,15 +111,18 @@ type Topology interface {
 // NewTopology creates a new empty topology.
 func NewTopology() Topology {
 	return &topologyS{
-		Topology: &RWTopology{},
+		Topology:       &RWTopology{},
+		coligateEgrMap: make(map[uint32]ColigateInfo),
 	}
 }
 
 // FromRWTopology wraps the high level topology interface API around a raw topology object.
 func FromRWTopology(topo *RWTopology) Topology {
-	return &topologyS{
+	s := &topologyS{
 		Topology: topo,
 	}
+	s.calculateColigateEgrMap()
+	return s
 }
 
 // FromJSONFile extracts the topology from a file containing the JSON representation of the
@@ -128,9 +132,11 @@ func FromJSONFile(path string) (Topology, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &topologyS{
+	s := &topologyS{
 		Topology: t,
-	}, nil
+	}
+	s.calculateColigateEgrMap()
+	return s, nil
 }
 
 func FromJSONBytes(raw []byte) (Topology, error) {
@@ -138,13 +144,28 @@ func FromJSONBytes(raw []byte) (Topology, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &topologyS{
+	s := &topologyS{
 		Topology: t,
-	}, nil
+	}
+	s.calculateColigateEgrMap()
+	return s, nil
 }
 
 type topologyS struct {
-	Topology *RWTopology
+	Topology       *RWTopology
+	coligateEgrMap map[uint32]ColigateInfo
+}
+
+func (t *topologyS) calculateColigateEgrMap() {
+	t.coligateEgrMap = make(map[uint32]ColigateInfo)
+	all, err := t.ColibriGateways()
+	if err == nil {
+		for _, coligate := range all {
+			for _, egress := range coligate.Egresses {
+				t.coligateEgrMap[egress] = coligate
+			}
+		}
+	}
 }
 
 func (t *topologyS) IA() addr.IA {
@@ -224,20 +245,28 @@ func (t *topologyS) BR(name string) (BRInfo, bool) {
 	return br, ok
 }
 
-func (t *topologyS) ColibriGateway(name string) (*net.UDPAddr, error) {
-	coligateInfo, ok := t.Topology.COLGATE[name]
+func (t *topologyS) ColibriGateway(name string) (ColigateInfo, error) {
+	coligateInfo, ok := t.Topology.Coligate[name]
 	if !ok {
 		return coligateInfo, serrors.New("Colibri Gateway not found", "name", name)
 	}
 	return coligateInfo, nil
 }
 
-func (t *topologyS) ColibriGateways() ([]*net.UDPAddr, error) {
-	v := make([]*net.UDPAddr, 0, len(t.Topology.COLGATE))
-	if len(t.Topology.COLGATE) == 0 {
-		return v, serrors.New("No Colibri Gateway found")
+func (t *topologyS) ColibriGatewayByEgressId(id uint32) (ColigateInfo, error) {
+	coligateInfo, found := t.coligateEgrMap[id]
+	if found {
+		return coligateInfo, nil
 	}
-	for _, addr := range t.Topology.COLGATE {
+	return ColigateInfo{}, serrors.New("Colibri Gateway not found", "id", id)
+}
+
+func (t *topologyS) ColibriGateways() ([]ColigateInfo, error) {
+	v := make([]ColigateInfo, 0, len(t.Topology.Coligate))
+	if len(t.Topology.Coligate) == 0 {
+		return v, nil
+	}
+	for _, addr := range t.Topology.Coligate {
 		v = append(v, addr)
 	}
 	return v, nil

@@ -69,7 +69,7 @@ type (
 
 		CS                        IDAddrMap
 		CO                        IDAddrMap
-		COLGATE                   map[string]*net.UDPAddr
+		Coligate                  map[string]ColigateInfo
 		DS                        IDAddrMap
 		HiddenSegmentLookup       IDAddrMap
 		HiddenSegmentRegistration IDAddrMap
@@ -82,6 +82,12 @@ type (
 		DataAddr        *net.UDPAddr
 		ProbeAddr       *net.UDPAddr
 		AllowInterfaces []uint64
+	}
+
+	ColigateInfo struct {
+		Name     string
+		Addr     *net.UDPAddr
+		Egresses []uint32
 	}
 
 	// BRInfo is a list of AS-wide unique interface IDs for a router. These IDs are also used
@@ -144,7 +150,7 @@ func NewRWTopology() *RWTopology {
 		BR:                        make(map[string]BRInfo),
 		CS:                        make(IDAddrMap),
 		CO:                        make(IDAddrMap),
-		COLGATE:                   make(map[string]*net.UDPAddr),
+		Coligate:                  make(map[string]ColigateInfo),
 		DS:                        make(IDAddrMap),
 		HiddenSegmentLookup:       make(IDAddrMap),
 		HiddenSegmentRegistration: make(IDAddrMap),
@@ -300,9 +306,9 @@ func (t *RWTopology) populateServices(raw *jsontopo.Topology) error {
 	if err != nil {
 		return serrors.WrapStr("unable to extract CO address", err)
 	}
-	t.COLGATE, err = coligateMapFromRaw(raw.ColibriGateway)
+	t.Coligate, err = coligateMapFromRaw(raw.ColibriGateway)
 	if err != nil {
-		return serrors.WrapStr("unable to extract COLGATE address", err)
+		return serrors.WrapStr("unable to extract Coligate address", err)
 	}
 	t.SIG, err = gatewayMapFromRaw(raw.SIG)
 	if err != nil {
@@ -398,7 +404,7 @@ func (t *RWTopology) Copy() *RWTopology {
 
 		CS:                        t.CS.copy(),
 		CO:                        t.CO.copy(),
-		COLGATE:                   copyColigateMap(t.COLGATE),
+		Coligate:                  copyColigateMap(t.Coligate),
 		DS:                        t.DS.copy(),
 		SIG:                       copySIGMap(t.SIG),
 		HiddenSegmentLookup:       t.HiddenSegmentLookup.copy(),
@@ -406,13 +412,17 @@ func (t *RWTopology) Copy() *RWTopology {
 	}
 }
 
-func copyColigateMap(m map[string]*net.UDPAddr) map[string]*net.UDPAddr {
+func copyColigateMap(m map[string]ColigateInfo) map[string]ColigateInfo {
 	if m == nil {
 		return nil
 	}
-	ret := make(map[string]*net.UDPAddr)
+	ret := make(map[string]ColigateInfo)
 	for k, v := range m {
-		ret[k] = copyUDPAddr(v)
+		ret[k] = ColigateInfo{
+			Name:     v.Name,
+			Addr:     copyUDPAddr(v.Addr),
+			Egresses: append([]uint32(nil), v.Egresses...),
+		}
 	}
 	return ret
 }
@@ -491,15 +501,19 @@ func (svc *svcInfo) getAllTopoAddrs() []TopoAddr {
 	return topoAddrs
 }
 
-func coligateMapFromRaw(ras map[string]*jsontopo.ServerInfo) (map[string]*net.UDPAddr, error) {
-	coligateMap := make(map[string]*net.UDPAddr)
-	for name, svc := range ras {
+func coligateMapFromRaw(m map[string]*jsontopo.ColigateInfo) (map[string]ColigateInfo, error) {
+	coligateMap := make(map[string]ColigateInfo)
+	for name, svc := range m {
 		gatewayAddr, err := rawAddrToUDPAddr(svc.Addr)
 		if err != nil {
 			return nil, serrors.WrapStr("could not parse address", err,
 				"address", svc.Addr, "process_name", name)
 		}
-		coligateMap[name] = gatewayAddr
+		coligateMap[name] = ColigateInfo{
+			Name:     name,
+			Addr:     gatewayAddr,
+			Egresses: svc.Egresses,
+		}
 	}
 	return coligateMap, nil
 }

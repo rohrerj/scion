@@ -180,13 +180,13 @@ func (w *Worker) performTrafficMonitoring(d *dataPacket) error {
 	currentBwCls := d.reservation.Current().BwCls
 	if monitor != nil {
 		if monitor.LastBwcls != currentBwCls {
-			realBandwidth := 1024 * libtypes.BWCls(currentBwCls).ToKbps()
+			realBandwidth := 125 * libtypes.BWCls(currentBwCls).ToKbps()
 			monitor.Bucket.SetRate(float64(realBandwidth))
 			monitor.Bucket.SetBurstSize(float64(realBandwidth))
 			monitor.LastBwcls = currentBwCls
 		}
 	} else {
-		realBandwidth := 1024 * libtypes.BWCls(currentBwCls).ToKbps()
+		realBandwidth := 125 * libtypes.BWCls(currentBwCls).ToKbps()
 		// TODO(rohrerj) set correct value for burst size
 		monitor = &storage.TrafficMonitor{
 			Bucket: tokenbucket.NewTokenBucket(d.pktArrivalTime,
