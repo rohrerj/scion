@@ -510,9 +510,9 @@ func coligateMapFromRaw(m map[string]*jsontopo.ColigateInfo) (map[string]Coligat
 				"address", svc.Addr, "process_name", name)
 		}
 		coligateMap[name] = ColigateInfo{
+			Name:     name,
 			Addr:     gatewayAddr,
 			Egresses: svc.Egresses,
-			Name:     name,
 		}
 	}
 	return coligateMap, nil

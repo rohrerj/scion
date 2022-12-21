@@ -411,22 +411,33 @@ func invalidReservationTest(c client, conn *snet.Conn, messagePayload []byte,
 
 // Tests that packets that exceed the bandwidth are dropped. The reservation uses
 // bandwidth class 1, which allows 2000 bytes per second, including the headers. The
-// burst size is also 2000 bytes per second. Since the payload + header size is larger
-// than 2000 bytes, the packet should be dropped.
+// burst size is also 2000 bytes. If we send two times a packet with payload size
+// 1200 bytes the first one should be accepted and the second one dropped.
 func exceedBandwidthTest(c client, conn *snet.Conn, messagePayload []byte,
 	recBuff []byte, trips []*libcol.FullTrip, resID reservation.ID) {
 
 	time.Sleep(1 * time.Second) // Make sure we have the full bandwidth available
-	sendBuf := make([]byte, 2000)
+	sendBuf := make([]byte, 1200-len(messagePayload))
 	messagePayload = append(messagePayload, sendBuf...)
 
 	_, err := conn.WriteTo(messagePayload, c.Remote)
 	if err != nil {
 		integration.LogFatal("writing data with colibri", "err", err)
 	}
-	// Because the packet is larger than the bandwidth class allowes it exceeds the
-	// limit and get dropped.
+	_, err = conn.WriteTo(messagePayload, c.Remote)
+	if err != nil {
+		integration.LogFatal("writing data with colibri", "err", err)
+	}
+
 	conn.SetReadDeadline(time.Now().Add(c.Timeout))
+	// The first packet should have reached the other endhost because the bandwidth has
+	// not been exceeded yet and therefore we should get a response.
+	_, _, err = conn.ReadFrom(recBuff)
+	if err != nil {
+		integration.LogFatal("reading data", "err", err)
+	}
+	// The second packet should not have reached the other endhost because now we have
+	// exceeded the bandwidth and therefore we should not get a response.
 	_, _, err = conn.ReadFrom(recBuff)
 	if err == nil {
 		integration.LogFatal("reading data", "err", err)
