@@ -56,14 +56,25 @@ func (cfg *ColigateConfig) Validate() error {
 }
 
 func (cfg *ColigateConfig) InitDefaults() {
-	cfg.NumBitsForGatewayId = 1
-	cfg.NumBitsForWorkerId = 8
-	cfg.NumBitsForPerWorkerCounter = 23
-	cfg.NumWorkers = 8
-	cfg.MaxQueueSizePerWorker = 256
-	cfg.Salt = ""
-	cfg.ColibriGatewayID = 1
-	cfg.COSyncTimeout = 10
+	if cfg.NumBitsForGatewayId == 0 || cfg.NumBitsForWorkerId == 0 ||
+		cfg.NumBitsForPerWorkerCounter == 0 {
+
+		cfg.NumBitsForGatewayId = 1
+		cfg.NumBitsForWorkerId = 8
+		cfg.NumBitsForPerWorkerCounter = 23
+	}
+	if cfg.NumWorkers == 0 {
+		cfg.NumWorkers = 8
+	}
+	if cfg.MaxQueueSizePerWorker == 0 {
+		cfg.MaxQueueSizePerWorker = 256
+	}
+	if cfg.ColibriGatewayID == 0 {
+		cfg.ColibriGatewayID = 1
+	}
+	if cfg.COSyncTimeout == 0 {
+		cfg.COSyncTimeout = 10
+	}
 }
 
 func (cfg *ColigateConfig) Sample(dst io.Writer, _ config.Path, _ config.CtxMap) {
