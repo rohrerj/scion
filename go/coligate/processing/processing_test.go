@@ -980,6 +980,7 @@ func TestUpdateMacs(t *testing.T) {
 
 	// Update mac fields of EE data packet with correct sigma
 	d.Reservation.Indices[0].Sigmas[0] = sigmaBuffer
+	d.Reservation.Indices[0].Ciphers = nil
 	err = w.Stamp(d)
 	assert.NoError(t, err)
 	// Validate the computed mac

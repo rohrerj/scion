@@ -15,6 +15,7 @@
 package processing
 
 import (
+	"crypto/cipher"
 	"time"
 
 	"github.com/google/gopacket"
@@ -218,12 +219,20 @@ func (w *Worker) stamp(d *dataPacket) error {
 	w.updateCounter()
 
 	d.colibriPath.PacketTimestamp = libcolibri.CreateColibriTimestampCustom(tsRel, w.CoreIdCounter)
-	// Set HVF values
-	for i, sigma := range currentIndex.Sigmas {
-		cipher, err := libcolibri.InitColibriKey(sigma)
-		if err != nil {
-			return err
+	// Pre-initialize and store all ciphers if they are not initialized already
+	if currentIndex.Ciphers == nil {
+		currentIndex.Ciphers = make([]cipher.Block, len(currentIndex.Sigmas))
+		for i := 0; i < len(currentIndex.Sigmas); i++ {
+			cipher, err := libcolibri.InitColibriKey(currentIndex.Sigmas[i])
+			if err != nil {
+				currentIndex.Ciphers = nil
+				return err
+			}
+			currentIndex.Ciphers[i] = cipher
 		}
+	}
+	// Set HVF values
+	for i, cipher := range currentIndex.Ciphers {
 		if err = libcolibri.MACE2EFromSigma(d.colibriPath.HopFields[i].Mac, cipher,
 			d.colibriPath.InfoField, d.colibriPath.PacketTimestamp, d.scionLayer); err != nil {
 			return err

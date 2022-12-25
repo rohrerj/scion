@@ -15,6 +15,7 @@
 package storage
 
 import (
+	"crypto/cipher"
 	"time"
 
 	"github.com/scionproto/scion/go/coligate/tokenbucket"
@@ -40,6 +41,7 @@ type ReservationIndex struct {
 	Index    uint8
 	Validity time.Time
 	Sigmas   [][]byte
+	Ciphers  []cipher.Block
 	BwCls    uint8
 }
 
