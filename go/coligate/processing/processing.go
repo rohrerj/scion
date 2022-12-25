@@ -143,10 +143,18 @@ func (w *Worker) validateFields(d *dataPacket) error {
 	infoField := d.colibriPath.InfoField
 	currentIndex := d.reservation.Current()
 
-	if len(d.colibriPath.HopFields) != len(currentIndex.Sigmas) {
-		return serrors.New("Number of hopfields is invalid", "expected",
-			len(currentIndex.Sigmas), "actual", len(d.colibriPath.HopFields))
+	if currentIndex.Ciphers != nil {
+		if len(d.colibriPath.HopFields) != len(currentIndex.Ciphers) {
+			return serrors.New("Number of hopfields is invalid", "expected",
+				len(currentIndex.Sigmas), "actual", len(d.colibriPath.HopFields))
+		}
+	} else {
+		if len(d.colibriPath.HopFields) != len(currentIndex.Sigmas) {
+			return serrors.New("Number of hopfields is invalid", "expected",
+				len(currentIndex.Sigmas), "actual", len(d.colibriPath.HopFields))
+		}
 	}
+
 	if infoField.CurrHF != 0 {
 		return serrors.New("CurrHF is invalid", "expected", 0, "actual", infoField.CurrHF)
 	}
@@ -222,7 +230,7 @@ func (w *Worker) stamp(d *dataPacket) error {
 	// Pre-initialize and store all ciphers if they are not initialized already
 	if currentIndex.Ciphers == nil {
 		currentIndex.Ciphers = make([]cipher.Block, len(currentIndex.Sigmas))
-		for i := 0; i < len(currentIndex.Sigmas); i++ {
+		for i := 0; i < len(currentIndex.Ciphers); i++ {
 			cipher, err := libcolibri.InitColibriKey(currentIndex.Sigmas[i])
 			if err != nil {
 				currentIndex.Ciphers = nil
@@ -230,6 +238,7 @@ func (w *Worker) stamp(d *dataPacket) error {
 			}
 			currentIndex.Ciphers[i] = cipher
 		}
+		currentIndex.Sigmas = nil
 	}
 	// Set HVF values
 	for i, cipher := range currentIndex.Ciphers {
