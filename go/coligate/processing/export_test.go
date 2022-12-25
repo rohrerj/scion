@@ -121,6 +121,10 @@ func (w *Worker) Stamp(d *DataPacket) error {
 	return w.stamp(d.Parse())
 }
 
+func (w *Worker) Process(d *DataPacket) error {
+	return w.process(d.Parse())
+}
+
 func (w *Worker) UpdateCounter() {
 	w.updateCounter()
 }

@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/gopacket"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/scionproto/scion/go/coligate/processing"
@@ -985,4 +986,347 @@ func TestUpdateMacs(t *testing.T) {
 	err = libcolibri.VerifyMAC(privateKeyCipher, d.ColibriPath.PacketTimestamp,
 		d.ColibriPath.InfoField, d.ColibriPath.HopFields[0], d.ScionLayer)
 	assert.NoError(t, err)
+}
+
+func BenchmarkParsing(b *testing.B) {
+	payloadLen := uint16(500)
+	s := &slayers.SCION{
+		SrcIA:      addr.MustIAFrom(1, 1),
+		DstIA:      addr.MustIAFrom(2, 2),
+		PayloadLen: payloadLen,
+		HdrLen:     27,
+		BaseLayer: slayers.BaseLayer{
+			Payload: make([]byte, payloadLen),
+		},
+		PathType: colibri.PathType,
+		Path: &colibri.ColibriPath{
+			InfoField: &colibri.InfoField{
+				ResIdSuffix: make([]byte, 12),
+				HFCount:     5,
+				OrigPayLen:  payloadLen,
+			},
+			HopFields: []*colibri.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       []byte{1, 2, 3, 4},
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       []byte{1, 2, 3, 4},
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       []byte{1, 2, 3, 4},
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       []byte{1, 2, 3, 4},
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       []byte{1, 2, 3, 4},
+				},
+			},
+		},
+	}
+	buffer := gopacket.NewSerializeBuffer()
+	err := s.SerializeTo(buffer, gopacket.SerializeOptions{})
+	assert.NoError(b, err)
+	bytes := []byte{}
+	bytes = append(bytes, buffer.Bytes()...)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := processing.Parse(bytes)
+		assert.NoError(b, err)
+	}
+}
+
+func BenchmarkProcess(b *testing.B) {
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	now := time.Now()
+	resStore := map[string]*storage.Reservation{
+		string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
+			Id: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+			Indices: map[uint8]*storage.ReservationIndex{
+				1: {
+					Index:    0,
+					Validity: now.Add(12 * time.Second),
+					Sigmas: [][]byte{
+						{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+						{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1},
+						{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2},
+						{4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3},
+						{5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4},
+						{6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5},
+					},
+					BwCls: 60,
+				},
+			},
+			Hops: []storage.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
+				{
+					IngressId: 3,
+					EgressId:  4,
+				},
+				{
+					IngressId: 5,
+					EgressId:  6,
+				},
+				{
+					IngressId: 7,
+					EgressId:  8,
+				},
+				{
+					IngressId: 9,
+					EgressId:  10,
+				},
+				{
+					IngressId: 11,
+					EgressId:  12,
+				},
+			},
+		},
+	}
+	w.Storage.InitStorageWithData(resStore)
+	defaultPkt := &processing.DataPacket{
+		PktArrivalTime: time.Now(),
+		ScionLayer: &slayers.SCION{
+			PathType: 4,
+			SrcIA:    addr.MustIAFrom(1, 1),
+		},
+		ColibriPath: &colibri.ColibriPath{
+			InfoField: &colibri.InfoField{
+				Ver:         1,
+				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+				BwCls:       60,
+				ExpTick:     uint32(now.Add(12*time.Second).Unix() / 4),
+			},
+			HopFields: []*colibri.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 3,
+					EgressId:  4,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 5,
+					EgressId:  6,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 7,
+					EgressId:  8,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 9,
+					EgressId:  10,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 11,
+					EgressId:  12,
+					Mac:       make([]byte, 4),
+				},
+			},
+		},
+		RawPacket: make([]byte, 400),
+	}
+	for i := 0; i < b.N; i++ {
+		assert.NoError(b, w.Process(defaultPkt))
+	}
+}
+
+func BenchmarkValidate(b *testing.B) {
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	now := time.Now()
+
+	resStore := map[string]*storage.Reservation{
+		string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}): {
+			Id: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+			Hops: []storage.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
+			},
+			ActiveIndexId: 0,
+			Rlc:           1,
+			Indices: map[uint8]*storage.ReservationIndex{
+				0: {
+					Index:    0,
+					Validity: now.Add(16 * time.Second),
+					BwCls:    1,
+					Sigmas:   make([][]byte, 1),
+				},
+			},
+		},
+	}
+	w.Storage.InitStorageWithData(resStore)
+	d := &processing.DataPacket{
+		PktArrivalTime: now,
+		ColibriPath: &colibri.ColibriPath{
+			InfoField: &colibri.InfoField{
+				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+				Ver:         0,
+				BwCls:       1,
+				Rlc:         1,
+				HFCount:     1,
+				ExpTick:     uint32(now.Add(16*time.Second).Unix() / 4),
+			},
+			HopFields: []*colibri.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
+			},
+		},
+		ScionLayer: &slayers.SCION{
+			SrcIA: addr.MustIAFrom(1, 1),
+		},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		assert.NoError(b, w.Validate(d))
+	}
+}
+
+func BenchmarkTrafficMonitoring(b *testing.B) {
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	now := time.Now()
+	d := &processing.DataPacket{
+		PktArrivalTime: now,
+		Reservation: &storage.Reservation{
+			Id:            "A",
+			ActiveIndexId: 0,
+			Indices: map[uint8]*storage.ReservationIndex{
+				0: {
+					Index:    0,
+					Validity: now.Add(12 * time.Second),
+					BwCls:    40,
+				},
+			},
+		},
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		assert.NoError(b, w.PerformTrafficMonitoring(d))
+	}
+}
+
+func BenchmarkStamp(b *testing.B) {
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	now := time.Now()
+	defaultPkt := &processing.DataPacket{
+		PktArrivalTime: now,
+		ScionLayer: &slayers.SCION{
+			PathType: colibri.PathType,
+			SrcIA:    addr.MustIAFrom(1, 1),
+		},
+		ColibriPath: &colibri.ColibriPath{
+			InfoField: &colibri.InfoField{
+				Ver:         1,
+				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+				BwCls:       1,
+				ExpTick:     uint32(now.Add(12*time.Second).Unix() / 4),
+				HFCount:     5,
+			},
+			HopFields: []*colibri.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 3,
+					EgressId:  4,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 5,
+					EgressId:  6,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 7,
+					EgressId:  8,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 9,
+					EgressId:  10,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 11,
+					EgressId:  12,
+					Mac:       make([]byte, 4),
+				},
+			},
+		},
+		RawPacket: make([]byte, 400),
+		Reservation: &storage.Reservation{
+			Id: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+			Hops: []storage.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
+				{
+					IngressId: 3,
+					EgressId:  4,
+				},
+				{
+					IngressId: 5,
+					EgressId:  6,
+				},
+				{
+					IngressId: 7,
+					EgressId:  8,
+				},
+				{
+					IngressId: 9,
+					EgressId:  10,
+				},
+				{
+					IngressId: 11,
+					EgressId:  12,
+				},
+			},
+			ActiveIndexId: 0,
+			Rlc:           1,
+			Indices: map[uint8]*storage.ReservationIndex{
+				0: {
+					Index:    0,
+					Validity: now.Add(12 * time.Second),
+					BwCls:    1,
+					Sigmas: [][]byte{
+						{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+						{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1},
+						{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2},
+						{4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3},
+						{5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4},
+						{6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5},
+					},
+				},
+			},
+		},
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		w.Stamp(defaultPkt)
+	}
 }
