@@ -27,7 +27,6 @@ import (
 
 	"github.com/scionproto/scion/go/coligate/storage"
 	libaddr "github.com/scionproto/scion/go/lib/addr"
-	libtypes "github.com/scionproto/scion/go/lib/colibri/reservation"
 	"github.com/scionproto/scion/go/lib/log"
 	libmetrics "github.com/scionproto/scion/go/lib/metrics"
 	"github.com/scionproto/scion/go/lib/serrors"
@@ -247,12 +246,10 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 	p.metrics.LoadActiveReservationsTotal.Add(float64(len(response.Reservations)))
 	for _, respReservation := range response.Reservations {
 		highestValidity := time.Unix(0, 0)
-		id, err := libtypes.NewID(libaddr.AS(respReservation.Id.Asid), respReservation.Id.Suffix)
-		if err != nil {
-			log.Debug("error parsing reservation id", "err", err)
-			continue
-		}
-		res := storage.NewReservation(string(id.ToRaw()),
+		newId := [12]byte{}
+		copy(newId[:], respReservation.Id.Suffix)
+
+		res := storage.NewReservation(newId,
 			[]storage.HopField{
 				{
 					EgressId: uint16(respReservation.Egress),
@@ -273,21 +270,21 @@ func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context
 		// Registers the reservation for deletion once it expires
 		p.cleanupChannel <- task
 
-		p.controlUpdateChannels[p.getWorkerForResId([]byte(task.Reservation.Id))] <- task
+		p.controlUpdateChannels[p.getWorkerForResId(task.Reservation.Id)] <- task
 	}
 	log.Info("Successfully loaded active reservation indices from colibri service")
 	return nil
 }
 
-func (p *Processor) getWorkerForResId(resId []byte) uint32 {
-	return p.saltHasher.Hash(resId) % uint32(p.numWorkers)
+func (p *Processor) getWorkerForResId(resId [12]byte) uint32 {
+	return p.saltHasher.Hash(resId[:]) % uint32(p.numWorkers)
 }
 
 // Initializes the cleanup routine that removes outdated reservations
 func (p *Processor) initCleanupRoutine() {
 	log.Info("Init cleanup routine")
 
-	reservationExpirations := make(map[string]time.Time)
+	reservationExpirations := make(map[[12]byte]time.Time)
 
 	updateExpirationMapping := (func(task *storage.UpdateTask) {
 		p.metrics.CleanupReservationUpdateTotal.Add(1)
@@ -325,7 +322,7 @@ func (p *Processor) initCleanupRoutine() {
 			if time.Until(val) < 0 {
 				p.metrics.CleanupReservationDeleted.Add(1)
 
-				workerId := p.getWorkerForResId([]byte(resId))
+				workerId := p.getWorkerForResId(resId)
 				p.controlDeletionChannels[workerId] <- storage.NewDeletionTask(resId)
 				delete(reservationExpirations, resId)
 			}
@@ -405,15 +402,9 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 					continue
 				}
 				d.pktArrivalTime = time.Now()
-				id, err := libtypes.NewID(d.scionLayer.SrcIA.AS(),
-					d.colibriPath.InfoField.ResIdSuffix)
-				if err != nil {
-					log.Debug("cannot parse reservation id")
-					continue
-				}
 
 				select {
-				case p.dataChannels[p.getWorkerForResId(id.ToRaw())] <- d:
+				case p.dataChannels[p.getWorkerForResId(d.id)] <- d:
 				default:
 					continue // Packet dropped
 				}

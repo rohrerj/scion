@@ -45,6 +45,7 @@ type dataPacket struct {
 	colibriPath    *colibri.ColibriPath
 	reservation    *storage.Reservation
 	rawPacket      []byte
+	id             [12]byte
 }
 
 // Parse parses the scion and colibri header from a raw packet
@@ -68,6 +69,7 @@ func Parse(rawPacket []byte) (*dataPacket, error) {
 	if proc.colibriPath, err = p.ToColibriPath(); err != nil {
 		return nil, serrors.New("expanding colibri path failed")
 	}
+	copy(proc.id[:], proc.colibriPath.InfoField.ResIdSuffix)
 	return &proc, nil
 }
 
@@ -113,21 +115,14 @@ func (w *Worker) validate(d *dataPacket) error {
 	C := infoField.C
 	R := infoField.R
 	S := infoField.S
-	resIDSuffix := infoField.ResIdSuffix
 	if C || R || S {
 		return serrors.New("Invalid flags", "S", S, "R", R, "C", C)
 	}
-	// TODO(rohrerj) change mapping of reservation id
-	id, err := libtypes.NewID((d).scionLayer.SrcIA.AS(), resIDSuffix)
-	if err != nil {
-		return serrors.New("Cannot parse reservation id")
-	}
-	if id.ASID != w.LocalAS {
+	if d.scionLayer.SrcIA.AS() != w.LocalAS {
 		return serrors.New("Reservation does not belong to local AS")
 	}
-	resID := string(id.ToRaw())
 
-	reservation, isValid := w.Storage.UseReservation(resID, infoField.Ver, d.pktArrivalTime)
+	reservation, isValid := w.Storage.UseReservation(d.id, infoField.Ver, d.pktArrivalTime)
 	if !isValid {
 		return serrors.New("E2E reservation is invalid")
 	}

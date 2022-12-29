@@ -15,8 +15,8 @@
 package processing_test
 
 import (
+	"encoding/binary"
 	"errors"
-	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -68,9 +68,11 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	})
 
 	for i := 0; i < L; i++ {
+		newId := [12]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		binary.BigEndian.PutUint32(newId[8:12], uint32(i))
 		cleanupChannel <- &storage.UpdateTask{
 			Reservation: &storage.Reservation{
-				Id: "A" + fmt.Sprint(i),
+				Id: newId,
 			},
 			HighestValidity: now.Add(1 * time.Millisecond),
 		}
@@ -78,7 +80,7 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 		case task := <-reservationDeletionChannels[0]:
 			assert.NotNil(t, task)
 			assert.IsType(t, &storage.DeletionTask{}, task)
-			assert.Equal(t, "A"+fmt.Sprint(i), task.ResId)
+			assert.Equal(t, newId, task.ResId)
 		case <-time.After(1 * time.Second):
 			assert.Fail(t, "reservation not deleted")
 		}
@@ -113,9 +115,11 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 
 	now := time.Now()
 	for i := 0; i < L; i++ {
+		newId := [12]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		binary.BigEndian.PutUint32(newId[8:12], uint32(i))
 		cleanupChannel <- &storage.UpdateTask{
 			Reservation: &storage.Reservation{
-				Id: "A" + fmt.Sprint(i),
+				Id: newId,
 			},
 			HighestValidity: now.Add(1 * time.Millisecond),
 		}
@@ -154,18 +158,22 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	now := time.Now()
 
 	for i := 0; i < L; i++ {
+		newId := [12]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		binary.BigEndian.PutUint32(newId[8:12], uint32(i))
 		cleanupChannel <- &storage.UpdateTask{
 			Reservation: &storage.Reservation{
-				Id: "A" + fmt.Sprint(i),
+				Id: newId,
 			},
 			HighestValidity: now.Add(10 * time.Millisecond),
 		}
 	}
 
 	for i := 0; i < L; i++ {
+		newId := [12]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		binary.BigEndian.PutUint32(newId[8:12], uint32(i))
 		cleanupChannel <- &storage.UpdateTask{
 			Reservation: &storage.Reservation{
-				Id: "A" + fmt.Sprint(i),
+				Id: newId,
 			},
 			HighestValidity: now.Add(20 * time.Millisecond),
 		}
@@ -210,7 +218,7 @@ func BenchmarkWorker(b *testing.B) {
 	now := time.Now()
 	updateChannels[0] <- &storage.UpdateTask{
 		Reservation: &storage.Reservation{
-			Id: string([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+			Id: [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
 			Indices: map[uint8]*storage.ReservationIndex{
 				1: {
 					Index:    0,

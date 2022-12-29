@@ -97,6 +97,7 @@ type DataPacket struct {
 	ColibriPath    *colibri.ColibriPath
 	Reservation    *storage.Reservation
 	RawPacket      []byte
+	Id             [12]byte
 }
 
 func (proc *DataPacket) Parse() *dataPacket {
@@ -106,6 +107,7 @@ func (proc *DataPacket) Parse() *dataPacket {
 		colibriPath:    proc.ColibriPath,
 		reservation:    proc.Reservation,
 		rawPacket:      proc.RawPacket,
+		id:             proc.Id,
 	}
 }
 
