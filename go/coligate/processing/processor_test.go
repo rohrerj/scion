@@ -81,7 +81,7 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 			assert.NotNil(t, task)
 			assert.IsType(t, &storage.DeletionTask{}, task)
 			assert.Equal(t, newId, task.ResId)
-		case <-time.After(1 * time.Second):
+		case <-time.After(1100 * time.Millisecond):
 			assert.Fail(t, "reservation not deleted")
 		}
 	}
@@ -130,7 +130,7 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 		select {
 		case <-reservationDeletionChannels[0]:
 			reportedReservations++
-		case <-time.After(20 * time.Millisecond):
+		case <-time.After(1100 * time.Millisecond):
 			exit = true
 		}
 	}
@@ -186,7 +186,7 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 		case task := <-reservationDeletionChannels[0]:
 			assert.IsType(t, &storage.DeletionTask{}, task)
 			reportedReservations++
-		case <-time.After(40 * time.Millisecond):
+		case <-time.After(1100 * time.Millisecond):
 			exit = true
 		}
 	}

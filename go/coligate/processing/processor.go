@@ -294,37 +294,47 @@ func (p *Processor) initCleanupRoutine() {
 			reservationExpirations[task.Reservation.Id] = task.HighestValidity
 		}
 	})
-	for !p.exit { // TODO(rohrerj) check CPU usage
-		if len(reservationExpirations) == 0 {
-			task := <-p.cleanupChannel
+	t := time.NewTicker(1 * time.Second)
+	defer t.Stop()
+
+	for !p.exit {
+		select {
+		case task := <-p.cleanupChannel:
 			if task == nil {
 				return
 			}
 			updateExpirationMapping(task)
-		}
-		for resId, val := range reservationExpirations {
-		out:
-			for {
-				select {
-				case task := <-p.cleanupChannel:
-					if task == nil {
-						return
+		case now := <-t.C:
+			updateTime := false
+			for resId, val := range reservationExpirations {
+			out:
+				for {
+					select {
+					case task := <-p.cleanupChannel:
+						if task == nil {
+							return
+						}
+						updateExpirationMapping(task)
+						if task.Reservation.Id == resId {
+							// Updated current value in case it got changed
+							val = reservationExpirations[resId]
+						}
+						updateTime = true
+					default:
+						if updateTime {
+							now = time.Now()
+							updateTime = false
+						}
+						break out
 					}
-					updateExpirationMapping(task)
-					if task.Reservation.Id == resId {
-						// Updated current value in case it got changed
-						val = reservationExpirations[resId]
-					}
-				default:
-					break out
 				}
-			}
-			if time.Until(val) < 0 {
-				p.metrics.CleanupReservationDeleted.Add(1)
+				if val.Before(now) {
+					p.metrics.CleanupReservationDeleted.Add(1)
 
-				workerId := p.getWorkerForResId(resId)
-				p.controlDeletionChannels[workerId] <- storage.NewDeletionTask(resId)
-				delete(reservationExpirations, resId)
+					workerId := p.getWorkerForResId(resId)
+					p.controlDeletionChannels[workerId] <- storage.NewDeletionTask(resId)
+					delete(reservationExpirations, resId)
+				}
 			}
 		}
 	}
