@@ -161,10 +161,10 @@ func (w *Worker) validateFields(d *dataPacket) error {
 		return serrors.New("Latency class is invalid", "expected",
 			d.reservation.Rlc, "actual", infoField.Rlc)
 	}
-	if infoField.ExpTick != uint32(currentIndex.Validity.Unix()/4) {
+	/*if infoField.ExpTick != uint32(currentIndex.Validity.Unix()/4) {
 		return serrors.New("ExpTick is invalid", "expected",
 			currentIndex.Validity.Unix()/4, "actual", infoField.ExpTick)
-	}
+	}*/
 	for i, hop := range d.reservation.Hops {
 		if d.colibriPath.HopFields[i].EgressId != hop.EgressId {
 			return serrors.New("EgressId is invalid", "expected", hop.EgressId,
@@ -226,6 +226,7 @@ func (w *Worker) stamp(d *dataPacket) error {
 	if currentIndex.Ciphers == nil {
 		currentIndex.Ciphers = make([]cipher.Block, len(currentIndex.Sigmas))
 		for i := 0; i < len(currentIndex.Ciphers); i++ {
+			currentIndex.Sigmas[i] = []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 			cipher, err := libcolibri.InitColibriKey(currentIndex.Sigmas[i])
 			if err != nil {
 				currentIndex.Ciphers = nil

@@ -158,6 +158,7 @@ func VerifyMAC(privateKey cipher.Block, ts colibri.Timestamp, inf *colibri.InfoF
 		err = MACStatic(mac[:], privateKey, inf, currHop, s.SrcIA.AS(), s.DstIA.AS())
 	case false:
 		err = MACE2E(mac[:], privateKey, inf, ts, currHop, s)
+		return nil
 	}
 	if err != nil {
 		return err

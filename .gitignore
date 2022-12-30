@@ -1,3 +1,9 @@
+# Performance test generated files #
+/pprof/
+/metrics/
+/benchmarks.txt
+/export
+
 # OS generated files #
 #########################
 .DS_Store

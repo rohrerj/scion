@@ -41,7 +41,7 @@ const (
 const (
 	// EndhostPort is the underlay port that the dispatcher binds to on non-routers. Subject to
 	// change during standardisation.
-	EndhostPort = 30041
+	EndhostPort = 30042
 )
 
 func (o Type) String() string {
