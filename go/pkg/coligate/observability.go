@@ -17,6 +17,7 @@ type Metrics struct {
 	UpdateSigmasTotal             *prometheus.CounterVec
 	DataPacketInTotal             *prometheus.CounterVec
 	DataPacketInInvalid           *prometheus.CounterVec
+	DataPacketInDropped           *prometheus.CounterVec
 	LoadActiveReservationsTotal   *prometheus.CounterVec
 	WorkerPacketInTotal           *prometheus.CounterVec
 	WorkerPacketOutTotal          *prometheus.CounterVec
@@ -59,6 +60,14 @@ func NewMetrics() *Metrics {
 				Name: "coligate_data_packet_in_invalid",
 				Help: "Total number of data packets received by the colibri gateway" +
 					" whose headers cannot be parsed correctly.",
+			},
+			[]string{},
+		),
+		DataPacketInDropped: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "coligate_data_packet_in_dropped",
+				Help: "Total number of data packets received by the colibri gateway" +
+					" that were dropped because the workers were not ready to process",
 			},
 			[]string{},
 		),

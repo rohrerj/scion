@@ -183,6 +183,7 @@ type ColigateMetrics struct {
 	UpdateSigmasTotal             libmetrics.Counter
 	DataPacketInTotal             libmetrics.Counter
 	DataPacketInInvalid           libmetrics.Counter
+	DataPacketInDropped           libmetrics.Counter
 	WorkerPacketInTotal           libmetrics.Counter
 	WorkerPacketInInvalid         libmetrics.Counter
 	WorkerPacketOutTotal          libmetrics.Counter
@@ -205,6 +206,8 @@ func initializeMetrics(metrics *common.Metrics) *ColigateMetrics {
 			metrics.DataPacketInTotal),
 		DataPacketInInvalid: libmetrics.NewPromCounter(
 			metrics.DataPacketInInvalid),
+		DataPacketInDropped: libmetrics.NewPromCounter(
+			metrics.DataPacketInDropped),
 		WorkerPacketInTotal: libmetrics.NewPromCounter(
 			metrics.WorkerPacketInTotal),
 		WorkerPacketInInvalid: libmetrics.NewPromCounter(
@@ -385,7 +388,7 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 		defer log.HandlePanic()
 		dataPacketInTotalPromCounter := p.metrics.DataPacketInTotal
 		dataPacketInInvalidPromCounter := p.metrics.DataPacketInInvalid
-
+		dataPacketInDroppedPromCounter := p.metrics.DataPacketInDropped
 		for !p.exit {
 			numPkts, err := ipv4Conn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
 			if err != nil {
@@ -409,6 +412,7 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 				if int(d.scionLayer.PayloadLen) != len(d.scionLayer.Payload) ||
 					d.scionLayer.PayloadLen != d.colibriPath.InfoField.OrigPayLen {
 					// Packet too large or inconsistent payload size.
+					dataPacketInInvalidPromCounter.Add(1)
 					continue
 				}
 				d.pktArrivalTime = time.Now()
@@ -416,6 +420,7 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 				select {
 				case p.dataChannels[p.getWorkerForResId(d.id)] <- d:
 				default:
+					dataPacketInDroppedPromCounter.Add(1)
 					continue // Packet dropped
 				}
 			}
