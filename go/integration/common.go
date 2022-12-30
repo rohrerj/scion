@@ -180,7 +180,7 @@ func SDConn() daemon.Connector {
 	defer cancelF()
 	conn, err := daemon.NewService(daemonAddr).Connect(ctx)
 	if err != nil {
-		LogFatal("Unable to initialize SCION Daemon connection", "err", err)
+		return nil //LogFatal("Unable to initialize SCION Daemon connection", "err", err)
 	}
 	return conn
 }

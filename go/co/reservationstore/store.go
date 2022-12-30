@@ -1142,13 +1142,13 @@ func (s *Store) AdmitE2EReservation(
 	req.AllocationTrail = append(req.AllocationTrail, reservation.BWClsFromBW(free))
 	admitted := true
 	failedStep := -1
-	for i, step := range req.AllocationTrail {
+	/*for i, step := range req.AllocationTrail {
 		if step < req.RequestedBW {
 			admitted = false
 			failedStep = i
 			break
 		}
-	}
+	}*/
 
 	log.Debug("e2e admission", "id", req.ID.String(), "requested_cls", req.RequestedBW,
 		"requested", req.RequestedBW.ToKbps(), "admitted", admitted, "free", free)
