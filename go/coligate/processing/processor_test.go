@@ -202,11 +202,6 @@ func BenchmarkWorker(b *testing.B) {
 	updateChannels := c.CreateControlUpdateChannels(1, 1000)
 	c.CreateControlDeletionChannels(1, 1)
 	dataChannels := c.CreateDataChannels(1, 1000)
-	errGroup := &errgroup.Group{}
-	errGroup.Go(func() error {
-		return c.WorkerReceiveEntry(getColigateConfiguration(), 0, 1, addr.MustIAFrom(1, 1).AS())
-	})
-
 	borderRouterConnection := make(map[uint16]*ipv4.PacketConn)
 	borderRouterAddr, err := net.ResolveUDPAddr("udp", "localhost:30000")
 	if err != nil {
@@ -214,7 +209,11 @@ func BenchmarkWorker(b *testing.B) {
 	}
 	conn, _ := net.DialUDP("udp", nil, borderRouterAddr)
 	borderRouterConnection[uint16(2)] = ipv4.NewPacketConn(conn)
-	c.SetBorderRouterConnections(borderRouterConnection)
+	errGroup := &errgroup.Group{}
+	errGroup.Go(func() error {
+		return c.WorkerReceiveEntry(getColigateConfiguration(), 0, 1, addr.MustIAFrom(1, 1).AS(), &borderRouterConnection)
+	})
+
 	now := time.Now()
 	updateChannels[0] <- &storage.UpdateTask{
 		Reservation: &storage.Reservation{

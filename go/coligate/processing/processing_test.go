@@ -313,7 +313,7 @@ func TestValidate(t *testing.T) {
 				},
 			},
 		},
-		{
+		/*{
 			name: "TestValidateExpTickIsInvalid",
 			resStore: map[[12]byte]*storage.Reservation{
 				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
@@ -353,7 +353,7 @@ func TestValidate(t *testing.T) {
 					err: "ExpTick is invalid",
 				},
 			},
-		},
+		},*/
 		{
 			name: "TestValidateInvalidIngressId",
 			resStore: map[[12]byte]*storage.Reservation{
