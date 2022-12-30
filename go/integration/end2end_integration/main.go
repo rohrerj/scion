@@ -43,6 +43,7 @@ var (
 	cmd         string
 	features    string
 	progress    bool
+	pktSize     int
 )
 
 func main() {
@@ -71,6 +72,7 @@ func realMain() int {
 		"-sciond", integration.Daemon,
 		"-local", integration.SrcAddrPattern + ":0",
 		"-remote", integration.DstAddrPattern + ":" + integration.ServerPortReplace,
+		"-pktSize", strconv.Itoa(pktSize),
 	}
 	serverArgs := []string{
 		"-mode", "server",
@@ -110,6 +112,7 @@ func addFlags() {
 		fmt.Sprintf("enable development features (%v)", feature.String(&feature.Default{}, "|")))
 	flag.BoolVar(&progress, "progress", true,
 		`show progress (the flag "-progress" will be passed to the command specified by -cmd)`)
+	flag.IntVar(&pktSize, "pktSize", 300, "pktSize")
 }
 
 // runTests runs the end2end tests for all pairs. In case of an error the
@@ -273,6 +276,7 @@ func clientTemplate(progressSock string) integration.Cmd {
 			"-sciond", integration.Daemon,
 			"-local", integration.SrcAddrPattern + ":0",
 			"-remote", integration.DstAddrPattern + ":" + integration.ServerPortReplace,
+			"-pktSize", strconv.Itoa(pktSize),
 		},
 	}
 	if len(features) != 0 {

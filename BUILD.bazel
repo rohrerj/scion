@@ -61,6 +61,7 @@ pkg_tar(
         "//go/integration/braccept",
         "//go/integration/colibri",
         "//go/integration/coligate_integration",
+        "//go/integration/coligate_performance",
         "//go/integration/end2end",
         "//go/integration/end2end_integration",
         "//go/integration/scion_integration",

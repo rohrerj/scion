@@ -16,6 +16,10 @@ package main
 
 import (
 	"context"
+	"os"
+
+	"runtime/pprof"
+	"runtime/trace"
 
 	"golang.org/x/sync/errgroup"
 
@@ -52,6 +56,46 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return serrors.WrapStr("creating topology loader", err)
 	}
+	log.Info("XXX", "AS", topo.IA().String())
+	if topo.IA().String() == "1-ff00:0:110" {
+		os.RemoveAll("pprof")
+		os.Mkdir("pprof", os.ModePerm)
+		cpuFile, err := os.Create("pprof/coligateCPU.pb.gz")
+		if err != nil {
+			return err
+		}
+		heapFile, err := os.Create("pprof/coligateHeap.pb.gz")
+		if err != nil {
+			return err
+		}
+		allocsFile, err := os.Create("pprof/coligateAllocs.pb.gz")
+		if err != nil {
+			return err
+		}
+		traceFile, err := os.Create("pprof/coligateTrace.out")
+		if err != nil {
+			return err
+		}
+		err = pprof.StartCPUProfile(cpuFile)
+		if err != nil {
+			return err
+		}
+		err = trace.Start(traceFile)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			pprof.StopCPUProfile()
+			pprof.Lookup("allocs").WriteTo(allocsFile, 0)
+			pprof.WriteHeapProfile(heapFile)
+			trace.Stop()
+			cpuFile.Close()
+			heapFile.Close()
+			allocsFile.Close()
+			traceFile.Close()
+		}()
+	}
+
 	g, errCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		defer log.HandlePanic()
