@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/scionproto/scion/go/coligate/tokenbucket"
-	"github.com/scionproto/scion/go/lib/log"
 )
 
 type Storage struct {
@@ -149,15 +148,15 @@ func NewDeletionTask(resId [12]byte) *DeletionTask {
 func (store *Storage) UseReservation(resId [12]byte, providedIndex uint8,
 	pktTime time.Time) (*Reservation, bool) {
 
-	log.Debug("use resId", "resId", resId)
+	//log.Debug("use resId", "resId", resId)
 	res, found := store.get(resId)
 	if !found {
-		log.Debug("reservation not found")
+		//log.Debug("reservation not found")
 		return nil, false
 	}
 	index, found := res.Indices[providedIndex]
 	if !found {
-		log.Debug("reservation index not found")
+		//log.Debug("reservation index not found")
 		return nil, false
 	}
 	defer res.deleteOlderIndices()
