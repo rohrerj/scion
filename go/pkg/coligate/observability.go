@@ -72,6 +72,14 @@ func NewMetrics() *Metrics {
 			},
 			[]string{},
 		),
+		DataPacketInDropped: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "coligate_data_packet_in_dropped",
+				Help: "Total number of data packets received by the colibri gateway" +
+					" that were dropped because the workers were not ready to process",
+			},
+			[]string{},
+		),
 		LoadActiveReservationsTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "coligate_init_load_active_reservations_total",
