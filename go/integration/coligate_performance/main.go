@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"math/rand"
 	"net"
 	"net/http"
@@ -40,7 +41,9 @@ var packetSize int = 300
 func main() {
 	defer log.HandlePanic()
 	defer log.Flush()
-	runtime.GOMAXPROCS(4)
+	numProcs := int(math.Min(24, float64(runtime.NumCPU()/2)))
+	fmt.Println("use numProcs", numProcs)
+	runtime.GOMAXPROCS(numProcs)
 
 	addFlags(&packetSize)
 	flag.Parse()
