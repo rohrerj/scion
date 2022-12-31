@@ -143,8 +143,8 @@ func run(pktSize uint16) error {
 		PathType:   colibri.PathType,
 		DstIA:      addr.MustIAFrom(1, 1),
 		SrcIA:      addr.MustIAFrom(1, as),
-		RawDstAddr: []byte{1, 2, 3, 4},
-		RawSrcAddr: []byte{5, 6, 7, 8},
+		RawDstAddr: []byte{177, 0, 0, 143},
+		RawSrcAddr: []byte{177, 0, 7, 142},
 		Path: &colibri.ColibriPath{
 			InfoField: &colibri.InfoField{
 				HFCount:     2,
