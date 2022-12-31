@@ -185,6 +185,7 @@ type ColigateMetrics struct {
 	WorkerPacketInTotal           libmetrics.Counter
 	WorkerPacketInInvalid         libmetrics.Counter
 	WorkerPacketOutTotal          libmetrics.Counter
+	WorkerPacketOutError          libmetrics.Counter
 	WorkerReservationUpdateTotal  libmetrics.Counter
 }
 
@@ -212,6 +213,8 @@ func initializeMetrics(metrics *common.Metrics) *ColigateMetrics {
 			metrics.WorkerPacketInInvalid),
 		WorkerPacketOutTotal: libmetrics.NewPromCounter(
 			metrics.WorkerPacketOutTotal),
+		WorkerPacketOutError: libmetrics.NewPromCounter(
+			metrics.WorkerPacketOutError),
 		WorkerReservationUpdateTotal: libmetrics.NewPromCounter(
 			metrics.WorkerReservationUpdateTotal),
 	}
@@ -438,6 +441,7 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 	workerPacketInTotalPromCounter := p.metrics.WorkerPacketInTotal
 	workerPacketInInvalidPromCounter := p.metrics.WorkerPacketInInvalid
 	workerPacketOutTotalPromCounter := p.metrics.WorkerPacketOutTotal
+	workerPacketOutErrorPromCounter := p.metrics.WorkerPacketOutError
 	workerReservationUpdateTotalPromCounter := p.metrics.WorkerReservationUpdateTotal
 
 	writeMsgs := make([]ipv4.Message, 1)
@@ -481,7 +485,12 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 
 			writeMsgs[0].Buffers[0] = d.rawPacket
 
-			borderRouterConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
+			_, err := borderRouterConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
+			if err != nil {
+				log.Debug("Error writing packet", "err", err)
+				workerPacketOutErrorPromCounter.Add(1)
+				continue
+			}
 			workerPacketOutTotalPromCounter.Add(1)
 		case task := <-chres:
 			if task == nil {

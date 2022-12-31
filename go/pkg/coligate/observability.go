@@ -21,6 +21,7 @@ type Metrics struct {
 	LoadActiveReservationsTotal   *prometheus.CounterVec
 	WorkerPacketInTotal           *prometheus.CounterVec
 	WorkerPacketOutTotal          *prometheus.CounterVec
+	WorkerPacketOutError          *prometheus.CounterVec
 	WorkerPacketInInvalid         *prometheus.CounterVec
 	WorkerReservationUpdateTotal  *prometheus.CounterVec
 	CleanupReservationUpdateTotal *prometheus.CounterVec
@@ -89,6 +90,13 @@ func NewMetrics() *Metrics {
 			prometheus.CounterOpts{
 				Name: "coligate_worker_packet_out_total",
 				Help: "Total number of data packets forwarded by the workers.",
+			},
+			[]string{},
+		),
+		WorkerPacketOutError: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "coligate_worker_packet_out_error",
+				Help: "Total number of data packets dropped by workers because of writing errors",
 			},
 			[]string{},
 		),
