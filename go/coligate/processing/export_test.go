@@ -71,12 +71,16 @@ func (p *Processor) CreateControlDeletionChannels(numberWorkers int,
 }
 
 func (p *Processor) WorkerReceiveEntry(config *config.ColigateConfig,
-	workerId uint32, gatewayId uint32, localAS libaddr.AS, r *map[uint16]*ipv4.PacketConn) error {
-	return p.workerReceiveEntry(config, workerId, gatewayId, localAS, r)
+	workerId uint32, gatewayId uint32, localAS libaddr.AS) error {
+	return p.workerReceiveEntry(config, workerId, gatewayId, localAS)
 }
 
 func InitializeMetrics() *ColigateMetrics {
 	return initializeMetrics(common.NewMetrics())
+}
+
+func (p *Processor) SetBorderRouterConnections(conn map[uint16]*ipv4.PacketConn) {
+	p.borderRouters = conn
 }
 
 func (p *Processor) SetMetrics(m *ColigateMetrics) {

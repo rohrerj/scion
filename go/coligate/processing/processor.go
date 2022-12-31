@@ -49,6 +49,7 @@ type Processor struct {
 	controlUpdateChannels   []chan *storage.UpdateTask
 	controlDeletionChannels []chan *storage.DeletionTask
 	cleanupChannel          chan *storage.UpdateTask
+	borderRouters           map[uint16]*ipv4.PacketConn
 	saltHasher              common.SaltHasher
 	exit                    bool
 	metrics                 *ColigateMetrics
@@ -84,7 +85,11 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	g *errgroup.Group, topo *topology.Loader, metrics *common.Metrics) error {
 
 	config := &cfg.Coligate
-
+	var borderRouters map[uint16]*ipv4.PacketConn = make(map[uint16]*ipv4.PacketConn)
+	for ifid, info := range topo.InterfaceInfoMap() {
+		conn, _ := net.DialUDP("udp", nil, info.InternalAddr)
+		borderRouters[uint16(ifid)] = ipv4.NewPacketConn(conn)
+	}
 	coligateInfo, err := topo.ColibriGateway(cfg.General.ID)
 	if err != nil {
 		return err
@@ -120,6 +125,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		saltHasher:              common.NewFnv1aHasher(salt),
 		metrics:                 initializeMetrics(metrics),
 		numWorkers:              config.NumWorkers,
+		borderRouters:           borderRouters,
 	}
 
 	cleanup.Add(func() error {
@@ -129,25 +135,19 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	// Creates all the channels and starts the go routines
 	for i := 0; i < p.numWorkers; i++ {
-		var borderRouters map[uint16]*ipv4.PacketConn = make(map[uint16]*ipv4.PacketConn)
-		for ifid, info := range topo.InterfaceInfoMap() {
-			conn, _ := net.DialUDP("udp", nil, info.InternalAddr)
-			borderRouters[uint16(ifid)] = ipv4.NewPacketConn(conn)
-		}
 		p.dataChannels[i] = make(chan *dataPacket, config.MaxQueueSizePerWorker)
 		p.controlUpdateChannels[i] = make(chan *storage.UpdateTask,
 			config.MaxQueueSizePerWorker)
 		// TODO(rohrerj) Check control deletion channel size
 		p.controlDeletionChannels[i] = make(chan *storage.DeletionTask, 1000)
-		func(i int, r *map[uint16]*ipv4.PacketConn) {
+		func(i int) {
 			g.Go(func() error {
 				defer log.HandlePanic()
 				return p.workerReceiveEntry(config,
 					uint32(i), uint32(config.ColibriGatewayID), localAS,
-					r,
 				)
 			})
-		}(i, &borderRouters)
+		}(i)
 	}
 
 	g.Go(func() error {
@@ -433,7 +433,7 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 
 // Configures a goroutine to listen for the data plane channel and control plane reservation updates
 func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId uint32,
-	gatewayId uint32, localAS libaddr.AS, r *map[uint16]*ipv4.PacketConn) error {
+	gatewayId uint32, localAS libaddr.AS) error {
 
 	log.Info("Init worker", "workerId", workerId)
 	worker := NewWorker(config, workerId, gatewayId, localAS)
@@ -472,7 +472,7 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 			}
 			workerPacketInTotalPromCounter.Add(1)
 			var egressId uint16 = d.colibriPath.GetCurrentHopField().EgressId
-			borderRouterConn, found := (*r)[egressId]
+			borderRouterConn, found := p.borderRouters[egressId]
 			if !found {
 				continue
 			}

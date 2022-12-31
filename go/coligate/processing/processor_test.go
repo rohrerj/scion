@@ -209,9 +209,10 @@ func BenchmarkWorker(b *testing.B) {
 	}
 	conn, _ := net.DialUDP("udp", nil, borderRouterAddr)
 	borderRouterConnection[uint16(2)] = ipv4.NewPacketConn(conn)
+	c.SetBorderRouterConnections(borderRouterConnection)
 	errGroup := &errgroup.Group{}
 	errGroup.Go(func() error {
-		return c.WorkerReceiveEntry(getColigateConfiguration(), 0, 1, addr.MustIAFrom(1, 1).AS(), &borderRouterConnection)
+		return c.WorkerReceiveEntry(getColigateConfiguration(), 0, 1, addr.MustIAFrom(1, 1).AS())
 	})
 
 	now := time.Now()
