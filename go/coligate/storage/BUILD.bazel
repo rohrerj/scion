@@ -5,10 +5,7 @@ go_library(
     srcs = ["storage.go"],
     importpath = "github.com/scionproto/scion/go/coligate/storage",
     visibility = ["//visibility:public"],
-    deps = [
-        "//go/coligate/tokenbucket:go_default_library",
-        "//go/lib/log:go_default_library",
-    ],
+    deps = ["//go/coligate/tokenbucket:go_default_library"],
 )
 
 go_test(
