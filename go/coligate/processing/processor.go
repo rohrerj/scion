@@ -49,7 +49,6 @@ type Processor struct {
 	controlUpdateChannels   []chan *storage.UpdateTask
 	controlDeletionChannels []chan *storage.DeletionTask
 	cleanupChannel          chan *storage.UpdateTask
-	borderRouters           map[uint16]*ipv4.PacketConn
 	saltHasher              common.SaltHasher
 	exit                    bool
 	metrics                 *ColigateMetrics
@@ -85,12 +84,6 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	g *errgroup.Group, topo *topology.Loader, metrics *common.Metrics) error {
 
 	config := &cfg.Coligate
-	var borderRouters map[uint16]*ipv4.PacketConn = make(map[uint16]*ipv4.PacketConn)
-	for ifid, info := range topo.InterfaceInfoMap() {
-		conn, _ := net.DialUDP("udp", nil, info.InternalAddr)
-		borderRouters[uint16(ifid)] = ipv4.NewPacketConn(conn)
-		log.Debug("Found Border Router", "ifid", ifid, "internal_addr", info.InternalAddr)
-	}
 
 	coligateInfo, err := topo.ColibriGateway(cfg.General.ID)
 	if err != nil {
@@ -118,8 +111,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	}
 
 	p := Processor{
-		localIA:       topo.IA(),
-		borderRouters: borderRouters,
+		localIA: topo.IA(),
 		// TODO(rohrerj) check cleanupChannel capacity
 		cleanupChannel:          make(chan *storage.UpdateTask, 1000),
 		dataChannels:            make([]chan *dataPacket, config.NumWorkers),
@@ -137,19 +129,25 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	// Creates all the channels and starts the go routines
 	for i := 0; i < p.numWorkers; i++ {
+		var borderRouters map[uint16]*ipv4.PacketConn = make(map[uint16]*ipv4.PacketConn)
+		for ifid, info := range topo.InterfaceInfoMap() {
+			conn, _ := net.DialUDP("udp", nil, info.InternalAddr)
+			borderRouters[uint16(ifid)] = ipv4.NewPacketConn(conn)
+		}
 		p.dataChannels[i] = make(chan *dataPacket, config.MaxQueueSizePerWorker)
 		p.controlUpdateChannels[i] = make(chan *storage.UpdateTask,
 			config.MaxQueueSizePerWorker)
 		// TODO(rohrerj) Check control deletion channel size
 		p.controlDeletionChannels[i] = make(chan *storage.DeletionTask, 1000)
-		func(i int) {
+		func(i int, r *map[uint16]*ipv4.PacketConn) {
 			g.Go(func() error {
 				defer log.HandlePanic()
 				return p.workerReceiveEntry(config,
 					uint32(i), uint32(config.ColibriGatewayID), localAS,
+					r,
 				)
 			})
-		}(i)
+		}(i, &borderRouters)
 	}
 
 	g.Go(func() error {
@@ -183,6 +181,7 @@ type ColigateMetrics struct {
 	UpdateSigmasTotal             libmetrics.Counter
 	DataPacketInTotal             libmetrics.Counter
 	DataPacketInInvalid           libmetrics.Counter
+	DataPacketInDropped           libmetrics.Counter
 	WorkerPacketInTotal           libmetrics.Counter
 	WorkerPacketInInvalid         libmetrics.Counter
 	WorkerPacketOutTotal          libmetrics.Counter
@@ -205,6 +204,8 @@ func initializeMetrics(metrics *common.Metrics) *ColigateMetrics {
 			metrics.DataPacketInTotal),
 		DataPacketInInvalid: libmetrics.NewPromCounter(
 			metrics.DataPacketInInvalid),
+		DataPacketInDropped: libmetrics.NewPromCounter(
+			metrics.DataPacketInDropped),
 		WorkerPacketInTotal: libmetrics.NewPromCounter(
 			metrics.WorkerPacketInTotal),
 		WorkerPacketInInvalid: libmetrics.NewPromCounter(
@@ -385,7 +386,7 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 		defer log.HandlePanic()
 		dataPacketInTotalPromCounter := p.metrics.DataPacketInTotal
 		dataPacketInInvalidPromCounter := p.metrics.DataPacketInInvalid
-
+		dataPacketInDroppedPromCounter := p.metrics.DataPacketInDropped
 		for !p.exit {
 			numPkts, err := ipv4Conn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
 			if err != nil {
@@ -395,7 +396,6 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 			if numPkts == 0 {
 				continue
 			}
-			log.Debug("received data packets")
 			dataPacketInTotalPromCounter.Add(float64(numPkts))
 			for _, pkt := range msgs[:numPkts] {
 				var d *dataPacket
@@ -409,6 +409,7 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 				if int(d.scionLayer.PayloadLen) != len(d.scionLayer.Payload) ||
 					d.scionLayer.PayloadLen != d.colibriPath.InfoField.OrigPayLen {
 					// Packet too large or inconsistent payload size.
+					dataPacketInInvalidPromCounter.Add(1)
 					continue
 				}
 				d.pktArrivalTime = time.Now()
@@ -416,6 +417,7 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 				select {
 				case p.dataChannels[p.getWorkerForResId(d.id)] <- d:
 				default:
+					dataPacketInDroppedPromCounter.Add(1)
 					continue // Packet dropped
 				}
 			}
@@ -426,20 +428,9 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 	return nil
 }
 
-// Internal method to get the address of the corresponding border router
-// to forward the outgoing packets
-func (p *Processor) getBorderRouterConnection(proc *dataPacket) (*ipv4.PacketConn, error) {
-	var egressId uint16 = proc.colibriPath.GetCurrentHopField().EgressId
-	conn, found := p.borderRouters[egressId]
-	if !found {
-		return nil, serrors.New("egress interface is invalid:", "egressId", egressId)
-	}
-	return conn, nil
-}
-
 // Configures a goroutine to listen for the data plane channel and control plane reservation updates
 func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId uint32,
-	gatewayId uint32, localAS libaddr.AS) error {
+	gatewayId uint32, localAS libaddr.AS, r *map[uint16]*ipv4.PacketConn) error {
 
 	log.Info("Init worker", "workerId", workerId)
 	worker := NewWorker(config, workerId, gatewayId, localAS)
@@ -464,7 +455,6 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 			if task == nil {
 				return nil
 			}
-			log.Debug("Worker received reservation update", "workerId", workerId)
 			workerReservationUpdateTotalPromCounter.Add(1)
 			task.Execute(worker.Storage)
 			continue
@@ -476,16 +466,13 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 			if d == nil { // If d is nil it is meant to be a exit sequence
 				return nil
 			}
-			log.Debug("Worker received data packet", "workerId", workerId,
-				"resId", string(d.colibriPath.InfoField.ResIdSuffix))
 			workerPacketInTotalPromCounter.Add(1)
-			borderRouterConn, err := p.getBorderRouterConnection(d)
-			if err != nil {
-				log.Debug("Error getting border router connection", "err", err)
-				workerPacketInInvalidPromCounter.Add(1)
+			var egressId uint16 = d.colibriPath.GetCurrentHopField().EgressId
+			borderRouterConn, found := (*r)[egressId]
+			if !found {
 				continue
 			}
-			if err = worker.process(d); err != nil {
+			if err := worker.process(d); err != nil {
 				log.Debug("Worker received error while processing.", "workerId", workerId,
 					"error", err.Error())
 				workerPacketInInvalidPromCounter.Add(1)
@@ -496,19 +483,16 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 
 			borderRouterConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
 			workerPacketOutTotalPromCounter.Add(1)
-			log.Debug("Worker forwarded packet", "workerId", workerId)
 		case task := <-chres:
 			if task == nil {
 				return nil
 			}
-			log.Debug("Worker received reservation update", "workerId", workerId)
 			workerReservationUpdateTotalPromCounter.Add(1)
 			task.Execute(worker.Storage)
 		case task := <-chresD: // Reservation deletion received.
 			if task == nil {
 				return nil
 			}
-			log.Debug("Worker received reservation deletion", "workerId", workerId)
 			workerReservationUpdateTotalPromCounter.Add(1)
 			task.Execute(worker.Storage)
 		}
