@@ -138,7 +138,7 @@ func run(pktSize uint16) error {
 	pkt := &slayers.SCION{
 		FlowID:     1,
 		NextHdr:    17,
-		HdrLen:     21,
+		HdrLen:     29,
 		PayloadLen: pktSize,
 		PathType:   colibri.PathType,
 		DstIA:      addr.MustIAFrom(1, 1),
@@ -147,7 +147,7 @@ func run(pktSize uint16) error {
 		RawSrcAddr: []byte{177, 0, 7, 142},
 		Path: &colibri.ColibriPath{
 			InfoField: &colibri.InfoField{
-				HFCount:     2,
+				HFCount:     6,
 				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 				BwCls:       50,
 				OrigPayLen:  pktSize,
@@ -158,6 +158,26 @@ func run(pktSize uint16) error {
 				{
 					IngressId: 0,
 					EgressId:  1,
+					Mac:       []byte{1, 2, 3, 4},
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       []byte{1, 2, 3, 4},
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       []byte{1, 2, 3, 4},
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       []byte{1, 2, 3, 4},
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
 					Mac:       []byte{1, 2, 3, 4},
 				},
 				{

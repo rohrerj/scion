@@ -178,8 +178,28 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 					IngressId: 1,
 					EgressId:  2,
 				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
 			})
 			index := storage.NewIndex(0, time.Date(2030, 1, 1, 0, 0, 0, 0, time.Local), 50, [][]byte{
+				{},
+				{},
+				{},
+				{},
 				{},
 				{},
 			})
