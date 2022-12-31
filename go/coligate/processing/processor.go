@@ -166,6 +166,30 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		config.COSyncTimeout, cfg.General.ID); err != nil {
 		return err
 	}
+	for i := 0; i < 255; i++ {
+		for j := 0; j < 255; j++ {
+			resId := [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(i), byte(j)}
+			res := storage.NewReservation(resId, []storage.HopField{
+				{
+					IngressId: 0,
+					EgressId:  1,
+				},
+				{
+					IngressId: 1,
+					EgressId:  2,
+				},
+			})
+			index := storage.NewIndex(0, time.Date(2030, 1, 1, 0, 0, 0, 0, time.Local), 50, [][]byte{
+				{},
+				{},
+			})
+			res.Indices = map[uint8]*storage.ReservationIndex{
+				0: index,
+			}
+			task := storage.NewUpdateTask(res, time.Date(2030, 1, 1, 0, 0, 0, 0, time.Local))
+			p.controlUpdateChannels[p.getWorkerForResId(resId)] <- task
+		}
+	}
 	if err := p.initDataPlane(config, coligateInfo.Addr, g, cleanup); err != nil {
 		return err
 	}

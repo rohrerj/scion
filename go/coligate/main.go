@@ -16,10 +16,10 @@ package main
 
 import (
 	"context"
-	"os"
+	/*"os"
 
 	"runtime/pprof"
-	"runtime/trace"
+	"runtime/trace"*/
 
 	"golang.org/x/sync/errgroup"
 
@@ -56,7 +56,7 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return serrors.WrapStr("creating topology loader", err)
 	}
-	log.Info("XXX", "AS", topo.IA().String())
+	/*log.Info("XXX", "AS", topo.IA().String())
 	if topo.IA().String() == "1-ff00:0:110" {
 		os.RemoveAll("pprof")
 		os.Mkdir("pprof", os.ModePerm)
@@ -94,7 +94,7 @@ func realMain(ctx context.Context, cfg *config.Config) error {
 			allocsFile.Close()
 			traceFile.Close()
 		}()
-	}
+	}*/
 
 	g, errCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {

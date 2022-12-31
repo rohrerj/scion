@@ -110,10 +110,10 @@ func CreateTsRel(expirationTick uint32, now time.Time) (uint32, error) {
 		return 0, serrors.New("provided packet expiration time is in the past",
 			"expiration", expiration, "now", now)
 	}
-	if now.Before(timestamp) {
+	/*if now.Before(timestamp) {
 		return 0, serrors.New("provided packet expiration time is too far in the future",
 			"timestamp", timestamp, "now", now)
-	}
+	}*/
 	diff := now.Sub(timestamp)
 	tsRel := uint32(diff / TimestampResolution)
 	return tsRel, nil
