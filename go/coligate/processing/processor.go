@@ -436,16 +436,11 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 	gatewayId uint32, localAS libaddr.AS) error {
 
 	log.Info("Init worker", "workerId", workerId)
-	worker := NewWorker(config, workerId, gatewayId, localAS)
-
+	worker := NewWorker(config, workerId, gatewayId, localAS, p.borderRouters, p.metrics)
+	defer worker.exit()
 	workerPacketInTotalPromCounter := p.metrics.WorkerPacketInTotal
 	workerPacketInInvalidPromCounter := p.metrics.WorkerPacketInInvalid
-	workerPacketOutTotalPromCounter := p.metrics.WorkerPacketOutTotal
-	workerPacketOutErrorPromCounter := p.metrics.WorkerPacketOutError
 	workerReservationUpdateTotalPromCounter := p.metrics.WorkerReservationUpdateTotal
-
-	writeMsgs := make([]ipv4.Message, 1)
-	writeMsgs[0].Buffers = [][]byte{make([]byte, bufSize)} // TODO(rohrerj) Check for optimizations
 
 	ch := p.dataChannels[workerId]
 	chres := p.controlUpdateChannels[workerId]
@@ -471,27 +466,13 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 				return nil
 			}
 			workerPacketInTotalPromCounter.Add(1)
-			var egressId uint16 = d.colibriPath.GetCurrentHopField().EgressId
-			borderRouterConn, found := p.borderRouters[egressId]
-			if !found {
-				continue
-			}
+
 			if err := worker.process(d); err != nil {
 				log.Debug("Worker received error while processing.", "workerId", workerId,
 					"error", err.Error())
 				workerPacketInInvalidPromCounter.Add(1)
 				continue
 			}
-
-			writeMsgs[0].Buffers[0] = d.rawPacket
-
-			_, err := borderRouterConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
-			if err != nil {
-				log.Debug("Error writing packet", "err", err)
-				workerPacketOutErrorPromCounter.Add(1)
-				continue
-			}
-			workerPacketOutTotalPromCounter.Add(1)
 		case task := <-chres:
 			if task == nil {
 				return nil

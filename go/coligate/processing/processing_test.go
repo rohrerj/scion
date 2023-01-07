@@ -15,12 +15,14 @@
 package processing_test
 
 import (
+	"net"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/gopacket"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/net/ipv4"
 
 	"github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/coligate/storage"
@@ -55,7 +57,8 @@ func TestValidate(t *testing.T) {
 		entries  []entry
 		resStore map[[12]byte]*storage.Reservation
 	}
-	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
+	defer worker.Exit()
 
 	var startTime = time.Unix(0, 0)
 
@@ -537,7 +540,8 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 		name    string
 		entries []entry
 	}
-	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
+	defer worker.Exit()
 
 	var startTime = time.Unix(0, 0)
 
@@ -891,7 +895,8 @@ func TestUpdateCounter(t *testing.T) {
 		NumBitsForGatewayId:        8,
 		NumBitsForWorkerId:         8,
 		NumBitsForPerWorkerCounter: 16,
-	}, 13, 3, 1)
+	}, 13, 3, 1, nil, coligateMetrics)
+	defer w.Exit()
 	// Check that it starts with the correct value
 	assert.Equal(t, uint32(0x30d0000), w.CoreIdCounter)
 
@@ -919,7 +924,7 @@ func TestUpdateMacs(t *testing.T) {
 	privateKeyCipher, err := libcolibri.InitColibriKey(privateKey)
 	assert.NoError(t, err)
 
-	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
 
 	d := &processing.DataPacket{
 		PktArrivalTime: time.Unix(0, 0),
@@ -1054,7 +1059,15 @@ func BenchmarkParsing(b *testing.B) {
 }
 
 func BenchmarkProcess(b *testing.B) {
-	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	borderRouterConnection := make(map[uint16]*ipv4.PacketConn)
+	borderRouterAddr, err := net.ResolveUDPAddr("udp", "localhost:30000")
+	if err != nil {
+		b.Error(err)
+	}
+	conn, _ := net.DialUDP("udp", nil, borderRouterAddr)
+	borderRouterConnection[uint16(2)] = ipv4.NewPacketConn(conn)
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, borderRouterConnection, coligateMetrics)
+	defer w.Exit()
 	now := time.Now()
 	resStore := map[[12]byte]*storage.Reservation{
 		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
@@ -1152,13 +1165,15 @@ func BenchmarkProcess(b *testing.B) {
 		},
 		RawPacket: make([]byte, 400),
 	}
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		assert.NoError(b, w.Process(defaultPkt))
 	}
 }
 
 func BenchmarkValidate(b *testing.B) {
-	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
+	defer w.Exit()
 	now := time.Now()
 
 	resStore := map[[12]byte]*storage.Reservation{
@@ -1214,7 +1229,8 @@ func BenchmarkValidate(b *testing.B) {
 }
 
 func BenchmarkTrafficMonitoring(b *testing.B) {
-	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
+	defer w.Exit()
 	now := time.Now()
 	d := &processing.DataPacket{
 		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
@@ -1238,7 +1254,8 @@ func BenchmarkTrafficMonitoring(b *testing.B) {
 }
 
 func BenchmarkStamp(b *testing.B) {
-	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1)
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
+	defer w.Exit()
 	now := time.Now()
 	defaultPkt := &processing.DataPacket{
 		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
@@ -1339,5 +1356,71 @@ func BenchmarkStamp(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		w.Stamp(defaultPkt)
+	}
+}
+
+func BenchmarkForwardPacket(b *testing.B) {
+	borderRouterConnection := make(map[uint16]*ipv4.PacketConn)
+	borderRouterAddr, err := net.ResolveUDPAddr("udp", "localhost:30000")
+	if err != nil {
+		b.Error(err)
+	}
+	conn, _ := net.DialUDP("udp", nil, borderRouterAddr)
+	borderRouterConnection[uint16(2)] = ipv4.NewPacketConn(conn)
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, borderRouterConnection, coligateMetrics)
+	defer w.Exit()
+	now := time.Now()
+	defaultPkt := &processing.DataPacket{
+		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		PktArrivalTime: time.Now(),
+		ScionLayer: &slayers.SCION{
+			PathType: 4,
+			SrcIA:    addr.MustIAFrom(1, 1),
+		},
+		ColibriPath: &colibri.ColibriPath{
+			InfoField: &colibri.InfoField{
+				Ver:         1,
+				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+				BwCls:       60,
+				ExpTick:     uint32(now.Add(12*time.Second).Unix() / 4),
+			},
+			HopFields: []*colibri.HopField{
+				{
+					IngressId: 1,
+					EgressId:  2,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 3,
+					EgressId:  4,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 5,
+					EgressId:  6,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 7,
+					EgressId:  8,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 9,
+					EgressId:  10,
+					Mac:       make([]byte, 4),
+				},
+				{
+					IngressId: 11,
+					EgressId:  12,
+					Mac:       make([]byte, 4),
+				},
+			},
+		},
+		RawPacket: make([]byte, 400),
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		w.ForwardPacket(defaultPkt)
 	}
 }

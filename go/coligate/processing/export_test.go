@@ -127,6 +127,14 @@ func (w *Worker) Process(d *DataPacket) error {
 	return w.process(d.Parse())
 }
 
+func (w *Worker) ForwardPacket(d *DataPacket) {
+	w.forwardPacket(d.Parse())
+}
+
 func (w *Worker) UpdateCounter() {
 	w.updateCounter()
+}
+
+func (w *Worker) Exit() {
+	w.exit()
 }
