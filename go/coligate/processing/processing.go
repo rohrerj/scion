@@ -35,8 +35,10 @@ type Worker struct {
 	CoreIdCounter  uint32
 	NumCounterBits int
 
-	Storage *storage.Storage
-	LocalAS libaddr.AS
+	Storage         *storage.Storage
+	forwardChannels map[uint16]chan []byte
+	LocalAS         libaddr.AS
+	metrics         *ColigateMetrics
 }
 
 type dataPacket struct {
@@ -75,15 +77,18 @@ func Parse(rawPacket []byte) (*dataPacket, error) {
 
 // NewWorker initializes the worker with its id, tokenbuckets and reservations
 func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32,
-	localAS libaddr.AS) *Worker {
+	localAS libaddr.AS, forwardChannels map[uint16]chan []byte, metrics *ColigateMetrics) *Worker {
 	w := &Worker{
 		CoreIdCounter: (gatewayId << (32 - config.NumBitsForGatewayId)) |
 			(workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId)),
-		NumCounterBits: config.NumBitsForPerWorkerCounter,
-		LocalAS:        localAS,
-		Storage:        &storage.Storage{},
+		NumCounterBits:  config.NumBitsForPerWorkerCounter,
+		LocalAS:         localAS,
+		Storage:         &storage.Storage{},
+		forwardChannels: forwardChannels,
+		metrics:         metrics,
 	}
 	w.Storage.InitStorageWithData(nil)
+
 	return w
 }
 
@@ -106,7 +111,11 @@ func (w *Worker) process(d *dataPacket) error {
 		return err
 	}
 
-	return w.stamp(d)
+	err = w.stamp(d)
+	if err != nil {
+		return err
+	}
+	return w.forwardPacket(d)
 }
 
 // Validates the fields in the colibri header and checks that a valid reservation exists
@@ -244,4 +253,14 @@ func (w *Worker) stamp(d *dataPacket) error {
 		}
 	}
 	return d.colibriPath.SerializeTo(d.rawPacket[slayers.CmnHdrLen+d.scionLayer.AddrHdrLen():])
+}
+
+func (w *Worker) forwardPacket(d *dataPacket) error {
+	egressId := d.colibriPath.GetCurrentHopField().EgressId
+	forwardChannel, found := w.forwardChannels[egressId]
+	if !found {
+		return serrors.New("Forward Channel for egress id not found", "egressId", egressId)
+	}
+	forwardChannel <- d.rawPacket
+	return nil
 }

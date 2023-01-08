@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
+	"syscall"
 	"testing"
 	"time"
 
@@ -197,20 +198,21 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 }
 
 func BenchmarkWorker(b *testing.B) {
+	errGroup := &errgroup.Group{}
 	c := &proc.Processor{}
 	c.SetMetrics(coligateMetrics)
 	updateChannels := c.CreateControlUpdateChannels(1, 1000)
 	c.CreateControlDeletionChannels(1, 1)
 	dataChannels := c.CreateDataChannels(1, 1000)
-	borderRouterConnection := make(map[uint16]*ipv4.PacketConn)
+
 	borderRouterAddr, err := net.ResolveUDPAddr("udp", "localhost:30000")
 	if err != nil {
 		b.Error(err)
 	}
-	conn, _ := net.DialUDP("udp", nil, borderRouterAddr)
-	borderRouterConnection[uint16(2)] = ipv4.NewPacketConn(conn)
-	c.SetBorderRouterConnections(borderRouterConnection)
-	errGroup := &errgroup.Group{}
+	c.SetupPacketForwarder(errGroup, map[uint16]*net.UDPAddr{
+		2: borderRouterAddr,
+	}, coligateMetrics)
+
 	errGroup.Go(func() error {
 		return c.WorkerReceiveEntry(getColigateConfiguration(), 0, 1, addr.MustIAFrom(1, 1).AS())
 	})
@@ -221,7 +223,7 @@ func BenchmarkWorker(b *testing.B) {
 			Id: [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
 			Indices: map[uint8]*storage.ReservationIndex{
 				1: {
-					Index:    0,
+					Index:    1,
 					Validity: now.Add(12 * time.Second),
 					Sigmas: [][]byte{
 						{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
@@ -309,12 +311,44 @@ func BenchmarkWorker(b *testing.B) {
 			},
 		},
 		RawPacket: make([]byte, 400),
+		Id:        [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
 	}
-	time.Sleep(1 * time.Millisecond)
+	server, err := net.ListenUDP("udp", borderRouterAddr)
+	if err != nil {
+		b.Log(err)
+		b.FailNow()
+	}
+	var counter int
+	errGroup.Go(func() error {
+		msgs := make([]ipv4.Message, 10)
+		for i := 0; i < 10; i++ {
+			msgs[i].Buffers = [][]byte{make([]byte, 500)}
+		}
+
+		packetConn := ipv4.NewPacketConn(server)
+
+		for {
+			n, err := packetConn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
+			if err != nil {
+				return err
+			}
+			counter += n
+		}
+	})
+	time.Sleep(10 * time.Millisecond)
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		dataChannels[0] <- defaultPkt.Parse()
 	}
 	dataChannels[0] <- nil
+	for len(dataChannels[0]) != 0 {
+	}
+	b.StopTimer()
+	c.StopPacketForwarder()
+	time.Sleep(100 * time.Millisecond)
+	server.Close()
 	errGroup.Wait()
+	// check that all except maybe the last message was successfully received
+	assert.GreaterOrEqual(b, float64(counter), float64(b.N)*0.99-128)
 }
