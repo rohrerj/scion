@@ -22,7 +22,7 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/ipv4"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/scionproto/scion/go/coligate/processing"
 	"github.com/scionproto/scion/go/coligate/storage"
@@ -58,7 +58,6 @@ func TestValidate(t *testing.T) {
 		resStore map[[12]byte]*storage.Reservation
 	}
 	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
-	defer worker.Exit()
 
 	var startTime = time.Unix(0, 0)
 
@@ -541,7 +540,6 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 		entries []entry
 	}
 	worker := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
-	defer worker.Exit()
 
 	var startTime = time.Unix(0, 0)
 
@@ -896,7 +894,6 @@ func TestUpdateCounter(t *testing.T) {
 		NumBitsForWorkerId:         8,
 		NumBitsForPerWorkerCounter: 16,
 	}, 13, 3, 1, nil, coligateMetrics)
-	defer w.Exit()
 	// Check that it starts with the correct value
 	assert.Equal(t, uint32(0x30d0000), w.CoreIdCounter)
 
@@ -1059,15 +1056,17 @@ func BenchmarkParsing(b *testing.B) {
 }
 
 func BenchmarkProcess(b *testing.B) {
-	borderRouterConnection := make(map[uint16]*ipv4.PacketConn)
+	errGroup := &errgroup.Group{}
+	c := &processing.Processor{}
 	borderRouterAddr, err := net.ResolveUDPAddr("udp", "localhost:30000")
 	if err != nil {
 		b.Error(err)
 	}
-	conn, _ := net.DialUDP("udp", nil, borderRouterAddr)
-	borderRouterConnection[uint16(2)] = ipv4.NewPacketConn(conn)
-	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, borderRouterConnection, coligateMetrics)
-	defer w.Exit()
+	c.SetupPacketForwarder(errGroup, map[uint16]*net.UDPAddr{
+		2: borderRouterAddr,
+	}, coligateMetrics)
+
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, c.GetPacketForwarderChannels(), coligateMetrics)
 	now := time.Now()
 	resStore := map[[12]byte]*storage.Reservation{
 		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
@@ -1165,15 +1164,23 @@ func BenchmarkProcess(b *testing.B) {
 		},
 		RawPacket: make([]byte, 400),
 	}
+	server, err := net.ListenUDP("udp", borderRouterAddr)
+	if err != nil {
+		b.Log(err)
+		b.FailNow()
+	}
+	defer server.Close()
+	time.Sleep(1 * time.Millisecond)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		assert.NoError(b, w.Process(defaultPkt))
 	}
+	c.StopPacketForwarder()
+	errGroup.Wait()
 }
 
 func BenchmarkValidate(b *testing.B) {
 	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
-	defer w.Exit()
 	now := time.Now()
 
 	resStore := map[[12]byte]*storage.Reservation{
@@ -1230,7 +1237,6 @@ func BenchmarkValidate(b *testing.B) {
 
 func BenchmarkTrafficMonitoring(b *testing.B) {
 	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
-	defer w.Exit()
 	now := time.Now()
 	d := &processing.DataPacket{
 		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
@@ -1255,7 +1261,6 @@ func BenchmarkTrafficMonitoring(b *testing.B) {
 
 func BenchmarkStamp(b *testing.B) {
 	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
-	defer w.Exit()
 	now := time.Now()
 	defaultPkt := &processing.DataPacket{
 		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
@@ -1360,15 +1365,16 @@ func BenchmarkStamp(b *testing.B) {
 }
 
 func BenchmarkForwardPacket(b *testing.B) {
-	borderRouterConnection := make(map[uint16]*ipv4.PacketConn)
+	errGroup := &errgroup.Group{}
+	c := &processing.Processor{}
 	borderRouterAddr, err := net.ResolveUDPAddr("udp", "localhost:30000")
 	if err != nil {
 		b.Error(err)
 	}
-	conn, _ := net.DialUDP("udp", nil, borderRouterAddr)
-	borderRouterConnection[uint16(2)] = ipv4.NewPacketConn(conn)
-	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, borderRouterConnection, coligateMetrics)
-	defer w.Exit()
+	c.SetupPacketForwarder(errGroup, map[uint16]*net.UDPAddr{
+		2: borderRouterAddr,
+	}, coligateMetrics)
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, c.GetPacketForwarderChannels(), coligateMetrics)
 	now := time.Now()
 	defaultPkt := &processing.DataPacket{
 		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
@@ -1419,8 +1425,17 @@ func BenchmarkForwardPacket(b *testing.B) {
 		},
 		RawPacket: make([]byte, 400),
 	}
+
+	server, err := net.ListenUDP("udp", borderRouterAddr)
+	if err != nil {
+		b.Log(err)
+		b.FailNow()
+	}
+	defer server.Close()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		w.ForwardPacket(defaultPkt)
 	}
+	c.StopPacketForwarder()
+	errGroup.Wait()
 }

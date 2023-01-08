@@ -16,18 +16,15 @@ package processing
 
 import (
 	"crypto/cipher"
-	"syscall"
 	"time"
 
 	"github.com/google/gopacket"
-	"golang.org/x/net/ipv4"
 
 	"github.com/scionproto/scion/go/coligate/storage"
 	"github.com/scionproto/scion/go/coligate/tokenbucket"
 	libaddr "github.com/scionproto/scion/go/lib/addr"
 	libcolibri "github.com/scionproto/scion/go/lib/colibri/dataplane"
 	libtypes "github.com/scionproto/scion/go/lib/colibri/reservation"
-	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path/colibri"
@@ -38,11 +35,10 @@ type Worker struct {
 	CoreIdCounter  uint32
 	NumCounterBits int
 
-	Storage                 *storage.Storage
-	borderRouters           map[uint16]*ipv4.PacketConn
-	LocalAS                 libaddr.AS
-	littleHelperSendChannel chan *forwardTask
-	metrics                 *ColigateMetrics
+	Storage         *storage.Storage
+	forwardChannels map[uint16]chan []byte
+	LocalAS         libaddr.AS
+	metrics         *ColigateMetrics
 }
 
 type dataPacket struct {
@@ -81,29 +77,19 @@ func Parse(rawPacket []byte) (*dataPacket, error) {
 
 // NewWorker initializes the worker with its id, tokenbuckets and reservations
 func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32,
-	localAS libaddr.AS, borderRouters map[uint16]*ipv4.PacketConn, metrics *ColigateMetrics) *Worker {
+	localAS libaddr.AS, forwardChannels map[uint16]chan []byte, metrics *ColigateMetrics) *Worker {
 	w := &Worker{
 		CoreIdCounter: (gatewayId << (32 - config.NumBitsForGatewayId)) |
 			(workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId)),
-		NumCounterBits:          config.NumBitsForPerWorkerCounter,
-		LocalAS:                 localAS,
-		Storage:                 &storage.Storage{},
-		borderRouters:           borderRouters,
-		littleHelperSendChannel: make(chan *forwardTask, 10),
-		metrics:                 metrics,
+		NumCounterBits:  config.NumBitsForPerWorkerCounter,
+		LocalAS:         localAS,
+		Storage:         &storage.Storage{},
+		forwardChannels: forwardChannels,
+		metrics:         metrics,
 	}
 	w.Storage.InitStorageWithData(nil)
 
-	go func() {
-		defer log.HandlePanic()
-		w.littleHelperSend()
-	}()
-
 	return w
-}
-
-func (w *Worker) exit() {
-	w.littleHelperSendChannel <- nil
 }
 
 // Processes the current packet based on the current dataPacket
@@ -129,8 +115,7 @@ func (w *Worker) process(d *dataPacket) error {
 	if err != nil {
 		return err
 	}
-	w.forwardPacket(d)
-	return nil
+	return w.forwardPacket(d)
 }
 
 // Validates the fields in the colibri header and checks that a valid reservation exists
@@ -269,39 +254,12 @@ func (w *Worker) stamp(d *dataPacket) error {
 	return d.colibriPath.SerializeTo(d.rawPacket[slayers.CmnHdrLen+d.scionLayer.AddrHdrLen():])
 }
 
-func (w *Worker) forwardPacket(d *dataPacket) {
-	w.littleHelperSendChannel <- &forwardTask{
-		egressId:  d.colibriPath.GetCurrentHopField().EgressId,
-		rawPacket: d.rawPacket,
+func (w *Worker) forwardPacket(d *dataPacket) error {
+	egressId := d.colibriPath.GetCurrentHopField().EgressId
+	forwardChannel, found := w.forwardChannels[egressId]
+	if !found {
+		return serrors.New("Forward Channel for egress id not found", "egressId", egressId)
 	}
-}
-
-type forwardTask struct {
-	rawPacket []byte
-	egressId  uint16
-}
-
-func (w *Worker) littleHelperSend() {
-	workerPacketOutTotalPromCounter := w.metrics.WorkerPacketOutTotal
-	workerPacketOutErrorPromCounter := w.metrics.WorkerPacketOutError
-	writeMsgs := make([]ipv4.Message, 1)
-	writeMsgs[0].Buffers = [][]byte{make([]byte, bufSize)}
-	for {
-		task := <-w.littleHelperSendChannel
-		if task == nil {
-			return
-		}
-		borderRouterConn, found := w.borderRouters[task.egressId]
-		if !found {
-			continue
-		}
-		writeMsgs[0].Buffers[0] = task.rawPacket
-
-		_, err := borderRouterConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
-		if err != nil {
-			workerPacketOutErrorPromCounter.Add(1)
-			continue
-		}
-		workerPacketOutTotalPromCounter.Add(1)
-	}
+	forwardChannel <- d.rawPacket
+	return nil
 }

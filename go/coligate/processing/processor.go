@@ -41,15 +41,13 @@ import (
 	cgpb "github.com/scionproto/scion/go/pkg/proto/coligate"
 )
 
-// TODO(rohrerj) Add Unit tests
-
 type Processor struct {
 	localIA                 libaddr.IA
 	dataChannels            []chan *dataPacket
 	controlUpdateChannels   []chan *storage.UpdateTask
 	controlDeletionChannels []chan *storage.DeletionTask
 	cleanupChannel          chan *storage.UpdateTask
-	borderRouters           map[uint16]*ipv4.PacketConn
+	packetForwardChannels   map[uint16]chan []byte
 	saltHasher              common.SaltHasher
 	exit                    bool
 	metrics                 *ColigateMetrics
@@ -60,7 +58,7 @@ type Processor struct {
 const bufSize int = 9000
 
 // NumOfMessages is the maximum number of messages that are read as a batch from the socket.
-const numOfMessages int = 10 // TODO(rohrerj) check msg size
+const numOfMessages int = 32
 
 func (c *Processor) shutdown() {
 	if c.exit {
@@ -77,22 +75,42 @@ func (c *Processor) shutdown() {
 	for i := 0; i < len(c.controlDeletionChannels); i++ {
 		c.controlDeletionChannels[i] <- nil
 	}
+	for _, v := range c.packetForwardChannels {
+		v <- nil
+	}
 }
 
 // Init initializes the colibri gateway. Configures the channels, goroutines,
 // and the control plane and the data plane.
 func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	g *errgroup.Group, topo *topology.Loader, metrics *common.Metrics) error {
-
-	config := &cfg.Coligate
-	var borderRouters map[uint16]*ipv4.PacketConn = make(map[uint16]*ipv4.PacketConn)
-	for ifid, info := range topo.InterfaceInfoMap() {
-		conn, _ := net.DialUDP("udp", nil, info.InternalAddr)
-		borderRouters[uint16(ifid)] = ipv4.NewPacketConn(conn)
-	}
 	coligateInfo, err := topo.ColibriGateway(cfg.General.ID)
 	if err != nil {
 		return err
+	}
+
+	config := &cfg.Coligate
+	coligateMetrics := initializeMetrics(metrics)
+	forwardChannels := make(map[uint16]chan []byte)
+	for ifid, info := range topo.InterfaceInfoMap() {
+		found := false
+		// We skip all interface ids that are not used by this instance of Colibri Gateway
+		for _, eggr := range coligateInfo.Egresses {
+			if eggr == uint32(ifid) {
+				found = true
+			}
+		}
+		if !found {
+			continue
+		}
+		ch := make(chan []byte, numOfMessages)
+		pf := NewPacketForwarder(info.InternalAddr, numOfMessages, ch, coligateMetrics)
+		g.Go(func() error {
+			defer log.HandlePanic()
+			pf.Start()
+			return nil
+		})
+		forwardChannels[uint16(ifid)] = ch
 	}
 
 	grpcAddr, err := net.ResolveTCPAddr("tcp", cfg.Coligate.ColigateGRPCAddr)
@@ -123,9 +141,9 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		controlUpdateChannels:   make([]chan *storage.UpdateTask, config.NumWorkers),
 		controlDeletionChannels: make([]chan *storage.DeletionTask, config.NumWorkers),
 		saltHasher:              common.NewFnv1aHasher(salt),
-		metrics:                 initializeMetrics(metrics),
+		metrics:                 coligateMetrics,
 		numWorkers:              config.NumWorkers,
-		borderRouters:           borderRouters,
+		packetForwardChannels:   forwardChannels,
 	}
 
 	cleanup.Add(func() error {
@@ -436,8 +454,7 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 	gatewayId uint32, localAS libaddr.AS) error {
 
 	log.Info("Init worker", "workerId", workerId)
-	worker := NewWorker(config, workerId, gatewayId, localAS, p.borderRouters, p.metrics)
-	defer worker.exit()
+	worker := NewWorker(config, workerId, gatewayId, localAS, p.packetForwardChannels, p.metrics)
 	workerPacketInTotalPromCounter := p.metrics.WorkerPacketInTotal
 	workerPacketInInvalidPromCounter := p.metrics.WorkerPacketInInvalid
 	workerReservationUpdateTotalPromCounter := p.metrics.WorkerReservationUpdateTotal
@@ -445,7 +462,6 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 	ch := p.dataChannels[workerId]
 	chres := p.controlUpdateChannels[workerId]
 	chresD := p.controlDeletionChannels[workerId]
-
 	for !p.exit {
 		// Check whether new reservation indices have to be processed.
 		// This has priority above the data plane packets.
@@ -466,7 +482,6 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 				return nil
 			}
 			workerPacketInTotalPromCounter.Add(1)
-
 			if err := worker.process(d); err != nil {
 				log.Debug("Worker received error while processing.", "workerId", workerId,
 					"error", err.Error())

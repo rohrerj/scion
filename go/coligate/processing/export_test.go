@@ -15,16 +15,17 @@
 package processing
 
 import (
+	"net"
 	"time"
-
-	"golang.org/x/net/ipv4"
 
 	"github.com/scionproto/scion/go/coligate/storage"
 	libaddr "github.com/scionproto/scion/go/lib/addr"
+	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path/colibri"
 	common "github.com/scionproto/scion/go/pkg/coligate"
 	"github.com/scionproto/scion/go/pkg/coligate/config"
+	"golang.org/x/sync/errgroup"
 )
 
 func (p *Processor) InitCleanupRoutine() {
@@ -79,8 +80,28 @@ func InitializeMetrics() *ColigateMetrics {
 	return initializeMetrics(common.NewMetrics())
 }
 
-func (p *Processor) SetBorderRouterConnections(conn map[uint16]*ipv4.PacketConn) {
-	p.borderRouters = conn
+func (p *Processor) SetupPacketForwarder(g *errgroup.Group, m map[uint16]*net.UDPAddr, coligateMetrics *ColigateMetrics) {
+	forwardChannels := make(map[uint16]chan []byte)
+	for ifid, info := range m {
+		ch := make(chan []byte, numOfMessages)
+		pf := NewPacketForwarder(info, numOfMessages, ch, coligateMetrics)
+		g.Go(func() error {
+			defer log.HandlePanic()
+			pf.Start()
+			return nil
+		})
+		forwardChannels[uint16(ifid)] = ch
+	}
+	p.packetForwardChannels = forwardChannels
+}
+
+func (p *Processor) GetPacketForwarderChannels() map[uint16]chan []byte {
+	return p.packetForwardChannels
+}
+func (p *Processor) StopPacketForwarder() {
+	for _, v := range p.packetForwardChannels {
+		v <- nil
+	}
 }
 
 func (p *Processor) SetMetrics(m *ColigateMetrics) {
@@ -133,8 +154,4 @@ func (w *Worker) ForwardPacket(d *DataPacket) {
 
 func (w *Worker) UpdateCounter() {
 	w.updateCounter()
-}
-
-func (w *Worker) Exit() {
-	w.exit()
 }
