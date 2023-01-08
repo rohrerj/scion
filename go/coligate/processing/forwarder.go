@@ -18,6 +18,7 @@ import (
 	"syscall"
 
 	"github.com/scionproto/scion/go/lib/log"
+	"github.com/scionproto/scion/go/lib/serrors"
 	"golang.org/x/net/ipv4"
 )
 
@@ -40,7 +41,7 @@ func NewPacketForwarder(addr *net.UDPAddr, batchSize int, ch chan []byte,
 
 // Starts the packet forwarder. This should be called in a new
 // go routine.
-func (p *packetForwarder) Start() {
+func (p *packetForwarder) Start() error {
 	workerPacketOutTotalPromCounter := p.metrics.WorkerPacketOutTotal
 	workerPacketOutErrorPromCounter := p.metrics.WorkerPacketOutError
 	writeMsgs := make([]ipv4.Message, p.batchSize)
@@ -49,7 +50,7 @@ func (p *packetForwarder) Start() {
 	}
 	conn, err := net.DialUDP("udp", nil, p.addr)
 	if err != nil {
-		log.Debug("PacketForwarder error while dialing", "err", err)
+		return serrors.New("PacketForwarder error while dialing", "err", err)
 	}
 	packetConn := ipv4.NewPacketConn(conn)
 	defer packetConn.Close()
@@ -57,7 +58,7 @@ func (p *packetForwarder) Start() {
 	for !exit {
 		task := <-p.ForwardTasks
 		if task == nil {
-			return
+			return nil
 		}
 		writeMsgs[0].Buffers[0] = task
 		i := 1
@@ -90,4 +91,5 @@ func (p *packetForwarder) Start() {
 		}
 		workerPacketOutTotalPromCounter.Add(float64(k))
 	}
+	return nil
 }

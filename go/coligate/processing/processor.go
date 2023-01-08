@@ -107,8 +107,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		pf := NewPacketForwarder(info.InternalAddr, numOfMessages, ch, coligateMetrics)
 		g.Go(func() error {
 			defer log.HandlePanic()
-			pf.Start()
-			return nil
+			return pf.Start()
 		})
 		forwardChannels[uint16(ifid)] = ch
 	}
