@@ -80,7 +80,9 @@ func InitializeMetrics() *ColigateMetrics {
 	return initializeMetrics(common.NewMetrics())
 }
 
-func (p *Processor) SetupPacketForwarder(g *errgroup.Group, m map[uint16]*net.UDPAddr, coligateMetrics *ColigateMetrics) {
+func (p *Processor) SetupPacketForwarder(g *errgroup.Group, m map[uint16]*net.UDPAddr,
+	coligateMetrics *ColigateMetrics) {
+
 	forwardChannels := make(map[uint16]chan []byte)
 	for ifid, info := range m {
 		ch := make(chan []byte, numOfMessages)

@@ -240,7 +240,8 @@ func initializeMetrics(metrics *common.Metrics) *ColigateMetrics {
 
 // Loads the active EE Reservations from the colibri service
 func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context,
-	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr, timeout int, coligateId string) error {
+	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr, timeout int,
+	coligateId string) error {
 
 	log.Info("Loading active reservation indices from colibri service")
 	var response *copb.ActiveIndicesResponse
