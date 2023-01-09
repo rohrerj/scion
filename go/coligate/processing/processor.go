@@ -103,8 +103,8 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		if !found {
 			continue
 		}
-		ch := make(chan []byte, numOfMessages)
-		pf := NewPacketForwarder(info.InternalAddr, numOfMessages, ch, coligateMetrics)
+		ch := make(chan []byte, config.ForwarderBatchSize)
+		pf := NewPacketForwarder(info.InternalAddr, config.ForwarderBatchSize, ch, coligateMetrics)
 		g.Go(func() error {
 			defer log.HandlePanic()
 			return pf.Start()

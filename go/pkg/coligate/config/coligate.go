@@ -35,6 +35,7 @@ type ColigateConfig struct {
 	MaxQueueSizePerWorker int    `toml:"MaxQueueSizePerWorker"`
 	Salt                  string `toml:"Salt"`
 	ColigateGRPCAddr      string `toml:"ColigateGRPCAddr"`
+	ForwarderBatchSize    int    `toml:"ForwarderBatchSize"`
 }
 
 func (cfg *ColigateConfig) Validate() error {
@@ -51,6 +52,9 @@ func (cfg *ColigateConfig) Validate() error {
 	if int(math.Pow(2, float64(cfg.NumBitsForWorkerId))-1) < cfg.NumWorkers {
 		return serrors.New("Too small bit count for too many workers", "NumBitsForWorkerId",
 			cfg.NumBitsForWorkerId, "NumWorkers", cfg.NumWorkers)
+	}
+	if cfg.ForwarderBatchSize < 1 {
+		return serrors.New("ForwarderBatchSize < 1")
 	}
 	return nil
 }
@@ -74,6 +78,9 @@ func (cfg *ColigateConfig) InitDefaults() {
 	}
 	if cfg.COSyncTimeout == 0 {
 		cfg.COSyncTimeout = 10
+	}
+	if cfg.ForwarderBatchSize == 0 {
+		cfg.ForwarderBatchSize = 32
 	}
 }
 
