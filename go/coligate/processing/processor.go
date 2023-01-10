@@ -126,7 +126,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 		chs := make([]chan []byte, forwarderConfig.Count)
 		for i := 0; i < forwarderConfig.Count; i++ {
-			chs[i] = make(chan []byte)
+			chs[i] = make(chan []byte, forwarderConfig.BatchSize)
 			pf := NewPacketForwarder(info.InternalAddr, forwarderConfig.BatchSize, chs[i], coligateMetrics)
 			func(pf *packetForwarder) {
 				g.Go(func() error {

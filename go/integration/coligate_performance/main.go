@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/gopacket"
@@ -33,6 +34,7 @@ import (
 	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path/colibri"
+	"golang.org/x/net/ipv4"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -138,6 +140,11 @@ func run(pktSize uint16) error {
 	if err != nil {
 		return err
 	}
+	batchSize := 10
+	writeMsgs := make([]ipv4.Message, batchSize)
+	for i := 0; i < batchSize; i++ {
+		writeMsgs[i].Buffers = [][]byte{make([]byte, 9000)}
+	}
 	pkt := &slayers.SCION{
 		FlowID:     1,
 		NextHdr:    17,
@@ -202,27 +209,32 @@ func run(pktSize uint16) error {
 	}
 	rawPkt := buf.Bytes()
 	payload := make([]byte, pktSize)
-	rawPkt = append(rawPkt, payload...)
+	for i := 0; i < batchSize; i++ {
+		writeMsgs[i].Buffers[0] = append(rawPkt, payload...)
+	}
 	coligateAddr, err := net.ResolveUDPAddr("udp", "127.0.0.19:31006")
 	if err != nil {
 		return err
 	}
 
-	conn, err := net.ListenPacket("udp", ":0")
+	conn, err := net.DialUDP("udp", nil, coligateAddr)
 	if err != nil {
 		return err
 	}
+	packetConn := ipv4.NewPacketConn(conn)
+	defer packetConn.Close()
+
 	startTime := time.Now()
 	colibriPath := pkt.Path.(*colibri.ColibriPath)
 	r := rand.New(rand.NewSource(rand.Int63()))
 	for startTime.Add(30 * time.Second).After(time.Now()) {
 		colibriPath.InfoField.ResIdSuffix[10] = byte(r.Intn(255))
 		colibriPath.InfoField.ResIdSuffix[11] = byte(r.Intn(255))
-		colibriPath.SerializeTo(rawPkt[slayers.CmnHdrLen+pkt.AddrHdrLen():])
+		for i := 0; i < batchSize; i++ {
+			colibriPath.SerializeTo(writeMsgs[i].Buffers[0][slayers.CmnHdrLen+pkt.AddrHdrLen():])
+		}
 		for i := 0; i < 100; i++ {
-			if _, err := conn.WriteTo(rawPkt, coligateAddr); err != nil {
-				log.Error("error while sending packet", "err", err)
-			}
+			packetConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
 		}
 	}
 	return nil
