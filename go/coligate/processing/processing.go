@@ -32,11 +32,12 @@ import (
 )
 
 type Worker struct {
+	Id             uint32
 	CoreIdCounter  uint32
 	NumCounterBits int
 
 	Storage         *storage.Storage
-	forwardChannels map[uint16]chan []byte
+	forwardChannels map[uint16]packetForwarderContainer
 	LocalAS         libaddr.AS
 	metrics         *ColigateMetrics
 }
@@ -77,8 +78,9 @@ func Parse(rawPacket []byte) (*dataPacket, error) {
 
 // NewWorker initializes the worker with its id, tokenbuckets and reservations
 func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32,
-	localAS libaddr.AS, forwardChannels map[uint16]chan []byte, metrics *ColigateMetrics) *Worker {
+	localAS libaddr.AS, forwardChannels map[uint16]packetForwarderContainer, metrics *ColigateMetrics) *Worker {
 	w := &Worker{
+		Id: workerId,
 		CoreIdCounter: (gatewayId << (32 - config.NumBitsForGatewayId)) |
 			(workerId << (32 - config.NumBitsForGatewayId - config.NumBitsForWorkerId)),
 		NumCounterBits:  config.NumBitsForPerWorkerCounter,
@@ -257,10 +259,11 @@ func (w *Worker) stamp(d *dataPacket) error {
 
 func (w *Worker) forwardPacket(d *dataPacket) error {
 	egressId := d.colibriPath.GetCurrentHopField().EgressId
-	forwardChannel, found := w.forwardChannels[egressId]
+	forwarderContainer, found := w.forwardChannels[egressId]
 	if !found {
 		return serrors.New("Forward Channel for egress id not found", "egressId", egressId)
 	}
-	forwardChannel <- d.rawPacket
+	index := w.Id % uint32(forwarderContainer.Length)
+	forwarderContainer.ForwardTasks[index] <- d.rawPacket
 	return nil
 }

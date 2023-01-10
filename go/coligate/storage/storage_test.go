@@ -26,7 +26,8 @@ import (
 func TestReservationNotFound(t *testing.T) {
 	storage := &storage.Storage{}
 	storage.InitStorageWithData(nil)
-	res, found := storage.UseReservation([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 0, time.Now())
+	res, found := storage.UseReservation([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		0, time.Now())
 	assert.False(t, found)
 	assert.Nil(t, res)
 }
@@ -146,7 +147,8 @@ func TestPacketValidityIsChecked(t *testing.T) {
 	res, found := s.UseReservation([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 0, now)
 	assert.True(t, found)
 	assert.Equal(t, [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, res.Id)
-	res, found = s.UseReservation([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 0, now.Add(1*time.Second))
+	res, found = s.UseReservation([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		0, now.Add(1*time.Second))
 	assert.False(t, found)
 	assert.Nil(t, res)
 }

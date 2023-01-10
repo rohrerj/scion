@@ -1066,7 +1066,8 @@ func BenchmarkProcess(b *testing.B) {
 		2: borderRouterAddr,
 	}, coligateMetrics)
 
-	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, c.GetPacketForwarderChannels(), coligateMetrics)
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1,
+		c.GetPacketForwarderChannels(), coligateMetrics)
 	now := time.Now()
 	resStore := map[[12]byte]*storage.Reservation{
 		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
@@ -1374,7 +1375,8 @@ func BenchmarkForwardPacket(b *testing.B) {
 	c.SetupPacketForwarder(errGroup, map[uint16]*net.UDPAddr{
 		2: borderRouterAddr,
 	}, coligateMetrics)
-	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, c.GetPacketForwarderChannels(), coligateMetrics)
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1,
+		c.GetPacketForwarderChannels(), coligateMetrics)
 	now := time.Now()
 	defaultPkt := &processing.DataPacket{
 		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},

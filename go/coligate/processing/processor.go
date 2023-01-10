@@ -47,7 +47,7 @@ type Processor struct {
 	controlUpdateChannels   []chan *storage.UpdateTask
 	controlDeletionChannels []chan *storage.DeletionTask
 	cleanupChannel          chan *storage.UpdateTask
-	packetForwardChannels   map[uint16]chan []byte
+	packetForwardChannels   map[uint16]packetForwarderContainer
 	saltHasher              common.SaltHasher
 	exit                    bool
 	metrics                 *ColigateMetrics
@@ -76,7 +76,9 @@ func (c *Processor) shutdown() {
 		c.controlDeletionChannels[i] <- nil
 	}
 	for _, v := range c.packetForwardChannels {
-		v <- nil
+		for _, c := range v.ForwardTasks {
+			c <- nil
+		}
 	}
 }
 
@@ -89,27 +91,55 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		return err
 	}
 
-	config := &cfg.Coligate
+	coligateConfig := &cfg.Coligate
 	coligateMetrics := initializeMetrics(metrics)
-	forwardChannels := make(map[uint16]chan []byte)
+	forwardChannels := make(map[uint16]packetForwarderContainer)
 	for ifid, info := range topo.InterfaceInfoMap() {
 		found := false
 		// We skip all interface ids that are not used by this instance of Colibri Gateway
 		for _, eggr := range coligateInfo.Egresses {
 			if eggr == uint32(ifid) {
 				found = true
+				break
 			}
 		}
 		if !found {
 			continue
 		}
-		ch := make(chan []byte, numOfMessages)
-		pf := NewPacketForwarder(info.InternalAddr, numOfMessages, ch, coligateMetrics)
-		g.Go(func() error {
-			defer log.HandlePanic()
-			return pf.Start()
-		})
-		forwardChannels[uint16(ifid)] = ch
+		// If a configuration for that interface exists use it otherwise use default values
+		found = false
+		var forwarderConfig config.ForwarderConfig
+		for _, fw := range coligateConfig.Forwarder {
+			if uint32(fw.InterfaceId) == uint32(ifid) {
+				found = true
+				forwarderConfig = fw
+				break
+			}
+		}
+		if !found {
+			forwarderConfig = config.ForwarderConfig{
+				InterfaceId: int(ifid),
+				BatchSize:   16,
+				Count:       1,
+			}
+		}
+
+		chs := make([]chan []byte, forwarderConfig.Count)
+		for i := 0; i < forwarderConfig.Count; i++ {
+			chs[i] = make(chan []byte)
+			pf := NewPacketForwarder(info.InternalAddr, forwarderConfig.BatchSize, chs[i], coligateMetrics)
+			func(pf *packetForwarder) {
+				g.Go(func() error {
+					defer log.HandlePanic()
+					log.Debug("Started Packet forwarder", "addr", pf.addr.String())
+					return pf.Start()
+				})
+			}(pf)
+		}
+		forwardChannels[uint16(ifid)] = packetForwarderContainer{
+			Length:       uint32(forwarderConfig.Count),
+			ForwardTasks: chs,
+		}
 	}
 
 	grpcAddr, err := net.ResolveTCPAddr("tcp", cfg.Coligate.ColigateGRPCAddr)
@@ -126,8 +156,8 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	// Loads the salt for load balancing from the config.
 	// If the salt is empty a random value will be chosen
-	salt := []byte(config.Salt)
-	if config.Salt == "" {
+	salt := []byte(coligateConfig.Salt)
+	if coligateConfig.Salt == "" {
 		salt := make([]byte, 16)
 		rand.Read(salt)
 	}
@@ -136,12 +166,12 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		localIA: topo.IA(),
 		// TODO(rohrerj) check cleanupChannel capacity
 		cleanupChannel:          make(chan *storage.UpdateTask, 1000),
-		dataChannels:            make([]chan *dataPacket, config.NumWorkers),
-		controlUpdateChannels:   make([]chan *storage.UpdateTask, config.NumWorkers),
-		controlDeletionChannels: make([]chan *storage.DeletionTask, config.NumWorkers),
+		dataChannels:            make([]chan *dataPacket, coligateConfig.NumWorkers),
+		controlUpdateChannels:   make([]chan *storage.UpdateTask, coligateConfig.NumWorkers),
+		controlDeletionChannels: make([]chan *storage.DeletionTask, coligateConfig.NumWorkers),
 		saltHasher:              common.NewFnv1aHasher(salt),
 		metrics:                 coligateMetrics,
-		numWorkers:              config.NumWorkers,
+		numWorkers:              coligateConfig.NumWorkers,
 		packetForwardChannels:   forwardChannels,
 	}
 
@@ -152,16 +182,16 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	// Creates all the channels and starts the go routines
 	for i := 0; i < p.numWorkers; i++ {
-		p.dataChannels[i] = make(chan *dataPacket, config.MaxQueueSizePerWorker)
+		p.dataChannels[i] = make(chan *dataPacket, coligateConfig.MaxQueueSizePerWorker)
 		p.controlUpdateChannels[i] = make(chan *storage.UpdateTask,
-			config.MaxQueueSizePerWorker)
+			coligateConfig.MaxQueueSizePerWorker)
 		// TODO(rohrerj) Check control deletion channel size
 		p.controlDeletionChannels[i] = make(chan *storage.DeletionTask, 1000)
 		func(i int) {
 			g.Go(func() error {
 				defer log.HandlePanic()
-				return p.workerReceiveEntry(config,
-					uint32(i), uint32(config.ColibriGatewayID), localAS,
+				return p.workerReceiveEntry(coligateConfig,
+					uint32(i), uint32(coligateConfig.ColibriGatewayID), localAS,
 				)
 			})
 		}(i)
@@ -175,12 +205,12 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	g.Go(func() error {
 		defer log.HandlePanic()
-		return p.initControlPlane(config, cleanup, grpcAddr)
+		return p.initControlPlane(coligateConfig, cleanup, grpcAddr)
 	})
 
 	// We start the data plane as soon as we retrieved the active reservations from colibri service
-	if err := p.loadActiveReservationsFromColibriService(ctx, config, colibriServiceAddresses[0],
-		config.COSyncTimeout, cfg.General.ID); err != nil {
+	if err := p.loadActiveReservationsFromColibriService(ctx, coligateConfig, colibriServiceAddresses[0],
+		coligateConfig.COSyncTimeout, cfg.General.ID); err != nil {
 		return err
 	}
 	for i := 0; i < 255; i++ {
@@ -227,7 +257,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 			p.controlUpdateChannels[p.getWorkerForResId(resId)] <- task
 		}
 	}
-	if err := p.initDataPlane(config, coligateInfo.Addr, g, cleanup); err != nil {
+	if err := p.initDataPlane(coligateConfig, coligateInfo.Addr, g, cleanup); err != nil {
 		return err
 	}
 
@@ -284,7 +314,8 @@ func initializeMetrics(metrics *common.Metrics) *ColigateMetrics {
 
 // Loads the active EE Reservations from the colibri service
 func (p *Processor) loadActiveReservationsFromColibriService(ctx context.Context,
-	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr, timeout int, coligateId string) error {
+	config *config.ColigateConfig, colibiServiceAddr *net.UDPAddr, timeout int,
+	coligateId string) error {
 
 	log.Info("Loading active reservation indices from colibri service")
 	var response *copb.ActiveIndicesResponse
