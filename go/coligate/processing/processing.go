@@ -16,9 +16,8 @@ package processing
 
 import (
 	"crypto/cipher"
+	"encoding/binary"
 	"time"
-
-	"github.com/google/gopacket"
 
 	"github.com/scionproto/scion/go/coligate/storage"
 	"github.com/scionproto/scion/go/coligate/tokenbucket"
@@ -51,28 +50,22 @@ type dataPacket struct {
 	id             [12]byte
 }
 
-// Parse parses the scion and colibri header from a raw packet
-// TODO(rohrerj) This parses the path twice, optimize
+// Parse parses only the bare minimum that is required to extract the reservation id
 func Parse(rawPacket []byte) (*dataPacket, error) {
+	if len(rawPacket) < 76 {
+		return nil, serrors.New("raw packet length too small")
+	}
+	addrLenByte := rawPacket[9]
+	dstAddrLen := addrLenByte >> 4 & 0x3
+	srcAddrLen := addrLenByte & 0x3
 	proc := dataPacket{
-		rawPacket:  make([]byte, len(rawPacket)),
-		scionLayer: &slayers.SCION{},
+		rawPacket: rawPacket,
 	}
-	copy(proc.rawPacket, rawPacket)
-	var err error
-	if err := proc.scionLayer.DecodeFromBytes(proc.rawPacket,
-		gopacket.NilDecodeFeedback); err != nil {
-		return nil, err
+	offset := slayers.CmnHdrLen + 2*libaddr.IABytes + (int(dstAddrLen)+1)*4 + (int(srcAddrLen)+1)*4
+	if len(rawPacket) < offset+40 {
+		return nil, serrors.New("raw packet length too small")
 	}
-	var ok bool
-	p, ok := proc.scionLayer.Path.(*colibri.ColibriPathMinimal)
-	if !ok {
-		return nil, serrors.New("getting colibri minimal path failed")
-	}
-	if proc.colibriPath, err = p.ToColibriPath(); err != nil {
-		return nil, serrors.New("expanding colibri path failed")
-	}
-	copy(proc.id[:], proc.colibriPath.InfoField.ResIdSuffix)
+	copy(proc.id[:], rawPacket[offset+12:])
 	return &proc, nil
 }
 
@@ -94,6 +87,31 @@ func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32,
 	return w
 }
 
+// Parses the some fields of the scion header that are needed by colibri gateway and the full colibri header
+func (w *Worker) realParse(d *dataPacket) error {
+	payloadLen := binary.BigEndian.Uint16(d.rawPacket[6:8])
+	realPayloadLen := len(d.rawPacket) - int(d.rawPacket[5])*4
+	if payloadLen != uint16(realPayloadLen) {
+		return serrors.New("wrong payload length", "payloadLen", payloadLen, "realPayloadLen", realPayloadLen)
+	}
+	addrLenByte := d.rawPacket[9]
+	dstAddrLen := addrLenByte >> 4 & 0x3
+	srcAddrLen := addrLenByte & 0x3
+	d.scionLayer = &slayers.SCION{
+		DstAddrLen: slayers.AddrLen(dstAddrLen),
+		SrcAddrLen: slayers.AddrLen(srcAddrLen),
+		SrcIA:      libaddr.IA(binary.BigEndian.Uint64(d.rawPacket[slayers.CmnHdrLen+libaddr.IABytes:])),
+	}
+	d.colibriPath = &colibri.ColibriPath{}
+	offset := slayers.CmnHdrLen + 2*libaddr.IABytes + (int(dstAddrLen)+1)*4 + (int(srcAddrLen)+1)*4
+	err := d.colibriPath.DecodeFromBytes(d.rawPacket[offset:])
+	if err != nil {
+		return err
+	}
+	d.pktArrivalTime = time.Now()
+	return nil
+}
+
 // Processes the current packet based on the current dataPacket
 func (w *Worker) process(d *dataPacket) error {
 	if w == nil {
@@ -103,20 +121,19 @@ func (w *Worker) process(d *dataPacket) error {
 	if d == nil {
 		return serrors.New("datapacket must not be nil")
 	}
-	var err error
-	err = w.validate(d)
-	if err != nil {
-		return err
-	}
-	err = w.performTrafficMonitoring(d)
-	if err != nil {
+
+	if err := w.validate(d); err != nil {
 		return err
 	}
 
-	err = w.stamp(d)
-	if err != nil {
+	if err := w.performTrafficMonitoring(d); err != nil {
 		return err
 	}
+
+	if err := w.stamp(d); err != nil {
+		return err
+	}
+
 	return w.forwardPacket(d)
 }
 
@@ -130,7 +147,7 @@ func (w *Worker) validate(d *dataPacket) error {
 		return serrors.New("Invalid flags", "S", S, "R", R, "C", C)
 	}
 	if d.scionLayer.SrcIA.AS() != w.LocalAS {
-		return serrors.New("Reservation does not belong to local AS")
+		return serrors.New("Reservation does not belong to local AS", "expected", w.LocalAS, "actual", d.scionLayer.SrcIA.AS())
 	}
 
 	reservation, isValid := w.Storage.UseReservation(d.id, infoField.Ver, d.pktArrivalTime)
