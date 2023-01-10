@@ -83,7 +83,7 @@ func InitializeMetrics() *ColigateMetrics {
 func (p *Processor) SetupPacketForwarder(g *errgroup.Group, m map[uint16]*net.UDPAddr,
 	coligateMetrics *ColigateMetrics) {
 
-	forwardChannels := make(map[uint16]chan []byte)
+	forwardChannels := make(map[uint16]packetForwarderContainer)
 	for ifid, info := range m {
 		ch := make(chan []byte, numOfMessages)
 		pf := NewPacketForwarder(info, numOfMessages, ch, coligateMetrics)
@@ -92,17 +92,20 @@ func (p *Processor) SetupPacketForwarder(g *errgroup.Group, m map[uint16]*net.UD
 			pf.Start()
 			return nil
 		})
-		forwardChannels[uint16(ifid)] = ch
+		forwardChannels[uint16(ifid)] = packetForwarderContainer{
+			Length:       1,
+			ForwardTasks: []chan []byte{ch},
+		}
 	}
 	p.packetForwardChannels = forwardChannels
 }
 
-func (p *Processor) GetPacketForwarderChannels() map[uint16]chan []byte {
+func (p *Processor) GetPacketForwarderChannels() map[uint16]packetForwarderContainer {
 	return p.packetForwardChannels
 }
 func (p *Processor) StopPacketForwarder() {
 	for _, v := range p.packetForwardChannels {
-		v <- nil
+		v.ForwardTasks[0] <- nil
 	}
 }
 

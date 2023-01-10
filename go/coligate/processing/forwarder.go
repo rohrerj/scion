@@ -22,6 +22,11 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
+type packetForwarderContainer struct {
+	Length       uint32
+	ForwardTasks []chan []byte
+}
+
 type packetForwarder struct {
 	addr         *net.UDPAddr
 	metrics      *ColigateMetrics
