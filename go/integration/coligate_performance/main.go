@@ -213,9 +213,12 @@ func run(pktSize uint16) error {
 		return err
 	}
 	startTime := time.Now()
+	colibriPath := pkt.Path.(*colibri.ColibriPath)
+	r := rand.New(rand.NewSource(rand.Int63()))
 	for startTime.Add(30 * time.Second).After(time.Now()) {
-		pkt.Path.(*colibri.ColibriPath).InfoField.ResIdSuffix[10] = byte(rand.Intn(255))
-		pkt.Path.(*colibri.ColibriPath).InfoField.ResIdSuffix[11] = byte(rand.Intn(255))
+		colibriPath.InfoField.ResIdSuffix[10] = byte(r.Intn(255))
+		colibriPath.InfoField.ResIdSuffix[11] = byte(r.Intn(255))
+		colibriPath.SerializeTo(rawPkt[slayers.CmnHdrLen+pkt.AddrHdrLen():])
 		for i := 0; i < 100; i++ {
 			if _, err := conn.WriteTo(rawPkt, coligateAddr); err != nil {
 				log.Error("error while sending packet", "err", err)
