@@ -51,6 +51,28 @@ type dataPacket struct {
 	id             [12]byte
 }
 
+func Parse2(rawPacket []byte) (*dataPacket, error) {
+	proc := dataPacket{
+		rawPacket:  rawPacket,
+		scionLayer: &slayers.SCION{},
+	}
+	var err error
+	if err := proc.scionLayer.DecodeFromBytes(proc.rawPacket,
+		gopacket.NilDecodeFeedback); err != nil {
+		return nil, err
+	}
+	var ok bool
+	p, ok := proc.scionLayer.Path.(*colibri.ColibriPathMinimal)
+	if !ok {
+		return nil, serrors.New("getting colibri minimal path failed")
+	}
+	if proc.colibriPath, err = p.ToColibriPath(); err != nil {
+		return nil, serrors.New("expanding colibri path failed")
+	}
+	copy(proc.id[:], proc.colibriPath.InfoField.ResIdSuffix)
+	return &proc, nil
+}
+
 // Parse parses the scion and colibri header from a raw packet
 // TODO(rohrerj) This parses the path twice, optimize
 func Parse(rawPacket []byte) (*dataPacket, error) {
