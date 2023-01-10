@@ -476,11 +476,47 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 	}
 
 	var ipv4Conn *ipv4.PacketConn = ipv4.NewPacketConn(udpConn)
+	recvChannel := make(chan []byte, 256)
+	g.Go(func() error {
+		defer log.HandlePanic()
+		dataPacketInInvalidPromCounter := p.metrics.DataPacketInInvalid
+		dataPacketInDroppedPromCounter := p.metrics.DataPacketInDropped
+		for !p.exit {
+			task := <-recvChannel
+			if task == nil {
+				return nil
+			}
+			d, err := Parse2(task)
+			if err != nil {
+				log.Debug("error while parsing headers", "err", err)
+				dataPacketInInvalidPromCounter.Add(1)
+				continue
+			}
+			if int(d.scionLayer.PayloadLen) != len(d.scionLayer.Payload) ||
+				d.scionLayer.PayloadLen != d.colibriPath.InfoField.OrigPayLen {
+				// Packet too large or inconsistent payload size.
+				dataPacketInInvalidPromCounter.Add(1)
+				continue
+			}
+			d.pktArrivalTime = time.Now()
+
+			select {
+			case p.dataChannels[p.getWorkerForResId(d.id)] <- d:
+			default:
+				dataPacketInDroppedPromCounter.Add(1)
+				continue // Packet dropped
+			}
+
+		}
+		return nil
+	})
 
 	g.Go(func() error {
 		defer log.HandlePanic()
+		defer func() {
+			recvChannel <- nil
+		}()
 		dataPacketInTotalPromCounter := p.metrics.DataPacketInTotal
-		dataPacketInInvalidPromCounter := p.metrics.DataPacketInInvalid
 		dataPacketInDroppedPromCounter := p.metrics.DataPacketInDropped
 		for !p.exit {
 			numPkts, err := ipv4Conn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
@@ -493,27 +529,12 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 			}
 			dataPacketInTotalPromCounter.Add(float64(numPkts))
 			for _, pkt := range msgs[:numPkts] {
-				var d *dataPacket
-
-				d, err = Parse(pkt.Buffers[0][:pkt.N])
-				if err != nil {
-					log.Debug("error while parsing headers", "err", err)
-					dataPacketInInvalidPromCounter.Add(1)
-					continue
-				}
-				if int(d.scionLayer.PayloadLen) != len(d.scionLayer.Payload) ||
-					d.scionLayer.PayloadLen != d.colibriPath.InfoField.OrigPayLen {
-					// Packet too large or inconsistent payload size.
-					dataPacketInInvalidPromCounter.Add(1)
-					continue
-				}
-				d.pktArrivalTime = time.Now()
-
+				rawPacket := make([]byte, pkt.N)
+				copy(rawPacket, pkt.Buffers[0][:pkt.N])
 				select {
-				case p.dataChannels[p.getWorkerForResId(d.id)] <- d:
+				case recvChannel <- rawPacket:
 				default:
 					dataPacketInDroppedPromCounter.Add(1)
-					continue // Packet dropped
 				}
 			}
 
