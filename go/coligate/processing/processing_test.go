@@ -1046,8 +1046,10 @@ func BenchmarkParsing(b *testing.B) {
 	buffer := gopacket.NewSerializeBuffer()
 	err := s.SerializeTo(buffer, gopacket.SerializeOptions{})
 	assert.NoError(b, err)
+	payload := make([]byte, payloadLen)
 	bytes := []byte{}
 	bytes = append(bytes, buffer.Bytes()...)
+	bytes = append(bytes, payload...)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := processing.Parse(bytes)
@@ -1066,7 +1068,7 @@ func BenchmarkProcess(b *testing.B) {
 		2: borderRouterAddr,
 	}, coligateMetrics)
 
-	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1,
+	w := processing.NewWorker(getColigateConfiguration(), 1, 1, addr.MustIAFrom(1, 1).AS(),
 		c.GetPacketForwarderChannels(), coligateMetrics)
 	now := time.Now()
 	resStore := map[[12]byte]*storage.Reservation{

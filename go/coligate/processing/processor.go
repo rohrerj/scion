@@ -486,19 +486,12 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 			if task == nil {
 				return nil
 			}
-			d, err := Parse2(task)
+			d, err := Parse(task)
 			if err != nil {
 				log.Debug("error while parsing headers", "err", err)
 				dataPacketInInvalidPromCounter.Add(1)
 				continue
 			}
-			if int(d.scionLayer.PayloadLen) != len(d.scionLayer.Payload) ||
-				d.scionLayer.PayloadLen != d.colibriPath.InfoField.OrigPayLen {
-				// Packet too large or inconsistent payload size.
-				dataPacketInInvalidPromCounter.Add(1)
-				continue
-			}
-			d.pktArrivalTime = time.Now()
 
 			select {
 			case p.dataChannels[p.getWorkerForResId(d.id)] <- d:
@@ -577,6 +570,12 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 				return nil
 			}
 			workerPacketInTotalPromCounter.Add(1)
+			if err := worker.realParse(d); err != nil {
+				log.Debug("Worker received error while parsing.", "workerId", workerId,
+					"error", err.Error())
+				workerPacketInInvalidPromCounter.Add(1)
+				continue
+			}
 			if err := worker.process(d); err != nil {
 				log.Debug("Worker received error while processing.", "workerId", workerId,
 					"error", err.Error())

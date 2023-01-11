@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/gopacket"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/sync/errgroup"
@@ -267,8 +268,9 @@ func BenchmarkWorker(b *testing.B) {
 	defaultPkt := &proc.DataPacket{
 		PktArrivalTime: time.Now(),
 		ScionLayer: &slayers.SCION{
-			PathType: 4,
-			SrcIA:    addr.MustIAFrom(1, 1),
+			PathType:   4,
+			SrcIA:      addr.MustIAFrom(1, 1),
+			PayloadLen: 400,
 		},
 		ColibriPath: &colipath.ColibriPath{
 			InfoField: &colipath.InfoField{
@@ -276,6 +278,7 @@ func BenchmarkWorker(b *testing.B) {
 				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
 				BwCls:       60,
 				ExpTick:     uint32(now.Add(12*time.Second).Unix() / 4),
+				HFCount:     6,
 			},
 			HopFields: []*colipath.HopField{
 				{
@@ -313,6 +316,11 @@ func BenchmarkWorker(b *testing.B) {
 		RawPacket: make([]byte, 400),
 		Id:        [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
 	}
+	defaultPkt.ScionLayer.Path = defaultPkt.ColibriPath
+	serializeBuffer := gopacket.NewSerializeBuffer()
+	defaultPkt.ScionLayer.SerializeTo(serializeBuffer, gopacket.SerializeOptions{})
+	copy(defaultPkt.RawPacket, serializeBuffer.Bytes())
+
 	server, err := net.ListenUDP("udp", borderRouterAddr)
 	if err != nil {
 		b.Log(err)
