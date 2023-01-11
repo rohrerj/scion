@@ -213,8 +213,8 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 		coligateConfig.COSyncTimeout, cfg.General.ID); err != nil {
 		return err
 	}
-	for i := 0; i < 255; i++ {
-		for j := 0; j < 255; j++ {
+	for i := 0; i < 256; i++ {
+		for j := 0; j < 256; j++ {
 			resId := [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(i), byte(j)}
 			res := storage.NewReservation(resId, []storage.HopField{
 				{
@@ -569,6 +569,7 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 			if d == nil { // If d is nil it is meant to be a exit sequence
 				return nil
 			}
+			log.Info("task", "wId", workerId)
 			workerPacketInTotalPromCounter.Add(1)
 			if err := worker.realParse(d); err != nil {
 				log.Debug("Worker received error while parsing.", "workerId", workerId,
