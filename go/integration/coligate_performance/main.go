@@ -14,7 +14,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -227,14 +226,12 @@ func run(pktSize uint16) error {
 
 	startTime := time.Now()
 	colibriPath := pkt.Path.(*colibri.ColibriPath)
-	for i := 0; i < batchSize; i++ {
-		colibriPath.SerializeTo(writeMsgs[i].Buffers[0][slayers.CmnHdrLen+pkt.AddrHdrLen():])
-	}
-
 	r := rand.New(rand.NewSource(rand.Int63()))
 	for startTime.Add(30 * time.Second).After(time.Now()) {
+		colibriPath.InfoField.ResIdSuffix[10] = byte(r.Intn(255))
+		colibriPath.InfoField.ResIdSuffix[11] = byte(r.Intn(255))
 		for i := 0; i < batchSize; i++ {
-			binary.BigEndian.PutUint16(writeMsgs[i].Buffers[0][slayers.CmnHdrLen+pkt.AddrHdrLen()+12+10:], uint16(r.Intn(255)))
+			colibriPath.SerializeTo(writeMsgs[i].Buffers[0][slayers.CmnHdrLen+pkt.AddrHdrLen():])
 		}
 		for i := 0; i < 100; i++ {
 			packetConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
