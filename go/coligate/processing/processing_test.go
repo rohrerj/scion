@@ -114,7 +114,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateReservationBelongsToOtherAS",
 			resStore: map[[12]byte]*storage.Reservation{
 				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-					Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -130,11 +130,11 @@ func TestValidate(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+						Id:             reservationIdOne,
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								ResIdSuffix: reservationIdOne[:],
 							},
 						},
 						ScionLayer: &slayers.SCION{
@@ -150,11 +150,11 @@ func TestValidate(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+						Id:             reservationIdOne,
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								ResIdSuffix: reservationIdOne[:],
 							},
 						},
 						ScionLayer: &slayers.SCION{
@@ -169,7 +169,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateInvalidNumberOfHopfields",
 			resStore: map[[12]byte]*storage.Reservation{
 				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-					Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -185,11 +185,11 @@ func TestValidate(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+						Id:             reservationIdOne,
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								ResIdSuffix: reservationIdOne[:],
 							},
 						},
 						ScionLayer: &slayers.SCION{
@@ -204,7 +204,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateCurrHFIsInvalid",
 			resStore: map[[12]byte]*storage.Reservation{
 				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-					Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -220,11 +220,11 @@ func TestValidate(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+						Id:             reservationIdOne,
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								ResIdSuffix: reservationIdOne[:],
 								CurrHF:      1,
 							},
 							HopFields: make([]*colibri.HopField, 1),
@@ -241,7 +241,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateBwClsIsInvalid",
 			resStore: map[[12]byte]*storage.Reservation{
 				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-					Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -257,11 +257,11 @@ func TestValidate(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+						Id:             reservationIdOne,
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								ResIdSuffix: reservationIdOne[:],
 								CurrHF:      0,
 								BwCls:       2,
 							},
@@ -279,7 +279,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateRlcIsInvalid",
 			resStore: map[[12]byte]*storage.Reservation{
 				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-					Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -296,11 +296,11 @@ func TestValidate(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+						Id:             reservationIdOne,
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								ResIdSuffix: reservationIdOne[:],
 								CurrHF:      0,
 								BwCls:       1,
 								Rlc:         2,
@@ -319,7 +319,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateExpTickIsInvalid",
 			resStore: map[[12]byte]*storage.Reservation{
 				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-					Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
 					Indices: map[uint8]*storage.ReservationIndex{
@@ -336,11 +336,11 @@ func TestValidate(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+						Id:             reservationIdOne,
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								ResIdSuffix: reservationIdOne[:],
 								CurrHF:      0,
 								BwCls:       1,
 								Rlc:         1,
@@ -360,7 +360,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateInvalidIngressId",
 			resStore: map[[12]byte]*storage.Reservation{
 				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-					Id: [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+					Id: reservationIdOne,
 					Hops: []storage.HopField{
 						{
 							IngressId: 1,
@@ -382,11 +382,11 @@ func TestValidate(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+						Id:             reservationIdOne,
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								ResIdSuffix: reservationIdOne[:],
 								Ver:         0,
 								BwCls:       1,
 								Rlc:         1,
@@ -412,7 +412,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateInvalidEgressId",
 			resStore: map[[12]byte]*storage.Reservation{
 				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-					Id: [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+					Id: reservationIdOne,
 					Hops: []storage.HopField{
 						{
 							IngressId: 1,
@@ -434,11 +434,11 @@ func TestValidate(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+						Id:             reservationIdOne,
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								ResIdSuffix: reservationIdOne[:],
 								Ver:         0,
 								BwCls:       1,
 								Rlc:         1,
@@ -464,7 +464,7 @@ func TestValidate(t *testing.T) {
 			name: "TestValidateAllValid",
 			resStore: map[[12]byte]*storage.Reservation{
 				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-					Id: [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+					Id: reservationIdOne,
 					Hops: []storage.HopField{
 						{
 							IngressId: 1,
@@ -486,11 +486,11 @@ func TestValidate(t *testing.T) {
 			entries: []entry{
 				{
 					proc: processing.DataPacket{
-						Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+						Id:             reservationIdOne,
 						PktArrivalTime: startTime,
 						ColibriPath: &colibri.ColibriPath{
 							InfoField: &colibri.InfoField{
-								ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+								ResIdSuffix: reservationIdOne[:],
 								Ver:         0,
 								BwCls:       1,
 								Rlc:         1,
@@ -552,7 +552,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -570,7 +570,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -593,7 +593,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 500),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -611,7 +611,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 500),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -629,7 +629,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 500),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -647,7 +647,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 500),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -665,7 +665,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -688,7 +688,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -729,7 +729,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -747,7 +747,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 1,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -775,7 +775,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -793,7 +793,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 2750),
 						PktArrivalTime: startTime.Add(1 * time.Second),
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 1,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -821,7 +821,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 2750),
 						PktArrivalTime: startTime,
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 0,
 							Indices: map[uint8]*storage.ReservationIndex{
 								0: {
@@ -839,7 +839,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 2000),
 						PktArrivalTime: startTime.Add(1 * time.Second),
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 1,
 							Indices: map[uint8]*storage.ReservationIndex{
 								1: {
@@ -857,7 +857,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 						RawPacket:      make([]byte, 1),
 						PktArrivalTime: startTime.Add(1 * time.Second),
 						Reservation: &storage.Reservation{
-							Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							Id:            reservationIdOne,
 							ActiveIndexId: 1,
 							Indices: map[uint8]*storage.ReservationIndex{
 								1: {
@@ -953,7 +953,7 @@ func TestUpdateMacs(t *testing.T) {
 			PathType:    colibri.PathType,
 		},
 		Reservation: &storage.Reservation{
-			Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			Id:            reservationIdOne,
 			ActiveIndexId: 0,
 			Hops: []storage.HopField{
 				{
@@ -1069,11 +1069,11 @@ func BenchmarkProcess(b *testing.B) {
 	}, coligateMetrics)
 
 	w := processing.NewWorker(getColigateConfiguration(), 1, 1, addr.MustIAFrom(1, 1).AS(),
-		c.GetPacketForwarderChannels(), coligateMetrics)
+		c.GetPacketForwarderContainers(), coligateMetrics)
 	now := time.Now()
 	resStore := map[[12]byte]*storage.Reservation{
 		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-			Id: [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			Id: reservationIdOne,
 			Indices: map[uint8]*storage.ReservationIndex{
 				1: {
 					Index:    0,
@@ -1119,7 +1119,7 @@ func BenchmarkProcess(b *testing.B) {
 	}
 	w.Storage.InitStorageWithData(resStore)
 	defaultPkt := &processing.DataPacket{
-		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		Id:             reservationIdOne,
 		PktArrivalTime: time.Now(),
 		ScionLayer: &slayers.SCION{
 			PathType: 4,
@@ -1128,7 +1128,7 @@ func BenchmarkProcess(b *testing.B) {
 		ColibriPath: &colibri.ColibriPath{
 			InfoField: &colibri.InfoField{
 				Ver:         1,
-				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+				ResIdSuffix: reservationIdOne[:],
 				BwCls:       60,
 				ExpTick:     uint32(now.Add(12*time.Second).Unix() / 4),
 			},
@@ -1188,7 +1188,7 @@ func BenchmarkValidate(b *testing.B) {
 
 	resStore := map[[12]byte]*storage.Reservation{
 		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
-			Id: [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			Id: reservationIdOne,
 			Hops: []storage.HopField{
 				{
 					IngressId: 1,
@@ -1209,11 +1209,11 @@ func BenchmarkValidate(b *testing.B) {
 	}
 	w.Storage.InitStorageWithData(resStore)
 	d := &processing.DataPacket{
-		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		Id:             reservationIdOne,
 		PktArrivalTime: now,
 		ColibriPath: &colibri.ColibriPath{
 			InfoField: &colibri.InfoField{
-				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+				ResIdSuffix: reservationIdOne[:],
 				Ver:         0,
 				BwCls:       1,
 				Rlc:         1,
@@ -1242,10 +1242,10 @@ func BenchmarkTrafficMonitoring(b *testing.B) {
 	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
 	now := time.Now()
 	d := &processing.DataPacket{
-		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		Id:             reservationIdOne,
 		PktArrivalTime: now,
 		Reservation: &storage.Reservation{
-			Id:            [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			Id:            reservationIdOne,
 			ActiveIndexId: 0,
 			Indices: map[uint8]*storage.ReservationIndex{
 				0: {
@@ -1266,7 +1266,7 @@ func BenchmarkStamp(b *testing.B) {
 	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1, nil, coligateMetrics)
 	now := time.Now()
 	defaultPkt := &processing.DataPacket{
-		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		Id:             reservationIdOne,
 		PktArrivalTime: now,
 		ScionLayer: &slayers.SCION{
 			PathType: colibri.PathType,
@@ -1275,7 +1275,7 @@ func BenchmarkStamp(b *testing.B) {
 		ColibriPath: &colibri.ColibriPath{
 			InfoField: &colibri.InfoField{
 				Ver:         1,
-				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+				ResIdSuffix: reservationIdOne[:],
 				BwCls:       1,
 				ExpTick:     uint32(now.Add(12*time.Second).Unix() / 4),
 				HFCount:     5,
@@ -1315,7 +1315,7 @@ func BenchmarkStamp(b *testing.B) {
 		},
 		RawPacket: make([]byte, 400),
 		Reservation: &storage.Reservation{
-			Id: [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			Id: reservationIdOne,
 			Hops: []storage.HopField{
 				{
 					IngressId: 1,
@@ -1378,10 +1378,10 @@ func BenchmarkForwardPacket(b *testing.B) {
 		2: borderRouterAddr,
 	}, coligateMetrics)
 	w := processing.NewWorker(getColigateConfiguration(), 1, 1, 1,
-		c.GetPacketForwarderChannels(), coligateMetrics)
+		c.GetPacketForwarderContainers(), coligateMetrics)
 	now := time.Now()
 	defaultPkt := &processing.DataPacket{
-		Id:             [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		Id:             reservationIdOne,
 		PktArrivalTime: time.Now(),
 		ScionLayer: &slayers.SCION{
 			PathType: 4,
@@ -1390,7 +1390,7 @@ func BenchmarkForwardPacket(b *testing.B) {
 		ColibriPath: &colibri.ColibriPath{
 			InfoField: &colibri.InfoField{
 				Ver:         1,
-				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+				ResIdSuffix: reservationIdOne[:],
 				BwCls:       60,
 				ExpTick:     uint32(now.Add(12*time.Second).Unix() / 4),
 			},

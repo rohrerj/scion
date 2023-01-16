@@ -42,23 +42,27 @@ import (
 )
 
 type Processor struct {
-	localIA                 libaddr.IA
-	dataChannels            []chan *dataPacket
-	controlUpdateChannels   []chan *storage.UpdateTask
-	controlDeletionChannels []chan *storage.DeletionTask
-	cleanupChannel          chan *storage.UpdateTask
-	packetForwardChannels   map[uint16]packetForwarderContainer
-	saltHasher              common.SaltHasher
-	exit                    bool
-	metrics                 *ColigateMetrics
-	numWorkers              int
+	localIA                   libaddr.IA
+	dataChannels              []chan *dataPacket
+	controlUpdateChannels     []chan *storage.UpdateTask
+	controlDeletionChannels   []chan *storage.DeletionTask
+	cleanupChannel            chan *storage.UpdateTask
+	packetForwarderContainers map[uint16]packetForwarderContainer
+	saltHasher                common.SaltHasher
+	exit                      bool
+	metrics                   *ColigateMetrics
+	numWorkers                int
 }
 
 // BufSize is the maximum size of a datapacket including all the headers.
 const bufSize int = 9000
 
-// NumOfMessages is the maximum number of messages that are read as a batch from the socket.
-const numOfMessages int = 32
+// NumMessages is the maximum number of messages that are read as a batch from the socket.
+const numMessages int = 32
+
+// ReceiverChannelSize is the size of the channel where the receiver writes its received
+// packets and from where the parser reads them
+const receiverChannelSize int = 256
 
 func (c *Processor) shutdown() {
 	if c.exit {
@@ -75,7 +79,7 @@ func (c *Processor) shutdown() {
 	for i := 0; i < len(c.controlDeletionChannels); i++ {
 		c.controlDeletionChannels[i] <- nil
 	}
-	for _, v := range c.packetForwardChannels {
+	for _, v := range c.packetForwarderContainers {
 		for _, c := range v.ForwardTasks {
 			c <- nil
 		}
@@ -93,7 +97,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	coligateConfig := &cfg.Coligate
 	coligateMetrics := initializeMetrics(metrics)
-	forwardChannels := make(map[uint16]packetForwarderContainer)
+	forwarderContainers := make(map[uint16]packetForwarderContainer)
 	for ifid, info := range topo.InterfaceInfoMap() {
 		found := false
 		// We skip all interface ids that are not used by this instance of Colibri Gateway
@@ -136,9 +140,9 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 				})
 			}(pf)
 		}
-		forwardChannels[uint16(ifid)] = packetForwarderContainer{
-			Length:       uint32(forwarderConfig.Count),
-			ForwardTasks: chs,
+		forwarderContainers[uint16(ifid)] = packetForwarderContainer{
+			ForwarderCount: uint32(forwarderConfig.Count),
+			ForwardTasks:   chs,
 		}
 	}
 
@@ -165,14 +169,14 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	p := Processor{
 		localIA: topo.IA(),
 		// TODO(rohrerj) check cleanupChannel capacity
-		cleanupChannel:          make(chan *storage.UpdateTask, 1000),
-		dataChannels:            make([]chan *dataPacket, coligateConfig.NumWorkers),
-		controlUpdateChannels:   make([]chan *storage.UpdateTask, coligateConfig.NumWorkers),
-		controlDeletionChannels: make([]chan *storage.DeletionTask, coligateConfig.NumWorkers),
-		saltHasher:              common.NewFnv1aHasher(salt),
-		metrics:                 coligateMetrics,
-		numWorkers:              coligateConfig.NumWorkers,
-		packetForwardChannels:   forwardChannels,
+		cleanupChannel:            make(chan *storage.UpdateTask, 1000),
+		dataChannels:              make([]chan *dataPacket, coligateConfig.NumWorkers),
+		controlUpdateChannels:     make([]chan *storage.UpdateTask, coligateConfig.NumWorkers),
+		controlDeletionChannels:   make([]chan *storage.DeletionTask, coligateConfig.NumWorkers),
+		saltHasher:                common.NewFnv1aHasher(salt),
+		metrics:                   coligateMetrics,
+		numWorkers:                coligateConfig.NumWorkers,
+		packetForwarderContainers: forwarderContainers,
 	}
 
 	cleanup.Add(func() error {
@@ -349,6 +353,10 @@ func (p *Processor) initCleanupRoutine() {
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 
+	// The cleanup routine gets notified about all reservation updates and keeps track
+	// of reservation validities. If a reservation is expired it sends an reservation
+	// deletion task to the worker. This check is done periodically but gets delayed
+	// if a lot of reservation updates are incoming.
 	for !p.exit {
 		select {
 		case task := <-p.cleanupChannel:
@@ -374,6 +382,8 @@ func (p *Processor) initCleanupRoutine() {
 						updateTime = true
 					default:
 						if updateTime {
+							// a long time might have passed and therfore
+							// the time "now" might not be valid anymore
 							now = time.Now()
 							updateTime = false
 						}
@@ -426,13 +436,13 @@ func (p *Processor) initDataPlane(config *config.ColigateConfig, gatewayAddr *ne
 		return err
 	}
 	cleanup.Add(func() error { udpConn.Close(); return nil })
-	msgs := make([]ipv4.Message, numOfMessages)
-	for i := 0; i < numOfMessages; i++ {
+	msgs := make([]ipv4.Message, numMessages)
+	for i := 0; i < numMessages; i++ {
 		msgs[i].Buffers = [][]byte{make([]byte, bufSize)}
 	}
 
 	var ipv4Conn *ipv4.PacketConn = ipv4.NewPacketConn(udpConn)
-	recvChannel := make(chan []byte, 256)
+	recvChannel := make(chan []byte, receiverChannelSize)
 	g.Go(func() error {
 		defer log.HandlePanic()
 		dataPacketInInvalidPromCounter := p.metrics.DataPacketInInvalid
@@ -498,7 +508,7 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 	gatewayId uint32, localAS libaddr.AS) error {
 
 	log.Info("Init worker", "workerId", workerId)
-	worker := NewWorker(config, workerId, gatewayId, localAS, p.packetForwardChannels, p.metrics)
+	worker := NewWorker(config, workerId, gatewayId, localAS, p.packetForwarderContainers, p.metrics)
 	workerPacketInTotalPromCounter := p.metrics.WorkerPacketInTotal
 	workerPacketInInvalidPromCounter := p.metrics.WorkerPacketInInvalid
 	workerReservationUpdateTotalPromCounter := p.metrics.WorkerReservationUpdateTotal

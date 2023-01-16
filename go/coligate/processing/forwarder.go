@@ -23,14 +23,20 @@ import (
 )
 
 type packetForwarderContainer struct {
-	Length       uint32
+	// ForwarderCount is the amount of forwarders for a border router interface
+	ForwarderCount uint32
+	// ForwardTasks are the channels through which the workers provide their
+	// raw packets to send
 	ForwardTasks []chan []byte
 }
 
 type packetForwarder struct {
-	addr         *net.UDPAddr
-	metrics      *ColigateMetrics
-	batchSize    int
+	// The address of the border router
+	addr    *net.UDPAddr
+	metrics *ColigateMetrics
+	// The maximum batch size when calling writeBatch()
+	batchSize int
+	// The channel through which the workers provide their raw packets to send
 	ForwardTasks chan []byte
 }
 
@@ -51,7 +57,7 @@ func (p *packetForwarder) Start() error {
 	workerPacketOutErrorPromCounter := p.metrics.WorkerPacketOutError
 	writeMsgs := make([]ipv4.Message, p.batchSize)
 	for i := 0; i < p.batchSize; i++ {
-		writeMsgs[i].Buffers = [][]byte{make([]byte, bufSize)}
+		writeMsgs[i].Buffers = [][]byte{make([]byte, 1)}
 	}
 	conn, err := net.DialUDP("udp", nil, p.addr)
 	if err != nil {
@@ -70,6 +76,9 @@ func (p *packetForwarder) Start() error {
 		// do we have more messages to send right now?
 	loop:
 		for i < p.batchSize {
+			// we load packets from the channel till the batchSize is reached
+			// or no new packets are available at the moment. In the latter
+			// case we break out of the for loop
 			select {
 			case task := <-p.ForwardTasks:
 				if task == nil {
@@ -94,7 +103,7 @@ func (p *packetForwarder) Start() error {
 		if k != i {
 			workerPacketOutErrorPromCounter.Add(float64(i - k))
 		}
-		workerPacketOutTotalPromCounter.Add(float64(k))
+		workerPacketOutTotalPromCounter.Add(float64(i))
 	}
 	return nil
 }

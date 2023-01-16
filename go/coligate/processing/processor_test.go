@@ -51,6 +51,9 @@ func ErrGroupWait(e *errgroup.Group, duration time.Duration) error {
 
 var coligateMetrics *proc.ColigateMetrics = proc.InitializeMetrics()
 
+var reservationIdOne [12]byte = [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+var reservationIdLeftOne [12]byte = [12]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+
 // Tests sequentially that write-read-repeat returns all reservations
 // and that the channel is empty after the exit.
 func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
@@ -70,7 +73,7 @@ func TestCleanupRoutineSingleTaskSequentially(t *testing.T) {
 	})
 
 	for i := 0; i < L; i++ {
-		newId := [12]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		newId := reservationIdLeftOne
 		binary.BigEndian.PutUint32(newId[8:12], uint32(i))
 		cleanupChannel <- &storage.UpdateTask{
 			Reservation: &storage.Reservation{
@@ -117,7 +120,7 @@ func TestCleanupRoutineBatchOfTasksSequentially(t *testing.T) {
 
 	now := time.Now()
 	for i := 0; i < L; i++ {
-		newId := [12]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		newId := reservationIdLeftOne
 		binary.BigEndian.PutUint32(newId[8:12], uint32(i))
 		cleanupChannel <- &storage.UpdateTask{
 			Reservation: &storage.Reservation{
@@ -160,7 +163,7 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	now := time.Now()
 
 	for i := 0; i < L; i++ {
-		newId := [12]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		newId := reservationIdLeftOne
 		binary.BigEndian.PutUint32(newId[8:12], uint32(i))
 		cleanupChannel <- &storage.UpdateTask{
 			Reservation: &storage.Reservation{
@@ -171,7 +174,7 @@ func TestCleanupRoutineSupersedeOld(t *testing.T) {
 	}
 
 	for i := 0; i < L; i++ {
-		newId := [12]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		newId := reservationIdLeftOne
 		binary.BigEndian.PutUint32(newId[8:12], uint32(i))
 		cleanupChannel <- &storage.UpdateTask{
 			Reservation: &storage.Reservation{
@@ -221,7 +224,7 @@ func BenchmarkWorker(b *testing.B) {
 	now := time.Now()
 	updateChannels[0] <- &storage.UpdateTask{
 		Reservation: &storage.Reservation{
-			Id: [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			Id: reservationIdOne,
 			Indices: map[uint8]*storage.ReservationIndex{
 				1: {
 					Index:    1,
@@ -275,7 +278,7 @@ func BenchmarkWorker(b *testing.B) {
 		ColibriPath: &colipath.ColibriPath{
 			InfoField: &colipath.InfoField{
 				Ver:         1,
-				ResIdSuffix: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+				ResIdSuffix: reservationIdOne[:],
 				BwCls:       60,
 				ExpTick:     uint32(now.Add(12*time.Second).Unix() / 4),
 				HFCount:     6,
@@ -314,7 +317,7 @@ func BenchmarkWorker(b *testing.B) {
 			},
 		},
 		RawPacket: make([]byte, 400),
-		Id:        [12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		Id:        reservationIdOne,
 	}
 	defaultPkt.ScionLayer.Path = defaultPkt.ColibriPath
 	serializeBuffer := gopacket.NewSerializeBuffer()
@@ -347,7 +350,7 @@ func BenchmarkWorker(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		dataChannels[0] <- defaultPkt.Parse()
+		dataChannels[0] <- defaultPkt.Convert()
 	}
 	dataChannels[0] <- nil
 	for len(dataChannels[0]) != 0 {
@@ -357,6 +360,7 @@ func BenchmarkWorker(b *testing.B) {
 	time.Sleep(100 * time.Millisecond)
 	server.Close()
 	errGroup.Wait()
-	// check that all except maybe the last message was successfully received
+
+	// check that the majority of the packets arrived
 	assert.GreaterOrEqual(b, float64(counter), float64(b.N)*0.99-128)
 }

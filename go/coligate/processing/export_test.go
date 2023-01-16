@@ -80,31 +80,31 @@ func InitializeMetrics() *ColigateMetrics {
 	return initializeMetrics(common.NewMetrics())
 }
 
-func (p *Processor) SetupPacketForwarder(g *errgroup.Group, m map[uint16]*net.UDPAddr,
+func (p *Processor) SetupPacketForwarder(g *errgroup.Group, brInterfaces map[uint16]*net.UDPAddr,
 	coligateMetrics *ColigateMetrics) {
 
 	forwardChannels := make(map[uint16]packetForwarderContainer)
-	for ifid, info := range m {
-		ch := make(chan []byte, numOfMessages)
-		pf := NewPacketForwarder(info, numOfMessages, ch, coligateMetrics)
+	for ifid, addr := range brInterfaces {
+		ch := make(chan []byte, numMessages)
+		pf := NewPacketForwarder(addr, numMessages, ch, coligateMetrics)
 		g.Go(func() error {
 			defer log.HandlePanic()
 			pf.Start()
 			return nil
 		})
 		forwardChannels[uint16(ifid)] = packetForwarderContainer{
-			Length:       1,
-			ForwardTasks: []chan []byte{ch},
+			ForwarderCount: 1,
+			ForwardTasks:   []chan []byte{ch},
 		}
 	}
-	p.packetForwardChannels = forwardChannels
+	p.packetForwarderContainers = forwardChannels
 }
 
-func (p *Processor) GetPacketForwarderChannels() map[uint16]packetForwarderContainer {
-	return p.packetForwardChannels
+func (p *Processor) GetPacketForwarderContainers() map[uint16]packetForwarderContainer {
+	return p.packetForwarderContainers
 }
 func (p *Processor) StopPacketForwarder() {
-	for _, v := range p.packetForwardChannels {
+	for _, v := range p.packetForwarderContainers {
 		v.ForwardTasks[0] <- nil
 	}
 }
@@ -126,7 +126,7 @@ type DataPacket struct {
 	Id             [12]byte
 }
 
-func (proc *DataPacket) Parse() *dataPacket {
+func (proc *DataPacket) Convert() *dataPacket {
 	return &dataPacket{
 		pktArrivalTime: proc.PktArrivalTime,
 		scionLayer:     proc.ScionLayer,
@@ -138,23 +138,23 @@ func (proc *DataPacket) Parse() *dataPacket {
 }
 
 func (w *Worker) Validate(proc *DataPacket) error {
-	return w.validate(proc.Parse())
+	return w.validate(proc.Convert())
 }
 
 func (w *Worker) PerformTrafficMonitoring(proc *DataPacket) error {
-	return w.performTrafficMonitoring(proc.Parse())
+	return w.performTrafficMonitoring(proc.Convert())
 }
 
 func (w *Worker) Stamp(d *DataPacket) error {
-	return w.stamp(d.Parse())
+	return w.stamp(d.Convert())
 }
 
 func (w *Worker) Process(d *DataPacket) error {
-	return w.process(d.Parse())
+	return w.process(d.Convert())
 }
 
 func (w *Worker) ForwardPacket(d *DataPacket) {
-	w.forwardPacket(d.Parse())
+	w.forwardPacket(d.Convert())
 }
 
 func (w *Worker) UpdateCounter() {

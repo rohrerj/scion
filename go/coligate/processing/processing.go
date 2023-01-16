@@ -58,15 +58,16 @@ func Parse(rawPacket []byte) (*dataPacket, error) {
 	addrLenByte := rawPacket[9]
 	dstAddrLen := addrLenByte >> 4 & 0x3
 	srcAddrLen := addrLenByte & 0x3
-	proc := dataPacket{
+	dataPacket := dataPacket{
 		rawPacket: rawPacket,
 	}
-	offset := slayers.CmnHdrLen + 2*libaddr.IABytes + (int(dstAddrLen)+1)*4 + (int(srcAddrLen)+1)*4
-	if len(rawPacket) < offset+40 {
+	offsetToColibriHeader := slayers.CmnHdrLen + 2*libaddr.IABytes +
+		(int(dstAddrLen)+1)*4 + (int(srcAddrLen)+1)*4
+	if len(rawPacket) < offsetToColibriHeader+40 {
 		return nil, serrors.New("raw packet length too small")
 	}
-	copy(proc.id[:], rawPacket[offset+12:])
-	return &proc, nil
+	copy(dataPacket.id[:], rawPacket[offsetToColibriHeader+12:])
+	return &dataPacket, nil
 }
 
 // NewWorker initializes the worker with its id, tokenbuckets and reservations
@@ -92,7 +93,8 @@ func (w *Worker) realParse(d *dataPacket) error {
 	payloadLen := binary.BigEndian.Uint16(d.rawPacket[6:8])
 	realPayloadLen := len(d.rawPacket) - int(d.rawPacket[5])*4
 	if payloadLen != uint16(realPayloadLen) {
-		return serrors.New("wrong payload length", "payloadLen", payloadLen, "realPayloadLen", realPayloadLen)
+		return serrors.New("payload length field does not match actual packet payload length",
+			"payloadLen", payloadLen, "realPayloadLen", realPayloadLen)
 	}
 	addrLenByte := d.rawPacket[9]
 	dstAddrLen := addrLenByte >> 4 & 0x3
@@ -117,23 +119,18 @@ func (w *Worker) process(d *dataPacket) error {
 	if w == nil {
 		return serrors.New("worker must not be nil")
 	}
-
 	if d == nil {
 		return serrors.New("datapacket must not be nil")
 	}
-
 	if err := w.validate(d); err != nil {
 		return err
 	}
-
 	if err := w.performTrafficMonitoring(d); err != nil {
 		return err
 	}
-
 	if err := w.stamp(d); err != nil {
 		return err
 	}
-
 	return w.forwardPacket(d)
 }
 
@@ -165,16 +162,16 @@ func (w *Worker) validate(d *dataPacket) error {
 func (w *Worker) validateFields(d *dataPacket) error {
 	infoField := d.colibriPath.InfoField
 	currentIndex := d.reservation.Current()
-
+	lenHopFields := len(d.colibriPath.HopFields)
 	if currentIndex.Ciphers != nil {
-		if len(d.colibriPath.HopFields) != len(currentIndex.Ciphers) {
+		if lenHopFields != len(currentIndex.Ciphers) {
 			return serrors.New("Number of hopfields is invalid", "expected",
-				len(currentIndex.Sigmas), "actual", len(d.colibriPath.HopFields))
+				len(currentIndex.Ciphers), "actual", lenHopFields)
 		}
 	} else {
-		if len(d.colibriPath.HopFields) != len(currentIndex.Sigmas) {
+		if lenHopFields != len(currentIndex.Sigmas) {
 			return serrors.New("Number of hopfields is invalid", "expected",
-				len(currentIndex.Sigmas), "actual", len(d.colibriPath.HopFields))
+				len(currentIndex.Sigmas), "actual", lenHopFields)
 		}
 	}
 
@@ -240,6 +237,22 @@ func (w *Worker) updateCounter() {
 	w.CoreIdCounter = w.CoreIdCounter&b + a&(w.CoreIdCounter+1)
 }
 
+// initializeCiphers initializes all the ciphers, stores them in the reservation and
+// deletes the sigmas
+func (w *Worker) initializeCiphers(d *dataPacket, currentIndex *storage.ReservationIndex) error {
+	currentIndex.Ciphers = make([]cipher.Block, len(currentIndex.Sigmas))
+	for i := 0; i < len(currentIndex.Ciphers); i++ {
+		cipher, err := libcolibri.InitColibriKey(currentIndex.Sigmas[i])
+		if err != nil {
+			currentIndex.Ciphers = nil
+			return err
+		}
+		currentIndex.Ciphers[i] = cipher
+	}
+	currentIndex.Sigmas = nil
+	return nil
+}
+
 // Updates the timestamp and HFVs
 func (w *Worker) stamp(d *dataPacket) error {
 	currentIndex := d.reservation.Current()
@@ -252,16 +265,7 @@ func (w *Worker) stamp(d *dataPacket) error {
 	d.colibriPath.PacketTimestamp = libcolibri.CreateColibriTimestampCustom(tsRel, w.CoreIdCounter)
 	// Pre-initialize and store all ciphers if they are not initialized already
 	if currentIndex.Ciphers == nil {
-		currentIndex.Ciphers = make([]cipher.Block, len(currentIndex.Sigmas))
-		for i := 0; i < len(currentIndex.Ciphers); i++ {
-			cipher, err := libcolibri.InitColibriKey(currentIndex.Sigmas[i])
-			if err != nil {
-				currentIndex.Ciphers = nil
-				return err
-			}
-			currentIndex.Ciphers[i] = cipher
-		}
-		currentIndex.Sigmas = nil
+		w.initializeCiphers(d, currentIndex)
 	}
 	// Set HVF values
 	for i, cipher := range currentIndex.Ciphers {
@@ -279,7 +283,7 @@ func (w *Worker) forwardPacket(d *dataPacket) error {
 	if !found {
 		return serrors.New("Forward Channel for egress id not found", "egressId", egressId)
 	}
-	index := w.Id % uint32(forwarderContainer.Length)
+	index := w.Id % uint32(forwarderContainer.ForwarderCount)
 	forwarderContainer.ForwardTasks[index] <- d.rawPacket
 	return nil
 }
