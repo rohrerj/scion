@@ -347,10 +347,10 @@ func BenchmarkWorker(b *testing.B) {
 		}
 	})
 	time.Sleep(10 * time.Millisecond)
-
+	pkt := defaultPkt.Convert()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		dataChannels[0] <- defaultPkt.Convert()
+		dataChannels[0] <- pkt
 	}
 	dataChannels[0] <- nil
 	for len(dataChannels[0]) != 0 {
