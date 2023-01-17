@@ -113,7 +113,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "TestValidateReservationBelongsToOtherAS",
 			resStore: map[[12]byte]*storage.Reservation{
-				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+				reservationIdOne: {
 					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
@@ -168,7 +168,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "TestValidateInvalidNumberOfHopfields",
 			resStore: map[[12]byte]*storage.Reservation{
-				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+				reservationIdOne: {
 					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
@@ -203,7 +203,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "TestValidateCurrHFIsInvalid",
 			resStore: map[[12]byte]*storage.Reservation{
-				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+				reservationIdOne: {
 					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
@@ -240,7 +240,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "TestValidateBwClsIsInvalid",
 			resStore: map[[12]byte]*storage.Reservation{
-				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+				reservationIdOne: {
 					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
@@ -278,7 +278,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "TestValidateRlcIsInvalid",
 			resStore: map[[12]byte]*storage.Reservation{
-				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+				reservationIdOne: {
 					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
@@ -318,7 +318,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "TestValidateExpTickIsInvalid",
 			resStore: map[[12]byte]*storage.Reservation{
-				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+				reservationIdOne: {
 					Id:            reservationIdOne,
 					Hops:          make([]storage.HopField, 1),
 					ActiveIndexId: 0,
@@ -359,7 +359,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "TestValidateInvalidIngressId",
 			resStore: map[[12]byte]*storage.Reservation{
-				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+				reservationIdOne: {
 					Id: reservationIdOne,
 					Hops: []storage.HopField{
 						{
@@ -411,7 +411,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "TestValidateInvalidEgressId",
 			resStore: map[[12]byte]*storage.Reservation{
-				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+				reservationIdOne: {
 					Id: reservationIdOne,
 					Hops: []storage.HopField{
 						{
@@ -463,7 +463,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "TestValidateAllValid",
 			resStore: map[[12]byte]*storage.Reservation{
-				{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+				reservationIdOne: {
 					Id: reservationIdOne,
 					Hops: []storage.HopField{
 						{
@@ -518,7 +518,7 @@ func TestValidate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			worker.Storage.InitStorageWithData(tc.resStore)
 			for _, en := range tc.entries {
-				err := worker.Validate(&en.proc)
+				err := worker.Validate(en.proc.Convert())
 				if en.err == "" {
 					assert.NoError(t, err)
 				} else {
@@ -880,7 +880,7 @@ func TestPerformTrafficMonitoring(t *testing.T) {
 			for _, en := range tc.entries {
 				monitor := m[en.proc.Reservation.Id]
 				en.proc.Reservation.TrafficMonitor = monitor
-				err := worker.PerformTrafficMonitoring(&en.proc)
+				err := worker.PerformTrafficMonitoring(en.proc.Convert())
 				m[en.proc.Reservation.Id] = en.proc.Reservation.TrafficMonitor
 				assert.True(t, (err == nil && en.success) || (err != nil && !en.success))
 			}
@@ -977,7 +977,7 @@ func TestUpdateMacs(t *testing.T) {
 
 	// Update mac fields of EE data packet with wrong sigma
 	d.Reservation.Indices[0].Sigmas[0] = []byte{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
-	err = w.Stamp(d)
+	err = w.Stamp(d.Convert())
 	assert.NoError(t, err)
 	// Validate the computed mac
 	err = libcolibri.VerifyMAC(privateKeyCipher, d.ColibriPath.PacketTimestamp,
@@ -989,7 +989,7 @@ func TestUpdateMacs(t *testing.T) {
 		sigmaBuffer,
 	}
 	d.Reservation.Indices[0].Ciphers = nil
-	err = w.Stamp(d)
+	err = w.Stamp(d.Convert())
 	assert.NoError(t, err)
 	// Validate the computed mac
 	err = libcolibri.VerifyMAC(privateKeyCipher, d.ColibriPath.PacketTimestamp,
@@ -1072,7 +1072,7 @@ func BenchmarkProcess(b *testing.B) {
 		c.GetPacketForwarderContainers(), coligateMetrics)
 	now := time.Now()
 	resStore := map[[12]byte]*storage.Reservation{
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+		reservationIdOne: {
 			Id: reservationIdOne,
 			Indices: map[uint8]*storage.ReservationIndex{
 				1: {
@@ -1174,9 +1174,10 @@ func BenchmarkProcess(b *testing.B) {
 	}
 	defer server.Close()
 	time.Sleep(1 * time.Millisecond)
+	pkt := defaultPkt.Convert()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		assert.NoError(b, w.Process(defaultPkt))
+		assert.NoError(b, w.Process(pkt))
 	}
 	c.StopPacketForwarder()
 	errGroup.Wait()
@@ -1187,7 +1188,7 @@ func BenchmarkValidate(b *testing.B) {
 	now := time.Now()
 
 	resStore := map[[12]byte]*storage.Reservation{
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}: {
+		reservationIdOne: {
 			Id: reservationIdOne,
 			Hops: []storage.HopField{
 				{
@@ -1231,10 +1232,10 @@ func BenchmarkValidate(b *testing.B) {
 			SrcIA: addr.MustIAFrom(1, 1),
 		},
 	}
-
+	pkt := d.Convert()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		assert.NoError(b, w.Validate(d))
+		assert.NoError(b, w.Validate(pkt))
 	}
 }
 
@@ -1256,9 +1257,10 @@ func BenchmarkTrafficMonitoring(b *testing.B) {
 			},
 		},
 	}
+	pkt := d.Convert()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		assert.NoError(b, w.PerformTrafficMonitoring(d))
+		assert.NoError(b, w.PerformTrafficMonitoring(pkt))
 	}
 }
 
@@ -1361,9 +1363,10 @@ func BenchmarkStamp(b *testing.B) {
 			},
 		},
 	}
+	pkt := defaultPkt.Convert()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		w.Stamp(defaultPkt)
+		w.Stamp(pkt)
 	}
 }
 
@@ -1436,9 +1439,10 @@ func BenchmarkForwardPacket(b *testing.B) {
 		b.FailNow()
 	}
 	defer server.Close()
+	pkt := defaultPkt.Convert()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		w.ForwardPacket(defaultPkt)
+		w.ForwardPacket(pkt)
 	}
 	c.StopPacketForwarder()
 	errGroup.Wait()

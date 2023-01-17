@@ -126,35 +126,35 @@ type DataPacket struct {
 	Id             [12]byte
 }
 
-func (proc *DataPacket) Convert() *dataPacket {
+func (pkt *DataPacket) Convert() *dataPacket {
 	return &dataPacket{
-		pktArrivalTime: proc.PktArrivalTime,
-		scionLayer:     proc.ScionLayer,
-		colibriPath:    proc.ColibriPath,
-		reservation:    proc.Reservation,
-		rawPacket:      proc.RawPacket,
-		id:             proc.Id,
+		pktArrivalTime: pkt.PktArrivalTime,
+		scionLayer:     pkt.ScionLayer,
+		colibriPath:    pkt.ColibriPath,
+		reservation:    pkt.Reservation,
+		rawPacket:      pkt.RawPacket,
+		id:             pkt.Id,
 	}
 }
 
-func (w *Worker) Validate(proc *DataPacket) error {
-	return w.validate(proc.Convert())
+func (w *Worker) Validate(pkt *dataPacket) error {
+	return w.validate(pkt)
 }
 
-func (w *Worker) PerformTrafficMonitoring(proc *DataPacket) error {
-	return w.performTrafficMonitoring(proc.Convert())
+func (w *Worker) PerformTrafficMonitoring(pkt *dataPacket) error {
+	return w.performTrafficMonitoring(pkt)
 }
 
-func (w *Worker) Stamp(d *DataPacket) error {
-	return w.stamp(d.Convert())
+func (w *Worker) Stamp(pkt *dataPacket) error {
+	return w.stamp(pkt)
 }
 
-func (w *Worker) Process(d *DataPacket) error {
-	return w.process(d.Convert())
+func (w *Worker) Process(pkt *dataPacket) error {
+	return w.process(pkt)
 }
 
-func (w *Worker) ForwardPacket(d *DataPacket) {
-	w.forwardPacket(d.Convert())
+func (w *Worker) ForwardPacket(pkt *dataPacket) {
+	w.forwardPacket(pkt)
 }
 
 func (w *Worker) UpdateCounter() {

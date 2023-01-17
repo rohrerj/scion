@@ -362,10 +362,9 @@ func (s *ColibriService) SetupReservation(ctx context.Context, msg *colpb.SetupR
 			return nil, serrors.New("at least one hopfield is required")
 		}
 
+		// TODO(rohrerj) don't always create a new goroutine
 		// contact the colibri gateway to update the sigmas:
-		go func(colPath *colpath.ColibriPath,
-			token *reservation.Token) {
-
+		go func(colPath *colpath.ColibriPath, token *reservation.Token) {
 			defer log.HandlePanic()
 			s.updateSigmas(path, token)
 		}(path, token)

@@ -66,7 +66,7 @@ func Parse(rawPacket []byte) (*dataPacket, error) {
 	if len(rawPacket) < offsetToColibriHeader+40 {
 		return nil, serrors.New("raw packet length too small")
 	}
-	copy(dataPacket.id[:], rawPacket[offsetToColibriHeader+12:])
+	copy(dataPacket.id[:12], rawPacket[offsetToColibriHeader+12:])
 	return &dataPacket, nil
 }
 
@@ -265,7 +265,9 @@ func (w *Worker) stamp(d *dataPacket) error {
 	d.colibriPath.PacketTimestamp = libcolibri.CreateColibriTimestampCustom(tsRel, w.CoreIdCounter)
 	// Pre-initialize and store all ciphers if they are not initialized already
 	if currentIndex.Ciphers == nil {
-		w.initializeCiphers(d, currentIndex)
+		if err := w.initializeCiphers(d, currentIndex); err != nil {
+			return err
+		}
 	}
 	// Set HVF values
 	for i, cipher := range currentIndex.Ciphers {
