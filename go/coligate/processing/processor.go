@@ -47,7 +47,7 @@ type Processor struct {
 	controlUpdateChannels     []chan *storage.UpdateTask
 	controlDeletionChannels   []chan *storage.DeletionTask
 	cleanupChannel            chan *storage.UpdateTask
-	packetForwarderContainers map[uint16]packetForwarderContainer
+	packetForwarderContainers map[uint16]*packetForwarderContainer
 	saltHasher                common.SaltHasher
 	exit                      bool
 	metrics                   *ColigateMetrics
@@ -80,8 +80,8 @@ func (c *Processor) shutdown() {
 		c.controlDeletionChannels[i] <- nil
 	}
 	for _, v := range c.packetForwarderContainers {
-		for _, c := range v.ForwardTasks {
-			c <- nil
+		for _, f := range v.Forwarders {
+			f.ForwardChannel <- nil
 		}
 	}
 }
@@ -97,7 +97,7 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 
 	coligateConfig := &cfg.Coligate
 	coligateMetrics := initializeMetrics(metrics)
-	forwarderContainers := make(map[uint16]packetForwarderContainer)
+	forwarderContainers := make(map[uint16]*packetForwarderContainer)
 	for ifid, info := range topo.InterfaceInfoMap() {
 		found := false
 		// We skip all interface ids that are not used by this instance of Colibri Gateway
@@ -127,23 +127,19 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 				Count:       1,
 			}
 		}
-
-		chs := make([]chan []byte, forwarderConfig.Count)
+		container := NewPacketForwarderContainer(info.InternalAddr, forwarderConfig.BatchSize,
+			coligateMetrics, uint32(forwarderConfig.Count))
 		for i := 0; i < forwarderConfig.Count; i++ {
-			chs[i] = make(chan []byte, forwarderConfig.BatchSize)
-			pf := NewPacketForwarder(info.InternalAddr, forwarderConfig.BatchSize, chs[i], coligateMetrics)
+			pf := container.NewPacketForwarder()
 			func(pf *packetForwarder) {
 				g.Go(func() error {
 					defer log.HandlePanic()
-					log.Debug("Started Packet forwarder", "addr", pf.addr.String())
+					log.Debug("Started Packet forwarder", "addr", pf.Container.addr.String())
 					return pf.Start()
 				})
 			}(pf)
 		}
-		forwarderContainers[uint16(ifid)] = packetForwarderContainer{
-			ForwarderCount: uint32(forwarderConfig.Count),
-			ForwardTasks:   chs,
-		}
+		forwarderContainers[uint16(ifid)] = container
 	}
 
 	grpcAddr, err := net.ResolveTCPAddr("tcp", cfg.Coligate.ColigateGRPCAddr)
@@ -213,8 +209,8 @@ func Init(ctx context.Context, cfg *config.Config, cleanup *app.Cleanup,
 	})
 
 	// We start the data plane as soon as we retrieved the active reservations from colibri service
-	if err := p.loadActiveReservationsFromColibriService(ctx, coligateConfig, colibriServiceAddresses[0],
-		coligateConfig.COSyncTimeout, cfg.General.ID); err != nil {
+	if err := p.loadActiveReservationsFromColibriService(ctx, coligateConfig,
+		colibriServiceAddresses[0], coligateConfig.COSyncTimeout, cfg.General.ID); err != nil {
 		return err
 	}
 	if err := p.initDataPlane(coligateConfig, coligateInfo.Addr, g, cleanup); err != nil {
@@ -508,7 +504,8 @@ func (p *Processor) workerReceiveEntry(config *config.ColigateConfig, workerId u
 	gatewayId uint32, localAS libaddr.AS) error {
 
 	log.Info("Init worker", "workerId", workerId)
-	worker := NewWorker(config, workerId, gatewayId, localAS, p.packetForwarderContainers, p.metrics)
+	worker := NewWorker(config, workerId, gatewayId, localAS,
+		p.packetForwarderContainers, p.metrics)
 	workerPacketInTotalPromCounter := p.metrics.WorkerPacketInTotal
 	workerPacketInInvalidPromCounter := p.metrics.WorkerPacketInInvalid
 	workerReservationUpdateTotalPromCounter := p.metrics.WorkerReservationUpdateTotal

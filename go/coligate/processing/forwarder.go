@@ -23,43 +23,57 @@ import (
 )
 
 type packetForwarderContainer struct {
+	// The address of the border router
+	addr *net.UDPAddr
 	// ForwarderCount is the amount of forwarders for a border router interface
 	ForwarderCount uint32
-	// ForwardTasks are the channels through which the workers provide their
-	// raw packets to send
-	ForwardTasks []chan []byte
+	// The packet forwarders of this container
+	Forwarders []*packetForwarder
+	metrics    *ColigateMetrics
+	// The maximum batch size when calling writeBatch()
+	batchSize int
 }
 
 type packetForwarder struct {
-	// The address of the border router
-	addr    *net.UDPAddr
-	metrics *ColigateMetrics
-	// The maximum batch size when calling writeBatch()
-	batchSize int
 	// The channel through which the workers provide their raw packets to send
-	ForwardTasks chan []byte
+	ForwardChannel chan []byte
+	// The packet forwarder container to which this forwarder belongs to
+	Container *packetForwarderContainer
 }
 
-func NewPacketForwarder(addr *net.UDPAddr, batchSize int, ch chan []byte,
-	metrics *ColigateMetrics) *packetForwarder {
-	return &packetForwarder{
-		addr:         addr,
-		batchSize:    batchSize,
-		metrics:      metrics,
-		ForwardTasks: ch,
+// Creates a new packet forwarder container
+func NewPacketForwarderContainer(addr *net.UDPAddr, batchSize int,
+	metrics *ColigateMetrics, forwarderCount uint32) *packetForwarderContainer {
+	return &packetForwarderContainer{
+		addr:           addr,
+		metrics:        metrics,
+		batchSize:      batchSize,
+		ForwarderCount: forwarderCount,
+		Forwarders:     make([]*packetForwarder, 0, forwarderCount),
 	}
+}
+
+// Creates a new packet forwarder inside a packet forwarder container
+func (container *packetForwarderContainer) NewPacketForwarder() *packetForwarder {
+	p := &packetForwarder{
+		ForwardChannel: make(chan []byte),
+		Container:      container,
+	}
+	container.Forwarders = append(container.Forwarders, p)
+	return p
 }
 
 // Starts the packet forwarder. This should be called in a new
 // go routine.
 func (p *packetForwarder) Start() error {
-	workerPacketOutTotalPromCounter := p.metrics.WorkerPacketOutTotal
-	workerPacketOutErrorPromCounter := p.metrics.WorkerPacketOutError
-	writeMsgs := make([]ipv4.Message, p.batchSize)
-	for i := 0; i < p.batchSize; i++ {
+	workerPacketOutTotalPromCounter := p.Container.metrics.WorkerPacketOutTotal
+	workerPacketOutErrorPromCounter := p.Container.metrics.WorkerPacketOutError
+	batchSize := p.Container.batchSize
+	writeMsgs := make([]ipv4.Message, batchSize)
+	for i := 0; i < batchSize; i++ {
 		writeMsgs[i].Buffers = [][]byte{make([]byte, 1)}
 	}
-	conn, err := net.DialUDP("udp", nil, p.addr)
+	conn, err := net.DialUDP("udp", nil, p.Container.addr)
 	if err != nil {
 		return serrors.New("PacketForwarder error while dialing", "err", err)
 	}
@@ -67,7 +81,7 @@ func (p *packetForwarder) Start() error {
 	defer packetConn.Close()
 	exit := false
 	for !exit {
-		task := <-p.ForwardTasks
+		task := <-p.ForwardChannel
 		if task == nil {
 			return nil
 		}
@@ -75,12 +89,12 @@ func (p *packetForwarder) Start() error {
 		i := 1
 		// do we have more messages to send right now?
 	loop:
-		for i < p.batchSize {
+		for i < batchSize {
 			// we load packets from the channel till the batchSize is reached
 			// or no new packets are available at the moment. In the latter
 			// case we break out of the for loop
 			select {
-			case task := <-p.ForwardTasks:
+			case task := <-p.ForwardChannel:
 				if task == nil {
 					// process all current packets, then exit
 					exit = true

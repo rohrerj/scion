@@ -36,7 +36,7 @@ type Worker struct {
 	NumCounterBits int
 
 	Storage         *storage.Storage
-	forwardChannels map[uint16]packetForwarderContainer
+	forwardChannels map[uint16]*packetForwarderContainer
 	LocalAS         libaddr.AS
 	metrics         *ColigateMetrics
 }
@@ -72,7 +72,8 @@ func Parse(rawPacket []byte) (*dataPacket, error) {
 
 // NewWorker initializes the worker with its id, tokenbuckets and reservations
 func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32,
-	localAS libaddr.AS, forwardChannels map[uint16]packetForwarderContainer, metrics *ColigateMetrics) *Worker {
+	localAS libaddr.AS, forwardChannels map[uint16]*packetForwarderContainer,
+	metrics *ColigateMetrics) *Worker {
 	w := &Worker{
 		Id: workerId,
 		CoreIdCounter: (gatewayId << (32 - config.NumBitsForGatewayId)) |
@@ -88,7 +89,8 @@ func NewWorker(config *config.ColigateConfig, workerId uint32, gatewayId uint32,
 	return w
 }
 
-// Parses the some fields of the scion header that are needed by colibri gateway and the full colibri header
+// Parses the some fields of the scion header that are needed by colibri gateway
+// and the full colibri header
 func (w *Worker) realParse(d *dataPacket) error {
 	payloadLen := binary.BigEndian.Uint16(d.rawPacket[6:8])
 	realPayloadLen := len(d.rawPacket) - int(d.rawPacket[5])*4
@@ -102,7 +104,8 @@ func (w *Worker) realParse(d *dataPacket) error {
 	d.scionLayer = &slayers.SCION{
 		DstAddrLen: slayers.AddrLen(dstAddrLen),
 		SrcAddrLen: slayers.AddrLen(srcAddrLen),
-		SrcIA:      libaddr.IA(binary.BigEndian.Uint64(d.rawPacket[slayers.CmnHdrLen+libaddr.IABytes:])),
+		SrcIA: libaddr.IA(binary.BigEndian.Uint64(
+			d.rawPacket[slayers.CmnHdrLen+libaddr.IABytes:])),
 	}
 	d.colibriPath = &colibri.ColibriPath{}
 	offset := slayers.CmnHdrLen + 2*libaddr.IABytes + (int(dstAddrLen)+1)*4 + (int(srcAddrLen)+1)*4
@@ -144,7 +147,8 @@ func (w *Worker) validate(d *dataPacket) error {
 		return serrors.New("Invalid flags", "S", S, "R", R, "C", C)
 	}
 	if d.scionLayer.SrcIA.AS() != w.LocalAS {
-		return serrors.New("Reservation does not belong to local AS", "expected", w.LocalAS, "actual", d.scionLayer.SrcIA.AS())
+		return serrors.New("Reservation does not belong to local AS", "expected",
+			w.LocalAS, "actual", d.scionLayer.SrcIA.AS())
 	}
 
 	reservation, isValid := w.Storage.UseReservation(d.id, infoField.Ver, d.pktArrivalTime)
@@ -286,6 +290,6 @@ func (w *Worker) forwardPacket(d *dataPacket) error {
 		return serrors.New("Forward Channel for egress id not found", "egressId", egressId)
 	}
 	index := w.Id % uint32(forwarderContainer.ForwarderCount)
-	forwarderContainer.ForwardTasks[index] <- d.rawPacket
+	forwarderContainer.Forwarders[index].ForwardChannel <- d.rawPacket
 	return nil
 }
