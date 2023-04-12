@@ -79,3 +79,12 @@ We could deploy multiple packet receivers per border router interface and use eB
 packets that belong to the same flow are received by the same receiver.
 Because the rest remains unchanged we would still have the "no-reordering" guarantee and significantly
 increase the read speed.
+
+## Lock goroutines to threads
+The CPU affiliation by locking the goroutines to threads and CPU cores can later be studied and this design
+should not prevent this.
+
+## Traffic engineering
+With the implementation as described in this document we have a pool of processing routines that just process
+the packets in the order they are queued. In the future we can use an additional queue for prioritized traffic
+or create groups of processing routines which are only responsible for some type of packets.
