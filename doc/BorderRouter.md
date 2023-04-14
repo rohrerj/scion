@@ -45,12 +45,14 @@ Afterwards it returns each buffer to the receiver from which it originates.
 ## Mapping of processing routines
 To prevent any packet reordering on the fast-path, we map the tuple of source and flowID, see the
 [SCION header documentation](https://github.com/scionproto/scion/blob/master/doc/protocols/scion-header.rst),
-to a fixed processing routine using a hash function together with a salt value to prevent pre-computations of the exact mapping.
+to a fixed processing routine using a hash function together with a salt value to prevent pre-computations
+of the exact mapping.
 
 ## Slow path
 During processing, packets that have to follow the slow path are identified and forwarded to the
 slow-path processing routines.
-Rate limiting of slow-path operations is not implemented explicitly, but only implictily through specifying the number of slow-path processing routines in the configuration.
+Rate limiting of slow-path operations is not implemented explicitly, but only implictily through specifying
+the number of slow-path processing routines in the configuration.
 In case a packet is identified to belong to the slow path but the queue of the slow path is full, the
 packet is dropped.
 Packets currently identified for slow-path are:
@@ -103,6 +105,12 @@ with custom ring buffers in case this provides higher performance.
 With the implementation as described in this document the forwarders process the packets in the order they are enqueued.
 In the future we can use additional queues for prioritized traffic between the processing routines and the forwarders.
 See [PR 4054](https://github.com/scionproto/scion/pull/4054).
+
+## UDP generic segment offloading (GSO)
+In the future we could add UDP generic segment offloading (GSO) for the connections between border router
+of different ASes to improve the performance even more.
+Such an implementation would be feasible in the future because we would just have to identify identify
+which border router interfaces are affected and for them make some changes to the IO parts.
 
 # Implementation steps
 * Restructure the router/dataplane.go file to have a reading, processing and forwarding functionality
