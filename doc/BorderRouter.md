@@ -6,11 +6,12 @@
 * Implemented in: [](will be added once implemented)
 
 # Motivation
-Right now, the performance of the border router is strongly limited because a single goroutine per
+Right now, the performance of the border router is very much limited because a single goroutine per
 border router interface is responsible for reading, parsing, processing and forwarding the packets.
-Redesigning this pipeline will lead to significant performance improvements.
-The current design was not created with performance in mind and hence, the performance has to be improved.
-Once there also existed a design which did something similar to the posposed design in this document.
+Redesigning this pipeline is expected to lead to significant performance improvements.
+The current design was not created with performance in mind.
+Previously, there also existed a design which did something similar than the proposed design in this document.
+[See](https://github.com/scionproto/scion/tree/92531f5cb62197b9d705001c13e5a6bdb7ba1fa4/go/border).
 
 # Overview
 The pipeline gets changed to have seperate goroutines for the receiving, processing and forwarding steps.
@@ -18,7 +19,7 @@ This will lead to a much higher performance because the expensive processing log
 goroutines and to improve the performance we can just increase the number of processing routines.
 
 # Design
-The border router will consist of three layers, the receiving, the processing and the forwarding.
+The border router will consist of three layers, the receiving, the processing and the forwarding layer.
 The communication between those layers and its components are implemented as go channels.
 
 * **Receivers** There is one receiver per border router interface that is responsible for batch-reading the
@@ -101,18 +102,19 @@ them to the cores.
 In the future we might want to replace the go channels that are used for communicating between the goroutines
 with custom ring buffers in case this provides higher performance.
 
-## Traffic engineering
-With the implementation as described in this document the forwarders process the packets in the order they are enqueued.
+## Traffic control (scheduling)
+With the implementation as described in this document the forwarders process the packets from one single queue.
 In the future we can use additional queues for prioritized traffic between the processing routines and the forwarders.
 See [PR 4054](https://github.com/scionproto/scion/pull/4054).
 
 ## UDP generic segment offloading (GSO)
 In the future we could add UDP generic segment offloading (GSO) for the connections between border router
 of different ASes to improve the performance even more.
-Such an implementation would be feasible in the future because we would just have to identify identify
+Such an implementation would be feasible in the future because we would just have to identify
 which border router interfaces are affected and for them make some changes to the IO parts.
 
 # Implementation steps
 * Restructure the router/dataplane.go file to have a reading, processing and forwarding functionality
 * Add buffer reusal support
 * Add slow-path support
+* Add configurability for the new functionalities
