@@ -114,7 +114,10 @@ Such an implementation would be feasible in the future because we would just hav
 which border router interfaces are affected and for them make some changes to the IO parts.
 
 # Implementation steps
+The implementation as suggested in the design document can be implemented in seperate pullrequest to
+make them easier to review.
+All those changes below should lead to a border router following this design document.
 * Restructure the router/dataplane.go file to have a reading, processing and forwarding functionality
-* Add buffer reusal support
+* Add buffer reuse support
 * Add slow-path support
 * Add configurability for the new functionalities
