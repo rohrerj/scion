@@ -37,9 +37,11 @@ If the processing routine identifies a packet that belongs to the slow-path, the
 the packet to a slow-path processing routine. If the queue of the slow-path processing routine is full, the
 packet will not be processed at all. In this case the buffer is immediately returned to the receiver.
 Once a packet is processed, it gets enqueued to the forwarder which is responsible for the egress interface.
-If the queue of the forwarder is full, the packet will be dropped.
+If the queue of the forwarder is full, the packet will be dropped and the buffer returned to the receiver.
 * **Forwarders** There exists one forwarder per border router interface that is responsible for forwarding the
-packets over the network that it receives from the processing routines. It forwards the packets as a batch.
+packets over the network that it receives from the processing routines. It collects packets from the go channel
+up to the point where either no further packet is available or the batch size is reached.
+Then it forwards the packets as a batch.
 Afterwards it returns each buffer to the receiver from which it originates.
 
 ![Border Router Design](fig/border_router/br_design.png)
@@ -70,17 +72,19 @@ Since a pool of packet buffers is bound to a receiver, the size of the pool can 
 receiver seperately.
 It makes sense to make this configurable on a per border router interface level because not every 
 interface might have the same expected load and hence not every interface requires the same pool size.
-An appropriate default value would have to be evaluated.
+An optimal value should be derivable from the maximum latency of processing and forwarding a packet and the speed
+of the network interface.
 
 ## Number of processing routines (N)
 By configuring the number of processing routines one can specify the number of goroutines that are able
 to process packets in parallel.
-A default value could be the number of border router interfaces.
+An optimal value should be derivable from the maximum latency of processing and forwarding a packet and the speed
+of the network interface.
 
 ## Number of slow-path processing routines (M)
 By configuring the number of slow-path processing routines one can specify the number of goroutines that
 process the packets on the slow-path.
-A default value could be 1 or 2.
+An optimal value could be a percentage of the number of processing routines.
 
 ## Processing packets channel size
 Since each processing routine has a queue of packets to process and all packets not fitting in the queue
@@ -95,7 +99,7 @@ Because the rest remains unchanged we would still have the "no-reordering" guara
 increase the read speed.
 
 ## Lock goroutines to threads
-The CPU affiliation by locking the goroutines to threads and CPU cores can later be studied and would become
+The CPU affinity by locking the goroutines to threads and CPU cores can later be studied and would become
 much easier by applying this design because we have more goroutines and hence more flexibility how we want to fix
 them to the cores.
 
@@ -111,6 +115,11 @@ See [PR 4054](https://github.com/scionproto/scion/pull/4054).
 ## UDP generic segment offloading (GSO)
 In the future we could add UDP generic segment offloading (GSO) for the connections between border router
 of different ASes to improve the performance even more.
+Such an implementation would be feasible in the future because we would just have to identify
+which border router interfaces are affected and for them make some changes to the IO parts.
+
+## UDP generic receive offload (GRO)
+In the future we could add UDP generic receive offload (GSO) to improve the performance.
 Such an implementation would be feasible in the future because we would just have to identify
 which border router interfaces are affected and for them make some changes to the IO parts.
 
