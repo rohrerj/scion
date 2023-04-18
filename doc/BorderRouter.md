@@ -20,17 +20,18 @@ goroutines and to improve the performance we can just increase the number of pro
 
 # Design
 The border router will consist of three layers, the receiving, the processing and the forwarding layer.
-The communication between those layers and its components are implemented as go channels.
+The communication between those layers are implemented as go channels.
 
 * **Receivers** There is one receiver per border router interface that is responsible for batch-reading the
-packets from the network socket, identify the source and flowID and use them to identify which processing
-routine has to process the packet and enqueues it.
+packets from the network socket, identifying the source and flowID and using them to identify which processing
+routine has to process the packet.
+Then the receiver enqueues the packet to that processing routine.
 If the queue of that processing routine is full, the packet will be dropped.
-Each receiver has a pool of preallocated buffer that they can use to store the packets they receive.
-This can be implemented as a queue of byte slices where the receiver reads a certain amount of byte slices,
-updates the pointers of the ipv4.Message.Buffers and then performs a batch read.
+Each receiver has a pool of preallocated packet buffers that they can use to store the packets they receive.
+This can be implemented as a go channel of packets where the receiver reads a certain amount of packets,
+updates the pointers of the ipv4.Message.Buffers to the buffer inside those packets and then performs a batch read.
 * **Processing Routines** There are several processing routines and slow-path processing routines
-in the border router that are responsible for processing the packet.
+in the border router that are responsible for processing the received packet.
 The actual processing logic remains unchanged.
 If the processing routine identifies a packet that belongs to the slow-path, the processing routines enqueues
 the packet to a slow-path processing routine. If the queue of the slow-path processing routine is full, the
@@ -46,7 +47,7 @@ Afterwards it returns each buffer to the receiver from which it originates.
 ## Mapping of processing routines
 To prevent any packet reordering on the fast-path, we map the tuple of source and flowID, see the
 [SCION header documentation](https://github.com/scionproto/scion/blob/master/doc/protocols/scion-header.rst),
-to a fixed processing routine using a hash function together with a salt value to prevent pre-computations
+to a fixed processing routine using a hash function together with a secret value to prevent pre-computations
 of the exact mapping.
 
 ## Slow path
@@ -64,7 +65,7 @@ Packets currently identified for slow-path are:
 The configuration of the border router will remain in the border router toml file.
 The following configuration entries are added:
 
-## Pool size of packet buffers
+## Pool size
 Since a pool of packet buffers is bound to a receiver, the size of the pool can be configured for each
 receiver seperately.
 It makes sense to make this configurable on a per border router interface level because not every 
@@ -74,20 +75,20 @@ An appropriate default value would have to be evaluated.
 ## Number of processing routines (N)
 By configuring the number of processing routines one can specify the number of goroutines that are able
 to process packets in parallel.
-A default value could be 4 to 8 times the number of border router interfaces.
+A default value could be the number of border router interfaces.
 
 ## Number of slow-path processing routines (M)
 By configuring the number of slow-path processing routines one can specify the number of goroutines that
 process the packets on the slow-path.
-A default value could be the same number as we have border router interfaces.
+A default value could be 1 or 2.
 
 ## Processing packets channel size
 Since each processing routine has a queue of packets to process and all packets not fitting in the queue
 are dropped, one has to specify a reasonable queue size.
-A default value could be 256.
+A default value could be 1024.
 
 # Considerations for future work
-## Multiple Receivers per Border Router interface
+## Multiple receivers per border router interface
 We could deploy multiple packet receivers per border router interface and use eBPF to make sure that all
 packets that belong to the same flow are received by the same receiver.
 Because the rest remains unchanged we would still have the "no-reordering" guarantee and significantly
