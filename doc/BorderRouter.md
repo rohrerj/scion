@@ -81,10 +81,11 @@ to process packets in parallel.
 An optimal value should be derivable from the maximum latency of processing and forwarding a packet, the speed
 of the network interfaces and the number of available CPU cores.
 
-## Number of slow-path processing routines (M)
-By configuring the number of slow-path processing routines one can specify the number of goroutines that
-process the packets on the slow-path.
-An optimal value could be a percentage of the number of processing routines or even a fixed number.
+## Slow-path processing routines margin
+By configuring the margin of the slow-path processing routines the border router makes sure that it is able to
+process up to a certain percentage of received packets on the slow-path by dynamically adjusting the number of
+slow-path processing routines.
+A default value could be 0.1%.
 
 ## Processing packets channel size
 Since each processing routine has a queue of packets to process and all packets not fitting in the queue
@@ -131,3 +132,6 @@ All those changes below should lead to a border router following this design doc
 * Add buffer reuse support
 * Add slow-path support
 * Add configurability for the new functionalities
+
+# References
+* [GSO / GRO](https://tailscale.com/blog/more-throughput/)
