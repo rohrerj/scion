@@ -74,6 +74,7 @@ It makes sense to make this configurable on a per border router interface level 
 interface might have the same expected load and hence not every interface requires the same pool size.
 An optimal value should be derivable from the maximum latency of processing and forwarding a packet, the speed
 of the network interfaces and the number of available CPU cores.
+In the future we might add the possibility to automatically estimate this number.
 
 ## Number of processing routines (N)
 By configuring the number of processing routines one can specify the number of goroutines that are able
@@ -81,11 +82,11 @@ to process packets in parallel.
 An optimal value should be derivable from the maximum latency of processing and forwarding a packet, the speed
 of the network interfaces and the number of available CPU cores.
 
-## Slow-path processing routines margin
-By configuring the margin of the slow-path processing routines the border router makes sure that it is able to
-process up to a certain percentage of received packets on the slow-path by dynamically adjusting the number of
-slow-path processing routines.
-A default value could be 0.1%.
+## Number of slow-path processing routines (M)
+By configuring the number of slow-path processing routines one can specify the number of goroutines that
+process the packets on the slow-path.
+An optimal value could be a percentage of the number of processing routines or even a fixed number.
+In the future we might add the possibility to automatically estimate this number.
 
 ## Processing packets channel size
 Since each processing routine has a queue of packets to process and all packets not fitting in the queue
@@ -120,7 +121,8 @@ Such an implementation would be feasible in the future because we would just hav
 which border router interfaces are affected and for them make some changes to the IO parts.
 
 ## UDP generic receive offload (GRO)
-In the future we could add UDP generic receive offload (GSO) to improve the performance.
+In the future we could add UDP generic receive offload (GSO) which seems to better perform than just recvmmsg
+and would therefore improve the performance even more.
 Such an implementation would be feasible in the future because we would just have to identify
 which border router interfaces are affected and for them make some changes to the IO parts.
 
