@@ -49,8 +49,8 @@ Afterwards it returns each buffer to the receiver from which it originates.
 ## Mapping of processing routines
 To prevent any packet reordering on the fast-path, we map the tuple of source and flowID, see the
 [SCION header documentation](https://github.com/scionproto/scion/blob/master/doc/protocols/scion-header.rst),
-to a fixed processing routine using a hash function together with a secret value to prevent pre-computations
-of the exact mapping.
+to a fixed processing routine using a hash function together with a random value which is generated on startup
+to prevent pre-computations of the exact mapping.
 
 ## Slow path
 During processing, packets that have to follow the slow path are identified and forwarded to the
@@ -72,19 +72,19 @@ Since a pool of packet buffers is bound to a receiver, the size of the pool can 
 receiver seperately.
 It makes sense to make this configurable on a per border router interface level because not every 
 interface might have the same expected load and hence not every interface requires the same pool size.
-An optimal value should be derivable from the maximum latency of processing and forwarding a packet and the speed
-of the network interface.
+An optimal value should be derivable from the maximum latency of processing and forwarding a packet, the speed
+of the network interfaces and the number of available CPU cores.
 
 ## Number of processing routines (N)
 By configuring the number of processing routines one can specify the number of goroutines that are able
 to process packets in parallel.
-An optimal value should be derivable from the maximum latency of processing and forwarding a packet and the speed
-of the network interface.
+An optimal value should be derivable from the maximum latency of processing and forwarding a packet, the speed
+of the network interfaces and the number of available CPU cores.
 
 ## Number of slow-path processing routines (M)
 By configuring the number of slow-path processing routines one can specify the number of goroutines that
 process the packets on the slow-path.
-An optimal value could be a percentage of the number of processing routines.
+An optimal value could be a percentage of the number of processing routines or even a fixed number.
 
 ## Processing packets channel size
 Since each processing routine has a queue of packets to process and all packets not fitting in the queue
