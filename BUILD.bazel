@@ -63,6 +63,7 @@ pkg_tar(
         "//router/cmd/router",
         "//scion-pki/cmd/scion-pki",
         "//scion/cmd/scion",
+        "//tools/metrics_querier",
         "//tools/pathdb_dump",
     ],
     mode = "0755",
