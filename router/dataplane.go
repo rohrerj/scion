@@ -554,8 +554,8 @@ func (d *DataPlane) Run(ctx context.Context) error {
 func (d *DataPlane) initComponents() {
 	g := &errgroup.Group{}
 	d.interfaces = make(map[uint16]NetworkInterface)
-	d.interfaces[0xffff] = NetworkInterface{
-		InterfaceId: 0xffff,
+	d.interfaces[0] = NetworkInterface{
+		InterfaceId: 0,
 		Conn:        d.internal,
 	}
 	for id, conn := range d.external {
@@ -602,7 +602,7 @@ type NetworkInterface struct {
 }
 
 type packet struct {
-	srcAddr   *net.UDPAddr
+	srcAddr   net.UDPAddr
 	ingress   uint16
 	egress    uint16
 	rawPacket []byte
@@ -636,10 +636,9 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 			procId := computeProcId(flowAndSource) % d.procRoutines
 			p := &packet{
 				ingress:   ni.InterfaceId,
-				srcAddr:   pkt.Addr.(*net.UDPAddr),
+				srcAddr:   *pkt.Addr.(*net.UDPAddr),
 				rawPacket: rawPacket,
 			}
-
 			select {
 			case d.procChannels[procId] <- p:
 				//TODO(rohrerj) add metrics
@@ -684,7 +683,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 	for d.running {
 		p := <-c
 		processor.ingressID = p.ingress
-		result, err := processor.processPkt(p.rawPacket, p.srcAddr)
+		result, err := processor.processPkt(p.rawPacket, &p.srcAddr)
 		egress := p.egress
 		switch {
 		case err == nil:
@@ -707,6 +706,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 			log.Debug("Error determining forwarder. Egress is invalid", "egress", egress)
 			continue
 		}
+		p.rawPacket = result.OutPkt
 		select {
 		case fwCh <- p:
 			//TODO(rohrerj) add metrics
@@ -723,8 +723,8 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 	c := d.forwardChannels[ni.InterfaceId]
 	batchSize := 16
 	writeMsgs := make(underlayconn.Messages, batchSize)
-	for _, msg := range writeMsgs {
-		msg.Buffers[0] = make([]byte, 1)
+	for i := range writeMsgs {
+		writeMsgs[i].Buffers = make([][]byte, 1)
 	}
 
 	for d.running {

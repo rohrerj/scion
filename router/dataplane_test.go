@@ -205,18 +205,22 @@ func TestDataPlaneRun(t *testing.T) {
 
 				matchFlags := gomock.Eq(syscall.MSG_DONTWAIT)
 				for i := 0; i < 10; i++ {
-					ii := i
 					mInternal.EXPECT().WriteBatch(gomock.Any(), matchFlags).DoAndReturn(
 						func(ms underlayconn.Messages, flags int) (int, error) {
-							want := bytes.Repeat([]byte("actualpayloadbytes"), ii)
-							if len(ms[0].Buffers[0]) != len(want)+84 {
-								return 1, nil
-							}
-							totalCount--
 							if totalCount == 0 {
-								done <- struct{}{}
+								return 0, nil
 							}
-							return 1, nil
+							for _, msg := range ms {
+								want := bytes.Repeat([]byte("actualpayloadbytes"), 10-totalCount)
+								if len(msg.Buffers[0]) != len(want)+84 {
+									return 1, nil
+								}
+								totalCount--
+								if totalCount == 0 {
+									done <- struct{}{}
+								}
+							}
+							return len(ms), nil
 						})
 				}
 				_ = ret.AddInternalInterface(mInternal, net.IP{})
