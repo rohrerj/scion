@@ -89,6 +89,8 @@ Slow path
 
 During processing, packets that have to follow the slow path are identified and forwarded to the
 slow-path processing routines.
+To do so, we hand over the current buffer to the slow-path routine together with all the information
+that the processing routine already computed that are required by the slow-path processing routine.
 Rate limiting of slow-path operations is not implemented explicitly, but only implictily through
 specifying the number of slow-path processing routines in the configuration.
 In case a packet is identified to belong to the slow path but the queue of the slow path is full, the
@@ -178,6 +180,24 @@ References
 
 Rationale
 ==========
+
+One packet pool per receiver vs one packet pool for all
+---------------------------------------------------------
+
+There was the option to use a packet pool per receiver or a larger one for all receivers.
+The advantage of using a single packet pool for all receivers are that we don't have to keep track to which
+receiver the buffer has to be returned and that the total amount of memory we have to allocate would be smaller.
+
+Packet pool as channel vs stack
+---------------------------------
+
+If we implement the packet pool as a channel we can make use of the fast and optimized implementation by go
+but if the channel size is too large, the packets might not reside in the cache anymore.
+On the other hand if we use a stack we would not have the problem that problem but now all goroutines that
+try to read or write to the buffer pool are now fighting over the lock.
+Both solutions have advantages and disadvantages but I would suggest to implement it as a queue because
+go already provides a good implement for that and if we later realize that the other solution would lead to
+better performance, we could still change it.
 
 Compatibility
 ===============
