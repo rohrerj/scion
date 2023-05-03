@@ -113,9 +113,7 @@ Pool size
 ^^^^^^^^^^^
 
 The size of the packet buffer pool of the receivers can be configured.
-An optimal value should be derivable from the maximum latency of processing and forwarding a packet,
-the speed of the network interfaces and the number of available CPU cores.
-An optimal could be derived by calculating the maximum number of packets in-flight through the system:
+An optimal value could be derived by calculating the maximum number of packets in-flight through the system:
 
 .. code-block:: text
 
