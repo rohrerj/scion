@@ -15,11 +15,11 @@ border router interface is responsible for reading, parsing, processing and forw
 Background
 ===========
 
-Redesigning this pipeline is expected to lead to significant performance improvements.
-The current design was not created with performance in mind.
+The current border router design was not created with performance in mind.
 Previously, there also existed a design which did something similar than the proposed design in
 this document.
 `See <https://github.com/scionproto/scion/tree/92531f5cb62197b9d705001c13e5a6bdb7ba1fa4/go/border>`_.
+Redesigning the current router pipeline is expected to lead to significant performance improvements.
 
 Proposal
 ========
@@ -27,6 +27,8 @@ Proposal
 The pipeline gets changed to have seperate goroutines for the receiving, processing and forwarding steps.
 This will lead to a much higher performance because the expensive processing logic is moved to other
 goroutines and to improve the performance we can just increase the number of processing routines.
+By introducing packet reuse we do not have to allocate memory at runtime to store the packets because we
+have preallocated memory.
 
 Design
 --------
@@ -113,7 +115,11 @@ Pool size
 The size of the packet buffer pool of the receivers can be configured.
 An optimal value should be derivable from the maximum latency of processing and forwarding a packet,
 the speed of the network interfaces and the number of available CPU cores.
-In the future we might add the possibility to automatically estimate this number.
+An optimal could be derived by calculating the maximum number of packets in-flight through the system:
+
+.. code-block:: text
+
+    pool_size := numReaders * readBatch + numProcessors * (processorQueueSize + 1) + numWriters * (writerQueueSize + writeBatchSize)
 
 Number of processing routines (N)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -141,6 +147,11 @@ We could deploy multiple packet receivers per border router interface and use eB
 all packets that belong to the same flow are received by the same receiver.
 Because the rest remains unchanged we would still have the "no-reordering" guarantee and significantly
 increase the read speed.
+
+Lock goroutines to threads
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The CPU affinity by locking the goroutines to threads and CPU cores can later be studied.
 
 Replace go channels with custom ring buffer
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
