@@ -80,19 +80,23 @@ Afterwards it returns the buffers back to the receivers.
 Mapping of processing routines
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To prevent any packet reordering on the fast-path, we map the triple of source (ISD-AS + local address),
-destination (ISD-AS + local address) and flowID, see the
+To prevent any packet reordering on the fast-path, we map the flowID together with the full address-header, see
 `SCION header documentation <https://github.com/scionproto/scion/blob/master/doc/protocols/scion-header.rst>`_
 to a fixed processing routine using the fnv-1a hash function together with a random value which is generated
 on startup to prevent pre-computations of the exact mapping.
+To mitigate the sticky-zero property of the fnv-1a hash function when hashing, we take the random value first
+and the flowID and address-header afterwards.
 
 Slow path
 ^^^^^^^^^^^
 
 During processing, packets that have to follow the slow path are identified and forwarded to the
 slow-path processing routines.
-To do so, we hand over the current buffer to the slow-path routine together with all the information
-that the processing routine already computed that are required by the slow-path processing routine.
+To do so, we hand over the current buffer to the slow-path routine together with the error codes.
+Because of that the slow-path processing routine might have to redo some of the parsing if necessary.
+The original processing routine can immediately continue processing its other packets once it forwarded the
+slow-path packet to the slow-path routine without the need of doing anything additional compared to the usual
+packet processing.
 Rate limiting of slow-path operations is not implemented explicitly, but only implictily through
 specifying the number of slow-path processing routines in the configuration.
 In case a packet is identified to belong to the slow path but the queue of the slow path is full, the
@@ -103,21 +107,20 @@ Packets currently identified for slow-path are:
 
 - SCMP traceroute packets
 
+Pool size
+^^^^^^^^^^^
+
+The pool size will be set by calculating the maximum number of packets in-flight through the system:
+
+.. code-block:: text
+
+    pool_size := numReaders * readBatch + numProcessors * (processorQueueSize + 1) + numWriters * (writerQueueSize + writeBatchSize)
+
 Configuration
 ---------------
 
 The configuration of the border router will remain in the border router toml file.
 The following configuration entries are added:
-
-Pool size
-^^^^^^^^^^^
-
-The size of the packet buffer pool of the receivers can be configured.
-An optimal value could be derived by calculating the maximum number of packets in-flight through the system:
-
-.. code-block:: text
-
-    pool_size := numReaders * readBatch + numProcessors * (processorQueueSize + 1) + numWriters * (writerQueueSize + writeBatchSize)
 
 Number of processing routines (N)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -126,6 +129,8 @@ By configuring the number of processing routines one can specify the number of g
 to process packets in parallel.
 An optimal value should be derivable from the maximum latency of processing and forwarding a packet,
 the speed of the network interfaces and the number of available CPU cores.
+Since having more processing routines than number of CPU cores would just lead to swapping, the maximum
+number of processing routines are limited by the environment variable GOMAXPROCS.
 
 Number of slow-path processing routines (M)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
