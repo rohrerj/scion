@@ -87,6 +87,15 @@ on startup to prevent pre-computations of the exact mapping.
 To mitigate the sticky-zero property of the fnv-1a hash function when hashing, we take the random value first
 and the flowID and address-header afterwards.
 
+Initial parsing in the receiver
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To minimize the time that the receivers need to parse the fields needed to map a packet to a worker
+we will use a custom parse function that just parses the fields that are needed for the mapping.
+The values of those fields will be the same as if they would have been parsed with the slayers.SCION
+parse function.
+
+
 Slow path
 ^^^^^^^^^^^
 
@@ -139,6 +148,14 @@ By configuring the number of slow-path processing routines one can specify the n
 process the packets on the slow-path.
 An optimal value could be a percentage of the number of processing routines or even a fixed number.
 A default value would be 1.
+
+Processing routine queue size and read-write batch size
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By configuring the queue sizes and the batch size one can specify how many packets a read or written
+from / to a network socket and how many packets can be enqueued at the processing routines and the
+forwarders before packets are getting dropped.
+A default value for both queue size and batch size would be 64.
 
 Considerations for future work
 --------------------------------
