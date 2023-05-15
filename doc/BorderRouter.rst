@@ -3,7 +3,7 @@ Border Router Performance Optimized Redesign
 **********************************************
 
 - Author: Justin Rohrer
-- Last Updated: 2023-04-28
+- Last Updated: 2023-05-15
 - Discussion at: `#4334 <https://github.com/scionproto/scion/issues/4334>`_
 
 Abstract
@@ -138,8 +138,9 @@ By configuring the number of processing routines one can specify the number of g
 to process packets in parallel.
 An optimal value should be derivable from the maximum latency of processing and forwarding a packet,
 the speed of the network interfaces and the number of available CPU cores.
-Since having more processing routines than number of CPU cores would just lead to swapping, the maximum
-number of processing routines are limited by the environment variable GOMAXPROCS.
+Since having more processing routines than number of CPU cores would just lead to swapping, the
+number of processing routines should nbe strictly smaller than the number of CPU cores because we also
+have to take the receivers, forwarders and slow-path processing routines into account that also require CPU time.
 
 Number of slow-path processing routines (M)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
