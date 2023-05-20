@@ -112,10 +112,16 @@ type DataPlane struct {
 	forwardingMetrics map[uint16]forwardingMetrics
 	//new added fields
 
-	interfaces      map[uint16]NetworkInterface
-	procRoutines    uint32
-	procChannels    []chan *packet
-	forwardChannels map[uint16]chan *packet
+	interfaces         map[uint16]NetworkInterface
+	procRoutines       uint32
+	procChannels       []chan *packet
+	forwardChannels    map[uint16]chan *packet
+	packetPool         chan []byte
+	interfaceBatchSize int
+	processorQueueSize int
+	forwarderQueueSize int
+	// the random value used for identifying the process routine
+	randomValue []byte
 }
 
 var (
@@ -564,14 +570,31 @@ func (d *DataPlane) initComponents() {
 			Conn:        conn,
 		}
 	}
+	//SET DEFAULTS
 	d.procRoutines = 8
+	d.forwarderQueueSize = 64
+	d.interfaceBatchSize = 64
+	d.processorQueueSize = 32
+	d.randomValue = make([]byte, 16)
+	rand.Read(d.randomValue)
+	//END SET DEFAULTS
+
 	d.procChannels = make([]chan *packet, d.procRoutines)
 	for i := 0; i < int(d.procRoutines); i++ {
-		d.procChannels[i] = make(chan *packet, 256)
+		d.procChannels[i] = make(chan *packet, d.processorQueueSize)
 	}
 	d.forwardChannels = make(map[uint16]chan *packet)
 	for _, ni := range d.interfaces {
-		d.forwardChannels[ni.InterfaceId] = make(chan *packet, 256)
+		d.forwardChannels[ni.InterfaceId] = make(chan *packet, d.forwarderQueueSize)
+	}
+	poolSize := len(d.interfaces)*d.interfaceBatchSize +
+		int(d.procRoutines)*(d.processorQueueSize+1) +
+		len(d.interfaces)*(d.forwarderQueueSize+d.interfaceBatchSize)
+
+	log.Debug("Initialize packet pool of size", "poolSize", poolSize)
+	d.packetPool = make(chan []byte, poolSize)
+	for i := 0; i < poolSize; i++ {
+		d.packetPool <- make([]byte, bufSize)
 	}
 
 	for _, ni := range d.interfaces {
@@ -598,25 +621,45 @@ func (d *DataPlane) initComponents() {
 
 type NetworkInterface struct {
 	InterfaceId uint16
+	Addr        net.Addr
 	Conn        BatchConn
 }
 
 type packet struct {
 	srcAddr   net.UDPAddr
+	dstAddr   *net.UDPAddr
 	ingress   uint16
-	egress    uint16
 	rawPacket []byte
 }
 
 func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 	log.Debug("Initialize receiver for", "interface", ni.InterfaceId)
-	msgs := underlayconn.NewReadMessages(inputBatchCnt)
+	msgs := underlayconn.NewReadMessages(d.interfaceBatchSize)
 	for _, msg := range msgs {
-		msg.Buffers[0] = make([]byte, bufSize)
+		msg.Buffers[0] = make([]byte, 1)
 	}
-	flowAndSource := make([]byte, 44)
+	flowIdBuffer := make([]byte, 4)
+	i := 0
 	for d.running {
-		numPkts, err := ni.Conn.ReadBatch(msgs)
+		// collect packets
+		if i == 0 {
+			p := <-d.packetPool
+			msgs[0].Buffers[0] = p[:bufSize]
+			i++
+		}
+	loop:
+		for i < d.interfaceBatchSize {
+			select {
+			case p := <-d.packetPool:
+				msgs[i].Buffers[0] = p[:bufSize]
+				i++
+			default:
+				break loop
+			}
+		}
+
+		// read batch
+		numPkts, err := ni.Conn.ReadBatch(msgs[:i])
 		if err != nil {
 			log.Debug("Error while reading batch", "interfaceId", ni.InterfaceId, "err", err)
 			continue
@@ -625,15 +668,13 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 			continue
 		}
 		for _, pkt := range msgs[:numPkts] {
-			//TODO(rohrerj) introduce buffer reuse
-			rawPacket := make([]byte, pkt.N)
-			copy(rawPacket, pkt.Buffers[0][:pkt.N])
+			rawPacket := pkt.Buffers[0][:pkt.N]
 
-			if err := extractFlowAndSource(rawPacket, flowAndSource); err != nil {
-				log.Debug("Error while parsing flow and source", "interfaceId", ni.InterfaceId, "err", err)
+			procId, err := d.computeProcId(rawPacket, flowIdBuffer)
+			if err != nil {
+				log.Debug("Error while computing procId", "err", err)
 				continue
 			}
-			procId := computeProcId(flowAndSource) % d.procRoutines
 			p := &packet{
 				ingress:   ni.InterfaceId,
 				srcAddr:   *pkt.Addr.(*net.UDPAddr),
@@ -646,33 +687,41 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 				//TODO(rohrerj) add metrics
 			}
 		}
+
+		// move not used packets
+		diff := i - numPkts
+		for j := 0; j < diff; j++ {
+			msgs[j].Buffers[0] = msgs[i-j-1].Buffers[0]
+		}
+		i = diff
 	}
 	return nil
 }
 
-func computeProcId(buffer []byte) uint32 {
-	hasher := fnv.New32a()
-	hasher.Write(buffer)
-	return hasher.Sum32()
-}
-
-func extractFlowAndSource(data []byte, buffer []byte) error {
+func (d *DataPlane) computeProcId(data []byte, tmpBuffer []byte) (uint32, error) {
 	// TODO(rohrerj) add unit tests
-	srcAddrLen := data[9] & 0x3
-	dstAddrLen := data[9] >> 4 & 0x3
-	dstAndSrcLen := int(dstAddrLen + srcAddrLen)
-	if len(data) < 29+dstAndSrcLen {
-		return serrors.New("Packet is too short")
+	srcHostAddrLen := data[9] & 0x3
+	dstHostAddrLen := data[9] >> 4 & 0x3
+	addrHdrLen := 16 + int(srcHostAddrLen+dstHostAddrLen)
+	if len(data) < slayers.CmnHdrLen+addrHdrLen {
+		return 0, serrors.New("Packet is too short")
 	}
-	if len(buffer) < 12+dstAndSrcLen {
-		return serrors.New("Buffer is too short")
+	if addrHdrLen > 48 {
+		return 0, serrors.New("Address header is invalid")
 	}
-	copy(buffer[0:3], data[1:4])
-	buffer[0] &= 0xF // the left 4 bits don't belong to the flowID
-	copy(buffer[4:12], data[20:29])
-	copy(buffer[12:], data[29+dstAddrLen:29+dstAddrLen+srcAddrLen])
+	copy(tmpBuffer[0:3], data[1:4])
+	tmpBuffer[0] &= 0xF // the left 4 bits don't belong to the flowID
 
-	return nil
+	hasher := fnv.New32a()
+	hasher.Write(d.randomValue)
+	hasher.Write(tmpBuffer[:4])
+	hasher.Write(data[slayers.CmnHdrLen : slayers.CmnHdrLen+addrHdrLen+1])
+	hasher.BlockSize()
+	return hasher.Sum32() % d.procRoutines, nil
+}
+
+func (d *DataPlane) returnPacket(pkt *packet) {
+	d.packetPool <- pkt.rawPacket
 }
 
 func (d *DataPlane) initProcessingRoutine(id int) error {
@@ -684,7 +733,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 		p := <-c
 		processor.ingressID = p.ingress
 		result, err := processor.processPkt(p.rawPacket, &p.srcAddr)
-		egress := p.egress
+		egress := result.EgressID
 		switch {
 		case err == nil:
 		case errors.As(err, &scmpErr):
@@ -696,21 +745,29 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 		default:
 			log.Debug("Error processing packet", "err", err)
 			//TODO(rohrerj) add metrics
+			d.returnPacket(p)
 			continue
 		}
 		if result.OutConn == nil { // e.g. BFD case no message is forwarded
+			d.returnPacket(p)
 			continue
 		}
 		fwCh, ok := d.forwardChannels[egress]
 		if !ok {
 			log.Debug("Error determining forwarder. Egress is invalid", "egress", egress)
+			d.returnPacket(p)
 			continue
 		}
 		p.rawPacket = result.OutPkt
+		if result.OutAddr != nil {
+			p.dstAddr = result.OutAddr
+		}
+
 		select {
 		case fwCh <- p:
 			//TODO(rohrerj) add metrics
 		default:
+			d.returnPacket(p)
 			//TODO(rohrerj) add metrics
 		}
 
@@ -721,8 +778,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 	log.Debug("Initialize forwarder for", "interface", ni.InterfaceId)
 	c := d.forwardChannels[ni.InterfaceId]
-	batchSize := 16
-	writeMsgs := make(underlayconn.Messages, batchSize)
+	writeMsgs := make(underlayconn.Messages, d.interfaceBatchSize)
 	for i := range writeMsgs {
 		writeMsgs[i].Buffers = make([][]byte, 1)
 	}
@@ -730,12 +786,20 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 	for d.running {
 		p := <-c
 		writeMsgs[0].Buffers[0] = p.rawPacket
+		writeMsgs[0].Addr = nil
+		if p.dstAddr != nil {
+			writeMsgs[0].Addr = p.dstAddr
+		}
 		i := 1
 	loop:
-		for i < batchSize {
+		for i < d.interfaceBatchSize {
 			select {
 			case p := <-c:
 				writeMsgs[i].Buffers[0] = p.rawPacket
+				writeMsgs[i].Addr = nil
+				if p.dstAddr != nil {
+					writeMsgs[i].Addr = p.dstAddr
+				}
 				i++
 			default:
 				break loop
@@ -746,13 +810,17 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 			var errno syscall.Errno
 			if !errors.As(err, &errno) ||
 				!(errno == syscall.EAGAIN || errno == syscall.EWOULDBLOCK) {
-				log.Debug("Error writing packet", "err", err)
+				log.Debug("Error writing packet", "ni", ni, "err", err)
 				// error metric
 			}
 			//TODO(rohrerj) add metrics
-			continue
+		} else {
+			//TODO(rohrerj) add metrics
 		}
-		//TODO(rohrerj) add metrics
+		for j := 0; j < i; j++ {
+			d.packetPool <- writeMsgs[j].Buffers[0]
+		}
+
 	}
 	return nil
 }
@@ -1484,7 +1552,6 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 	if r, err := p.handleIngressRouterAlert(); err != nil {
 		return r, err
 	}
-
 	// Inbound: pkts destined to the local IA.
 	if p.scionLayer.DstIA == p.d.localIA {
 		a, r, err := p.resolveInbound()
@@ -1496,7 +1563,6 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 
 	// Outbound: pkts leaving the local IA.
 	// BRTransit: pkts leaving from the same BR different interface.
-
 	if p.path.IsXover() {
 		if r, err := p.doXover(); err != nil {
 			return r, err
@@ -1521,7 +1587,6 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 	if r, err := p.validateEgressUp(); err != nil {
 		return r, err
 	}
-
 	egressID := p.egressInterface()
 	if c, ok := p.d.external[egressID]; ok {
 		if err := p.processEgress(); err != nil {
@@ -1529,7 +1594,6 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 		}
 		return processResult{EgressID: egressID, OutConn: c, OutPkt: p.rawPkt}, nil
 	}
-
 	// ASTransit: pkts leaving from another AS BR.
 	if a, ok := p.d.internalNextHops[egressID]; ok {
 		return processResult{OutConn: p.d.internal, OutAddr: a, OutPkt: p.rawPkt}, nil
