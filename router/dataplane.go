@@ -23,8 +23,10 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
+	"math"
 	"math/big"
 	"net"
+	"runtime"
 	"strconv"
 	"sync"
 	"syscall"
@@ -456,81 +458,6 @@ func (d *DataPlane) Run(ctx context.Context) error {
 
 	d.initMetrics()
 	d.initComponents()
-	/*read := func(ingressID uint16, rd BatchConn) {
-
-		msgs := conn.NewReadMessages(inputBatchCnt)
-		for _, msg := range msgs {
-			msg.Buffers[0] = make([]byte, bufSize)
-		}
-		writeMsgs := make(underlayconn.Messages, 1)
-		writeMsgs[0].Buffers = make([][]byte, 1)
-
-		processor := newPacketProcessor(d, ingressID)
-		var scmpErr scmpError
-		for d.running {
-			pkts, err := rd.ReadBatch(msgs)
-			if err != nil {
-				log.Debug("Failed to read batch", "err", err)
-				// error metric
-				continue
-			}
-			if pkts == 0 {
-				continue
-			}
-			for _, p := range msgs[:pkts] {
-				// input metric
-				inputCounters := d.forwardingMetrics[ingressID]
-				inputCounters.InputPacketsTotal.Inc()
-				inputCounters.InputBytesTotal.Add(float64(p.N))
-
-				srcAddr := p.Addr.(*net.UDPAddr)
-				result, err := processor.processPkt(p.Buffers[0][:p.N], srcAddr)
-
-				switch {
-				case err == nil:
-				case errors.As(err, &scmpErr):
-					if !scmpErr.TypeCode.InfoMsg() {
-						log.Debug("SCMP", "err", scmpErr, "dst_addr", p.Addr)
-					}
-					// SCMP go back the way they came.
-					result.OutAddr = srcAddr
-					result.OutConn = rd
-				default:
-					log.Debug("Error processing packet", "err", err)
-					inputCounters.DroppedPacketsTotal.Inc()
-					continue
-				}
-				if result.OutConn == nil { // e.g. BFD case no message is forwarded
-					continue
-				}
-
-				// Write to OutConn; drop the packet if this would block.
-				// Use WriteBatch because it's the only available function that
-				// supports MSG_DONTWAIT.
-				writeMsgs[0].Buffers[0] = result.OutPkt
-				writeMsgs[0].Addr = nil
-				if result.OutAddr != nil { // don't assign directly to net.Addr, typed nil!
-					writeMsgs[0].Addr = result.OutAddr
-				}
-
-				_, err = result.OutConn.WriteBatch(writeMsgs, syscall.MSG_DONTWAIT)
-				if err != nil {
-					var errno syscall.Errno
-					if !errors.As(err, &errno) ||
-						!(errno == syscall.EAGAIN || errno == syscall.EWOULDBLOCK) {
-						log.Debug("Error writing packet", "err", err)
-						// error metric
-					}
-					inputCounters.DroppedPacketsTotal.Inc()
-					continue
-				}
-				// ok metric
-				outputCounters := d.forwardingMetrics[result.EgressID]
-				outputCounters.OutputPacketsTotal.Inc()
-				outputCounters.OutputBytesTotal.Add(float64(len(result.OutPkt)))
-			}
-		}
-	}*/
 
 	for k, v := range d.bfdSessions {
 		go func(ifID uint16, c bfdSession) {
@@ -540,16 +467,6 @@ func (d *DataPlane) Run(ctx context.Context) error {
 			}
 		}(k, v)
 	}
-	/*for ifID, v := range d.external {
-		go func(i uint16, c BatchConn) {
-			defer log.HandlePanic()
-			read(i, c)
-		}(ifID, v)
-	}
-	go func(c BatchConn) {
-		defer log.HandlePanic()
-		read(0, c)
-	}(d.internal)*/
 
 	d.mtx.Unlock()
 
@@ -571,10 +488,10 @@ func (d *DataPlane) initComponents() {
 		}
 	}
 	//SET DEFAULTS
-	d.procRoutines = 8
-	d.forwarderQueueSize = 64
-	d.interfaceBatchSize = 64
-	d.processorQueueSize = 32
+	d.procRoutines = uint32(runtime.GOMAXPROCS(0))
+	d.forwarderQueueSize = 256
+	d.interfaceBatchSize = 256
+	d.processorQueueSize = int(math.Max(float64(len(d.interfaces)*d.interfaceBatchSize/int(d.procRoutines)), float64(d.interfaceBatchSize)))
 	d.randomValue = make([]byte, 16)
 	rand.Read(d.randomValue)
 	//END SET DEFAULTS
