@@ -71,6 +71,43 @@ func (d *DataPlane) ProcessPkt(ifID uint16, m *ipv4.Message) (ProcessResult, err
 	return ProcessResult{processResult: result}, err
 }
 
+func (d *DataPlane) ComputeProcId(data []byte, tmpBuffer []byte) (uint32, error) {
+	return d.computeProcId(data, tmpBuffer)
+}
+
+func (d *DataPlane) ConfigureProcChannels(numProcRoutines int, queueSize int) []chan *packet {
+	d.procRoutines = uint32(numProcRoutines)
+	d.processorQueueSize = queueSize
+	d.procChannels = make([]chan *packet, d.procRoutines)
+	for i := 0; i < int(d.procRoutines); i++ {
+		d.procChannels[i] = make(chan *packet, d.processorQueueSize)
+	}
+	return d.procChannels
+}
+
+func (d *DataPlane) ConfigureBatchSize(size int) {
+	d.interfaceBatchSize = size
+}
+
+func (d *DataPlane) InitializePacketPool(poolSize int) {
+	d.packetPool = make(chan []byte, poolSize)
+	for i := 0; i < poolSize; i++ {
+		d.packetPool <- make([]byte, bufSize)
+	}
+}
+
+func (d *DataPlane) InitReceiver(ni NetworkInterface) {
+	d.initReceiver(ni)
+}
+
+func (d *DataPlane) GetInternalInterface() BatchConn {
+	return d.internal
+}
+
+func (d *DataPlane) SetRunning(b bool) {
+	d.running = b
+}
+
 func ExtractServices(s *services) map[addr.HostSVC][]*net.UDPAddr {
 	return s.m
 }

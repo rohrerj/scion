@@ -49,6 +49,74 @@ import (
 	"github.com/scionproto/scion/router/mock_router"
 )
 
+var metrics = router.NewMetrics()
+
+func TestReceiver(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	done := make(chan struct{})
+	prepareDP := func(ctrl *gomock.Controller, done chan<- struct{}) *router.DataPlane {
+		ret := &router.DataPlane{Metrics: metrics}
+
+		key := []byte("testkey_xxxxxxxx")
+		local := xtest.MustParseIA("1-ff00:0:110")
+
+		mInternal := mock_router.NewMockBatchConn(ctrl)
+		mInternal.EXPECT().ReadBatch(gomock.Any()).DoAndReturn(
+			func(m underlayconn.Messages) (int, error) {
+				// 10 scion messages to external
+				for i := 0; i < 10; i++ {
+					spkt, dpath := prepBaseMsg(time.Now())
+					spkt.DstIA = local
+					dpath.HopFields = []path.HopField{
+						{ConsIngress: 41, ConsEgress: 40},
+						{ConsIngress: 31, ConsEgress: 30},
+						{ConsIngress: 1, ConsEgress: 0},
+					}
+					dpath.Base.PathMeta.CurrHF = 2
+					dpath.HopFields[2].Mac = computeMAC(t, key,
+						dpath.InfoFields[0], dpath.HopFields[2])
+					spkt.Path = dpath
+					payload := bytes.Repeat([]byte("actualpayloadbytes"), i)
+					buffer := gopacket.NewSerializeBuffer()
+					err := gopacket.SerializeLayers(buffer,
+						gopacket.SerializeOptions{FixLengths: true},
+						spkt, gopacket.Payload(payload))
+					require.NoError(t, err)
+					raw := buffer.Bytes()
+					copy(m[i].Buffers[0], raw)
+					m[i].N = len(raw)
+					m[i].Addr = &net.UDPAddr{IP: net.IP{10, 0, 200, 200}}
+				}
+				return 10, nil
+			},
+		).AnyTimes()
+
+		_ = ret.AddInternalInterface(mInternal, net.IP{})
+		_ = ret.SetIA(local)
+		_ = ret.SetKey(key)
+		return ret
+	}
+	dp := prepareDP(ctrl, done)
+	ch := dp.ConfigureProcChannels(1, 100)
+	dp.InitializePacketPool(100)
+	dp.ConfigureBatchSize(64)
+	dp.SetRunning(true)
+	go func() {
+		dp.InitReceiver(router.NetworkInterface{InterfaceId: 0, Addr: nil, Conn: dp.GetInternalInterface()})
+	}()
+	for i := 0; i < 10; i++ {
+		select {
+		case <-ch[0]:
+			// we just check that the processing routine has received the packet
+		case <-time.After(time.Millisecond):
+			t.Fail()
+		}
+	}
+	dp.SetRunning(false)
+
+}
+
 func TestDataPlaneAddInternalInterface(t *testing.T) {
 	t.Run("fails after serve", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
@@ -186,8 +254,6 @@ func TestDataPlaneRun(t *testing.T) {
 	t.Parallel()
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-
-	metrics := router.NewMetrics()
 
 	testCases := map[string]struct {
 		prepareDP func(*gomock.Controller, chan<- struct{}) *router.DataPlane

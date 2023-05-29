@@ -556,16 +556,17 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 		msg.Buffers[0] = make([]byte, 1)
 	}
 	flowIdBuffer := make([]byte, 4)
-	i := 0
+	i := 0 // newly loaded buffers
+	j := 0 // unused buffers from previous loop
 	for d.running {
 		// collect packets
-		if i == 0 {
+		if i+j == 0 {
 			p := <-d.packetPool
 			msgs[0].Buffers[0] = p[:bufSize]
 			i++
 		}
 	loop:
-		for i < d.interfaceBatchSize {
+		for i+j < d.interfaceBatchSize {
 			select {
 			case p := <-d.packetPool:
 				msgs[i].Buffers[0] = p[:bufSize]
@@ -576,12 +577,11 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 		}
 
 		// read batch
-		numPkts, err := ni.Conn.ReadBatch(msgs[:i])
+		numPkts, err := ni.Conn.ReadBatch(msgs[:i+j])
 		if err != nil {
 			log.Debug("Error while reading batch", "interfaceId", ni.InterfaceId, "err", err)
-			continue
-		}
-		if numPkts == 0 {
+			j = i + j
+			i = 0
 			continue
 		}
 		for _, pkt := range msgs[:numPkts] {
@@ -604,13 +604,8 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 				//TODO(rohrerj) add metrics
 			}
 		}
-
-		// move not used packets
-		diff := i - numPkts
-		for j := 0; j < diff; j++ {
-			msgs[j].Buffers[0] = msgs[i-j-1].Buffers[0]
-		}
-		i = diff
+		j = i + j - numPkts
+		i = 0
 	}
 	return nil
 }
@@ -633,7 +628,6 @@ func (d *DataPlane) computeProcId(data []byte, tmpBuffer []byte) (uint32, error)
 	hasher.Write(d.randomValue)
 	hasher.Write(tmpBuffer[:4])
 	hasher.Write(data[slayers.CmnHdrLen : slayers.CmnHdrLen+addrHdrLen+1])
-	hasher.BlockSize()
 	return hasher.Sum32() % d.procRoutines, nil
 }
 
