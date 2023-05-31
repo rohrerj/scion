@@ -71,8 +71,8 @@ func (d *DataPlane) ProcessPkt(ifID uint16, m *ipv4.Message) (ProcessResult, err
 	return ProcessResult{processResult: result}, err
 }
 
-func (d *DataPlane) ComputeProcId(data []byte, tmpBuffer []byte) (uint32, error) {
-	return d.computeProcId(data, tmpBuffer)
+func (d *DataPlane) ComputeProcId(data []byte) (uint32, error) {
+	return d.computeProcId(data)
 }
 
 func (d *DataPlane) ConfigureProcChannels(numProcRoutines int, queueSize int) []chan *packet {
@@ -83,6 +83,10 @@ func (d *DataPlane) ConfigureProcChannels(numProcRoutines int, queueSize int) []
 		d.procChannels[i] = make(chan *packet, d.processorQueueSize)
 	}
 	return d.procChannels
+}
+
+func (d *DataPlane) SetRandomValue(v []byte) {
+	d.randomValue = v
 }
 
 func (d *DataPlane) ConfigureBatchSize(size int) {
@@ -98,6 +102,40 @@ func (d *DataPlane) InitializePacketPool(poolSize int) {
 
 func (d *DataPlane) InitReceiver(ni NetworkInterface) {
 	d.initReceiver(ni)
+}
+
+func (d *DataPlane) CurrentPoolSize() int {
+	return len(d.packetPool)
+}
+
+func (d *DataPlane) GetBufferFromPool() []byte {
+	return <-d.packetPool
+}
+
+func (d *DataPlane) SendPacketToChannel(srcAddr *net.UDPAddr, dstAddr *net.UDPAddr, ingress uint16, raw []byte, ch chan *packet) {
+	pkt := &packet{
+		srcAddr:   srcAddr,
+		dstAddr:   dstAddr,
+		ingress:   ingress,
+		rawPacket: raw,
+	}
+	ch <- pkt
+}
+
+func (d *DataPlane) ConfigureForwarder(ni NetworkInterface) chan *packet {
+	if d.forwardChannels == nil {
+		d.forwardChannels = make(map[uint16]chan *packet)
+	}
+	ch, found := d.forwardChannels[ni.InterfaceId]
+	if !found {
+		ch = make(chan *packet, d.interfaceBatchSize)
+		d.forwardChannels[ni.InterfaceId] = ch
+	}
+	return ch
+}
+
+func (d *DataPlane) InitForwarder(ni NetworkInterface) {
+	d.initForwarder(ni)
 }
 
 func (d *DataPlane) GetInternalInterface() BatchConn {

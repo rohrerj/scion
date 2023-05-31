@@ -17,7 +17,9 @@ package router_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"net"
 	"sync"
 	"syscall"
@@ -54,8 +56,7 @@ var metrics = router.NewMetrics()
 func TestReceiver(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	done := make(chan struct{})
-	prepareDP := func(ctrl *gomock.Controller, done chan<- struct{}) *router.DataPlane {
+	prepareDP := func(ctrl *gomock.Controller) *router.DataPlane {
 		ret := &router.DataPlane{Metrics: metrics}
 
 		key := []byte("testkey_xxxxxxxx")
@@ -64,7 +65,6 @@ func TestReceiver(t *testing.T) {
 		mInternal := mock_router.NewMockBatchConn(ctrl)
 		mInternal.EXPECT().ReadBatch(gomock.Any()).DoAndReturn(
 			func(m underlayconn.Messages) (int, error) {
-				// 10 scion messages to external
 				for i := 0; i < 10; i++ {
 					spkt, dpath := prepBaseMsg(time.Now())
 					spkt.DstIA = local
@@ -73,8 +73,8 @@ func TestReceiver(t *testing.T) {
 						{ConsIngress: 31, ConsEgress: 30},
 						{ConsIngress: 1, ConsEgress: 0},
 					}
-					dpath.Base.PathMeta.CurrHF = 2
-					dpath.HopFields[2].Mac = computeMAC(t, key,
+					dpath.Base.PathMeta.CurrHF = 0
+					dpath.HopFields[0].Mac = computeMAC(t, key,
 						dpath.InfoFields[0], dpath.HopFields[2])
 					spkt.Path = dpath
 					payload := bytes.Repeat([]byte("actualpayloadbytes"), i)
@@ -90,18 +90,21 @@ func TestReceiver(t *testing.T) {
 				}
 				return 10, nil
 			},
-		).AnyTimes()
+		).Times(1)
+		mInternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 		_ = ret.AddInternalInterface(mInternal, net.IP{})
 		_ = ret.SetIA(local)
 		_ = ret.SetKey(key)
 		return ret
 	}
-	dp := prepareDP(ctrl, done)
+	dp := prepareDP(ctrl)
 	ch := dp.ConfigureProcChannels(1, 100)
 	dp.InitializePacketPool(100)
 	dp.ConfigureBatchSize(64)
+	assert.Equal(t, 100, dp.CurrentPoolSize())
 	dp.SetRunning(true)
+	defer dp.SetRunning(false)
 	go func() {
 		dp.InitReceiver(router.NetworkInterface{InterfaceId: 0, Addr: nil, Conn: dp.GetInternalInterface()})
 	}()
@@ -109,12 +112,109 @@ func TestReceiver(t *testing.T) {
 		select {
 		case <-ch[0]:
 			// we just check that the processing routine has received the packet
-		case <-time.After(time.Millisecond):
+			assert.Greater(t, 100, dp.CurrentPoolSize())
+		case <-time.After(100 * time.Millisecond):
 			t.Fail()
 		}
 	}
-	dp.SetRunning(false)
+}
 
+func TestForwarder(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	done := make(chan struct{})
+	prepareDP := func(ctrl *gomock.Controller) *router.DataPlane {
+		ret := &router.DataPlane{Metrics: metrics}
+
+		key := []byte("testkey_xxxxxxxx")
+		local := xtest.MustParseIA("1-ff00:0:110")
+		mInternal := mock_router.NewMockBatchConn(ctrl)
+		matchFlags := gomock.Eq(syscall.MSG_DONTWAIT)
+		totalCount := 10
+		for i := 0; i < 10; i++ {
+			mInternal.EXPECT().WriteBatch(gomock.Any(), matchFlags).DoAndReturn(
+				func(ms underlayconn.Messages, flags int) (int, error) {
+					if totalCount == 0 {
+						return 0, nil
+					}
+					totalCount -= len(ms)
+					if totalCount == 0 {
+						done <- struct{}{}
+					}
+					return len(ms), nil
+				}).AnyTimes()
+		}
+		_ = ret.AddInternalInterface(mInternal, net.IP{})
+		_ = ret.SetIA(local)
+		_ = ret.SetKey(key)
+		return ret
+	}
+	dp := prepareDP(ctrl)
+	dp.InitializePacketPool(100)
+	dp.ConfigureBatchSize(64)
+	ni := router.NetworkInterface{InterfaceId: 0, Addr: nil, Conn: dp.GetInternalInterface()}
+	ch := dp.ConfigureForwarder(ni)
+	dp.SetRunning(true)
+	defer dp.SetRunning(false)
+	go func() {
+		dp.InitForwarder(ni)
+	}()
+	assert.Equal(t, 100, dp.CurrentPoolSize())
+	for i := 0; i < 10; i++ {
+		buf := dp.GetBufferFromPool()
+		assert.NotEqual(t, 100, dp.CurrentPoolSize())
+		dp.SendPacketToChannel(nil, nil, ni.InterfaceId, buf, ch)
+	}
+	select {
+	case <-done:
+		assert.Equal(t, 100, dp.CurrentPoolSize())
+	case <-time.After(100 * time.Millisecond):
+		t.Fail()
+	}
+}
+
+func TestComputeProcId(t *testing.T) {
+	packetBuffer := make([]byte, 9000)
+	dp := &router.DataPlane{}
+	randomValue := []byte{1, 2, 3, 4}
+	numProcs := 10000
+	dp.SetRandomValue(randomValue)
+	dp.ConfigureProcChannels(numProcs, 1)
+
+	key := []byte("testkey_xxxxxxxx")
+	local := xtest.MustParseIA("1-ff00:0:110")
+	spkt, dpath := prepBaseMsg(time.Now())
+	spkt.DstIA = local
+	spkt.FlowID = (1 << 20) - 1
+	dpath.HopFields = []path.HopField{
+		{ConsIngress: 41, ConsEgress: 40},
+		{ConsIngress: 31, ConsEgress: 30},
+		{ConsIngress: 1, ConsEgress: 0},
+	}
+	dpath.Base.PathMeta.CurrHF = 2
+	dpath.HopFields[2].Mac = computeMAC(t, key,
+		dpath.InfoFields[0], dpath.HopFields[2])
+	spkt.Path = dpath
+	payload := []byte("x")
+	buffer := gopacket.NewSerializeBuffer()
+	err := gopacket.SerializeLayers(buffer,
+		gopacket.SerializeOptions{FixLengths: true},
+		spkt, gopacket.Payload(payload))
+	require.NoError(t, err)
+	raw := buffer.Bytes()
+	copy(packetBuffer, raw)
+	tmpBuffer := make([]byte, 4)
+	binary.BigEndian.PutUint32(tmpBuffer, spkt.FlowID)
+	tmpBuffer[0] &= 0xF
+
+	hasher := fnv.New32a()
+	hasher.Write(randomValue)
+	hasher.Write(tmpBuffer[1:4])
+	hasher.Write(packetBuffer[slayers.CmnHdrLen : slayers.CmnHdrLen+spkt.AddrHdrLen()+1])
+	val1 := hasher.Sum32() % uint32(numProcs)
+	val2, err := dp.ComputeProcId(packetBuffer)
+	assert.NoError(t, err)
+	assert.Equal(t, val1, val2)
 }
 
 func TestDataPlaneAddInternalInterface(t *testing.T) {

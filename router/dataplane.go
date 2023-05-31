@@ -543,7 +543,7 @@ type NetworkInterface struct {
 }
 
 type packet struct {
-	srcAddr   net.UDPAddr
+	srcAddr   *net.UDPAddr
 	dstAddr   *net.UDPAddr
 	ingress   uint16
 	rawPacket []byte
@@ -555,7 +555,6 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 	for _, msg := range msgs {
 		msg.Buffers[0] = make([]byte, 1)
 	}
-	flowIdBuffer := make([]byte, 4)
 	i := 0 // newly loaded buffers
 	j := 0 // unused buffers from previous loop
 	for d.running {
@@ -587,14 +586,14 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 		for _, pkt := range msgs[:numPkts] {
 			rawPacket := pkt.Buffers[0][:pkt.N]
 
-			procId, err := d.computeProcId(rawPacket, flowIdBuffer)
+			procId, err := d.computeProcId(rawPacket)
 			if err != nil {
 				log.Debug("Error while computing procId", "err", err)
 				continue
 			}
 			p := &packet{
 				ingress:   ni.InterfaceId,
-				srcAddr:   *pkt.Addr.(*net.UDPAddr),
+				srcAddr:   pkt.Addr.(*net.UDPAddr),
 				rawPacket: rawPacket,
 			}
 			select {
@@ -610,10 +609,10 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 	return nil
 }
 
-func (d *DataPlane) computeProcId(data []byte, tmpBuffer []byte) (uint32, error) {
+func (d *DataPlane) computeProcId(data []byte) (uint32, error) {
 	// TODO(rohrerj) add unit tests
-	srcHostAddrLen := data[9] & 0x3
-	dstHostAddrLen := data[9] >> 4 & 0x3
+	srcHostAddrLen := ((data[9] & 0x3) + 1) * 4
+	dstHostAddrLen := ((data[9] >> 4 & 0x3) + 1) * 4
 	addrHdrLen := 16 + int(srcHostAddrLen+dstHostAddrLen)
 	if len(data) < slayers.CmnHdrLen+addrHdrLen {
 		return 0, serrors.New("Packet is too short")
@@ -621,12 +620,13 @@ func (d *DataPlane) computeProcId(data []byte, tmpBuffer []byte) (uint32, error)
 	if addrHdrLen > 48 {
 		return 0, serrors.New("Address header is invalid")
 	}
+	tmpBuffer := [3]byte{}
 	copy(tmpBuffer[0:3], data[1:4])
 	tmpBuffer[0] &= 0xF // the left 4 bits don't belong to the flowID
 
 	hasher := fnv.New32a()
 	hasher.Write(d.randomValue)
-	hasher.Write(tmpBuffer[:4])
+	hasher.Write(tmpBuffer[:])
 	hasher.Write(data[slayers.CmnHdrLen : slayers.CmnHdrLen+addrHdrLen+1])
 	return hasher.Sum32() % d.procRoutines, nil
 }
@@ -643,7 +643,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 	for d.running {
 		p := <-c
 		processor.ingressID = p.ingress
-		result, err := processor.processPkt(p.rawPacket, &p.srcAddr)
+		result, err := processor.processPkt(p.rawPacket, p.srcAddr)
 		egress := result.EgressID
 		switch {
 		case err == nil:
