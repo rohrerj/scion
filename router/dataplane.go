@@ -648,6 +648,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 	for d.running {
 		p := <-c
 		processor.ingressID = p.ingress
+		metrics := d.forwardingMetrics[p.ingress]
 		result, err := processor.processPkt(p.rawPacket, p.srcAddr)
 		egress := result.EgressID
 		switch {
@@ -660,7 +661,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 			egress = p.ingress
 		default:
 			log.Debug("Error processing packet", "err", err)
-			// TODO(rohrerj) add metrics
+			metrics.DroppedPacketsTotal.Inc()
 			d.returnPacket(p)
 			continue
 		}
@@ -671,6 +672,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 		fwCh, ok := d.forwardChannels[egress]
 		if !ok {
 			log.Debug("Error determining forwarder. Egress is invalid", "egress", egress)
+			metrics.DroppedPacketsTotal.Inc()
 			d.returnPacket(p)
 			continue
 		}
@@ -684,7 +686,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 			// TODO(rohrerj) add metrics
 		default:
 			d.returnPacket(p)
-			// TODO(rohrerj) add metrics
+			metrics.DroppedPacketsTotal.Inc()
 		}
 
 	}
