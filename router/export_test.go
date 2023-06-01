@@ -85,6 +85,10 @@ func (d *DataPlane) ConfigureProcChannels(numProcRoutines int, queueSize int) []
 	return d.procChannels
 }
 
+func (d *DataPlane) InitMetrics() {
+	d.initMetrics()
+}
+
 func (d *DataPlane) SetRandomValue(v []byte) {
 	d.randomValue = v
 }

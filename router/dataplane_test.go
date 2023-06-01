@@ -104,6 +104,7 @@ func TestReceiver(t *testing.T) {
 	dp.ConfigureBatchSize(64)
 	assert.Equal(t, 100, dp.CurrentPoolSize())
 	dp.SetRunning(true)
+	dp.InitMetrics()
 	defer dp.SetRunning(false)
 	go func() {
 		dp.InitReceiver(router.NetworkInterface{InterfaceId: 0, Addr: nil, Conn: dp.GetInternalInterface()})
@@ -155,6 +156,7 @@ func TestForwarder(t *testing.T) {
 	ni := router.NetworkInterface{InterfaceId: 0, Addr: nil, Conn: dp.GetInternalInterface()}
 	ch := dp.ConfigureForwarder(ni)
 	dp.SetRunning(true)
+	dp.InitMetrics()
 	defer dp.SetRunning(false)
 	go func() {
 		dp.InitForwarder(ni)

@@ -491,7 +491,9 @@ func (d *DataPlane) initComponents() {
 	d.procRoutines = uint32(runtime.GOMAXPROCS(0))
 	d.forwarderQueueSize = 256
 	d.interfaceBatchSize = 256
-	d.processorQueueSize = int(math.Max(float64(len(d.interfaces)*d.interfaceBatchSize/int(d.procRoutines)), float64(d.interfaceBatchSize)))
+	d.processorQueueSize = int(math.Max(
+		float64(len(d.interfaces)*d.interfaceBatchSize/int(d.procRoutines)),
+		float64(d.interfaceBatchSize)))
 	d.randomValue = make([]byte, 16)
 	rand.Read(d.randomValue)
 	//END SET DEFAULTS
@@ -557,6 +559,7 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 	}
 	i := 0 // newly loaded buffers
 	j := 0 // unused buffers from previous loop
+	metrics := d.forwardingMetrics[ni.InterfaceId]
 	for d.running {
 		// collect packets
 		if i+j == 0 {
@@ -584,6 +587,9 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 			continue
 		}
 		for _, pkt := range msgs[:numPkts] {
+			metrics.InputPacketsTotal.Inc()
+			metrics.InputBytesTotal.Add(float64(pkt.N))
+
 			rawPacket := pkt.Buffers[0][:pkt.N]
 
 			procId, err := d.computeProcId(rawPacket)
@@ -598,9 +604,9 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 			}
 			select {
 			case d.procChannels[procId] <- p:
-				//TODO(rohrerj) add metrics
+				// TODO(rohrerj) add metrics
 			default:
-				//TODO(rohrerj) add metrics
+				metrics.DroppedPacketsTotal.Inc()
 			}
 		}
 		j = i + j - numPkts
@@ -610,7 +616,6 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 }
 
 func (d *DataPlane) computeProcId(data []byte) (uint32, error) {
-	// TODO(rohrerj) add unit tests
 	srcHostAddrLen := ((data[9] & 0x3) + 1) * 4
 	dstHostAddrLen := ((data[9] >> 4 & 0x3) + 1) * 4
 	addrHdrLen := 16 + int(srcHostAddrLen+dstHostAddrLen)
@@ -655,7 +660,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 			egress = p.ingress
 		default:
 			log.Debug("Error processing packet", "err", err)
-			//TODO(rohrerj) add metrics
+			// TODO(rohrerj) add metrics
 			d.returnPacket(p)
 			continue
 		}
@@ -676,10 +681,10 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 
 		select {
 		case fwCh <- p:
-			//TODO(rohrerj) add metrics
+			// TODO(rohrerj) add metrics
 		default:
 			d.returnPacket(p)
-			//TODO(rohrerj) add metrics
+			// TODO(rohrerj) add metrics
 		}
 
 	}
@@ -693,7 +698,8 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 	for i := range writeMsgs {
 		writeMsgs[i].Buffers = make([][]byte, 1)
 	}
-
+	metrics := d.forwardingMetrics[ni.InterfaceId]
+	byteLen := 0
 	for d.running {
 		p := <-c
 		writeMsgs[0].Buffers[0] = p.rawPacket
@@ -702,6 +708,7 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 			writeMsgs[0].Addr = p.dstAddr
 		}
 		i := 1
+		byteLen = len(p.rawPacket)
 	loop:
 		for i < d.interfaceBatchSize {
 			select {
@@ -712,21 +719,25 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 					writeMsgs[i].Addr = p.dstAddr
 				}
 				i++
+				byteLen += len(p.rawPacket)
 			default:
 				break loop
 			}
 		}
-		_, err := ni.Conn.WriteBatch(writeMsgs[:i], syscall.MSG_DONTWAIT)
+
+		k, err := ni.Conn.WriteBatch(writeMsgs[:i], syscall.MSG_DONTWAIT)
 		if err != nil {
 			var errno syscall.Errno
 			if !errors.As(err, &errno) ||
 				!(errno == syscall.EAGAIN || errno == syscall.EWOULDBLOCK) {
 				log.Debug("Error writing packet", "ni", ni, "err", err)
-				// error metric
+				metrics.DroppedPacketsTotal.Add(float64(i))
 			}
-			//TODO(rohrerj) add metrics
+			// TODO(rohrerj) add metrics
 		} else {
-			//TODO(rohrerj) add metrics
+			metrics.DroppedPacketsTotal.Add(float64(i - k))
+			metrics.OutputPacketsTotal.Add(float64(k))
+			metrics.OutputBytesTotal.Add(float64(byteLen))
 		}
 		for j := 0; j < i; j++ {
 			d.packetPool <- writeMsgs[j].Buffers[0]
