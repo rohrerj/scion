@@ -163,9 +163,10 @@ func TestForwarder(t *testing.T) {
 	}()
 	assert.Equal(t, 100, dp.CurrentPoolSize())
 	for i := 0; i < 10; i++ {
-		buf := dp.GetBufferFromPool()
+		pkt := dp.GetBufferFromPool()
 		assert.NotEqual(t, 100, dp.CurrentPoolSize())
-		dp.SendPacketToChannel(nil, nil, ni.InterfaceId, buf, ch)
+		pkt.UpdateFields(nil, nil, ni.InterfaceId)
+		dp.SendPacketToChannel(pkt, ch)
 	}
 	select {
 	case <-done:
@@ -363,7 +364,6 @@ func TestDataPlaneRun(t *testing.T) {
 		"route 10 msg from external to internal": {
 			prepareDP: func(ctrl *gomock.Controller, done chan<- struct{}) *router.DataPlane {
 				ret := &router.DataPlane{Metrics: metrics}
-
 				key := []byte("testkey_xxxxxxxx")
 				local := xtest.MustParseIA("1-ff00:0:110")
 
@@ -372,25 +372,23 @@ func TestDataPlaneRun(t *testing.T) {
 				mInternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 				matchFlags := gomock.Eq(syscall.MSG_DONTWAIT)
-				for i := 0; i < 10; i++ {
-					mInternal.EXPECT().WriteBatch(gomock.Any(), matchFlags).DoAndReturn(
-						func(ms underlayconn.Messages, flags int) (int, error) {
+				mInternal.EXPECT().WriteBatch(gomock.Any(), matchFlags).DoAndReturn(
+					func(ms underlayconn.Messages, flags int) (int, error) {
+						if totalCount == 0 {
+							return 0, nil
+						}
+						for _, msg := range ms {
+							want := bytes.Repeat([]byte("actualpayloadbytes"), 10-totalCount)
+							if len(msg.Buffers[0]) != len(want)+84 {
+								return 1, nil
+							}
+							totalCount--
 							if totalCount == 0 {
-								return 0, nil
+								done <- struct{}{}
 							}
-							for _, msg := range ms {
-								want := bytes.Repeat([]byte("actualpayloadbytes"), 10-totalCount)
-								if len(msg.Buffers[0]) != len(want)+84 {
-									return 1, nil
-								}
-								totalCount--
-								if totalCount == 0 {
-									done <- struct{}{}
-								}
-							}
-							return len(ms), nil
-						})
-				}
+						}
+						return len(ms), nil
+					}).AnyTimes()
 				_ = ret.AddInternalInterface(mInternal, net.IP{})
 
 				mExternal := mock_router.NewMockBatchConn(ctrl)

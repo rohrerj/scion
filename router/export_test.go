@@ -98,9 +98,11 @@ func (d *DataPlane) ConfigureBatchSize(size int) {
 }
 
 func (d *DataPlane) InitializePacketPool(poolSize int) {
-	d.packetPool = make(chan []byte, poolSize)
+	d.packetPool = make(chan *packet, poolSize)
 	for i := 0; i < poolSize; i++ {
-		d.packetPool <- make([]byte, bufSize)
+		d.packetPool <- &packet{
+			rawPacket: make([]byte, bufSize),
+		}
 	}
 }
 
@@ -112,18 +114,18 @@ func (d *DataPlane) CurrentPoolSize() int {
 	return len(d.packetPool)
 }
 
-func (d *DataPlane) GetBufferFromPool() []byte {
+func (d *DataPlane) GetBufferFromPool() *packet {
 	return <-d.packetPool
 }
 
-func (d *DataPlane) SendPacketToChannel(srcAddr *net.UDPAddr, dstAddr *net.UDPAddr, ingress uint16, raw []byte, ch chan *packet) {
-	pkt := &packet{
-		srcAddr:   srcAddr,
-		dstAddr:   dstAddr,
-		ingress:   ingress,
-		rawPacket: raw,
-	}
+func (d *DataPlane) SendPacketToChannel(pkt *packet, ch chan *packet) {
 	ch <- pkt
+}
+
+func (pkt *packet) UpdateFields(srcAddr *net.UDPAddr, dstAddr *net.UDPAddr, ingress uint16) {
+	pkt.srcAddr = srcAddr
+	pkt.dstAddr = dstAddr
+	pkt.ingress = ingress
 }
 
 func (d *DataPlane) ConfigureForwarder(ni NetworkInterface) chan *packet {

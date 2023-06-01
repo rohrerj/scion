@@ -118,7 +118,7 @@ type DataPlane struct {
 	procRoutines       uint32
 	procChannels       []chan *packet
 	forwardChannels    map[uint16]chan *packet
-	packetPool         chan []byte
+	packetPool         chan *packet
 	interfaceBatchSize int
 	processorQueueSize int
 	forwarderQueueSize int
@@ -511,9 +511,11 @@ func (d *DataPlane) initComponents() {
 		len(d.interfaces)*(d.forwarderQueueSize+d.interfaceBatchSize)
 
 	log.Debug("Initialize packet pool of size", "poolSize", poolSize)
-	d.packetPool = make(chan []byte, poolSize)
+	d.packetPool = make(chan *packet, poolSize)
 	for i := 0; i < poolSize; i++ {
-		d.packetPool <- make([]byte, bufSize)
+		d.packetPool <- &packet{
+			rawPacket: make([]byte, bufSize),
+		}
 	}
 
 	for _, ni := range d.interfaces {
@@ -560,18 +562,21 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 	i := 0 // newly loaded buffers
 	j := 0 // unused buffers from previous loop
 	metrics := d.forwardingMetrics[ni.InterfaceId]
+	currentPackets := make([]*packet, d.interfaceBatchSize)
 	for d.running {
 		// collect packets
 		if i+j == 0 {
 			p := <-d.packetPool
-			msgs[0].Buffers[0] = p[:bufSize]
+			msgs[0].Buffers[0] = p.rawPacket[:bufSize]
+			currentPackets[0] = p
 			i++
 		}
 	loop:
 		for i+j < d.interfaceBatchSize {
 			select {
 			case p := <-d.packetPool:
-				msgs[i].Buffers[0] = p[:bufSize]
+				msgs[i].Buffers[0] = p.rawPacket[:bufSize]
+				currentPackets[i] = p
 				i++
 			default:
 				break loop
@@ -586,24 +591,24 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 			i = 0
 			continue
 		}
-		for _, pkt := range msgs[:numPkts] {
+		for k, pkt := range msgs[:numPkts] {
 			metrics.InputPacketsTotal.Inc()
 			metrics.InputBytesTotal.Add(float64(pkt.N))
 
-			rawPacket := pkt.Buffers[0][:pkt.N]
+			currPkt := currentPackets[k]
+			currPkt.ingress = ni.InterfaceId
+			currPkt.dstAddr = nil
+			currPkt.srcAddr = pkt.Addr.(*net.UDPAddr)
+			currPkt.rawPacket = currPkt.rawPacket[:pkt.N]
 
-			procId, err := d.computeProcId(rawPacket)
+			procId, err := d.computeProcId(currPkt.rawPacket)
 			if err != nil {
 				log.Debug("Error while computing procId", "err", err)
 				continue
 			}
-			p := &packet{
-				ingress:   ni.InterfaceId,
-				srcAddr:   pkt.Addr.(*net.UDPAddr),
-				rawPacket: rawPacket,
-			}
+
 			select {
-			case d.procChannels[procId] <- p:
+			case d.procChannels[procId] <- currPkt:
 				// TODO(rohrerj) add metrics
 			default:
 				metrics.DroppedPacketsTotal.Inc()
@@ -637,7 +642,7 @@ func (d *DataPlane) computeProcId(data []byte) (uint32, error) {
 }
 
 func (d *DataPlane) returnPacket(pkt *packet) {
-	d.packetPool <- pkt.rawPacket
+	d.packetPool <- pkt
 }
 
 func (d *DataPlane) initProcessingRoutine(id int) error {
@@ -701,6 +706,7 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 		writeMsgs[i].Buffers = make([][]byte, 1)
 	}
 	metrics := d.forwardingMetrics[ni.InterfaceId]
+	currentPackets := make([]*packet, d.interfaceBatchSize)
 	byteLen := 0
 	for d.running {
 		p := <-c
@@ -709,6 +715,7 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 		if p.dstAddr != nil {
 			writeMsgs[0].Addr = p.dstAddr
 		}
+		currentPackets[0] = p
 		i := 1
 		byteLen = len(p.rawPacket)
 	loop:
@@ -720,6 +727,7 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 				if p.dstAddr != nil {
 					writeMsgs[i].Addr = p.dstAddr
 				}
+				currentPackets[i] = p
 				i++
 				byteLen += len(p.rawPacket)
 			default:
@@ -742,7 +750,7 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 			metrics.OutputBytesTotal.Add(float64(byteLen))
 		}
 		for j := 0; j < i; j++ {
-			d.packetPool <- writeMsgs[j].Buffers[0]
+			d.returnPacket(currentPackets[j])
 		}
 
 	}
