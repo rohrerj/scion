@@ -1,4 +1,5 @@
 // Copyright 2020 Anapaya Systems
+// Copyright 2023 ETH Zurich
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -112,7 +113,11 @@ func TestReceiver(t *testing.T) {
 	dp.InitMetrics()
 	defer dp.SetRunning(false)
 	go func() {
-		dp.InitReceiver(router.NetworkInterface{InterfaceId: 0, Addr: nil, Conn: dp.GetInternalInterface()})
+		dp.InitReceiver(router.NetworkInterface{
+			InterfaceId: 0,
+			Addr:        nil,
+			Conn:        dp.GetInternalInterface(),
+		})
 	}()
 	for i := 0; i < 21; i++ {
 		select {
@@ -120,7 +125,7 @@ func TestReceiver(t *testing.T) {
 			// we just check that the processing routine has received the packet
 			assert.Greater(t, 100, dp.CurrentPoolSize())
 		case <-time.After(50 * time.Millisecond):
-			// make sure that we recieved exactly 20 messages
+			// make sure that we received exactly 20 messages
 			if i != 20 {
 				t.Fail()
 			}

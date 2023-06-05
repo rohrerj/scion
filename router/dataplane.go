@@ -1,4 +1,5 @@
 // Copyright 2020 Anapaya Systems
+// Copyright 2023 ETH Zurich
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,9 +59,6 @@ import (
 )
 
 const (
-	// Number of packets to read in a single ReadBatch call.
-	inputBatchCnt = 64
-
 	// TODO(karampok). Investigate whether that value should be higher.  In
 	// theory, PayloadLen in SCION header is 16 bits long, supporting a maximum
 	// payload size of 64KB. At the moment we are limited by Ethernet size
@@ -477,7 +475,10 @@ func (d *DataPlane) loadDefaults() {
 		float64(len(d.interfaces)*d.interfaceBatchSize/int(d.numProcRoutines)),
 		float64(d.interfaceBatchSize)))
 	d.randomValue = make([]byte, 16)
-	rand.Read(d.randomValue)
+	if _, err := rand.Read(d.randomValue); err != nil {
+		log.Error("Error while generating random value", "err", err)
+	}
+
 }
 
 // initializePacketPool calculates the size of the packet pool based on the
@@ -527,11 +528,13 @@ func (d *DataPlane) initComponents(ctx context.Context) {
 		func(ni NetworkInterface) {
 			g.Go(func() error {
 				defer log.HandlePanic()
-				return d.runReceiver(ni)
+				d.runReceiver(ni)
+				return nil
 			})
 			g.Go(func() error {
 				defer log.HandlePanic()
-				return d.runForwarder(ni)
+				d.runForwarder(ni)
+				return nil
 			})
 		}(ni)
 	}
@@ -539,7 +542,8 @@ func (d *DataPlane) initComponents(ctx context.Context) {
 		func(i int) {
 			g.Go(func() error {
 				defer log.HandlePanic()
-				return d.runProcessingRoutine(i)
+				d.runProcessingRoutine(i)
+				return nil
 			})
 		}(i)
 	}
@@ -567,7 +571,7 @@ type packet struct {
 	rawPacket []byte
 }
 
-func (d *DataPlane) runReceiver(ni NetworkInterface) error {
+func (d *DataPlane) runReceiver(ni NetworkInterface) {
 	log.Debug("Initialize receiver for", "interface", ni.InterfaceId)
 	msgs := underlayconn.NewReadMessages(d.interfaceBatchSize)
 	newBufferCount := 0    // newly loaded buffers
@@ -618,7 +622,6 @@ func (d *DataPlane) runReceiver(ni NetworkInterface) error {
 		unusedBufferCount += newBufferCount - numPkts
 		newBufferCount = 0
 	}
-	return nil
 }
 
 func (d *DataPlane) computeProcId(data []byte) (uint32, error) {
@@ -646,7 +649,7 @@ func (d *DataPlane) returnPacketToPool(pkt *packet) {
 	d.packetPool <- pkt
 }
 
-func (d *DataPlane) runProcessingRoutine(id int) error {
+func (d *DataPlane) runProcessingRoutine(id int) {
 	log.Debug("Initialize processing routine with", "id", id)
 	c := d.procChannels[id]
 	processor := newPacketProcessor(d, 0)
@@ -696,10 +699,9 @@ func (d *DataPlane) runProcessingRoutine(id int) error {
 		}
 
 	}
-	return nil
 }
 
-func (d *DataPlane) runForwarder(ni NetworkInterface) error {
+func (d *DataPlane) runForwarder(ni NetworkInterface) {
 	log.Debug("Initialize forwarder for", "interface", ni.InterfaceId)
 	c := d.forwardChannels[ni.InterfaceId]
 	writeMsgs := make(underlayconn.Messages, d.interfaceBatchSize)
@@ -755,7 +757,6 @@ func (d *DataPlane) runForwarder(ni NetworkInterface) error {
 		}
 
 	}
-	return nil
 }
 
 // initMetrics initializes the metrics related to packet forwarding. The
