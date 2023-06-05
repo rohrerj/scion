@@ -17,6 +17,7 @@ package router_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"hash/fnv"
@@ -53,6 +54,10 @@ import (
 
 var metrics = router.NewMetrics()
 
+// TestReceiver sets up a mocked batchConn, starts the receiver that reads from
+// this batchConn and forwards it to the processing routines channels. We verify
+// by directly reading from the processing routine channels that we received
+// the same number of packets as the receiver received.
 func TestReceiver(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -90,7 +95,7 @@ func TestReceiver(t *testing.T) {
 				}
 				return 10, nil
 			},
-		).Times(1)
+		).Times(2)
 		mInternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 		_ = ret.AddInternalInterface(mInternal, net.IP{})
@@ -109,17 +114,24 @@ func TestReceiver(t *testing.T) {
 	go func() {
 		dp.InitReceiver(router.NetworkInterface{InterfaceId: 0, Addr: nil, Conn: dp.GetInternalInterface()})
 	}()
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 21; i++ {
 		select {
 		case <-ch[0]:
 			// we just check that the processing routine has received the packet
 			assert.Greater(t, 100, dp.CurrentPoolSize())
-		case <-time.After(100 * time.Millisecond):
-			t.Fail()
+		case <-time.After(50 * time.Millisecond):
+			// make sure that we recieved exactly 20 messages
+			if i != 20 {
+				t.Fail()
+			}
 		}
 	}
 }
 
+// TestForwarder sets up a mocked batchConn, starts the forwarder that will write to
+// this batchConn and forwards some packets to the channel of the forwarder. We then
+// verify that the forwarder has sent all the packets and that the buffers have been
+// returned to the buffer pool.
 func TestForwarder(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -132,19 +144,17 @@ func TestForwarder(t *testing.T) {
 		mInternal := mock_router.NewMockBatchConn(ctrl)
 		matchFlags := gomock.Eq(syscall.MSG_DONTWAIT)
 		totalCount := 10
-		for i := 0; i < 10; i++ {
-			mInternal.EXPECT().WriteBatch(gomock.Any(), matchFlags).DoAndReturn(
-				func(ms underlayconn.Messages, flags int) (int, error) {
-					if totalCount == 0 {
-						return 0, nil
-					}
-					totalCount -= len(ms)
-					if totalCount == 0 {
-						done <- struct{}{}
-					}
-					return len(ms), nil
-				}).AnyTimes()
-		}
+		mInternal.EXPECT().WriteBatch(gomock.Any(), matchFlags).DoAndReturn(
+			func(ms underlayconn.Messages, flags int) (int, error) {
+				if totalCount == 0 {
+					return 0, nil
+				}
+				totalCount -= len(ms)
+				if totalCount == 0 {
+					done <- struct{}{}
+				}
+				return len(ms), nil
+			}).AnyTimes()
 		_ = ret.AddInternalInterface(mInternal, net.IP{})
 		_ = ret.SetIA(local)
 		_ = ret.SetKey(key)
@@ -177,12 +187,38 @@ func TestForwarder(t *testing.T) {
 }
 
 func TestComputeProcId(t *testing.T) {
-	packetBuffer := make([]byte, 9000)
 	dp := &router.DataPlane{}
 	randomValue := []byte{1, 2, 3, 4}
 	numProcs := 10000
 	dp.SetRandomValue(randomValue)
 	dp.ConfigureProcChannels(numProcs, 1)
+
+	hashForScionPacket := func(flowBuf []byte, pktBuf []byte, s *slayers.SCION) uint32 {
+		hasher := fnv.New32a()
+		hasher.Write(randomValue)
+		hasher.Write(flowBuf[1:4])
+		hasher.Write(pktBuf[slayers.CmnHdrLen : slayers.CmnHdrLen+s.AddrHdrLen()+1])
+		return hasher.Sum32() % uint32(numProcs)
+	}
+
+	// this internal function compares the hash value using the scion parsed packet
+	// with the custom extraction in dataplane.omputeProcID()
+	compareHash := func(payload []byte, s *slayers.SCION) uint32 {
+		buffer := gopacket.NewSerializeBuffer()
+		err := gopacket.SerializeLayers(buffer,
+			gopacket.SerializeOptions{FixLengths: true},
+			s, gopacket.Payload(payload))
+		require.NoError(t, err)
+		raw := buffer.Bytes()
+		flowBuf := make([]byte, 4)
+		binary.BigEndian.PutUint32(flowBuf, s.FlowID)
+		flowBuf[0] &= 0xF
+		val1 := hashForScionPacket(flowBuf, raw, s)
+		val2, err := dp.ComputeProcId(raw)
+		assert.NoError(t, err)
+		assert.Equal(t, val1, val2)
+		return val1
+	}
 
 	key := []byte("testkey_xxxxxxxx")
 	local := xtest.MustParseIA("1-ff00:0:110")
@@ -199,25 +235,25 @@ func TestComputeProcId(t *testing.T) {
 		dpath.InfoFields[0], dpath.HopFields[2])
 	spkt.Path = dpath
 	payload := []byte("x")
-	buffer := gopacket.NewSerializeBuffer()
-	err := gopacket.SerializeLayers(buffer,
-		gopacket.SerializeOptions{FixLengths: true},
-		spkt, gopacket.Payload(payload))
-	require.NoError(t, err)
-	raw := buffer.Bytes()
-	copy(packetBuffer, raw)
-	tmpBuffer := make([]byte, 4)
-	binary.BigEndian.PutUint32(tmpBuffer, spkt.FlowID)
-	tmpBuffer[0] &= 0xF
-
-	hasher := fnv.New32a()
-	hasher.Write(randomValue)
-	hasher.Write(tmpBuffer[1:4])
-	hasher.Write(packetBuffer[slayers.CmnHdrLen : slayers.CmnHdrLen+spkt.AddrHdrLen()+1])
-	val1 := hasher.Sum32() % uint32(numProcs)
-	val2, err := dp.ComputeProcId(packetBuffer)
-	assert.NoError(t, err)
-	assert.Equal(t, val1, val2)
+	// now we test with the packet as defined above
+	val1 := compareHash(payload, spkt)
+	// now we change the payload to make sure that this does not
+	// affect the hashing
+	payload = make([]byte, 100)
+	for i := 0; i < 10; i++ {
+		_, err := rand.Read(payload)
+		assert.NoError(t, err)
+		newVal := compareHash(payload, spkt)
+		assert.Equal(t, val1, newVal)
+	}
+	// now we modify the traffic class to make sure that even
+	// though it share a byte with the flowId, it does not affect
+	// the hashing
+	spkt.TrafficClass = 0
+	for i := 0; i < 16; i++ {
+		compareHash(payload, spkt)
+		spkt.TrafficClass++
+	}
 }
 
 func TestDataPlaneAddInternalInterface(t *testing.T) {

@@ -112,17 +112,18 @@ type DataPlane struct {
 	running           bool
 	Metrics           *Metrics
 	forwardingMetrics map[uint16]forwardingMetrics
-	//new added fields
 
+	//fields for the router-internal queues and routines
 	interfaces         map[uint16]NetworkInterface
-	procRoutines       uint32
+	numProcRoutines    uint32
 	procChannels       []chan *packet
 	forwardChannels    map[uint16]chan *packet
 	packetPool         chan *packet
 	interfaceBatchSize int
 	processorQueueSize int
 	forwarderQueueSize int
-	// the random value used for identifying the process routine
+	// the random value is hashed together with the flowID and the address header
+	// to identify the processing routine that is responsible to process a packet
 	randomValue []byte
 }
 
@@ -457,16 +458,7 @@ func (d *DataPlane) Run(ctx context.Context) error {
 	d.running = true
 
 	d.initMetrics()
-	d.initComponents()
-
-	for k, v := range d.bfdSessions {
-		go func(ifID uint16, c bfdSession) {
-			defer log.HandlePanic()
-			if err := c.Run(ctx); err != nil && err != bfd.AlreadyRunning {
-				log.Error("BFD session failed to start", "ifID", ifID, "err", err)
-			}
-		}(k, v)
-	}
+	d.initComponents(ctx)
 
 	d.mtx.Unlock()
 
@@ -474,7 +466,39 @@ func (d *DataPlane) Run(ctx context.Context) error {
 	return nil
 }
 
-func (d *DataPlane) initComponents() {
+// loadDefaults sets the default configuration for the number of
+// processing routines, the random value, the batch and queue sizes
+func (d *DataPlane) loadDefaults() {
+	// TODO(rohrerj) move this logic to configuration in configuration PR
+	d.numProcRoutines = uint32(runtime.GOMAXPROCS(0))
+	d.forwarderQueueSize = 256
+	d.interfaceBatchSize = 256
+	d.processorQueueSize = int(math.Max(
+		float64(len(d.interfaces)*d.interfaceBatchSize/int(d.numProcRoutines)),
+		float64(d.interfaceBatchSize)))
+	d.randomValue = make([]byte, 16)
+	rand.Read(d.randomValue)
+}
+
+// initializePacketPool calculates the size of the packet pool based on the
+// current dataplane settings and allocates all the buffers
+func (d *DataPlane) initializePacketPool() {
+	poolSize := len(d.interfaces)*d.interfaceBatchSize +
+		int(d.numProcRoutines)*(d.processorQueueSize+1) +
+		len(d.interfaces)*(d.forwarderQueueSize+d.interfaceBatchSize)
+
+	log.Debug("Initialize packet pool of size", "poolSize", poolSize)
+	d.packetPool = make(chan *packet, poolSize)
+	for i := 0; i < poolSize; i++ {
+		d.packetPool <- &packet{
+			rawPacket: make([]byte, bufSize),
+		}
+	}
+}
+
+// initComponents initializes the channels, buffers, the receivers, the forwarders,
+// processing routines and the bfd sessions
+func (d *DataPlane) initComponents(ctx context.Context) {
 	g := &errgroup.Group{}
 	d.interfaces = make(map[uint16]NetworkInterface)
 	d.interfaces[0] = NetworkInterface{
@@ -487,56 +511,46 @@ func (d *DataPlane) initComponents() {
 			Conn:        conn,
 		}
 	}
-	//SET DEFAULTS
-	d.procRoutines = uint32(runtime.GOMAXPROCS(0))
-	d.forwarderQueueSize = 256
-	d.interfaceBatchSize = 256
-	d.processorQueueSize = int(math.Max(
-		float64(len(d.interfaces)*d.interfaceBatchSize/int(d.procRoutines)),
-		float64(d.interfaceBatchSize)))
-	d.randomValue = make([]byte, 16)
-	rand.Read(d.randomValue)
-	//END SET DEFAULTS
+	d.loadDefaults()
+	d.initializePacketPool()
 
-	d.procChannels = make([]chan *packet, d.procRoutines)
-	for i := 0; i < int(d.procRoutines); i++ {
+	d.procChannels = make([]chan *packet, d.numProcRoutines)
+	for i := 0; i < int(d.numProcRoutines); i++ {
 		d.procChannels[i] = make(chan *packet, d.processorQueueSize)
 	}
 	d.forwardChannels = make(map[uint16]chan *packet)
 	for _, ni := range d.interfaces {
 		d.forwardChannels[ni.InterfaceId] = make(chan *packet, d.forwarderQueueSize)
 	}
-	poolSize := len(d.interfaces)*d.interfaceBatchSize +
-		int(d.procRoutines)*(d.processorQueueSize+1) +
-		len(d.interfaces)*(d.forwarderQueueSize+d.interfaceBatchSize)
-
-	log.Debug("Initialize packet pool of size", "poolSize", poolSize)
-	d.packetPool = make(chan *packet, poolSize)
-	for i := 0; i < poolSize; i++ {
-		d.packetPool <- &packet{
-			rawPacket: make([]byte, bufSize),
-		}
-	}
 
 	for _, ni := range d.interfaces {
 		func(ni NetworkInterface) {
 			g.Go(func() error {
 				defer log.HandlePanic()
-				return d.initReceiver(ni)
+				return d.runReceiver(ni)
 			})
 			g.Go(func() error {
 				defer log.HandlePanic()
-				return d.initForwarder(ni)
+				return d.runForwarder(ni)
 			})
 		}(ni)
 	}
-	for i := 0; i < int(d.procRoutines); i++ {
+	for i := 0; i < int(d.numProcRoutines); i++ {
 		func(i int) {
 			g.Go(func() error {
 				defer log.HandlePanic()
-				return d.initProcessingRoutine(i)
+				return d.runProcessingRoutine(i)
 			})
 		}(i)
+	}
+
+	for k, v := range d.bfdSessions {
+		go func(ifID uint16, c bfdSession) {
+			defer log.HandlePanic()
+			if err := c.Run(ctx); err != nil && err != bfd.AlreadyRunning {
+				log.Error("BFD session failed to start", "ifID", ifID, "err", err)
+			}
+		}(k, v)
 	}
 }
 
@@ -553,42 +567,28 @@ type packet struct {
 	rawPacket []byte
 }
 
-func (d *DataPlane) initReceiver(ni NetworkInterface) error {
+func (d *DataPlane) runReceiver(ni NetworkInterface) error {
 	log.Debug("Initialize receiver for", "interface", ni.InterfaceId)
 	msgs := underlayconn.NewReadMessages(d.interfaceBatchSize)
-	for _, msg := range msgs {
-		msg.Buffers[0] = make([]byte, 1)
-	}
-	i := 0 // newly loaded buffers
-	j := 0 // unused buffers from previous loop
+	newBufferCount := 0    // newly loaded buffers
+	unusedBufferCount := 0 // unused buffers from previous loop
 	metrics := d.forwardingMetrics[ni.InterfaceId]
 	currentPackets := make([]*packet, d.interfaceBatchSize)
 	for d.running {
 		// collect packets
-		if i+j == 0 {
+		for newBufferCount+unusedBufferCount < d.interfaceBatchSize {
 			p := <-d.packetPool
-			msgs[0].Buffers[0] = p.rawPacket[:bufSize]
-			currentPackets[0] = p
-			i++
-		}
-	loop:
-		for i+j < d.interfaceBatchSize {
-			select {
-			case p := <-d.packetPool:
-				msgs[i].Buffers[0] = p.rawPacket[:bufSize]
-				currentPackets[i] = p
-				i++
-			default:
-				break loop
-			}
+			msgs[newBufferCount].Buffers[0] = p.rawPacket[:bufSize]
+			currentPackets[newBufferCount] = p
+			newBufferCount++
 		}
 
 		// read batch
-		numPkts, err := ni.Conn.ReadBatch(msgs[:i+j])
+		numPkts, err := ni.Conn.ReadBatch(msgs[:newBufferCount+unusedBufferCount])
 		if err != nil {
 			log.Debug("Error while reading batch", "interfaceId", ni.InterfaceId, "err", err)
-			j = i + j
-			i = 0
+			unusedBufferCount += newBufferCount
+			newBufferCount = 0
 			continue
 		}
 		for k, pkt := range msgs[:numPkts] {
@@ -611,11 +611,12 @@ func (d *DataPlane) initReceiver(ni NetworkInterface) error {
 			case d.procChannels[procId] <- currPkt:
 				// TODO(rohrerj) add metrics
 			default:
+				d.returnPacketToPool(currPkt)
 				metrics.DroppedPacketsTotal.Inc()
 			}
 		}
-		j = i + j - numPkts
-		i = 0
+		unusedBufferCount += newBufferCount - numPkts
+		newBufferCount = 0
 	}
 	return nil
 }
@@ -630,22 +631,22 @@ func (d *DataPlane) computeProcId(data []byte) (uint32, error) {
 	if addrHdrLen > 48 {
 		return 0, serrors.New("Address header is invalid")
 	}
-	tmpBuffer := [3]byte{}
-	copy(tmpBuffer[0:3], data[1:4])
-	tmpBuffer[0] &= 0xF // the left 4 bits don't belong to the flowID
+	flowIDBuffer := [3]byte{}
+	copy(flowIDBuffer[0:3], data[1:4])
+	flowIDBuffer[0] &= 0xF // the left 4 bits don't belong to the flowID
 
 	hasher := fnv.New32a()
 	hasher.Write(d.randomValue)
-	hasher.Write(tmpBuffer[:])
+	hasher.Write(flowIDBuffer[:])
 	hasher.Write(data[slayers.CmnHdrLen : slayers.CmnHdrLen+addrHdrLen+1])
-	return hasher.Sum32() % d.procRoutines, nil
+	return hasher.Sum32() % d.numProcRoutines, nil
 }
 
-func (d *DataPlane) returnPacket(pkt *packet) {
+func (d *DataPlane) returnPacketToPool(pkt *packet) {
 	d.packetPool <- pkt
 }
 
-func (d *DataPlane) initProcessingRoutine(id int) error {
+func (d *DataPlane) runProcessingRoutine(id int) error {
 	log.Debug("Initialize processing routine with", "id", id)
 	c := d.procChannels[id]
 	processor := newPacketProcessor(d, 0)
@@ -667,18 +668,18 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 		default:
 			log.Debug("Error processing packet", "err", err)
 			metrics.DroppedPacketsTotal.Inc()
-			d.returnPacket(p)
+			d.returnPacketToPool(p)
 			continue
 		}
 		if result.OutConn == nil { // e.g. BFD case no message is forwarded
-			d.returnPacket(p)
+			d.returnPacketToPool(p)
 			continue
 		}
 		fwCh, ok := d.forwardChannels[egress]
 		if !ok {
 			log.Debug("Error determining forwarder. Egress is invalid", "egress", egress)
 			metrics.DroppedPacketsTotal.Inc()
-			d.returnPacket(p)
+			d.returnPacketToPool(p)
 			continue
 		}
 		p.rawPacket = result.OutPkt
@@ -690,7 +691,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 		case fwCh <- p:
 			// TODO(rohrerj) add metrics
 		default:
-			d.returnPacket(p)
+			d.returnPacketToPool(p)
 			metrics.DroppedPacketsTotal.Inc()
 		}
 
@@ -698,7 +699,7 @@ func (d *DataPlane) initProcessingRoutine(id int) error {
 	return nil
 }
 
-func (d *DataPlane) initForwarder(ni NetworkInterface) error {
+func (d *DataPlane) runForwarder(ni NetworkInterface) error {
 	log.Debug("Initialize forwarder for", "interface", ni.InterfaceId)
 	c := d.forwardChannels[ni.InterfaceId]
 	writeMsgs := make(underlayconn.Messages, d.interfaceBatchSize)
@@ -750,7 +751,7 @@ func (d *DataPlane) initForwarder(ni NetworkInterface) error {
 			metrics.OutputBytesTotal.Add(float64(byteLen))
 		}
 		for j := 0; j < i; j++ {
-			d.returnPacket(currentPackets[j])
+			d.returnPacketToPool(currentPackets[j])
 		}
 
 	}

@@ -76,10 +76,10 @@ func (d *DataPlane) ComputeProcId(data []byte) (uint32, error) {
 }
 
 func (d *DataPlane) ConfigureProcChannels(numProcRoutines int, queueSize int) []chan *packet {
-	d.procRoutines = uint32(numProcRoutines)
+	d.numProcRoutines = uint32(numProcRoutines)
 	d.processorQueueSize = queueSize
-	d.procChannels = make([]chan *packet, d.procRoutines)
-	for i := 0; i < int(d.procRoutines); i++ {
+	d.procChannels = make([]chan *packet, d.numProcRoutines)
+	for i := 0; i < int(d.numProcRoutines); i++ {
 		d.procChannels[i] = make(chan *packet, d.processorQueueSize)
 	}
 	return d.procChannels
@@ -107,7 +107,7 @@ func (d *DataPlane) InitializePacketPool(poolSize int) {
 }
 
 func (d *DataPlane) InitReceiver(ni NetworkInterface) {
-	d.initReceiver(ni)
+	d.runReceiver(ni)
 }
 
 func (d *DataPlane) CurrentPoolSize() int {
@@ -141,7 +141,7 @@ func (d *DataPlane) ConfigureForwarder(ni NetworkInterface) chan *packet {
 }
 
 func (d *DataPlane) InitForwarder(ni NetworkInterface) {
-	d.initForwarder(ni)
+	d.runForwarder(ni)
 }
 
 func (d *DataPlane) GetInternalInterface() BatchConn {
