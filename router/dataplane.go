@@ -565,8 +565,13 @@ type NetworkInterface struct {
 }
 
 type packet struct {
-	srcAddr   *net.UDPAddr
-	dstAddr   *net.UDPAddr
+	// The source address. Will be set by the receiver
+	srcAddr *net.UDPAddr
+	// The address to where we are forwarding the packet.
+	// Will be set by the processing routine
+	dstAddr *net.UDPAddr
+	// The ingress on which this packet arrived. Will be
+	// set by the receiver
 	ingress   uint16
 	rawPacket []byte
 }
@@ -577,13 +582,13 @@ func (d *DataPlane) runReceiver(ni NetworkInterface) {
 	newBufferCount := 0    // newly loaded buffers
 	unusedBufferCount := 0 // unused buffers from previous loop
 	metrics := d.forwardingMetrics[ni.InterfaceId]
-	currentPackets := make([]*packet, d.interfaceBatchSize)
+	currentPacketsFromPool := make([]*packet, d.interfaceBatchSize)
 	for d.running {
 		// collect packets
 		for newBufferCount+unusedBufferCount < d.interfaceBatchSize {
 			p := <-d.packetPool
 			msgs[newBufferCount].Buffers[0] = p.rawPacket[:bufSize]
-			currentPackets[newBufferCount] = p
+			currentPacketsFromPool[newBufferCount] = p
 			newBufferCount++
 		}
 
@@ -599,7 +604,7 @@ func (d *DataPlane) runReceiver(ni NetworkInterface) {
 			metrics.InputPacketsTotal.Inc()
 			metrics.InputBytesTotal.Add(float64(pkt.N))
 
-			currPkt := currentPackets[k]
+			currPkt := currentPacketsFromPool[k]
 			currPkt.ingress = ni.InterfaceId
 			currPkt.dstAddr = nil
 			currPkt.srcAddr = pkt.Addr.(*net.UDPAddr)
@@ -709,28 +714,28 @@ func (d *DataPlane) runForwarder(ni NetworkInterface) {
 		writeMsgs[i].Buffers = make([][]byte, 1)
 	}
 	metrics := d.forwardingMetrics[ni.InterfaceId]
-	currentPackets := make([]*packet, d.interfaceBatchSize)
+	currentPacketsToSend := make([]*packet, d.interfaceBatchSize)
+	// byteLen contains the length of all packets in the batch,
+	// also those that might not be sent correctly
 	byteLen := 0
+	prepareMsg := func(p *packet, i int) {
+		writeMsgs[i].Buffers[0] = p.rawPacket
+		writeMsgs[i].Addr = nil
+		if p.dstAddr != nil {
+			writeMsgs[i].Addr = p.dstAddr
+		}
+		currentPacketsToSend[i] = p
+	}
 	for d.running {
 		p := <-c
-		writeMsgs[0].Buffers[0] = p.rawPacket
-		writeMsgs[0].Addr = nil
-		if p.dstAddr != nil {
-			writeMsgs[0].Addr = p.dstAddr
-		}
-		currentPackets[0] = p
+		prepareMsg(p, 0)
 		i := 1
 		byteLen = len(p.rawPacket)
 	loop:
 		for i < d.interfaceBatchSize {
 			select {
 			case p := <-c:
-				writeMsgs[i].Buffers[0] = p.rawPacket
-				writeMsgs[i].Addr = nil
-				if p.dstAddr != nil {
-					writeMsgs[i].Addr = p.dstAddr
-				}
-				currentPackets[i] = p
+				prepareMsg(p, i)
 				i++
 				byteLen += len(p.rawPacket)
 			default:
@@ -753,7 +758,7 @@ func (d *DataPlane) runForwarder(ni NetworkInterface) {
 			metrics.OutputBytesTotal.Add(float64(byteLen))
 		}
 		for j := 0; j < i; j++ {
-			d.returnPacketToPool(currentPackets[j])
+			d.returnPacketToPool(currentPacketsToSend[j])
 		}
 
 	}
