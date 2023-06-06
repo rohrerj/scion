@@ -465,6 +465,13 @@ func (d *DataPlane) Run(ctx context.Context) error {
 	return nil
 }
 
+func (d *DataPlane) Exit() {
+	d.running = false
+	for _, ni := range d.interfaces {
+		ni.Conn.Close()
+	}
+}
+
 // loadDefaults sets the default configuration for the number of
 // processing routines, the random value, the batch and queue sizes
 func (d *DataPlane) loadDefaults() {
@@ -501,7 +508,9 @@ func (d *DataPlane) initializePacketPool() {
 // initComponents initializes the channels, buffers, the receivers, the forwarders,
 // processing routines and the bfd sessions
 func (d *DataPlane) initComponents(ctx context.Context) {
-	g := &errgroup.Group{}
+	receiverGroup := &errgroup.Group{}
+	procGroup := &errgroup.Group{}
+	forwarderGroup := &errgroup.Group{}
 	d.interfaces = make(map[uint16]NetworkInterface)
 	d.interfaces[0] = NetworkInterface{
 		InterfaceId: 0,
@@ -527,12 +536,12 @@ func (d *DataPlane) initComponents(ctx context.Context) {
 
 	for _, ni := range d.interfaces {
 		func(ni NetworkInterface) {
-			g.Go(func() error {
+			receiverGroup.Go(func() error {
 				defer log.HandlePanic()
 				d.runReceiver(ni)
 				return nil
 			})
-			g.Go(func() error {
+			forwarderGroup.Go(func() error {
 				defer log.HandlePanic()
 				d.runForwarder(ni)
 				return nil
@@ -541,7 +550,7 @@ func (d *DataPlane) initComponents(ctx context.Context) {
 	}
 	for i := 0; i < int(d.numProcRoutines); i++ {
 		func(i int) {
-			g.Go(func() error {
+			procGroup.Go(func() error {
 				defer log.HandlePanic()
 				d.runProcessingRoutine(i)
 				return nil
@@ -557,6 +566,16 @@ func (d *DataPlane) initComponents(ctx context.Context) {
 			}
 		}(k, v)
 	}
+	receiverGroup.Wait()
+	for _, ch := range d.procChannels {
+		close(ch)
+	}
+	procGroup.Wait()
+	for _, ch := range d.forwardChannels {
+		close(ch)
+	}
+	forwarderGroup.Wait()
+	log.Debug("all components terminated")
 }
 
 type NetworkInterface struct {
@@ -661,7 +680,10 @@ func (d *DataPlane) runProcessingRoutine(id int) {
 	processor := newPacketProcessor(d, 0)
 	var scmpErr scmpError
 	for d.running {
-		p := <-c
+		p, ok := <-c
+		if !ok {
+			continue
+		}
 		processor.ingressID = p.ingress
 		metrics := d.forwardingMetrics[p.ingress]
 		result, err := processor.processPkt(p.rawPacket, p.srcAddr)
@@ -728,12 +750,19 @@ func (d *DataPlane) runForwarder(ni NetworkInterface) {
 		currentPacketsToSend[i] = p
 	}
 	for d.running {
-		p := <-c
+		p, ok := <-c
+		if !ok {
+			continue
+		}
 		prepareMsg(p, 0)
 		byteLen = len(p.rawPacket)
 		availablePacket := int(math.Min(float64(len(c)), float64(d.interfaceBatchSize-1)) + 1)
 		for i := 1; i < availablePacket; i++ {
-			p = <-c
+			p, ok = <-c
+			if !ok {
+				availablePacket = i
+				break
+			}
 			prepareMsg(p, i)
 			byteLen += len(p.rawPacket)
 		}
