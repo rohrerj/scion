@@ -566,15 +566,21 @@ func (d *DataPlane) initComponents(ctx context.Context) {
 			}
 		}(k, v)
 	}
-	receiverGroup.Wait()
+	if err := receiverGroup.Wait(); err != nil {
+		log.Debug("Receiver error", "err", err)
+	}
 	for _, ch := range d.procChannels {
 		close(ch)
 	}
-	procGroup.Wait()
+	if err := procGroup.Wait(); err != nil {
+		log.Debug("Processing error", "err", err)
+	}
 	for _, ch := range d.forwardChannels {
 		close(ch)
 	}
-	forwarderGroup.Wait()
+	if err := forwarderGroup.Wait(); err != nil {
+		log.Debug("Forwarder error", "err", err)
+	}
 	log.Debug("all components terminated")
 }
 
