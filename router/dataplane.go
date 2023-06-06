@@ -111,7 +111,8 @@ type DataPlane struct {
 	Metrics           *Metrics
 	forwardingMetrics map[uint16]forwardingMetrics
 
-	//fields for the router-internal queues and routines
+	// fields for the router-internal queues and routines, see
+	// https://github.com/scionproto/scion/blob/master/doc/dev/design/BorderRouter.rst
 	interfaces         map[uint16]NetworkInterface
 	numProcRoutines    uint32
 	procChannels       []chan *packet
@@ -729,35 +730,28 @@ func (d *DataPlane) runForwarder(ni NetworkInterface) {
 	for d.running {
 		p := <-c
 		prepareMsg(p, 0)
-		i := 1
 		byteLen = len(p.rawPacket)
-	loop:
-		for i < d.interfaceBatchSize {
-			select {
-			case p := <-c:
-				prepareMsg(p, i)
-				i++
-				byteLen += len(p.rawPacket)
-			default:
-				break loop
-			}
+		availablePacket := int(math.Min(float64(len(c)), float64(d.interfaceBatchSize-1)) + 1)
+		for i := 1; i < availablePacket; i++ {
+			p = <-c
+			prepareMsg(p, i)
+			byteLen += len(p.rawPacket)
 		}
-
-		k, err := ni.Conn.WriteBatch(writeMsgs[:i], syscall.MSG_DONTWAIT)
+		k, err := ni.Conn.WriteBatch(writeMsgs[:availablePacket], syscall.MSG_DONTWAIT)
 		if err != nil {
 			var errno syscall.Errno
 			if !errors.As(err, &errno) ||
 				!(errno == syscall.EAGAIN || errno == syscall.EWOULDBLOCK) {
 				log.Debug("Error writing packet", "ni", ni, "err", err)
-				metrics.DroppedPacketsTotal.Add(float64(i))
+				metrics.DroppedPacketsTotal.Add(float64(availablePacket))
 			}
 			// TODO(rohrerj) add metrics
 		} else {
-			metrics.DroppedPacketsTotal.Add(float64(i - k))
+			metrics.DroppedPacketsTotal.Add(float64(availablePacket - k))
 			metrics.OutputPacketsTotal.Add(float64(k))
 			metrics.OutputBytesTotal.Add(float64(byteLen))
 		}
-		for j := 0; j < i; j++ {
+		for j := 0; j < availablePacket; j++ {
 			d.returnPacketToPool(currentPacketsToSend[j])
 		}
 
