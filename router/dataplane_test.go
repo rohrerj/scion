@@ -122,10 +122,10 @@ func TestReceiver(t *testing.T) {
 	for i := 0; i < 21; i++ {
 		select {
 		case <-ch[0]:
-			// we just check that the processing routine has received the packet
+			// make sure that the pool size has decreased
 			assert.Greater(t, 100, dp.CurrentPoolSize())
 		case <-time.After(50 * time.Millisecond):
-			// make sure that we received exactly 20 messages
+			// make sure that the processing routine received exactly 20 messages
 			if i != 20 {
 				t.Fail()
 			}
