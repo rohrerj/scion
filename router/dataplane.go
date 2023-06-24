@@ -591,6 +591,7 @@ func (d *DataPlane) runReceiver(ifID uint16, conn BatchConn, cfg *RunConfig,
 		default:
 			d.returnPacketToPool(pkt.Buffers[0])
 			metrics.DroppedPacketsTotal.Inc()
+			metrics.DroppedPacketsBusyProcessor.Inc()
 		}
 	}
 
@@ -684,9 +685,11 @@ func (d *DataPlane) runProcessor(id int, q <-chan packet,
 		select {
 		case fwCh <- p:
 			// TODO(rohrerj) add metrics
+			metrics.ProcessedPackets.Inc()
 		default:
 			d.returnPacketToPool(p.rawPacket)
 			metrics.DroppedPacketsTotal.Inc()
+			metrics.DroppedPacketsBusyForwarder.Inc()
 		}
 
 	}
@@ -2068,26 +2071,35 @@ func nextHdr(layer gopacket.DecodingLayer) slayers.L4ProtocolType {
 // forwardingMetrics contains the subset of Metrics relevant for forwarding,
 // instantiated with some interface-specific labels.
 type forwardingMetrics struct {
-	InputBytesTotal     prometheus.Counter
-	OutputBytesTotal    prometheus.Counter
-	InputPacketsTotal   prometheus.Counter
-	OutputPacketsTotal  prometheus.Counter
-	DroppedPacketsTotal prometheus.Counter
+	InputBytesTotal             prometheus.Counter
+	OutputBytesTotal            prometheus.Counter
+	InputPacketsTotal           prometheus.Counter
+	OutputPacketsTotal          prometheus.Counter
+	DroppedPacketsTotal         prometheus.Counter
+	DroppedPacketsBusyProcessor prometheus.Counter
+	DroppedPacketsBusyForwarder prometheus.Counter
+	ProcessedPackets            prometheus.Counter
 }
 
 func initForwardingMetrics(metrics *Metrics, labels prometheus.Labels) forwardingMetrics {
 	c := forwardingMetrics{
-		InputBytesTotal:     metrics.InputBytesTotal.With(labels),
-		InputPacketsTotal:   metrics.InputPacketsTotal.With(labels),
-		OutputBytesTotal:    metrics.OutputBytesTotal.With(labels),
-		OutputPacketsTotal:  metrics.OutputPacketsTotal.With(labels),
-		DroppedPacketsTotal: metrics.DroppedPacketsTotal.With(labels),
+		InputBytesTotal:             metrics.InputBytesTotal.With(labels),
+		InputPacketsTotal:           metrics.InputPacketsTotal.With(labels),
+		OutputBytesTotal:            metrics.OutputBytesTotal.With(labels),
+		OutputPacketsTotal:          metrics.OutputPacketsTotal.With(labels),
+		DroppedPacketsTotal:         metrics.DroppedPacketsTotal.With(labels),
+		DroppedPacketsBusyProcessor: metrics.DroppedPacketsBusyProcessor.With(labels),
+		DroppedPacketsBusyForwarder: metrics.DroppedPacketsBusyForwarder.With(labels),
+		ProcessedPackets:            metrics.ProcessedPackets.With(labels),
 	}
 	c.InputBytesTotal.Add(0)
 	c.InputPacketsTotal.Add(0)
 	c.OutputBytesTotal.Add(0)
 	c.OutputPacketsTotal.Add(0)
 	c.DroppedPacketsTotal.Add(0)
+	c.DroppedPacketsBusyProcessor.Add(0)
+	c.DroppedPacketsBusyForwarder.Add(0)
+	c.ProcessedPackets.Add(0)
 	return c
 }
 
