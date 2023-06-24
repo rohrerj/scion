@@ -1,0 +1,19 @@
+load("//tools/lint:go.bzl", "go_library")
+load("//:scion.bzl", "scion_go_binary")
+
+go_library(
+    name = "go_default_library",
+    srcs = ["main.go"],
+    importpath = "github.com/scionproto/scion/tools/metrics_querier",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/log:go_default_library",
+        "//pkg/private/serrors:go_default_library",
+    ],
+)
+
+scion_go_binary(
+    name = "metrics_querier",
+    embed = [":go_default_library"],
+    visibility = ["//visibility:public"],
+)
