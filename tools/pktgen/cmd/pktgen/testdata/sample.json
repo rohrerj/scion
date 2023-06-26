@@ -1,16 +1,16 @@
 {
     "ethernet": {
-        "SrcMAC": "f0:0d:ca:fe:be:ef",
-        "DstMAC": "f0:0d:ca:fe:00:13",
+        "SrcMAC": "02:42:ac:14:00:14",
+        "DstMAC": "02:42:ac:14:00:14",
         "EthernetType": 2048
     },
     "ipv4": {
-        "SrcIP": "10.0.0.40",
-        "DstIP": "10.0.0.45"
+        "SrcIP": "172.20.0.22",
+        "DstIP": "172.20.0.18"
     },
     "udp": {
-        "SrcPort": 4000,
-        "DstPort": 5000
+        "SrcPort": 31100,
+        "DstPort": 30042
     },
     "scion": {
         "TrafficClass": 184,

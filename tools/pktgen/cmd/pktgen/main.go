@@ -50,6 +50,7 @@ type flags struct {
 	interactive bool
 	noColor     bool
 	refresh     bool
+	flowId      int
 }
 
 func main() {
@@ -88,6 +89,7 @@ func main() {
 		"The configuration for the lower layers.")
 	cmd.Flags().StringVarP(&cfg.out, "out", "o", "pktgen.pcap", "The name of the output file.")
 	cmd.Flags().StringVar(&cfg.logLevel, "log.level", "info", "The level of the log.")
+	cmd.Flags().IntVar(&cfg.flowId, "flowid", 0, "flowid")
 	if err := cmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
@@ -116,7 +118,7 @@ func run(cfg flags, dst *snet.UDPAddr) error {
 	udpLayer := parseUDP(&layersCfg)
 	_ = udpLayer.SetNetworkLayerForChecksum(ipv4Layer)
 	scionLayer := parseSCION(&layersCfg)
-
+	scionLayer.FlowID = uint32(cfg.flowId)
 	ctx := app.WithSignal(context.Background(), os.Kill)
 	sdConn, err := daemon.NewService(cfg.daemon).Connect(ctx)
 	if err != nil {
