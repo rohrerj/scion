@@ -123,6 +123,9 @@ func realMain(ctx context.Context) error {
 		defer log.HandlePanic()
 		runConfig := &router.RunConfig{}
 		runConfig.LoadDefaults()
+		if globalCfg.General.ID != "br1-ff00_0_110-1" {
+			runConfig.NumProcessors = 1
+		}
 		if err := dp.DataPlane.Run(errCtx, runConfig); err != nil {
 			return serrors.WrapStr("running dataplane", err)
 		}
