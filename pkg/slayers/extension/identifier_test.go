@@ -88,3 +88,54 @@ func TestIdentifierDecode(t *testing.T) {
 		}(tc)
 	}
 }
+
+func TestIdentifierSerialize(t *testing.T) {
+	type test struct {
+		name       string
+		identifier *extension.IdentifierOption
+		buffer     []byte
+		validate   func([]byte, error, *testing.T)
+	}
+	unixNow := uint32(time.Now().Unix())
+	tests := []test{
+		{
+			name:       "identifier is nil",
+			identifier: nil,
+			buffer:     make([]byte, 100),
+			validate: func(b []byte, err error, t *testing.T) {
+				assert.Error(t, err)
+			},
+		},
+		{
+			name:       "buffer too small",
+			identifier: &extension.IdentifierOption{},
+			buffer:     make([]byte, 7),
+			validate: func(b []byte, err error, t *testing.T) {
+				assert.Error(t, err)
+			},
+		},
+		{
+			name: "correct serialization",
+			identifier: &extension.IdentifierOption{
+				Timestamp:     time.Unix(int64(unixNow), 0x7000001*int64(time.Millisecond)),
+				PacketID:      0xaabbccdd,
+				BaseTimestamp: unixNow,
+			},
+			buffer: make([]byte, 8),
+			validate: func(b []byte, err error, t *testing.T) {
+				assert.NoError(t, err)
+				assert.Equal(t, []byte{0x7, 0x00, 0x00, 0x01}, b[0:4]) //the timestamp
+				assert.Equal(t, []byte{0xaa, 0xbb, 0xcc, 0xdd}, b[4:8])
+			},
+		},
+	}
+	for _, tc := range tests {
+		func(tc test) {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				err := tc.identifier.Serialize(tc.buffer)
+				tc.validate(tc.buffer, err, t)
+			})
+		}(tc)
+	}
+}
