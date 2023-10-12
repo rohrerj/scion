@@ -84,7 +84,7 @@ func TestFabridDecode(t *testing.T) {
 				PathMeta: scion.MetaHdr{
 					CurrHF: 1,
 				},
-				NumHops: 62,
+				NumHops: extension.MaxSupportedFabridHops,
 			},
 			validate: func(fo extension.FabridOption, err error, t *testing.T) {
 				assert.NoError(t, err)
@@ -100,7 +100,7 @@ func TestFabridDecode(t *testing.T) {
 				PathMeta: scion.MetaHdr{
 					CurrHF: 1,
 				},
-				NumHops: 63,
+				NumHops: extension.MaxSupportedFabridHops + 1,
 			},
 			validate: func(fo extension.FabridOption, err error, t *testing.T) {
 				assert.Error(t, err)
@@ -174,7 +174,7 @@ func TestFabridSerialize(t *testing.T) {
 		{
 			name: "Too many hops",
 			fabrid: &extension.FabridOption{
-				HopfieldMetadata: make([]extension.FabridHopfieldMetadata, 63),
+				HopfieldMetadata: make([]extension.FabridHopfieldMetadata, extension.MaxSupportedFabridHops+1),
 			},
 			buffer: make([]byte, 256),
 			validate: func(b []byte, err error, t *testing.T) {

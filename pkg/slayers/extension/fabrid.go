@@ -37,6 +37,7 @@ import (
 
 const baseFabridLen int = 4
 const fabridMetadataLen int = 4
+const MaxSupportedFabridHops = 62
 
 type FabridOption struct {
 	HopfieldMetadata []FabridHopfieldMetadata
@@ -87,7 +88,7 @@ func (f *FabridOption) validate(b []byte, base *scion.Base) error {
 		return serrors.New("Raw Fabrid option too short", "is", len(b),
 			"expected", fabridLen(base.NumHops))
 	}
-	if base.NumHops > 62 {
+	if base.NumHops > MaxSupportedFabridHops {
 		// The size of FABRID is limited to 255 bytes because of the HBH option length field
 		// 4 bytes + 62 * 4 bytes = 252 bytes
 		return serrors.New("Fabrid is not supported for paths consisting of more than 62 hopfields")
@@ -135,7 +136,7 @@ func (f *FabridOption) SerializeTo(b []byte) error {
 		return serrors.New("Buffer too short", "is", len(b),
 			"expected", fabridLen(len(f.HopfieldMetadata)))
 	}
-	if len(f.HopfieldMetadata) > 62 {
+	if len(f.HopfieldMetadata) > MaxSupportedFabridHops {
 		// The size of FABRID is limited to 255 bytes because of the HBH option length field
 		// 4 bytes + 62 * 4 bytes = 252 bytes
 		return serrors.New("Fabrid is not supported for paths consisting of more than 62 hopfields")

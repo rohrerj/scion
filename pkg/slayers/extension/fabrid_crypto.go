@@ -30,7 +30,7 @@ type FabridPolicyID struct {
 	Global bool
 }
 
-func (f *FabridHopfieldMetadata) ComputeFabridHVF(id *IdentifierOption,
+func (f *FabridHopfieldMetadata) computeFabridHVF(id *IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, resultBuffer [6]byte,
 	key []byte, sigma []byte) error {
 	if len(key) != len(sigma) {
@@ -75,7 +75,7 @@ func (f *FabridHopfieldMetadata) ComputeFabridHVF(id *IdentifierOption,
 func (f *FabridHopfieldMetadata) VerifyAndUpdate(id *IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
 	computedHVF := [6]byte{}
-	err := f.ComputeFabridHVF(id, s, tmpBuffer, computedHVF, key, sigma)
+	err := f.computeFabridHVF(id, s, tmpBuffer, computedHVF, key, sigma)
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func (f *FabridHopfieldMetadata) ComputePolicyID(id *IdentifierOption,
 	if err != nil {
 		return FabridPolicyID{}, err
 	}
-	buf := make([]byte, identifierLength)
+	buf := make([]byte, aes.BlockSize)
 	if err = id.Serialize(buf); err != nil {
 		return FabridPolicyID{}, err
 	}
@@ -115,7 +115,7 @@ func (f *FabridPolicyID) EncryptPolicyID(id *IdentifierOption,
 	if err != nil {
 		return 0, err
 	}
-	buf := make([]byte, identifierLength)
+	buf := make([]byte, aes.BlockSize)
 	if err = id.Serialize(buf); err != nil {
 		return 0, err
 	}
@@ -124,12 +124,47 @@ func (f *FabridPolicyID) EncryptPolicyID(id *IdentifierOption,
 	return policyID, nil
 }
 
-func (f *FabridOption) VerifyPath(s *slayers.SCION, key [16]byte) {
+// InitValidators sets all HVFs of the FABRID option and computes the
+// path validator.
+func (f *FabridOption) InitValidators(id *IdentifierOption,
+	s *slayers.SCION, pathKey []byte, keys [][]byte, sigmas [][]byte) error {
 
+	tmpBuffer := make([]byte, 17+len(s.RawSrcAddr))
+	outBuffer := [6]byte{}
+	pathValidatorBuf := make([]byte, fabridMetadataLen*len(f.HopfieldMetadata))
+	for i, meta := range f.HopfieldMetadata {
+		err := meta.computeFabridHVF(id, s, tmpBuffer, outBuffer, keys[i], sigmas[i])
+		if err != nil {
+			return err
+		}
+		copy(meta.HopValidationField[:3], outBuffer[:3])
+		pathValidatorBuf[i*fabridMetadataLen] = meta.EncryptedPolicyID
+		copy(pathValidatorBuf[i*fabridMetadataLen+1:i*fabridMetadataLen+4], outBuffer[3:6])
+	}
+	mac, err := initCMAC(pathKey)
+	if err != nil {
+		return err
+	}
+	mac.Write(pathValidatorBuf)
+	copy(f.PathValidator[:4], mac.Sum([]byte{}))
+	return nil
 }
 
-func (f *FabridOption) ComputePathValidator(s *slayers.SCION, key [16]byte) {
-
+func (f *FabridOption) VerifyPath(key []byte) error {
+	buf := make([]byte, fabridMetadataLen*len(f.HopfieldMetadata))
+	for i := 0; i < len(f.HopfieldMetadata); i++ {
+		f.HopfieldMetadata[i].serializeTo(buf[i*fabridMetadataLen : (i+1)*fabridMetadataLen])
+	}
+	mac, err := initCMAC(key)
+	if err != nil {
+		return err
+	}
+	mac.Write(buf)
+	computedPathValidator := mac.Sum([]byte{})
+	if !bytes.Equal(computedPathValidator[:4], f.PathValidator[:]) {
+		return serrors.New("Path validator is invalid")
+	}
+	return nil
 }
 
 func initCMAC(key []byte) (hash.Hash, error) {
