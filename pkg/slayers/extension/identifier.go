@@ -38,7 +38,6 @@ type IdentifierOption struct {
 	Timestamp time.Time
 	// The packet ID
 	PacketID uint32
-
 	// The base timestamp. Usually the timestamp of the first info field.
 	BaseTimestamp uint32
 }
@@ -60,7 +59,6 @@ func (id *IdentifierOption) decode(b []byte) error {
 	}
 	id.decodeTimestampFromBytes(b[0:4])
 	id.PacketID = binary.BigEndian.Uint32(b[4:8])
-
 	return nil
 }
 

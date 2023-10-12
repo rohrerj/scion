@@ -4,6 +4,7 @@ go_library(
     name = "go_default_library",
     srcs = [
         "fabrid.go",
+        "fabrid_crypto.go",
         "identifier.go",
     ],
     importpath = "github.com/scionproto/scion/pkg/slayers/extension",
@@ -12,12 +13,14 @@ go_library(
         "//pkg/private/serrors:go_default_library",
         "//pkg/slayers:go_default_library",
         "//pkg/slayers/path/scion:go_default_library",
+        "@com_github_dchest_cmac//:go_default_library",
     ],
 )
 
 go_test(
     name = "go_default_test",
     srcs = [
+        "fabrid_crypto_test.go",
         "fabrid_test.go",
         "identifier_test.go",
     ],
