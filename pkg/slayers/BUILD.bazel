@@ -5,7 +5,6 @@ go_library(
     srcs = [
         "doc.go",
         "extn.go",
-        "fabrid.go",
         "l4.go",
         "layertypes.go",
         "pkt_auth.go",
@@ -35,7 +34,6 @@ go_test(
         "bfd_test.go",
         "export_test.go",
         "extn_test.go",
-        "fabrid_test.go",
         "pkt_auth_test.go",
         "scion_test.go",
         "scmp_msg_test.go",
