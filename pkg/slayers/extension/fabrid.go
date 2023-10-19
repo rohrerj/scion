@@ -154,7 +154,7 @@ func fabridLen(numHopfields int) int {
 	return baseFabridLen + numHopfields*fabridMetadataLen
 }
 
-func ParseFabridOptionFullExtension(o *slayers.EndToEndOption, base *scion.Base) (FabridOption, error) {
+func ParseFabridOptionFullExtension(o *slayers.HopByHopOption, base *scion.Base) (FabridOption, error) {
 	if o.OptType != slayers.OptTypeFabrid {
 		return FabridOption{},
 			serrors.New("Wrong option type", "expected", slayers.OptTypeFabrid, "actual", o.OptType)
@@ -166,7 +166,7 @@ func ParseFabridOptionFullExtension(o *slayers.EndToEndOption, base *scion.Base)
 	return f, nil
 }
 
-func ParseFabridOptionCurrentHop(o *slayers.EndToEndOption, base *scion.Base) (FabridOption, error) {
+func ParseFabridOptionCurrentHop(o *slayers.HopByHopOption, base *scion.Base) (FabridOption, error) {
 	if o.OptType != slayers.OptTypeFabrid {
 		return FabridOption{},
 			serrors.New("Wrong option type", "expected", slayers.OptTypeFabrid, "actual", o.OptType)

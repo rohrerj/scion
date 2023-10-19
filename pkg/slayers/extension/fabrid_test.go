@@ -26,14 +26,14 @@ import (
 func TestFabridDecode(t *testing.T) {
 	type test struct {
 		name     string
-		o        *slayers.EndToEndOption
+		o        *slayers.HopByHopOption
 		base     *scion.Base
 		validate func(extension.FabridOption, error, *testing.T)
 	}
 	tests := []test{
 		{
 			name: "Base is nil",
-			o: &slayers.EndToEndOption{
+			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeFabrid,
 				OptData: make([]byte, 100),
 			},
@@ -44,7 +44,7 @@ func TestFabridDecode(t *testing.T) {
 		},
 		{
 			name: "wrong option type",
-			o: &slayers.EndToEndOption{
+			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeIdentifier,
 				OptData: make([]byte, 8),
 			},
@@ -60,7 +60,7 @@ func TestFabridDecode(t *testing.T) {
 		},
 		{
 			name: "Raw fabrid too short",
-			o: &slayers.EndToEndOption{
+			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeFabrid,
 				OptData: make([]byte, 7),
 			},
@@ -76,7 +76,7 @@ func TestFabridDecode(t *testing.T) {
 		},
 		{
 			name: "Raw fabrid parses with 62 HF",
-			o: &slayers.EndToEndOption{
+			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeFabrid,
 				OptData: make([]byte, 252),
 			},
@@ -92,7 +92,7 @@ func TestFabridDecode(t *testing.T) {
 		},
 		{
 			name: "Raw fabrid fails parsing 63 HF",
-			o: &slayers.EndToEndOption{
+			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeFabrid,
 				OptData: make([]byte, 1000),
 			},
@@ -108,7 +108,7 @@ func TestFabridDecode(t *testing.T) {
 		},
 		{
 			name: "Parses fabrid correctly",
-			o: &slayers.EndToEndOption{
+			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeFabrid,
 				OptData: []byte{
 					0x66, 0x77, 0x88, 0x99,

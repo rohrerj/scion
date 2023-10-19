@@ -26,7 +26,7 @@ import (
 func TestIdentifierDecode(t *testing.T) {
 	type test struct {
 		name          string
-		o             *slayers.EndToEndOption
+		o             *slayers.HopByHopOption
 		baseTimestamp uint32
 		validate      func(extension.IdentifierOption, error, *testing.T)
 	}
@@ -34,7 +34,7 @@ func TestIdentifierDecode(t *testing.T) {
 	tests := []test{
 		{
 			name: "wrong option type",
-			o: &slayers.EndToEndOption{
+			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeFabrid,
 				OptData: []byte{
 					0x0, 0x0, 0x0, 0x0,
@@ -48,7 +48,7 @@ func TestIdentifierDecode(t *testing.T) {
 		},
 		{
 			name: "raw data too short",
-			o: &slayers.EndToEndOption{
+			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeIdentifier,
 				OptData: []byte{
 					0x0, 0x0, 0x0, 0x0,
@@ -62,7 +62,7 @@ func TestIdentifierDecode(t *testing.T) {
 		},
 		{
 			name: "correct timestamp",
-			o: &slayers.EndToEndOption{
+			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeIdentifier,
 				OptData: []byte{
 					0xff, 0x00, 0x00, 0x01,
