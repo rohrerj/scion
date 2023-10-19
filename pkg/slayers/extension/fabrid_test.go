@@ -28,7 +28,7 @@ func TestFabridDecode(t *testing.T) {
 		name     string
 		o        *slayers.HopByHopOption
 		base     *scion.Base
-		validate func(extension.FabridOption, error, *testing.T)
+		validate func(*extension.FabridOption, error, *testing.T)
 	}
 	tests := []test{
 		{
@@ -38,7 +38,7 @@ func TestFabridDecode(t *testing.T) {
 				OptData: make([]byte, 100),
 			},
 			base: nil,
-			validate: func(fo extension.FabridOption, err error, t *testing.T) {
+			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.Error(t, err)
 			},
 		},
@@ -54,7 +54,7 @@ func TestFabridDecode(t *testing.T) {
 				},
 				NumHops: 1,
 			},
-			validate: func(fo extension.FabridOption, err error, t *testing.T) {
+			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.Error(t, err)
 			},
 		},
@@ -70,7 +70,7 @@ func TestFabridDecode(t *testing.T) {
 				},
 				NumHops: 1,
 			},
-			validate: func(fo extension.FabridOption, err error, t *testing.T) {
+			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.Error(t, err)
 			},
 		},
@@ -86,7 +86,7 @@ func TestFabridDecode(t *testing.T) {
 				},
 				NumHops: extension.MaxSupportedFabridHops,
 			},
-			validate: func(fo extension.FabridOption, err error, t *testing.T) {
+			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.NoError(t, err)
 			},
 		},
@@ -102,7 +102,7 @@ func TestFabridDecode(t *testing.T) {
 				},
 				NumHops: extension.MaxSupportedFabridHops + 1,
 			},
-			validate: func(fo extension.FabridOption, err error, t *testing.T) {
+			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.Error(t, err)
 			},
 		},
@@ -122,7 +122,7 @@ func TestFabridDecode(t *testing.T) {
 				},
 				NumHops: 2,
 			},
-			validate: func(fo extension.FabridOption, err error, t *testing.T) {
+			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(fo.HopfieldMetadata))
 				assert.Equal(t, uint8(0x66), fo.HopfieldMetadata[0].EncryptedPolicyID)

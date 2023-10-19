@@ -38,12 +38,14 @@ import (
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/drkey"
+	"github.com/scionproto/scion/pkg/drkey/specific"
 	libepic "github.com/scionproto/scion/pkg/experimental/epic"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/private/util"
 	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/slayers"
+	"github.com/scionproto/scion/pkg/slayers/extension"
 	"github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/pkg/slayers/path/empty"
 	"github.com/scionproto/scion/pkg/slayers/path/epic"
@@ -111,6 +113,8 @@ type DataPlane struct {
 	running           bool
 	Metrics           *Metrics
 	forwardingMetrics map[uint16]forwardingMetrics
+	drKeySecret       [16]byte
+	fabridPolicyMap   map[uint8]uint32
 
 	// The pool that stores all the packet buffers as described in the design document. See
 	// https://github.com/scionproto/scion/blob/master/doc/dev/design/BorderRouter.rst
@@ -172,6 +176,16 @@ func (d *DataPlane) SetIA(ia addr.IA) error {
 		return alreadySet
 	}
 	d.localIA = ia
+	return nil
+}
+
+func (d *DataPlane) SetDRKeySecret(key [16]byte) error {
+	d.mtx.Lock()
+	defer d.mtx.Unlock()
+	if d.running {
+		return modifyExisting
+	}
+	d.drKeySecret = key
 	return nil
 }
 
@@ -900,6 +914,8 @@ func (d *DataPlane) runForwarder(ifID uint16, conn BatchConn,
 		available := readUpTo(c, cfg.BatchSize-remaining, remaining == 0,
 			writeMsgs[remaining:])
 		available += remaining
+		// TODO (rohrerj): implement policy based paths
+
 		written, _ := conn.WriteBatch(writeMsgs[:available], 0)
 		if written < 0 {
 			// WriteBatch returns -1 on error, we just consider this as
@@ -1011,10 +1027,93 @@ func (p *scionPacketProcessor) reset() error {
 	p.mac.Reset()
 	p.cachedMac = nil
 	// Reset hbh layer
-	p.hbhLayer = slayers.HopByHopExtnSkipper{}
+	p.hbhLayer = slayers.HopByHopExtn{}
 	// Reset e2e layer
 	p.e2eLayer = slayers.EndToEndExtnSkipper{}
+	p.identifier = nil
+	p.fabrid = nil
 	return nil
+}
+
+func (p *scionPacketProcessor) deriveASToHostKey() ([]byte, error) {
+	d := specific.Deriver{}
+	asToAsKey, err := d.DeriveLevel1(p.scionLayer.DstIA, p.d.drKeySecret)
+	if err != nil {
+		return nil, err
+	}
+	dst, err := p.scionLayer.DstAddr()
+	if err != nil {
+		return nil, err
+	}
+	asToHostKey, err := d.DeriveASHost(dst.String(), asToAsKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return asToHostKey[:], nil
+}
+
+func (p *scionPacketProcessor) processFabrid() error {
+	meta := p.fabrid.HopfieldMetadata[0]
+	key, err := p.deriveASToHostKey()
+	if err != nil {
+		return err
+	}
+	policyID, err := meta.ComputePolicyID(p.identifier, key)
+	if err != nil {
+		return err
+	}
+	mplsLabel, found := p.d.fabridPolicyMap[policyID.ID]
+	if !found {
+		return serrors.New("Provided policyID is invalid", "policyID", policyID)
+	}
+	p.mplsLabel = mplsLabel
+	// TODO (rohrerj): maybe use real epic timestamp instead
+	sigma, err := libepic.CalcMac(p.cachedMac, epic.PktID{
+		Timestamp: p.identifier.RelativeTimestamp,
+		Counter:   p.identifier.PacketID,
+	}, &p.scionLayer, p.identifier.BaseTimestamp, p.macInputBuffer)
+	if err != nil {
+		return err
+	}
+
+	err = meta.VerifyAndUpdate(p.identifier, &p.scionLayer, p.macInputBuffer, key, sigma)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *scionPacketProcessor) processHbhOptions() error {
+	var err error
+	for _, opt := range p.hbhLayer.Options {
+		switch opt.OptType {
+		case slayers.OptTypeIdentifier:
+			if p.identifier != nil {
+				return serrors.New("Identifier HBH option provided multiple times")
+			}
+			p.identifier, err = extension.ParseIdentifierOption(opt, p.infoField.Timestamp)
+			if err != nil {
+				return err
+			}
+		case slayers.OptTypeFabrid:
+			if p.fabrid != nil {
+				return serrors.New("FABRID HBH option provided multiple times")
+			}
+			if p.identifier == nil {
+				return serrors.New("Identifier HBH option must be present when using FABRID")
+			}
+			p.fabrid, err = extension.ParseFabridOptionCurrentHop(opt, &p.path.Base)
+			if err != nil {
+				return err
+			}
+			if err = p.processFabrid(); err != nil {
+				return err
+			}
+		default:
+		}
+	}
+	return err
 }
 
 func (p *scionPacketProcessor) processPkt(rawPkt []byte,
@@ -1184,7 +1283,7 @@ type scionPacketProcessor struct {
 
 	// scionLayer is the SCION gopacket layer.
 	scionLayer slayers.SCION
-	hbhLayer   slayers.HopByHopExtnSkipper
+	hbhLayer   slayers.HopByHopExtn
 	e2eLayer   slayers.EndToEndExtnSkipper
 	// last is the last parsed layer, i.e. either &scionLayer, &hbhLayer or &e2eLayer
 	lastLayer gopacket.DecodingLayer
@@ -1208,6 +1307,10 @@ type scionPacketProcessor struct {
 
 	// bfdLayer is reusable buffer for parsing BFD messages
 	bfdLayer layers.BFD
+
+	identifier *extension.IdentifierOption
+	fabrid     *extension.FabridOption
+	mplsLabel  uint32
 }
 
 type slowPathType int
@@ -1779,6 +1882,9 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 	}
 	if r, err := p.handleIngressRouterAlert(); err != nil {
 		return r, err
+	}
+	if err := p.processHbhOptions(); err != nil {
+		return processResult{}, err
 	}
 	// Inbound: pkts destined to the local IA.
 	if p.scionLayer.DstIA == p.d.localIA {

@@ -39,6 +39,8 @@ const baseFabridLen int = 4
 const fabridMetadataLen int = 4
 const MaxSupportedFabridHops = 62
 
+// The FABRID option requires the Identifier option to be present in the HBH header
+// extension and defined before the FABRID option.
 type FabridOption struct {
 	HopfieldMetadata []FabridHopfieldMetadata
 	PathValidator    [4]byte
@@ -154,26 +156,26 @@ func fabridLen(numHopfields int) int {
 	return baseFabridLen + numHopfields*fabridMetadataLen
 }
 
-func ParseFabridOptionFullExtension(o *slayers.HopByHopOption, base *scion.Base) (FabridOption, error) {
+func ParseFabridOptionFullExtension(o *slayers.HopByHopOption, base *scion.Base) (*FabridOption, error) {
 	if o.OptType != slayers.OptTypeFabrid {
-		return FabridOption{},
+		return nil,
 			serrors.New("Wrong option type", "expected", slayers.OptTypeFabrid, "actual", o.OptType)
 	}
-	f := FabridOption{}
+	f := &FabridOption{}
 	if err := f.DecodeFull(o.OptData, base); err != nil {
-		return FabridOption{}, err
+		return nil, err
 	}
 	return f, nil
 }
 
-func ParseFabridOptionCurrentHop(o *slayers.HopByHopOption, base *scion.Base) (FabridOption, error) {
+func ParseFabridOptionCurrentHop(o *slayers.HopByHopOption, base *scion.Base) (*FabridOption, error) {
 	if o.OptType != slayers.OptTypeFabrid {
-		return FabridOption{},
+		return nil,
 			serrors.New("Wrong option type", "expected", slayers.OptTypeFabrid, "actual", o.OptType)
 	}
-	f := FabridOption{}
+	f := &FabridOption{}
 	if err := f.DecodeForCurrentHop(o.OptData, base); err != nil {
-		return FabridOption{}, err
+		return nil, err
 	}
 	return f, nil
 }

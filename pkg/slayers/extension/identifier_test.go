@@ -28,7 +28,7 @@ func TestIdentifierDecode(t *testing.T) {
 		name          string
 		o             *slayers.HopByHopOption
 		baseTimestamp uint32
-		validate      func(extension.IdentifierOption, error, *testing.T)
+		validate      func(*extension.IdentifierOption, error, *testing.T)
 	}
 	unixNow := uint32(time.Now().Unix())
 	tests := []test{
@@ -42,7 +42,7 @@ func TestIdentifierDecode(t *testing.T) {
 				},
 			},
 			baseTimestamp: unixNow,
-			validate: func(id extension.IdentifierOption, err error, t *testing.T) {
+			validate: func(id *extension.IdentifierOption, err error, t *testing.T) {
 				assert.Error(t, err)
 			},
 		},
@@ -56,7 +56,7 @@ func TestIdentifierDecode(t *testing.T) {
 				},
 			},
 			baseTimestamp: unixNow,
-			validate: func(id extension.IdentifierOption, err error, t *testing.T) {
+			validate: func(id *extension.IdentifierOption, err error, t *testing.T) {
 				assert.Error(t, err)
 			},
 		},
@@ -70,7 +70,7 @@ func TestIdentifierDecode(t *testing.T) {
 				},
 			},
 			baseTimestamp: unixNow,
-			validate: func(id extension.IdentifierOption, err error, t *testing.T) {
+			validate: func(id *extension.IdentifierOption, err error, t *testing.T) {
 				assert.NoError(t, err)
 				expectedTime := int64(unixNow)*1000 + 0x7000001
 				assert.Equal(t, expectedTime, id.Timestamp.UnixMilli())
