@@ -21,6 +21,7 @@ import (
 
 	"golang.org/x/net/ipv4"
 
+	"github.com/google/gopacket"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/private/topology"
 )
@@ -84,4 +85,13 @@ func (d *DataPlane) ProcessPkt(ifID uint16, m *ipv4.Message) (ProcessResult, err
 
 func ExtractServices(s *services) map[addr.SVC][]*net.UDPAddr {
 	return s.m
+}
+
+func (d *DataPlane) DeriveASToHostKey(dstAddr addr.IA, dst string) ([]byte, error) {
+	return d.deriveASToHostKey(dstAddr, dst)
+}
+
+func DecodeLayers(data []byte, base gopacket.DecodingLayer,
+	opts ...gopacket.DecodingLayer) (gopacket.DecodingLayer, error) {
+	return decodeLayers(data, base, opts...)
 }

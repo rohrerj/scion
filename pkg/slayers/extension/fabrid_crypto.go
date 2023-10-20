@@ -72,6 +72,28 @@ func (f *FabridHopfieldMetadata) computeFabridHVF(id *IdentifierOption,
 	return nil
 }
 
+func (f *FabridHopfieldMetadata) ComputeBaseHVF(id *IdentifierOption,
+	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
+	computedHVF := [6]byte{}
+	err := f.computeFabridHVF(id, s, tmpBuffer, computedHVF, key, sigma)
+	if err != nil {
+		return err
+	}
+	copy(f.HopValidationField[:], computedHVF[0:3])
+	return nil
+}
+
+func (f *FabridHopfieldMetadata) ComputeVerifiedHVF(id *IdentifierOption,
+	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
+	computedHVF := [6]byte{}
+	err := f.computeFabridHVF(id, s, tmpBuffer, computedHVF, key, sigma)
+	if err != nil {
+		return err
+	}
+	copy(f.HopValidationField[:], computedHVF[3:6])
+	return nil
+}
+
 func (f *FabridHopfieldMetadata) VerifyAndUpdate(id *IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
 	computedHVF := [6]byte{}

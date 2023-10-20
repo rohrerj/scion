@@ -499,6 +499,15 @@ func (d *DataPlane) AddNextHopBFD(ifID uint16, src, dst *net.UDPAddr, cfg contro
 	return d.addBFDController(ifID, s, cfg, m)
 }
 
+func (d *DataPlane) RegisterFabridPolicy(policy extension.FabridPolicyID, mplsLabel uint32) {
+	d.mtx.Lock()
+	defer d.mtx.Unlock()
+	if d.fabridPolicyMap == nil {
+		d.fabridPolicyMap = make(map[uint8]uint32)
+	}
+	d.fabridPolicyMap[policy.ID] = mplsLabel
+}
+
 func max(a int, b int) int {
 	if a > b {
 		return a
@@ -1035,22 +1044,26 @@ func (p *scionPacketProcessor) reset() error {
 	return nil
 }
 
-func (p *scionPacketProcessor) deriveASToHostKey() ([]byte, error) {
+func (dp *DataPlane) deriveASToHostKey(dstAddr addr.IA, dst string) ([]byte, error) {
 	d := specific.Deriver{}
-	asToAsKey, err := d.DeriveLevel1(p.scionLayer.DstIA, p.d.drKeySecret)
+	asToAsKey, err := d.DeriveLevel1(dstAddr, dp.drKeySecret)
 	if err != nil {
 		return nil, err
 	}
-	dst, err := p.scionLayer.DstAddr()
-	if err != nil {
-		return nil, err
-	}
-	asToHostKey, err := d.DeriveASHost(dst.String(), asToAsKey)
+	asToHostKey, err := d.DeriveASHost(dst, asToAsKey)
 	if err != nil {
 		return nil, err
 	}
 
 	return asToHostKey[:], nil
+}
+
+func (p *scionPacketProcessor) deriveASToHostKey() ([]byte, error) {
+	dst, err := p.scionLayer.DstAddr()
+	if err != nil {
+		return nil, err
+	}
+	return p.d.deriveASToHostKey(p.scionLayer.DstIA, dst.String())
 }
 
 func (p *scionPacketProcessor) processFabrid() error {
@@ -1065,19 +1078,11 @@ func (p *scionPacketProcessor) processFabrid() error {
 	}
 	mplsLabel, found := p.d.fabridPolicyMap[policyID.ID]
 	if !found {
-		return serrors.New("Provided policyID is invalid", "policyID", policyID)
+		return serrors.New("Provided policyID is invalid", "policyID", policyID, "id", p.identifier)
 	}
 	p.mplsLabel = mplsLabel
-	// TODO (rohrerj): maybe use real epic timestamp instead
-	sigma, err := libepic.CalcMac(p.cachedMac, epic.PktID{
-		Timestamp: p.identifier.RelativeTimestamp,
-		Counter:   p.identifier.PacketID,
-	}, &p.scionLayer, p.identifier.BaseTimestamp, p.macInputBuffer)
-	if err != nil {
-		return err
-	}
 
-	err = meta.VerifyAndUpdate(p.identifier, &p.scionLayer, p.macInputBuffer, key, sigma)
+	err = meta.VerifyAndUpdate(p.identifier, &p.scionLayer, p.macInputBuffer, key, p.cachedMac)
 	if err != nil {
 		return err
 	}
@@ -2458,6 +2463,8 @@ func nextHdr(layer gopacket.DecodingLayer) slayers.L4ProtocolType {
 	case *slayers.SCION:
 		return v.NextHdr
 	case *slayers.EndToEndExtnSkipper:
+		return v.NextHdr
+	case *slayers.HopByHopExtn:
 		return v.NextHdr
 	case *slayers.HopByHopExtnSkipper:
 		return v.NextHdr

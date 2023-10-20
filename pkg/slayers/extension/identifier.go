@@ -39,19 +39,21 @@ type IdentifierOption struct {
 	// The packet ID
 	PacketID uint32
 	// The base timestamp. Usually the timestamp of the first info field.
-	BaseTimestamp     uint32
-	RelativeTimestamp uint32
+	BaseTimestamp uint32
+}
+
+func (id *IdentifierOption) GetRelativeTimestamp() uint32 {
+	return uint32(id.Timestamp.UnixMilli()-int64(id.BaseTimestamp)*1000) & 0x7FFFFFF
 }
 
 func (id *IdentifierOption) decodeTimestampFromBytes(b []byte) {
-	id.RelativeTimestamp = binary.BigEndian.Uint32(b) & 0x7FFFFFF // take only the right 27bit
-	ts := uint64(id.RelativeTimestamp) + 1000*uint64(id.BaseTimestamp)
+	relativeTimestamp := binary.BigEndian.Uint32(b) & 0x7FFFFFF // take only the right 27bit
+	ts := uint64(relativeTimestamp) + 1000*uint64(id.BaseTimestamp)
 	id.Timestamp = time.Unix(0, int64(time.Millisecond)*int64(ts))
 }
 
 func (id *IdentifierOption) serializeTimestampTo(b []byte) {
-	id.RelativeTimestamp = uint32(id.Timestamp.UnixMilli()-int64(id.BaseTimestamp)*1000) & 0x7FFFFFF
-	binary.BigEndian.PutUint32(b, id.RelativeTimestamp)
+	binary.BigEndian.PutUint32(b, id.GetRelativeTimestamp())
 }
 
 func (id *IdentifierOption) decode(b []byte) error {
