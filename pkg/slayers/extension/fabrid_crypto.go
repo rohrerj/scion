@@ -79,6 +79,7 @@ func (f *FabridHopfieldMetadata) ComputeBaseHVF(id *IdentifierOption,
 	if err != nil {
 		return err
 	}
+	computedHVF[0] &= 0x7f // ignore QoS bit
 	copy(f.HopValidationField[:], computedHVF[0:3])
 	return nil
 }
@@ -90,6 +91,7 @@ func (f *FabridHopfieldMetadata) ComputeVerifiedHVF(id *IdentifierOption,
 	if err != nil {
 		return err
 	}
+	computedHVF[3] &= 0x7f //ignore QoS bit
 	copy(f.HopValidationField[:], computedHVF[3:6])
 	return nil
 }
@@ -101,9 +103,11 @@ func (f *FabridHopfieldMetadata) VerifyAndUpdate(id *IdentifierOption,
 	if err != nil {
 		return err
 	}
+	computedHVF[0] &= 0x7f //ignore QoS bit
 	if !bytes.Equal(computedHVF[:3], f.HopValidationField[:]) {
 		return serrors.New("HVF is not valid")
 	}
+	computedHVF[3] &= 0x7f //ignore QoS bit
 	copy(f.HopValidationField[:], computedHVF[3:6])
 	return nil
 }
@@ -159,6 +163,8 @@ func (f *FabridOption) InitValidators(id *IdentifierOption,
 		if err != nil {
 			return err
 		}
+		outBuffer[0] &= 0x7f //ignore QoS bit
+		outBuffer[3] &= 0x7f //ignore QoS bit
 		copy(meta.HopValidationField[:3], outBuffer[:3])
 		pathValidatorBuf[i*fabridMetadataLen] = meta.EncryptedPolicyID
 		copy(pathValidatorBuf[i*fabridMetadataLen+1:i*fabridMetadataLen+4], outBuffer[3:6])
@@ -176,6 +182,7 @@ func (f *FabridOption) VerifyPath(key []byte) error {
 	buf := make([]byte, fabridMetadataLen*len(f.HopfieldMetadata))
 	for i := 0; i < len(f.HopfieldMetadata); i++ {
 		f.HopfieldMetadata[i].serializeTo(buf[i*fabridMetadataLen : (i+1)*fabridMetadataLen])
+		buf[i*fabridMetadataLen+1] &= 0x7f //ignore QoS bit
 	}
 	mac, err := initCMAC(key)
 	if err != nil {

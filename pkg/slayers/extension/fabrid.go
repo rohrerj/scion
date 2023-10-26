@@ -16,13 +16,13 @@
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |   NextHdr     |     ExtLen    |  OptType = 4  |    OptLen     |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// | Enc PolicyID  |       Hop Validation Field                    |
+// | Enc PolicyID  |Q|     Hop Validation Field                    |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// | Enc PolicyID  |       Hop Validation Field                    |
+// | Enc PolicyID  |Q|     Hop Validation Field                    |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// |    ....       |                   ....                        |
+// |    ....       | |                 ....                        |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// | Enc PolicyID  |       Hop Validation Field                    |
+// | Enc PolicyID  |Q|     Hop Validation Field                    |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |                       Path Validator                          |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -48,6 +48,7 @@ type FabridOption struct {
 
 type FabridHopfieldMetadata struct {
 	EncryptedPolicyID  uint8
+	QoS                bool
 	HopValidationField [3]byte
 }
 
@@ -63,6 +64,10 @@ func (f *FabridHopfieldMetadata) DecodeFabridHopfieldMetadata(b []byte) error {
 func (f *FabridHopfieldMetadata) decodeFabridHopfieldMetadata(b []byte) {
 	f.EncryptedPolicyID = uint8(b[0])
 	copy(f.HopValidationField[:], b[1:4])
+	if b[1]&0x80 > 0 {
+		f.QoS = true
+		f.HopValidationField[0] &= 0x7f
+	}
 }
 
 func (f *FabridHopfieldMetadata) SerializeTo(b []byte) error {
@@ -77,6 +82,10 @@ func (f *FabridHopfieldMetadata) SerializeTo(b []byte) error {
 func (f *FabridHopfieldMetadata) serializeTo(b []byte) {
 	b[0] = byte(f.EncryptedPolicyID)
 	copy(b[1:4], f.HopValidationField[:])
+	b[1] &= 0x7f // clear first bit of HVF for QoS
+	if f.QoS {
+		b[1] |= 0x80
+	}
 }
 
 func (f *FabridOption) validate(b []byte, base *scion.Base) error {
