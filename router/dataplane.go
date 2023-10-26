@@ -1082,7 +1082,7 @@ func (p *scionPacketProcessor) processFabrid() error {
 	}
 	p.mplsLabel = mplsLabel
 
-	err = meta.VerifyAndUpdate(p.identifier, &p.scionLayer, p.macInputBuffer, key, p.cachedMac)
+	err = meta.VerifyAndUpdate(p.identifier, &p.scionLayer, p.macInputBuffer, key, p.cachedMac[:6])
 	if err != nil {
 		return err
 	}

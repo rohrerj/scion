@@ -272,9 +272,8 @@ func TestDataPlaneRun(t *testing.T) {
 							EncryptedPolicyID: encPolicyID,
 						}
 						tmp := make([]byte, 100)
-
-						err = meta.ComputeBaseHVF(&identifier, &s, tmp, asDRKey[:],
-							computeFullMAC(t, key, path.InfoFields[0], path.HopFields[1]))
+						sigma := computeMAC(t, key, path.InfoFields[0], path.HopFields[1])
+						err = meta.ComputeBaseHVF(&identifier, &s, tmp, asDRKey[:], sigma[:])
 						assert.NoError(t, err)
 
 						fabrid := extension.FabridOption{
@@ -358,7 +357,8 @@ func TestDataPlaneRun(t *testing.T) {
 									recomputedVerifiedHVF := extension.FabridHopfieldMetadata{
 										EncryptedPolicyID: encPolicyID,
 									}
-									err = recomputedVerifiedHVF.ComputeVerifiedHVF(foundIdentifier, &s, tmp, asToHostKey, computeFullMAC(t, key, infField, hopField))
+									mac := computeMAC(t, key, infField, hopField)
+									err = recomputedVerifiedHVF.ComputeVerifiedHVF(foundIdentifier, &s, tmp, asToHostKey, mac[:])
 									assert.NoError(t, err)
 									assert.Equal(t, encPolicyID, meta.EncryptedPolicyID)
 									assert.Equal(t, recomputedVerifiedHVF.HopValidationField, meta.HopValidationField)

@@ -119,10 +119,10 @@ func TestSuccessfullValidators(t *testing.T) {
 					sigmas := [][]byte{}
 					for i := 0; i < len(fabrid.HopfieldMetadata); i++ {
 						keys = append(keys, generateRandomBytes(16))
-						sigmas = append(sigmas, generateRandomBytes(16))
+						sigmas = append(sigmas, generateRandomBytes(6))
 					}
 
-					err := fabrid.InitValidators(id, s, pathKey, keys, sigmas)
+					err := fabrid.InitValidators(id, s, tmpBuffer, pathKey, keys, sigmas)
 					assert.NoError(t, err)
 
 					for i, meta := range fabrid.HopfieldMetadata {

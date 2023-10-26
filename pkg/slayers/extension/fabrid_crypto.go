@@ -17,7 +17,6 @@ package extension
 import (
 	"bytes"
 	"crypto/aes"
-	"encoding/binary"
 	"hash"
 
 	"github.com/dchest/cmac"
@@ -30,39 +29,45 @@ type FabridPolicyID struct {
 	Global bool
 }
 
+// MAC key: key xor (Identifier ++ SrcISD-AS)
+// MAC input: Sigma ++ EncPolicyID ++ SrcHostAddrLength ++ SrcHostAddress
 func (f *FabridHopfieldMetadata) computeFabridHVF(id *IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, resultBuffer [6]byte,
 	key []byte, sigma []byte) error {
-	if len(key) != len(sigma) {
-		return serrors.New("Both keys must have the same length", "len(key)",
-			len(key), "len(sigma)", len(sigma))
+	if len(key) != 16 {
+		return serrors.New("Wrong key length", "expected", 16, "actual", len(key))
 	}
+	if len(sigma) != 6 {
+		return serrors.New("Wrong sigma length", "expected", 6, "actual", len(sigma))
+	}
+	if len(tmpBuffer) < 24 {
+		return serrors.New("tmpBuffer too small", "expected",
+			24, "actual", len(tmpBuffer))
+	}
+	id.Serialize(tmpBuffer[0:8])
+	srcIABytes, _ := s.SrcIA.MarshalText()
+
 	xoredKey := make([]byte, len(key))
-	for i := 0; i < len(key); i++ {
-		xoredKey[i] = key[i] ^ sigma[i]
+	for i := 0; i < 8; i++ {
+		xoredKey[i] = key[i] ^ tmpBuffer[i]
+	}
+	for i := 0; i < 8; i++ {
+		xoredKey[i] = key[i+8] ^ srcIABytes[i]
 	}
 
-	srcAS := uint64(s.SrcIA.AS())
 	srcAddr := s.RawSrcAddr
 	srcAddrLen := len(srcAddr)
-	macInputLength := 17 + srcAddrLen
-	if len(tmpBuffer) < macInputLength {
-		return serrors.New("buffer too small", "expected",
-			macInputLength, "got", len(tmpBuffer))
-	}
-	err := id.Serialize(tmpBuffer[0:8])
-	if err != nil {
-		return err
-	}
-	binary.BigEndian.PutUint64(tmpBuffer[8:16], srcAS)
-	copy(tmpBuffer[16:16+srcAddrLen], srcAddr)
-	tmpBuffer[16+srcAddrLen] = f.EncryptedPolicyID
+	usedBufferLength := 8 + srcAddrLen
+	copy(tmpBuffer[0:6], sigma[0:6])
+	tmpBuffer[6] = f.EncryptedPolicyID
+	tmpBuffer[7] = byte(s.SrcAddrType.Length())
+	copy(tmpBuffer[8:usedBufferLength], srcAddr)
 
 	mac, err := initCMAC(xoredKey)
 	if err != nil {
 		return err
 	}
-	_, err = mac.Write(tmpBuffer)
+	_, err = mac.Write(tmpBuffer[:usedBufferLength])
 	if err != nil {
 		return err
 	}
@@ -153,9 +158,8 @@ func (f *FabridPolicyID) EncryptPolicyID(id *IdentifierOption,
 // InitValidators sets all HVFs of the FABRID option and computes the
 // path validator.
 func (f *FabridOption) InitValidators(id *IdentifierOption,
-	s *slayers.SCION, pathKey []byte, keys [][]byte, sigmas [][]byte) error {
+	s *slayers.SCION, tmpBuffer []byte, pathKey []byte, keys [][]byte, sigmas [][]byte) error {
 
-	tmpBuffer := make([]byte, 17+len(s.RawSrcAddr))
 	outBuffer := [6]byte{}
 	pathValidatorBuf := make([]byte, fabridMetadataLen*len(f.HopfieldMetadata))
 	for i, meta := range f.HopfieldMetadata {
