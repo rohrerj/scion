@@ -72,7 +72,7 @@ func TestSuccessfullValidators(t *testing.T) {
 	}
 	unixNow := uint32(time.Now().Unix())
 
-	tmpBuffer := make([]byte, 1000)
+	tmpBuffer := make([]byte, extension.FabridMacInputSize)
 	tests := []test{
 		{
 			name:       "random 16 byte src addr",

@@ -1011,10 +1011,11 @@ type processResult struct {
 
 func newPacketProcessor(d *DataPlane) *scionPacketProcessor {
 	p := &scionPacketProcessor{
-		d:              d,
-		buffer:         gopacket.NewSerializeBuffer(),
-		mac:            d.macFactory(),
-		macInputBuffer: make([]byte, max(path.MACBufferSize, libepic.MACBufferSize)),
+		d:      d,
+		buffer: gopacket.NewSerializeBuffer(),
+		mac:    d.macFactory(),
+		macInputBuffer: make([]byte, max(path.MACBufferSize,
+			max(libepic.MACBufferSize, extension.FabridMacInputSize))),
 	}
 	p.scionLayer.RecyclePaths()
 	return p
