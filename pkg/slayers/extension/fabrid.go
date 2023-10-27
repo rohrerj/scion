@@ -36,7 +36,7 @@ import (
 )
 
 const baseFabridLen int = 4
-const fabridMetadataLen int = 4
+const FabridMetadataLen int = 4
 const MaxSupportedFabridHops = 62
 
 // The FABRID option requires the Identifier option to be present in the HBH header
@@ -53,9 +53,9 @@ type FabridHopfieldMetadata struct {
 }
 
 func (f *FabridHopfieldMetadata) DecodeFabridHopfieldMetadata(b []byte) error {
-	if len(b) < fabridMetadataLen {
+	if len(b) < FabridMetadataLen {
 		return serrors.New("Buffer too small to decode metadata",
-			"is", len(b), "expected", fabridMetadataLen)
+			"is", len(b), "expected", FabridMetadataLen)
 	}
 	f.decodeFabridHopfieldMetadata(b)
 	return nil
@@ -71,9 +71,9 @@ func (f *FabridHopfieldMetadata) decodeFabridHopfieldMetadata(b []byte) {
 }
 
 func (f *FabridHopfieldMetadata) SerializeTo(b []byte) error {
-	if len(b) < fabridMetadataLen {
+	if len(b) < FabridMetadataLen {
 		return serrors.New("Buffer too small to serialize metadata",
-			"is", len(b), "expected", fabridMetadataLen)
+			"is", len(b), "expected", FabridMetadataLen)
 	}
 	f.serializeTo(b)
 	return nil
@@ -114,9 +114,9 @@ func (f *FabridOption) DecodeForCurrentHop(b []byte, base *scion.Base) error {
 	if err := f.validate(b, base); err != nil {
 		return err
 	}
-	byteIndex := int(base.PathMeta.CurrHF) * fabridMetadataLen
+	byteIndex := int(base.PathMeta.CurrHF) * FabridMetadataLen
 	md := FabridHopfieldMetadata{}
-	md.decodeFabridHopfieldMetadata(b[byteIndex : byteIndex+fabridMetadataLen])
+	md.decodeFabridHopfieldMetadata(b[byteIndex : byteIndex+FabridMetadataLen])
 	f.HopfieldMetadata = []FabridHopfieldMetadata{
 		md,
 	}
@@ -131,9 +131,9 @@ func (f *FabridOption) DecodeFull(b []byte, base *scion.Base) error {
 	f.HopfieldMetadata = make([]FabridHopfieldMetadata, base.NumHops)
 	for i := 0; i < base.NumHops; i++ {
 		md := FabridHopfieldMetadata{}
-		md.decodeFabridHopfieldMetadata(b[byteIndex : byteIndex+fabridMetadataLen])
+		md.decodeFabridHopfieldMetadata(b[byteIndex : byteIndex+FabridMetadataLen])
 		f.HopfieldMetadata[i] = md
-		byteIndex += fabridMetadataLen
+		byteIndex += FabridMetadataLen
 	}
 	copy(f.PathValidator[:], b[byteIndex:byteIndex+4])
 	return nil
@@ -162,7 +162,7 @@ func (f *FabridOption) SerializeTo(b []byte) error {
 }
 
 func fabridLen(numHopfields int) int {
-	return baseFabridLen + numHopfields*fabridMetadataLen
+	return baseFabridLen + numHopfields*FabridMetadataLen
 }
 
 func ParseFabridOptionFullExtension(o *slayers.HopByHopOption, base *scion.Base) (*FabridOption, error) {

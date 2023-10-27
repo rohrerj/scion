@@ -2,29 +2,25 @@ load("//tools/lint:go.bzl", "go_library", "go_test")
 
 go_library(
     name = "go_default_library",
-    srcs = [
-        "fabrid.go",
-        "identifier.go",
-    ],
-    importpath = "github.com/scionproto/scion/pkg/slayers/extension",
+    srcs = ["fabrid_crypto.go"],
+    importpath = "github.com/scionproto/scion/pkg/experimental/fabrid",
     visibility = ["//visibility:public"],
     deps = [
         "//pkg/private/serrors:go_default_library",
         "//pkg/slayers:go_default_library",
-        "//pkg/slayers/path/scion:go_default_library",
+        "//pkg/slayers/extension:go_default_library",
+        "@com_github_dchest_cmac//:go_default_library",
     ],
 )
 
 go_test(
     name = "go_default_test",
-    srcs = [
-        "fabrid_test.go",
-        "identifier_test.go",
-    ],
+    srcs = ["fabrid_crypto_test.go"],
     deps = [
         ":go_default_library",
+        "//pkg/addr:go_default_library",
         "//pkg/slayers:go_default_library",
-        "//pkg/slayers/path/scion:go_default_library",
+        "//pkg/slayers/extension:go_default_library",
         "@com_github_stretchr_testify//assert:go_default_library",
     ],
 )

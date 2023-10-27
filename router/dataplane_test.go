@@ -34,6 +34,7 @@ import (
 
 	"github.com/scionproto/scion/pkg/addr"
 	libepic "github.com/scionproto/scion/pkg/experimental/epic"
+	"github.com/scionproto/scion/pkg/experimental/fabrid"
 	"github.com/scionproto/scion/pkg/private/util"
 	"github.com/scionproto/scion/pkg/private/xtest"
 	"github.com/scionproto/scion/pkg/scrypto"
@@ -217,7 +218,7 @@ func TestDataPlaneRun(t *testing.T) {
 					BaseTimestamp: uint32(now.Unix()),
 				}
 
-				policyID := extension.FabridPolicyID{
+				policyID := fabrid.FabridPolicyID{
 					Global: false,
 					ID:     0x0f,
 				}
@@ -225,7 +226,7 @@ func TestDataPlaneRun(t *testing.T) {
 
 				asToHostKey, err := ret.DeriveASToHostKey(dstIA, dstAddr.String())
 				assert.NoError(t, err)
-				encPolicyID, err := policyID.EncryptPolicyID(&identifier, asToHostKey)
+				encPolicyID, err := fabrid.EncryptPolicyID(&policyID, &identifier, asToHostKey)
 				assert.NoError(t, err)
 
 				mExternal := mock_router.NewMockBatchConn(ctrl)
@@ -273,7 +274,7 @@ func TestDataPlaneRun(t *testing.T) {
 						}
 						tmp := make([]byte, 100)
 						sigma := computeMAC(t, key, path.InfoFields[0], path.HopFields[1])
-						err = meta.ComputeBaseHVF(&identifier, &s, tmp, asDRKey[:], sigma[:])
+						err = fabrid.ComputeBaseHVF(&meta, &identifier, &s, tmp, asDRKey[:], sigma[:])
 						assert.NoError(t, err)
 
 						fabrid := extension.FabridOption{
@@ -354,11 +355,11 @@ func TestDataPlaneRun(t *testing.T) {
 									assert.NoError(t, err)
 									meta := foundFabrid.HopfieldMetadata[1]
 									tmp := make([]byte, 100)
-									recomputedVerifiedHVF := extension.FabridHopfieldMetadata{
+									recomputedVerifiedHVF := &extension.FabridHopfieldMetadata{
 										EncryptedPolicyID: encPolicyID,
 									}
 									mac := computeMAC(t, key, infField, hopField)
-									err = recomputedVerifiedHVF.ComputeVerifiedHVF(foundIdentifier, &s, tmp, asToHostKey, mac[:])
+									err = fabrid.ComputeVerifiedHVF(recomputedVerifiedHVF, foundIdentifier, &s, tmp, asToHostKey, mac[:])
 									assert.NoError(t, err)
 									assert.Equal(t, encPolicyID, meta.EncryptedPolicyID)
 									assert.Equal(t, recomputedVerifiedHVF.HopValidationField, meta.HopValidationField)

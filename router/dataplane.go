@@ -40,6 +40,7 @@ import (
 	"github.com/scionproto/scion/pkg/drkey"
 	"github.com/scionproto/scion/pkg/drkey/specific"
 	libepic "github.com/scionproto/scion/pkg/experimental/epic"
+	"github.com/scionproto/scion/pkg/experimental/fabrid"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/private/util"
@@ -499,7 +500,7 @@ func (d *DataPlane) AddNextHopBFD(ifID uint16, src, dst *net.UDPAddr, cfg contro
 	return d.addBFDController(ifID, s, cfg, m)
 }
 
-func (d *DataPlane) RegisterFabridPolicy(policy extension.FabridPolicyID, mplsLabel uint32) {
+func (d *DataPlane) RegisterFabridPolicy(policy fabrid.FabridPolicyID, mplsLabel uint32) {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 	if d.fabridPolicyMap == nil {
@@ -1015,7 +1016,7 @@ func newPacketProcessor(d *DataPlane) *scionPacketProcessor {
 		buffer: gopacket.NewSerializeBuffer(),
 		mac:    d.macFactory(),
 		macInputBuffer: make([]byte, max(path.MACBufferSize,
-			max(libepic.MACBufferSize, extension.FabridMacInputSize))),
+			max(libepic.MACBufferSize, fabrid.FabridMacInputSize))),
 	}
 	p.scionLayer.RecyclePaths()
 	return p
@@ -1073,7 +1074,7 @@ func (p *scionPacketProcessor) processFabrid() error {
 	if err != nil {
 		return err
 	}
-	policyID, err := meta.ComputePolicyID(p.identifier, key)
+	policyID, err := fabrid.ComputePolicyID(&meta, p.identifier, key)
 	if err != nil {
 		return err
 	}
@@ -1083,7 +1084,7 @@ func (p *scionPacketProcessor) processFabrid() error {
 	}
 	p.mplsLabel = mplsLabel
 
-	err = meta.VerifyAndUpdate(p.identifier, &p.scionLayer, p.macInputBuffer, key, p.cachedMac[:6])
+	err = fabrid.VerifyAndUpdate(&meta, p.identifier, &p.scionLayer, p.macInputBuffer, key, p.cachedMac[:6])
 	if err != nil {
 		return err
 	}

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package extension_test
+package fabrid_test
 
 import (
 	crand "crypto/rand"
@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/experimental/fabrid"
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/slayers/extension"
 	"github.com/stretchr/testify/assert"
@@ -37,18 +38,18 @@ func TestEncryptPolicyID(t *testing.T) {
 	// test with 64 different randomly chosen keys and policyIDs
 	for i := 0; i < 64; i++ {
 		idNumber := uint8(rand.Uint32())
-		policyID := extension.FabridPolicyID{
+		policyID := fabrid.FabridPolicyID{
 			ID:     idNumber,
 			Global: idNumber >= 0x80,
 		}
 		key := generateRandomBytes(16)
-		encPolicyID, err := policyID.EncryptPolicyID(id, key)
+		encPolicyID, err := fabrid.EncryptPolicyID(&policyID, id, key)
 		assert.NoError(t, err)
 		meta := &extension.FabridHopfieldMetadata{
 			EncryptedPolicyID:  encPolicyID,
 			HopValidationField: [3]byte{},
 		}
-		computedPolicyID, err := meta.ComputePolicyID(id, key)
+		computedPolicyID, err := fabrid.ComputePolicyID(meta, id, key)
 		assert.NoError(t, err)
 		assert.Equal(t, policyID, computedPolicyID)
 	}
@@ -72,7 +73,7 @@ func TestSuccessfullValidators(t *testing.T) {
 	}
 	unixNow := uint32(time.Now().Unix())
 
-	tmpBuffer := make([]byte, extension.FabridMacInputSize)
+	tmpBuffer := make([]byte, fabrid.FabridMacInputSize)
 	tests := []test{
 		{
 			name:       "random 16 byte src addr",
@@ -108,28 +109,28 @@ func TestSuccessfullValidators(t *testing.T) {
 					RawSrcAddr: tc.rawSrcAddr,
 					SrcIA:      tc.srcIA,
 				}
-				fabrid := &extension.FabridOption{}
+				f := &extension.FabridOption{}
 				for j := 1; j <= extension.MaxSupportedFabridHops; j++ {
-					fabrid.HopfieldMetadata = append(fabrid.HopfieldMetadata, extension.FabridHopfieldMetadata{
+					f.HopfieldMetadata = append(f.HopfieldMetadata, extension.FabridHopfieldMetadata{
 						EncryptedPolicyID: uint8(rand.Uint32()),
 						QoS:               rand.Intn(2) == 0,
 					})
 					pathKey := generateRandomBytes(16)
 					keys := [][]byte{}
 					sigmas := [][]byte{}
-					for i := 0; i < len(fabrid.HopfieldMetadata); i++ {
+					for i := 0; i < len(f.HopfieldMetadata); i++ {
 						keys = append(keys, generateRandomBytes(16))
 						sigmas = append(sigmas, generateRandomBytes(6))
 					}
 
-					err := fabrid.InitValidators(id, s, tmpBuffer, pathKey, keys, sigmas)
+					err := fabrid.InitValidators(f, id, s, tmpBuffer, pathKey, keys, sigmas)
 					assert.NoError(t, err)
 
-					for i, meta := range fabrid.HopfieldMetadata {
-						err = meta.VerifyAndUpdate(id, s, tmpBuffer, keys[i], sigmas[i])
+					for i, meta := range f.HopfieldMetadata {
+						err = fabrid.VerifyAndUpdate(&meta, id, s, tmpBuffer, keys[i], sigmas[i])
 						assert.NoError(t, err)
 					}
-					err = fabrid.VerifyPath(pathKey)
+					err = fabrid.VerifyPath(f, pathKey)
 					assert.NoError(t, err)
 				}
 			})

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package extension
+package fabrid
 
 import (
 	"bytes"
@@ -23,6 +23,7 @@ import (
 	"github.com/dchest/cmac"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/slayers"
+	ext "github.com/scionproto/scion/pkg/slayers/extension"
 )
 
 type FabridPolicyID struct {
@@ -32,9 +33,27 @@ type FabridPolicyID struct {
 
 const FabridMacInputSize int = 40
 
-// MAC key: key xor (Identifier ++ SrcISD-AS)
-// MAC input: Sigma ++ EncPolicyID ++ SrcHostAddrLength ++ SrcHostAddress
-func (f *FabridHopfieldMetadata) computeFabridHVF(id *IdentifierOption,
+//  MAC xored key input:
+//  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	| Identifier (8B)                                     |
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//  |                                                     |
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	| SrcISD (2B)             | SrcAS (6B)                |
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	|                                                     |
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//
+//	MAC input:
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	| Sigma (6B)                                          |
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	|                         |ePolicyID(1B)| sHostLen(1B)|
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	| Source Host Address (4-16 Bytes)                    |
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+func computeFabridHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, resultBuffer [16]byte,
 	key []byte, sigma []byte) error {
 	if len(key) != 16 {
@@ -70,10 +89,10 @@ func (f *FabridHopfieldMetadata) computeFabridHVF(id *IdentifierOption,
 	return nil
 }
 
-func (f *FabridHopfieldMetadata) ComputeBaseHVF(id *IdentifierOption,
+func ComputeBaseHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
 	computedHVF := [16]byte{}
-	err := f.computeFabridHVF(id, s, tmpBuffer, computedHVF, key, sigma)
+	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, sigma)
 	if err != nil {
 		return err
 	}
@@ -82,10 +101,10 @@ func (f *FabridHopfieldMetadata) ComputeBaseHVF(id *IdentifierOption,
 	return nil
 }
 
-func (f *FabridHopfieldMetadata) ComputeVerifiedHVF(id *IdentifierOption,
+func ComputeVerifiedHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
 	computedHVF := [16]byte{}
-	err := f.computeFabridHVF(id, s, tmpBuffer, computedHVF, key, sigma)
+	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, sigma)
 	if err != nil {
 		return err
 	}
@@ -94,10 +113,10 @@ func (f *FabridHopfieldMetadata) ComputeVerifiedHVF(id *IdentifierOption,
 	return nil
 }
 
-func (f *FabridHopfieldMetadata) VerifyAndUpdate(id *IdentifierOption,
+func VerifyAndUpdate(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
 	computedHVF := [16]byte{}
-	err := f.computeFabridHVF(id, s, tmpBuffer, computedHVF, key, sigma)
+	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, sigma)
 	if err != nil {
 		return err
 	}
@@ -110,7 +129,7 @@ func (f *FabridHopfieldMetadata) VerifyAndUpdate(id *IdentifierOption,
 	return nil
 }
 
-func (f *FabridHopfieldMetadata) ComputePolicyID(id *IdentifierOption,
+func ComputePolicyID(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	key []byte) (FabridPolicyID, error) {
 
 	cipher, err := aes.NewCipher(key)
@@ -132,7 +151,7 @@ func (f *FabridHopfieldMetadata) ComputePolicyID(id *IdentifierOption,
 	return fp, nil
 }
 
-func (f *FabridPolicyID) EncryptPolicyID(id *IdentifierOption,
+func EncryptPolicyID(f *FabridPolicyID, id *ext.IdentifierOption,
 	key []byte) (uint8, error) {
 
 	cipher, err := aes.NewCipher(key)
@@ -150,21 +169,21 @@ func (f *FabridPolicyID) EncryptPolicyID(id *IdentifierOption,
 
 // InitValidators sets all HVFs of the FABRID option and computes the
 // path validator.
-func (f *FabridOption) InitValidators(id *IdentifierOption,
+func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, pathKey []byte, keys [][]byte, sigmas [][]byte) error {
 
 	outBuffer := [16]byte{}
-	pathValidatorBuf := make([]byte, fabridMetadataLen*len(f.HopfieldMetadata))
+	pathValidatorBuf := make([]byte, ext.FabridMetadataLen*len(f.HopfieldMetadata))
 	for i, meta := range f.HopfieldMetadata {
-		err := meta.computeFabridHVF(id, s, tmpBuffer, outBuffer, keys[i], sigmas[i])
+		err := computeFabridHVF(&meta, id, s, tmpBuffer, outBuffer, keys[i], sigmas[i])
 		if err != nil {
 			return err
 		}
 		outBuffer[0] &= 0x7f //ignore QoS bit
 		outBuffer[3] &= 0x7f //ignore QoS bit
 		copy(meta.HopValidationField[:3], outBuffer[:3])
-		pathValidatorBuf[i*fabridMetadataLen] = meta.EncryptedPolicyID
-		copy(pathValidatorBuf[i*fabridMetadataLen+1:i*fabridMetadataLen+4], outBuffer[3:6])
+		pathValidatorBuf[i*ext.FabridMetadataLen] = meta.EncryptedPolicyID
+		copy(pathValidatorBuf[i*ext.FabridMetadataLen+1:i*ext.FabridMetadataLen+4], outBuffer[3:6])
 	}
 	mac, err := initCMAC(pathKey)
 	if err != nil {
@@ -175,11 +194,11 @@ func (f *FabridOption) InitValidators(id *IdentifierOption,
 	return nil
 }
 
-func (f *FabridOption) VerifyPath(key []byte) error {
-	buf := make([]byte, fabridMetadataLen*len(f.HopfieldMetadata))
+func VerifyPath(f *ext.FabridOption, key []byte) error {
+	buf := make([]byte, ext.FabridMetadataLen*len(f.HopfieldMetadata))
 	for i := 0; i < len(f.HopfieldMetadata); i++ {
-		f.HopfieldMetadata[i].serializeTo(buf[i*fabridMetadataLen : (i+1)*fabridMetadataLen])
-		buf[i*fabridMetadataLen+1] &= 0x7f //ignore QoS bit
+		f.HopfieldMetadata[i].SerializeTo(buf[i*ext.FabridMetadataLen : (i+1)*ext.FabridMetadataLen])
+		buf[i*ext.FabridMetadataLen+1] &= 0x7f //ignore QoS bit
 	}
 	mac, err := initCMAC(key)
 	if err != nil {
