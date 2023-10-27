@@ -229,9 +229,8 @@ func macBlock(key []byte, tmp []byte, src []byte, dst []byte) error {
 		encryptor.CryptBlocks(dst, src[:16*blockCount])
 	}
 	if paddingLength != 0 {
-		paddingBytes := bytes.Repeat([]byte{byte(paddingLength)}, paddingLength)
 		copy(tmp, src[16*blockCount:])
-		copy(tmp[16-paddingLength:], paddingBytes)
+		copy(tmp[16-paddingLength:], zeroBlock[:paddingLength])
 		encryptor.CryptBlocks(dst, tmp)
 	}
 	return nil
