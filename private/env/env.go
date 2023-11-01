@@ -79,6 +79,8 @@ type General struct {
 	ID string `toml:"id,omitempty"`
 	// ConfigDir for loading extra files (currently, only topology.json and staticInfoConfig.json)
 	ConfigDir string `toml:"config_dir,omitempty"`
+	// Path to the FABRID config
+	FABRIDPath string `toml:"fabrid_path,omitempty"`
 	// ReconnectToDispatcher can be set to true to enable transparent dispatcher
 	// reconnects.
 	ReconnectToDispatcher bool `toml:"reconnect_to_dispatcher,omitempty"`
@@ -125,6 +127,11 @@ func (cfg *General) Topology() string {
 // StaticInfoConfig return the path to the configuration file for the StaticInfo beacon extension.
 func (cfg *General) StaticInfoConfig() string {
 	return filepath.Join(cfg.ConfigDir, StaticInfoConfigFile)
+}
+
+// Fabrid returns the path to the folder which contains the FABRID policies.
+func (cfg *General) Fabrid() string {
+	return filepath.Join(cfg.ConfigDir, cfg.FABRIDPath)
 }
 
 var _ config.Config = (*Daemon)(nil)

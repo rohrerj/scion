@@ -18,9 +18,18 @@ option go_package = "github.com/scionproto/scion/pkg/proto/control_plane/experim
 
 package proto.control_plane.experimental.v1;
 
+import "proto/control_plane/experimental/v1/fabrid_extensions.proto";
+
+
 message EPICDetachedExtension {
     // Remaining bytes of the full MAC in the hop entry.
     bytes auth_hop_entry = 1;
     // Remaining bytes of the full MAC in the peer entries.
     repeated bytes auth_peer_entries = 2;
+}
+
+
+message FABRIDDetachedExtension {
+    // The I and D-map of FABRID
+    proto.control_plane.experimental.v1.FABRIDDetachableMaps maps = 1;
 }

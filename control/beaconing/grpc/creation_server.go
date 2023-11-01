@@ -61,6 +61,7 @@ func (s SegmentCreationServer) Beacon(ctx context.Context,
 		logger.Debug("Failed to extract ingress interface", "peer", peer, "err", err)
 		return nil, status.Error(codes.InvalidArgument, "failed to extract ingress interface")
 	}
+	log.Info("received segment", "seg", req.Segment)
 	ps, err := seg.BeaconFromPB(req.Segment)
 	if err != nil {
 		logger.Debug("Failed to parse beacon", "peer", peer, "err", err)

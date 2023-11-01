@@ -16,6 +16,7 @@ package control
 
 import (
 	"context"
+	"github.com/scionproto/scion/control/fabrid"
 	"hash"
 	"net"
 	"time"
@@ -60,6 +61,7 @@ type TasksConfig struct {
 	Inspector             trust.Inspector
 	Metrics               *Metrics
 	DRKeyEngine           *drkey.ServiceEngine
+	Fabrid                *fabrid.FabridManager
 
 	MACGen     func() hash.Hash
 	StaticInfo func() *beaconing.StaticInfoCfg
@@ -85,6 +87,7 @@ func (t *TasksConfig) Originator() *periodic.Runner {
 		return nil
 	}
 	s := &beaconing.Originator{
+
 		Extender: t.extender("originator", t.IA, t.MTU, func() uint8 {
 			return t.BeaconStore.MaxExpTime(beacon.PropPolicy)
 		}),
@@ -217,6 +220,7 @@ func (t *TasksConfig) extender(
 		MTU:        mtu,
 		MaxExpTime: func() uint8 { return maxExp() },
 		StaticInfo: t.StaticInfo,
+		Fabrid:     t.Fabrid,
 		Task:       task,
 		EPIC:       t.EPIC,
 		SegmentExpirationDeficient: func() metrics.Gauge {

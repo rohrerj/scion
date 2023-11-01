@@ -19,6 +19,7 @@ option go_package = "github.com/scionproto/scion/pkg/proto/control_plane";
 package proto.control_plane.v1;
 
 import "proto/control_plane/experimental/v1/seg_detached_extensions.proto";
+import "proto/control_plane/experimental/v1/fabrid_extensions.proto";
 
 message PathSegmentExtensions {
     // Optional static info extension.
@@ -145,9 +146,20 @@ message DigestExtension {
     // total number of authenticators used in the hash.
     //
     Digest epic = 1000;
+    // The digest of the detached FABRID extension. The hash input is defined as follows:
+    //
+    // input = I-map || D-Map
+    //
+    // Here, 'I-map' is the mapping from connection points (e.g. interfaces or ip ranges)
+    // to the supported policy indices.
+    // Conversely, 'D-map' maps policy indices to local or global policy identifiers.
+    Digest fabrid = 1001;
 }
+
 
 message PathSegmentUnsignedExtensions {
     // Optional EPIC extension.
     proto.control_plane.experimental.v1.EPICDetachedExtension epic = 1000;
+    // Optional FABRID extension
+    proto.control_plane.experimental.v1.FABRIDDetachedExtension fabrid = 1001;
 }
