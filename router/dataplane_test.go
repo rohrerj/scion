@@ -222,7 +222,8 @@ func TestDataPlaneRun(t *testing.T) {
 					Global: false,
 					ID:     0x0f,
 				}
-				ret.RegisterFabridPolicy(policyID, 1)
+				mplsLabel := 0x05
+				ret.RegisterFabridPolicy(policyID, uint32(mplsLabel))
 
 				asToHostKey, err := ret.DeriveASToHostKey(dstIA, dstAddr.String())
 				assert.NoError(t, err)
@@ -316,7 +317,7 @@ func TestDataPlaneRun(t *testing.T) {
 
 				mExternal2 := mock_router.NewMockBatchConn(ctrl)
 				mExternal2.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
-
+				mExternal2.EXPECT().SetToS(uint8(mplsLabel)).Return(nil).Times(1)
 				mExternal2.EXPECT().WriteBatch(gomock.Any(), 0).DoAndReturn(
 					func(ms underlayconn.Messages, flags int) (int, error) {
 						if len(ms) != 1 {

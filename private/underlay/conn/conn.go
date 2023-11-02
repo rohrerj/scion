@@ -48,6 +48,7 @@ type Conn interface {
 	SetReadDeadline(time.Time) error
 	SetWriteDeadline(time.Time) error
 	SetDeadline(time.Time) error
+	SetToS(uint8) error
 	Close() error
 }
 
@@ -103,6 +104,10 @@ func (c *connUDPIPv4) WriteBatch(msgs Messages, flags int) (int, error) {
 	return c.pconn.WriteBatch(msgs, flags)
 }
 
+func (c *connUDPIPv4) SetToS(tos uint8) error {
+	return c.pconn.SetTOS(int(tos))
+}
+
 // SetReadDeadline sets the read deadline associated with the endpoint.
 func (c *connUDPIPv4) SetReadDeadline(t time.Time) error {
 	return c.pconn.SetReadDeadline(t)
@@ -139,6 +144,11 @@ func (c *connUDPIPv6) ReadBatch(msgs Messages) (int, error) {
 
 func (c *connUDPIPv6) WriteBatch(msgs Messages, flags int) (int, error) {
 	return c.pconn.WriteBatch(msgs, flags)
+}
+
+func (c *connUDPIPv6) SetToS(tos uint8) error {
+	// ToS only exists for ipv4. Do nothing here.
+	return nil
 }
 
 // SetReadDeadline sets the read deadline associated with the endpoint.

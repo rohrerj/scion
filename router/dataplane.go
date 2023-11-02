@@ -87,6 +87,7 @@ type BatchConn interface {
 	ReadBatch(underlayconn.Messages) (int, error)
 	WriteTo([]byte, *net.UDPAddr) (int, error)
 	WriteBatch(msgs underlayconn.Messages, flags int) (int, error)
+	SetToS(tos uint8) error
 	Close() error
 }
 
@@ -615,6 +616,8 @@ type packet struct {
 	// set by the receiver
 	ingress   uint16
 	rawPacket []byte
+	// because of the ToS mapping we only support 8bit long labels
+	mplsLabel uint8
 }
 
 type slowPacket struct {
@@ -754,6 +757,7 @@ func (d *DataPlane) runProcessor(id int, q <-chan packet,
 		}
 		p.rawPacket = result.OutPkt
 		p.dstAddr = result.OutAddr
+		p.mplsLabel = uint8(processor.mplsLabel)
 
 		select {
 		case fwCh <- p:
@@ -913,20 +917,31 @@ func (d *DataPlane) runForwarder(ifID uint16, conn BatchConn,
 	cfg *RunConfig, c <-chan packet) {
 
 	log.Debug("Initialize forwarder for", "interface", ifID)
-	writeMsgs := make(underlayconn.Messages, cfg.BatchSize)
+	batchSize := 1
+	writeMsgs := make(underlayconn.Messages, batchSize)
 	for i := range writeMsgs {
 		writeMsgs[i].Buffers = make([][]byte, 1)
 	}
 	metrics := d.forwardingMetrics[ifID]
-
-	remaining := 0
+	lastToS := uint8(0)
 	for d.running {
-		available := readUpTo(c, cfg.BatchSize-remaining, remaining == 0,
-			writeMsgs[remaining:])
-		available += remaining
 		// TODO (rohrerj): implement policy based paths
-
-		written, _ := conn.WriteBatch(writeMsgs[:available], 0)
+		pkt := <-c
+		writeMsgs[0].Buffers[0] = pkt.rawPacket
+		writeMsgs[0].Addr = nil
+		if pkt.dstAddr != nil {
+			writeMsgs[0].Addr = pkt.dstAddr
+		}
+		if pkt.mplsLabel != lastToS {
+			// we have to update our ToS value
+			lastToS = pkt.mplsLabel
+			_ = conn.SetToS(lastToS)
+		}
+		written, err := conn.WriteBatch(writeMsgs, 0)
+		if err != nil {
+			log.Debug("error", "err", err)
+		}
+		log.Debug("forwarder wrote", "written", written)
 		if written < 0 {
 			// WriteBatch returns -1 on error, we just consider this as
 			// 0 packets written
@@ -940,16 +955,9 @@ func (d *DataPlane) runForwarder(ifID uint16, conn BatchConn,
 		metrics.OutputPacketsTotal.Add(float64(written))
 		metrics.OutputBytesTotal.Add(float64(writtenBytes))
 
-		if written != available {
+		if written != 1 {
 			metrics.DroppedPacketsInvalid.Inc()
 			d.returnPacketToPool(writeMsgs[written].Buffers[0])
-			remaining = available - written - 1
-			for i := 0; i < remaining; i++ {
-				writeMsgs[i].Buffers[0] = writeMsgs[i+written+1].Buffers[0]
-				writeMsgs[i].Addr = writeMsgs[i+written+1].Addr
-			}
-		} else {
-			remaining = 0
 		}
 	}
 }
@@ -1043,6 +1051,7 @@ func (p *scionPacketProcessor) reset() error {
 	p.e2eLayer = slayers.EndToEndExtnSkipper{}
 	p.identifier = nil
 	p.fabrid = nil
+	p.mplsLabel = 0
 	return nil
 }
 
