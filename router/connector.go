@@ -166,10 +166,10 @@ func (c *Connector) DelSvc(ia addr.IA, svc addr.SVC, ip net.IP) error {
 	return c.DataPlane.DelSvc(svc, &net.UDPAddr{IP: ip, Port: topology.EndhostPort})
 }
 
-func (c *Connector) SetDRKeySecret(key [16]byte) {
+func (c *Connector) AddDRKeySecret(protocolID int32, sv control.SecretValue) error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
-	c.DataPlane.SetDRKeySecret(key)
+	return c.DataPlane.AddDRKeySecret(protocolID, sv)
 }
 
 // SetKey sets the key for the given ISD-AS at the given index.

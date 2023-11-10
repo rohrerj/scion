@@ -33,6 +33,7 @@ import (
 	"golang.org/x/net/ipv4"
 
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/drkey"
 	libepic "github.com/scionproto/scion/pkg/experimental/epic"
 	"github.com/scionproto/scion/pkg/experimental/fabrid"
 	"github.com/scionproto/scion/pkg/private/util"
@@ -209,7 +210,12 @@ func TestDataPlaneRun(t *testing.T) {
 					0x88, 0x99, 0xaa, 0xbb,
 					0xcc, 0xdd, 0xee, 0xff,
 				}
-				_ = ret.SetDRKeySecret(asDRKey)
+				_ = ret.AddDRKeySecret(int32(drkey.FABRID),
+					control.SecretValue{
+						Key:        asDRKey,
+						EpochBegin: time.Now(),
+						EpochEnd:   time.Now().AddDate(1, 0, 0),
+					})
 				local := xtest.MustParseIA("1-ff00:0:110")
 				now := time.Unix(0, time.Now().UnixMilli()*int64(time.Millisecond))
 				identifier := extension.IdentifierOption{
@@ -224,7 +230,8 @@ func TestDataPlaneRun(t *testing.T) {
 				}
 				ret.RegisterFabridPolicy(policyID, 1)
 
-				asToHostKey, err := ret.DeriveASToHostKey(dstIA, dstAddr.String())
+				asToHostKey, err := ret.DeriveASToHostKey(int32(drkey.FABRID), now,
+					dstIA, dstAddr.String())
 				assert.NoError(t, err)
 				encPolicyID, err := fabrid.EncryptPolicyID(&policyID, &identifier, asToHostKey)
 				assert.NoError(t, err)

@@ -26,6 +26,7 @@ import (
 	"github.com/go-chi/cors"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/private/app"
@@ -121,6 +122,18 @@ func realMain(ctx context.Context) error {
 		defer log.HandlePanic()
 		return globalCfg.Metrics.ServePrometheus(errCtx)
 	})
+	if globalCfg.Router.UseDRKey {
+		controlServiceAddr, err := controlConfig.Topo.Anycast(addr.SvcCS)
+		if err != nil {
+			return err
+		}
+		go func() {
+			defer log.HandlePanic()
+			control.StartSecretUpdater(dp,
+				controlConfig.BR.InternalAddr.IP.String(), controlServiceAddr)
+		}()
+
+	}
 	g.Go(func() error {
 		defer log.HandlePanic()
 		runConfig := &router.RunConfig{

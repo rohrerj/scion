@@ -114,8 +114,10 @@ type DataPlane struct {
 	running           bool
 	Metrics           *Metrics
 	forwardingMetrics map[uint16]forwardingMetrics
-	drKeySecret       [16]byte
-	fabridPolicyMap   map[uint8]uint32
+	drKeySecrets      [][2]*control.SecretValue
+	// determines whether index 0 or index 1 should be overwritten next
+	drKeySecretNextOverwrite []uint8
+	fabridPolicyMap          map[uint8]uint32
 
 	// The pool that stores all the packet buffers as described in the design document. See
 	// https://github.com/scionproto/scion/blob/master/doc/dev/design/BorderRouter.rst
@@ -147,6 +149,7 @@ var (
 	macVerificationFailed         = errors.New("MAC verification failed")
 	badPacketSize                 = errors.New("bad packet size")
 	slowPathRequired              = errors.New("slow-path required")
+	drKeySecretInvalid            = errors.New("no valid drkey secret for provided time period")
 
 	// zeroBuffer will be used to reset the Authenticator option in the
 	// scionPacketProcessor.OptAuth
@@ -180,14 +183,47 @@ func (d *DataPlane) SetIA(ia addr.IA) error {
 	return nil
 }
 
-func (d *DataPlane) SetDRKeySecret(key [16]byte) error {
+func (d *DataPlane) initializeDRKey() {
+	d.drKeySecrets = make([][2]*control.SecretValue, 3)
+	for i := 0; i < 3; i++ {
+		d.drKeySecrets[i] = [2]*control.SecretValue{
+			{},
+			{},
+		}
+	}
+	d.drKeySecretNextOverwrite = make([]uint8, 3)
+}
+
+func (d *DataPlane) AddDRKeySecret(protocolID int32, sv control.SecretValue) error {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
-	if d.running {
-		return modifyExisting
+	if d.drKeySecrets == nil {
+		d.initializeDRKey()
 	}
-	d.drKeySecret = key
+
+	if int(protocolID) > len(d.drKeySecrets) {
+		return serrors.New("Error while adding a new drkey. ProtocolID too large",
+			"protocolID", protocolID)
+	}
+	nextOverwrite := d.drKeySecretNextOverwrite[protocolID]
+	d.drKeySecrets[protocolID][nextOverwrite] = &sv
+	log.Debug("Registered new DRKey", "protocol", protocolID, "from", sv.EpochBegin, "to", sv.EpochEnd)
+	// switch nextOverwrite from 0 to 1 or from 1 to 0
+	d.drKeySecretNextOverwrite[protocolID] = 1 - nextOverwrite
 	return nil
+}
+
+func (d *DataPlane) getDRKeySecret(protocolID int32, t time.Time) (*control.SecretValue, error) {
+	secrets := d.drKeySecrets[protocolID]
+	// check whether t lies in the validity period of secret value 0
+	if !t.After(secrets[0].EpochBegin) && secrets[0].EpochEnd.After(t) {
+		return secrets[0], nil
+	}
+	// check whether t lies in the validity period of secret value 1
+	if !t.After(secrets[1].EpochBegin) && secrets[1].EpochEnd.After(t) {
+		return secrets[1], nil
+	}
+	return nil, drKeySecretInvalid
 }
 
 // SetKey sets the key used for MAC verification. The key provided here should
@@ -526,7 +562,9 @@ func (d *DataPlane) Run(ctx context.Context, cfg *RunConfig) error {
 	d.mtx.Lock()
 	d.running = true
 	d.initMetrics()
-
+	if d.drKeySecrets == nil {
+		d.initializeDRKey()
+	}
 	processorQueueSize := max(
 		len(d.interfaces)*cfg.BatchSize/cfg.NumProcessors,
 		cfg.BatchSize)
@@ -1046,9 +1084,13 @@ func (p *scionPacketProcessor) reset() error {
 	return nil
 }
 
-func (dp *DataPlane) deriveASToHostKey(dstAddr addr.IA, dst string) ([]byte, error) {
+func (dp *DataPlane) deriveASToHostKey(protocolID int32, t time.Time, dstAddr addr.IA, dst string) ([]byte, error) {
 	d := specific.Deriver{}
-	asToAsKey, err := d.DeriveLevel1(dstAddr, dp.drKeySecret)
+	secret, err := dp.getDRKeySecret(protocolID, t)
+	if err != nil {
+		return nil, err
+	}
+	asToAsKey, err := d.DeriveLevel1(dstAddr, secret.Key)
 	if err != nil {
 		return nil, err
 	}
@@ -1060,17 +1102,14 @@ func (dp *DataPlane) deriveASToHostKey(dstAddr addr.IA, dst string) ([]byte, err
 	return asToHostKey[:], nil
 }
 
-func (p *scionPacketProcessor) deriveASToHostKey() ([]byte, error) {
-	dst, err := p.scionLayer.DstAddr()
-	if err != nil {
-		return nil, err
-	}
-	return p.d.deriveASToHostKey(p.scionLayer.DstIA, dst.String())
-}
-
 func (p *scionPacketProcessor) processFabrid() error {
 	meta := p.fabrid.HopfieldMetadata[0]
-	key, err := p.deriveASToHostKey()
+	dst, err := p.scionLayer.DstAddr()
+	if err != nil {
+		return err
+	}
+	key, err := p.d.deriveASToHostKey(int32(drkey.FABRID), p.identifier.Timestamp,
+		p.scionLayer.DstIA, dst.String())
 	if err != nil {
 		return err
 	}

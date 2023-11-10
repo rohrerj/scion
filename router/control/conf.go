@@ -18,12 +18,10 @@ import (
 	"crypto/sha256"
 	"net"
 	"sort"
-	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/scionproto/scion/pkg/addr"
-	"github.com/scionproto/scion/pkg/drkey"
 	"github.com/scionproto/scion/pkg/private/common"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/snet"
@@ -39,7 +37,7 @@ type Dataplane interface {
 	AddSvc(ia addr.IA, svc addr.SVC, ip net.IP) error
 	DelSvc(ia addr.IA, svc addr.SVC, ip net.IP) error
 	SetKey(ia addr.IA, index int, key []byte) error
-	SetDRKeySecret(key [16]byte)
+	AddDRKeySecret(protocolID int32, sv SecretValue) error
 }
 
 // LinkInfo contains the information about a link between an internal and
@@ -127,13 +125,6 @@ func ConfigDataplane(dp Dataplane, cfg *Config) error {
 		if err := dp.SetKey(cfg.IA, 0, key0); err != nil {
 			return err
 		}
-		now := time.Now()
-		sk, err := drkey.DeriveSV(drkey.Generic, drkey.NewEpoch(uint32(now.Unix()),
-			uint32(now.AddDate(10, 0, 0).Unix())), cfg.MasterKeys.Key0)
-		if err != nil {
-			return err
-		}
-		dp.SetDRKeySecret(sk.Key)
 	}
 	// Add internal interfaces
 	if cfg.BR != nil {

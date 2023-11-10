@@ -18,6 +18,7 @@ package router
 import (
 	"net"
 	"net/netip"
+	"time"
 
 	"golang.org/x/net/ipv4"
 
@@ -87,8 +88,9 @@ func ExtractServices(s *services) map[addr.SVC][]*net.UDPAddr {
 	return s.m
 }
 
-func (d *DataPlane) DeriveASToHostKey(dstAddr addr.IA, dst string) ([]byte, error) {
-	return d.deriveASToHostKey(dstAddr, dst)
+func (d *DataPlane) DeriveASToHostKey(protocolID int32, t time.Time,
+	dstAddr addr.IA, dst string) ([]byte, error) {
+	return d.deriveASToHostKey(protocolID, t, dstAddr, dst)
 }
 
 func DecodeLayers(data []byte, base gopacket.DecodingLayer,
