@@ -26,6 +26,32 @@ type Detached struct {
 	IndexIdentiferMap   IndexIdentifierMap
 }
 
+func (ind *SupportedIndicesMap) SortedKeys() []ConnectionPair {
+	orderedKeysSupIndex := make([]ConnectionPair, 0, len(*ind))
+	for k := range *ind {
+		orderedKeysSupIndex = append(orderedKeysSupIndex, k)
+	}
+	sort.Slice(orderedKeysSupIndex, func(i int, j int) bool {
+		if orderedKeysSupIndex[i].Ingress != orderedKeysSupIndex[j].Ingress {
+			return orderedKeysSupIndex[i].Ingress.Less(orderedKeysSupIndex[j].Ingress)
+		}
+		return orderedKeysSupIndex[i].Egress.Less(orderedKeysSupIndex[j].Egress)
+	})
+	return orderedKeysSupIndex
+}
+
+func (id *IndexIdentifierMap) SortedKeys() []uint8 {
+	// TODO(jvanbommel): Q precompute and store?
+	orderedKeys := make([]uint8, 0, len(*id))
+	for k := range *id {
+		orderedKeys = append(orderedKeys, k)
+	}
+	sort.Slice(orderedKeys, func(i int, j int) bool {
+		return orderedKeys[i] < orderedKeys[j]
+	})
+	return orderedKeys
+}
+
 type ConnectionPointType string
 
 const (
@@ -39,7 +65,7 @@ type ConnectionPoint struct {
 	Type        ConnectionPointType
 	IP          string // Stored as a string to allow it to be key of a map.
 	Prefix      uint32
-	InterfaceId uint16 // TODO(jvanbommel): this is actually not consistent in scion.
+	InterfaceId uint16 // TODO(jvanbommel): Q this is actually not consistent in scion.
 }
 
 // To ensure that the connection point strings are identical, i.e. without padding, parse using the net library
@@ -51,6 +77,19 @@ func ConnectionPointFromString(IP string, Prefix uint32, Type ConnectionPointTyp
 		m = net.CIDRMask(int(Prefix), 8*net.IPv6len)
 	}
 	return ConnectionPoint{Type: Type, IP: net.ParseIP(IP).Mask(m).String(), Prefix: Prefix}
+}
+
+func (c *ConnectionPoint) Less(d ConnectionPoint) bool {
+	if c.Type != d.Type {
+		return c.Type < d.Type
+	}
+	if c.IP != d.IP {
+		return c.IP < d.IP
+	}
+	if c.Prefix != d.Prefix {
+		return c.Prefix < d.Prefix
+	}
+	return c.InterfaceId < d.InterfaceId
 }
 
 func (c *ConnectionPoint) IPNetwork() *net.IPNet {
@@ -195,6 +234,9 @@ func IndexIdentifierMapFromPB(identifierMap map[uint32]*fabridpb.FABRIDPolicyIde
 }
 
 func DetachedToPB(detached *Detached) *fabridpb.FABRIDDetachedExtension {
+	if detached == nil {
+		return &fabridpb.FABRIDDetachedExtension{}
+	}
 	return &fabridpb.FABRIDDetachedExtension{
 		Maps: &fabridpb.FABRIDDetachableMaps{
 			SupportedIndicesMap: SupportedIndicesMapToPB(detached.SupportedIndicesMap),
@@ -204,7 +246,9 @@ func DetachedToPB(detached *Detached) *fabridpb.FABRIDDetachedExtension {
 }
 
 func DetachedFromPB(detached *fabridpb.FABRIDDetachedExtension) *Detached {
-	//todo(jvanbommel): nil check
+	if detached == nil || detached.Maps == nil {
+		return nil
+	}
 	return &Detached{
 		SupportedIndicesMap: SupportedIndicesMapFromPB(detached.Maps.SupportedIndicesMap),
 		IndexIdentiferMap:   IndexIdentifierMapFromPB(detached.Maps.IndexIdentifierMap),
@@ -213,33 +257,12 @@ func DetachedFromPB(detached *fabridpb.FABRIDDetachedExtension) *Detached {
 
 func (d *Detached) String() string {
 	base := " indexIdentifierMap: ["
-	orderedKeys := make([]uint8, 0, len(d.IndexIdentiferMap))
-	for k, _ := range d.IndexIdentiferMap {
-		orderedKeys = append(orderedKeys, k)
-	}
-	sort.Slice(orderedKeys, func(i int, j int) bool {
-		return orderedKeys[i] < orderedKeys[j]
-	}) //TODO (jvanbommel): do this sorting into an ordered map directly at load ?
-	for _, k := range orderedKeys {
+	for _, k := range d.IndexIdentiferMap.SortedKeys() {
 		base += fmt.Sprintf("{ index: %d, type: %d, identifier: %d }", k, d.IndexIdentiferMap[k].Type, d.IndexIdentiferMap[k].Identifier)
 	}
 	base += "], supportedIndicesMap: ["
 
-	orderedKeysSupIndex := make([]ConnectionPair, 0, len(d.SupportedIndicesMap))
-	for k, _ := range d.SupportedIndicesMap {
-		orderedKeysSupIndex = append(orderedKeysSupIndex, k)
-	}
-	sort.Slice(orderedKeysSupIndex, func(i int, j int) bool {
-		return orderedKeysSupIndex[i].Ingress.Type < orderedKeysSupIndex[j].Ingress.Type ||
-			orderedKeysSupIndex[i].Ingress.IP < orderedKeysSupIndex[j].Ingress.IP ||
-			orderedKeysSupIndex[i].Ingress.Prefix < orderedKeysSupIndex[j].Ingress.Prefix ||
-			orderedKeysSupIndex[i].Ingress.InterfaceId < orderedKeysSupIndex[j].Ingress.InterfaceId ||
-			orderedKeysSupIndex[i].Egress.Type < orderedKeysSupIndex[j].Egress.Type ||
-			orderedKeysSupIndex[i].Egress.IP < orderedKeysSupIndex[j].Egress.IP ||
-			orderedKeysSupIndex[i].Egress.Prefix < orderedKeysSupIndex[j].Egress.Prefix ||
-			orderedKeysSupIndex[i].Egress.InterfaceId < orderedKeysSupIndex[j].Egress.InterfaceId
-	}) //TODO(jvanbommel): ensure this is stable sorting
-	for _, k := range orderedKeysSupIndex {
+	for _, k := range d.SupportedIndicesMap.SortedKeys() {
 		base += fmt.Sprintf("{ ingress: { type: %s ", k.Ingress.Type)
 		if k.Ingress.Type == Interface {
 			base += fmt.Sprintf("interfaceId: %d }", k.Ingress.InterfaceId)
@@ -265,35 +288,15 @@ func (d *Detached) String() string {
 	}
 	return base
 }
+
 func (d *Detached) Hash() []byte {
 	h := sha256.New()
-	orderedKeys := make([]uint8, 0, len(d.IndexIdentiferMap))
-	for k, _ := range d.IndexIdentiferMap {
-		orderedKeys = append(orderedKeys, k)
-	}
-	sort.Slice(orderedKeys, func(i int, j int) bool {
-		return orderedKeys[i] < orderedKeys[j]
-	})
-	for _, k := range orderedKeys {
+	for _, k := range d.IndexIdentiferMap.SortedKeys() {
 		binary.Write(h, binary.BigEndian, k)
 		binary.Write(h, binary.BigEndian, d.IndexIdentiferMap[k].Type)
 		binary.Write(h, binary.BigEndian, d.IndexIdentiferMap[k].Identifier)
 	}
-	orderedKeysSupIndex := make([]ConnectionPair, 0, len(d.SupportedIndicesMap))
-	for k, _ := range d.SupportedIndicesMap {
-		orderedKeysSupIndex = append(orderedKeysSupIndex, k)
-	}
-	sort.Slice(orderedKeysSupIndex, func(i int, j int) bool {
-		return orderedKeysSupIndex[i].Ingress.Type < orderedKeysSupIndex[j].Ingress.Type ||
-			orderedKeysSupIndex[i].Ingress.IP < orderedKeysSupIndex[j].Ingress.IP ||
-			orderedKeysSupIndex[i].Ingress.Prefix < orderedKeysSupIndex[j].Ingress.Prefix ||
-			orderedKeysSupIndex[i].Ingress.InterfaceId < orderedKeysSupIndex[j].Ingress.InterfaceId ||
-			orderedKeysSupIndex[i].Egress.Type < orderedKeysSupIndex[j].Egress.Type ||
-			orderedKeysSupIndex[i].Egress.IP < orderedKeysSupIndex[j].Egress.IP ||
-			orderedKeysSupIndex[i].Egress.Prefix < orderedKeysSupIndex[j].Egress.Prefix ||
-			orderedKeysSupIndex[i].Egress.InterfaceId < orderedKeysSupIndex[j].Egress.InterfaceId
-	})
-	for _, k := range orderedKeysSupIndex {
+	for _, k := range d.SupportedIndicesMap.SortedKeys() {
 		binary.Write(h, binary.BigEndian, k.Ingress.Type)
 		if k.Ingress.Type == Interface {
 			binary.Write(h, binary.BigEndian, k.Ingress.InterfaceId)

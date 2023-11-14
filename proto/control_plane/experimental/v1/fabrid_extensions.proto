@@ -83,7 +83,7 @@ message FABRIDConnectionPoint {
     bytes ip_address = 2;
     // IP prefix length, as in CIDR notation.
     uint32 ip_prefix = 3;
-    //TODO(jvanbommel): we can also from-to the IP range.
+    // TODO(jvanbommel): Q we can also from-to the IP range.
     // The interface for the interface type.
     uint64 interface = 4;
 

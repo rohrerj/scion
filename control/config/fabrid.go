@@ -23,42 +23,13 @@ import (
 	"github.com/scionproto/scion/private/config"
 )
 
-var _ (config.Config) = (*FABRIDConfig)(nil)
-
-// FABRIDConfig is the configuration for the policies that an AS supports on its links.
-type FABRIDConfig struct {
-	Policies []FABRIDPolicy `yaml:"policies,omitempty"`
-}
-
-func (cfg *FABRIDConfig) InitDefaults() {
-}
-
-// Validate validates that all values are parsable.
-func (cfg *FABRIDConfig) Validate() error {
-	for _, policy := range cfg.Policies {
-		if err := config.ValidateAll(&policy); err != nil {
-			return serrors.WrapStr("Error occurred while validating policy", err)
-		}
-	}
-	return nil
-}
-
-// Sample writes a config sample to the writer.
-func (cfg *FABRIDConfig) Sample(dst io.Writer, path config.Path, ctx config.CtxMap) {
-	//todo(jvanbommel)
-}
-
-// ConfigName is the key in the yaml file.
-func (cfg *FABRIDConfig) ConfigName() string {
-	return "fabrid"
-}
-
 type FABRIDPolicy struct {
-	SupportedBy      []FABRIDConnectionPoints `yaml:"connections,omitempty"`
-	IsLocalPolicy    bool                     `yaml:"local,omitempty"` //todo(jvanbommel); futureproof with a string enum?
+	IsLocalPolicy    bool                     `yaml:"local,omitempty"`
 	LocalIdentifier  uint32                   `yaml:"local_identifier,omitempty"`
 	LocalDescription string                   `yaml:"local_description,omitempty"`
 	GlobalIdentifier uint32                   `yaml:"global_identifier,omitempty"`
+	MPLSLabel        uint32                   `yaml:"mpls_label,omitempty"`
+	SupportedBy      []FABRIDConnectionPoints `yaml:"connections,omitempty"`
 }
 
 // Validate validates that all values are parsable.
@@ -79,12 +50,7 @@ func (cfg *FABRIDPolicy) Validate() error {
 
 // Sample writes a config sample to the writer.
 func (cfg *FABRIDPolicy) Sample(dst io.Writer, path config.Path, ctx config.CtxMap) {
-	//todo(jvanbommel)
-}
-
-// ConfigName is the key in the yaml file.
-func (cfg *FABRIDPolicy) ConfigName() string {
-	return "policies"
+	config.WriteString(dst, fabridLocalPolicySample)
 }
 
 type FABRIDConnectionPoints struct {
@@ -92,19 +58,9 @@ type FABRIDConnectionPoints struct {
 	Egress  FABRIDConnectionPoint `yaml:"egress,omitempty"`
 }
 
-// ConfigName is the key in the yaml file.
-func (cfg *FABRIDConnectionPoints) ConfigName() string {
-	return "connections"
-}
-
 // Validate validates that all values are parsable.
 func (cfg *FABRIDConnectionPoints) Validate() error {
 	return config.ValidateAll(&cfg.Ingress, &cfg.Egress)
-}
-
-// Sample writes a config sample to the writer.
-func (cfg *FABRIDConnectionPoints) Sample(dst io.Writer, path config.Path, ctx config.CtxMap) {
-	//todo(jvanbommel)
 }
 
 type FABRIDConnectionPoint struct {
@@ -112,11 +68,6 @@ type FABRIDConnectionPoint struct {
 	IPAddress string                     `yaml:"ip,omitempty"`
 	Prefix    uint8                      `yaml:"prefix,omitempty"`
 	Interface uint16                     `yaml:"interface,omitempty"`
-}
-
-// ConfigName is the key in the yaml file.
-func (cfg *FABRIDConnectionPoint) ConfigName() string {
-	return "connection"
 }
 
 // Validate validates that all values are parsable.
@@ -133,7 +84,6 @@ func (cfg *FABRIDConnectionPoint) Validate() error {
 	default:
 		return serrors.New("unknown FABRID connection point", "type", cfg.Type)
 	}
-	//todo(jvanbommel): check if interfaces can be 0.
 	if cfg.Type == fabrid.Interface && cfg.Interface == 0 {
 		return serrors.New("Invalid interface for connection point")
 	} else if cfg.Type == fabrid.IPv6Range && (cfg.IPAddress == "" || cfg.Prefix > 128) {
@@ -142,9 +92,4 @@ func (cfg *FABRIDConnectionPoint) Validate() error {
 		return serrors.New("Invalid IPv4 Address range for connection point")
 	}
 	return nil
-}
-
-// Sample writes a config sample to the writer.
-func (cfg *FABRIDConnectionPoint) Sample(dst io.Writer, path config.Path, ctx config.CtxMap) {
-	//todo(jvanbommel)
 }

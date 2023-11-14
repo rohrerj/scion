@@ -1,4 +1,4 @@
-load("//tools/lint:go.bzl", "go_library")
+load("//tools/lint:go.bzl", "go_library", "go_test")
 
 go_library(
     name = "go_default_library",
@@ -8,5 +8,15 @@ go_library(
     deps = [
         "//pkg/proto/control_plane/experimental:go_default_library",
         "//pkg/segment/extensions/digest:go_default_library",
+    ],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = ["fabrid_test.go"],
+    embed = [":go_default_library"],
+    deps = [
+        "//pkg/proto/control_plane/experimental:go_default_library",
+        "@com_github_stretchr_testify//assert:go_default_library",
     ],
 )

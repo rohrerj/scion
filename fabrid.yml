@@ -1,23 +1,11 @@
----
-policies:
-    - connections:
-          - ingress:
-                type: interface
-                interface: 1
-            egress:
-                type: ipv4
-                ip: 192.168.2.1
-                prefix: 24
-      local: true
-      local_identifier: 55
-      local_description: Fabrid Example Policy
-    - connections:
-          - ingress:
-                type: interface
-                interface: 1
-            egress:
-                type: ipv6
-                ip: 2001:0db8:3c4d:0015:0000:0000:1a2f:1a2b
-                prefix: 100
-      local: false
-      global_identifier: 1
+connections:
+    - ingress:
+        type: interface
+        interface: 0
+      egress:
+        type: ipv6
+        ip: 2001::1a2b
+        prefix: 129
+local: true
+local_identifier: 55
+local_description: Fabrid Example Policy

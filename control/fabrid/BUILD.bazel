@@ -1,8 +1,11 @@
-load("//tools/lint:go.bzl", "go_library")
+load("//tools/lint:go.bzl", "go_library", "go_test")
 
 go_library(
     name = "go_default_library",
-    srcs = ["fabrid_manager.go"],
+    srcs = [
+        "fabrid_manager.go",
+        "mpls.go",
+    ],
     importpath = "github.com/scionproto/scion/control/fabrid",
     visibility = ["//visibility:public"],
     deps = [
@@ -12,4 +15,10 @@ go_library(
         "//pkg/segment/extensions/fabrid:go_default_library",
         "@in_gopkg_yaml_v2//:go_default_library",
     ],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = ["fabrid_manager_test.go"],
+    embed = [":go_default_library"],
 )

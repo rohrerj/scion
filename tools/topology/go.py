@@ -114,7 +114,7 @@ class GoGenerator(object):
             'general': {
                 'id': name,
                 'config_dir': config_dir,
-                'fabrid_path': 'fabrid.yml',
+                'fabrid_path': 'gen-fabrid/',
                 'reconnect_to_dispatcher': True,
             },
             'log': self._log_entry(name),

@@ -1,0 +1,10 @@
+connections:
+    - ingress:
+          type: interface
+          interface: 1
+      egress:
+          type: ipv6
+          ip: 2001:0db8:3c4d:0015:0000:0000:1a2f:1a2b
+          prefix: 100
+local: false
+global_identifier: 1

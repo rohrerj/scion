@@ -25,7 +25,7 @@ service FABRIDInterService{
     rpc GetSupportedIndicesMap(SupportedIndicesRequest) returns (SupportedIndicesResponse) {}
     // Gets the D-Map for a local AS, mapping policy indices to policy identifiers
     rpc GetIndexIdentifierMap(IndexIdentifierMapRequest) returns (IndexIdentifierMapResponse) {}
-// todo(jvanbommel): signatures on the maps ? (hash in pcb?)
+// todo(jvanbommel): Q signatures on the maps ? (hash in pcb?)
     // Gets a string description for a local policy
     rpc GetLocalPolicyDescription(PolicyDescriptionRequest) returns (PolicyDescriptionResponse) {}
 }
@@ -34,6 +34,24 @@ service FABRIDIntraService {
     // Used by a local AS to request a policy description for another AS. The control service will
     // request the policy description from the remote AS if it is unknown to the control service.
     rpc GetRemotePolicyDescription(RemotePolicyDescriptionRequest) returns (PolicyDescriptionResponse) {}
+
+    // Used by border routers in the AS to request the mapping of supported policy indices to local MPLS labels
+    rpc GetMPLSMapIfNecessary(MPLSMapRequest) returns (MPLSMapResponse) {}
+}
+
+message MPLSMapRequest {
+    // The MPLS map is only updated if the hash of the map already saved at the router is mismatched with the current
+    // active MPLS map. This field is optional, if empty, the active map is always sent in response.
+    bytes hash = 1;
+}
+
+message MPLSMapResponse {
+    // If true the endpoint should update its MPLS label map, if false it is already up to date
+    bool update = 1;
+    // The hash of the current active MPLS map on the control service
+    bytes hash = 2;
+    // The actual MPLS map, mapping policy indices (uint8) to MPLS labels (uint32).
+    map<uint32, uint32> mplsLabelMap = 3;
 }
 
 message SupportedIndicesRequest { }

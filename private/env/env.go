@@ -131,7 +131,8 @@ func (cfg *General) StaticInfoConfig() string {
 
 // Fabrid returns the path to the folder which contains the FABRID policies.
 func (cfg *General) Fabrid() string {
-	return filepath.Join(cfg.ConfigDir, cfg.FABRIDPath)
+	return cfg.FABRIDPath
+	//return filepath.Join(cfg.ConfigDir, cfg.FABRIDPath)
 }
 
 var _ config.Config = (*Daemon)(nil)

@@ -92,15 +92,23 @@ func checkUnsignedExtensions(ue *UnsignedExtensions, e *Extensions) error {
 		}
 	}
 
-	fabridDetached := (ue.FabridDetached != nil)
-	fabridDigest := (e.Digests != nil && len(e.Digests.Fabrid.Digest) != 0)
-	if fabridDetached && !fabridDigest {
-		return serrors.New("fabrid maps present, but hash is not")
-	}
-	if fabridDetached && epicDigest {
-		if digest := ue.FabridDetached.Hash(); !bytes.Equal(e.Digests.Fabrid.Digest, digest) {
-			return serrors.New("fabrid digest validation failed", "calculated", hex.EncodeToString(e.Digests.Fabrid.Digest),
-				"stored", hex.EncodeToString(digest))
+	if ue.FabridDetached != nil {
+		hasSupportedIndices := len(ue.FabridDetached.SupportedIndicesMap) > 0
+		hasIndexIdentifiers := len(ue.FabridDetached.IndexIdentiferMap) > 0
+		fabridDigest := e.Digests != nil && len(e.Digests.Fabrid.Digest) != 0
+		if hasSupportedIndices && !hasIndexIdentifiers {
+			// An AS may announce index->identifiers that are not used in the supported indices map.
+			// However, announcing supported policy indices without specifying the identifiers is invalid.
+			return serrors.New("fabrid maps are malformed")
+		}
+
+		if fabridDigest {
+			if digest := ue.FabridDetached.Hash(); !bytes.Equal(e.Digests.Fabrid.Digest, digest) {
+				return serrors.New("fabrid digest validation failed", "calculated", hex.EncodeToString(e.Digests.Fabrid.Digest),
+					"stored", hex.EncodeToString(digest))
+			}
+		} else {
+			return serrors.New("fabrid maps present, but hash is not")
 		}
 	}
 	return nil
