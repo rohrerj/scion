@@ -228,7 +228,9 @@ func TestDataPlaneRun(t *testing.T) {
 					Global: false,
 					ID:     0x0f,
 				}
-				ret.RegisterFabridPolicy(policyID, 1)
+				ret.UpdateFabridPolicies(map[uint8]uint32{
+					policyID.ID: 1,
+				})
 
 				asToHostKey, err := ret.DeriveASToHostKey(int32(drkey.FABRID), now,
 					dstIA, dstAddr.String())

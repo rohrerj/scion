@@ -32,16 +32,73 @@ type SecretValue struct {
 	Key        [16]byte
 }
 
-func StartSecretUpdater(dp Dataplane, localAddr string, csAddr *net.UDPAddr) {
+type Fetcher struct {
+	localAddr  *net.TCPAddr
+	remoteAddr *net.TCPAddr
+	dp         Dataplane
+}
+
+func NewFetcher(localIP string, csAddr string, dp Dataplane) (*Fetcher, error) {
+	localAddr := &net.TCPAddr{
+		IP:   net.ParseIP(localIP),
+		Port: 0,
+	}
+	remoteTcpAddr, err := net.ResolveTCPAddr("tcp", csAddr)
+	if err != nil {
+		return nil, err
+	}
+	f := &Fetcher{
+		localAddr:  localAddr,
+		remoteAddr: remoteTcpAddr,
+		dp:         dp,
+	}
+	return f, nil
+}
+
+func (f *Fetcher) StartFabridPolicyFetcher() {
 	retryAfterErrorDuration := 10 * time.Second
 	for {
-		sv, err := queryASSecret(dp, localAddr, csAddr)
+		policies, err := f.queryFabridPolicies()
+		if err != nil {
+			log.Debug("Error while querying the FABRID policies from local control service", "err", err)
+			time.Sleep(retryAfterErrorDuration)
+			continue
+		}
+		err = f.dp.UpdateFabridPolicies(policies)
+		if err != nil {
+			log.Debug("Error while adding FABRID policies", "err", err)
+			time.Sleep(retryAfterErrorDuration)
+			continue
+		}
+		time.Sleep(30 * time.Minute)
+	}
+}
+
+func (f *Fetcher) queryFabridPolicies() (map[uint8]uint32, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	dialer := func(ctx context.Context, addr string) (net.Conn, error) {
+		return net.DialTCP("tcp", f.localAddr, f.remoteAddr)
+	}
+	grpcconn, err := grpc.DialContext(ctx, f.remoteAddr.String(),
+		grpc.WithInsecure(), grpc.WithContextDialer(dialer))
+	if err != nil {
+		return nil, err
+	}
+	defer grpcconn.Close()
+	return nil, nil
+}
+
+func (f *Fetcher) StartSecretUpdater() {
+	retryAfterErrorDuration := 10 * time.Second
+	for {
+		sv, err := f.queryASSecret(drkey.Protocol_PROTOCOL_FABRID)
 		if err != nil {
 			log.Debug("Error while querying secret value from local control service", "err", err)
 			time.Sleep(retryAfterErrorDuration)
 			continue
 		}
-		err = dp.AddDRKeySecret(int32(drkey.Protocol_PROTOCOL_FABRID), sv)
+		err = f.dp.AddDRKeySecret(int32(drkey.Protocol_PROTOCOL_FABRID), sv)
 		if err != nil {
 			log.Debug("Error while adding drkey", "err", err)
 			time.Sleep(retryAfterErrorDuration)
@@ -51,21 +108,15 @@ func StartSecretUpdater(dp Dataplane, localAddr string, csAddr *net.UDPAddr) {
 	}
 }
 
-func queryASSecret(dp Dataplane, localAddr string, csAddr *net.UDPAddr) (SecretValue, error) {
+func (f *Fetcher) queryASSecret(
+	protocolID drkey.Protocol) (SecretValue, error) {
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	dialer := func(ctx context.Context, addr string) (net.Conn, error) {
-		localTcpAddr := &net.TCPAddr{
-			IP:   net.ParseIP(localAddr),
-			Port: 0,
-		}
-		remoteTcpAddr, err := net.ResolveTCPAddr("tcp", addr)
-		if err != nil {
-			return nil, err
-		}
-		return net.DialTCP("tcp", localTcpAddr, remoteTcpAddr)
+		return net.DialTCP("tcp", f.localAddr, f.remoteAddr)
 	}
-	grpcconn, err := grpc.DialContext(ctx, csAddr.String(),
+	grpcconn, err := grpc.DialContext(ctx, f.remoteAddr.String(),
 		grpc.WithInsecure(), grpc.WithContextDialer(dialer))
 	if err != nil {
 		return SecretValue{}, err
@@ -73,10 +124,10 @@ func queryASSecret(dp Dataplane, localAddr string, csAddr *net.UDPAddr) (SecretV
 	defer grpcconn.Close()
 	client := drpb.NewDRKeyIntraServiceClient(grpcconn)
 	req := &drpb.DRKeySecretValueRequest{
-		ProtocolId: drkey.Protocol_PROTOCOL_FABRID,
+		ProtocolId: protocolID,
 		ValTime:    timestamppb.New(time.Now().Add(1 * time.Hour)),
 	}
-	res, err := client.DRKeySecretValue(context.Background(), req)
+	res, err := client.DRKeySecretValue(ctx, req)
 	if err != nil {
 		return SecretValue{}, err
 	}

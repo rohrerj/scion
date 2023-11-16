@@ -122,17 +122,24 @@ func realMain(ctx context.Context) error {
 		defer log.HandlePanic()
 		return globalCfg.Metrics.ServePrometheus(errCtx)
 	})
+	controlServiceAddr, err := controlConfig.Topo.Anycast(addr.SvcCS)
+	if err != nil {
+		return err
+	}
+	fetcher, err := control.NewFetcher(controlConfig.BR.InternalAddr.IP.String(),
+		controlServiceAddr.String(), dp)
+	if err != nil {
+		return err
+	}
 	if globalCfg.Router.UseDRKey {
-		controlServiceAddr, err := controlConfig.Topo.Anycast(addr.SvcCS)
-		if err != nil {
-			return err
-		}
 		go func() {
 			defer log.HandlePanic()
-			control.StartSecretUpdater(dp,
-				controlConfig.BR.InternalAddr.IP.String(), controlServiceAddr)
+			fetcher.StartSecretUpdater()
 		}()
-
+		go func() {
+			defer log.HandlePanic()
+			fetcher.StartFabridPolicyFetcher()
+		}()
 	}
 	g.Go(func() error {
 		defer log.HandlePanic()

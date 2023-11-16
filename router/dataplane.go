@@ -215,13 +215,10 @@ func (d *DataPlane) AddDRKeySecret(protocolID int32, sv control.SecretValue) err
 
 func (d *DataPlane) getDRKeySecret(protocolID int32, t time.Time) (*control.SecretValue, error) {
 	secrets := d.drKeySecrets[protocolID]
-	// check whether t lies in the validity period of secret value 0
-	if !t.After(secrets[0].EpochBegin) && secrets[0].EpochEnd.After(t) {
-		return secrets[0], nil
-	}
-	// check whether t lies in the validity period of secret value 1
-	if !t.After(secrets[1].EpochBegin) && secrets[1].EpochEnd.After(t) {
-		return secrets[1], nil
+	for _, sv := range secrets {
+		if !t.After(sv.EpochBegin) && sv.EpochEnd.After(t) {
+			return sv, nil
+		}
 	}
 	return nil, drKeySecretInvalid
 }
@@ -536,13 +533,13 @@ func (d *DataPlane) AddNextHopBFD(ifID uint16, src, dst *net.UDPAddr, cfg contro
 	return d.addBFDController(ifID, s, cfg, m)
 }
 
-func (d *DataPlane) RegisterFabridPolicy(policy fabrid.FabridPolicyID, mplsLabel uint32) {
+func (d *DataPlane) UpdateFabridPolicies(policies map[uint8]uint32) error {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
-	if d.fabridPolicyMap == nil {
-		d.fabridPolicyMap = make(map[uint8]uint32)
-	}
-	d.fabridPolicyMap[policy.ID] = mplsLabel
+	// TODO(rohrerj): check for concurrency issues
+	// when an update happens during reading
+	d.fabridPolicyMap = policies
+	return nil
 }
 
 func max(a int, b int) int {
