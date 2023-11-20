@@ -16,13 +16,13 @@
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |   NextHdr     |     ExtLen    |  OptType = 4  |    OptLen     |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// | Enc PolicyID  |Q|     Hop Validation Field                    |
+// | Enc PolicyID  |F|A|   Hop Validation Field                    |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// | Enc PolicyID  |Q|     Hop Validation Field                    |
+// | Enc PolicyID  |F|A|   Hop Validation Field                    |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// |    ....       | |                 ....                        |
+// |    ....       | | |               ....                        |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// | Enc PolicyID  |Q|     Hop Validation Field                    |
+// | Enc PolicyID  |F|A|   Hop Validation Field                    |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |                       Path Validator                          |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -48,7 +48,8 @@ type FabridOption struct {
 
 type FabridHopfieldMetadata struct {
 	EncryptedPolicyID  uint8
-	QoS                bool
+	FabridEnabled      bool
+	ASLevelKey         bool
 	HopValidationField [3]byte
 }
 
@@ -65,9 +66,12 @@ func (f *FabridHopfieldMetadata) decodeFabridHopfieldMetadata(b []byte) {
 	f.EncryptedPolicyID = uint8(b[0])
 	copy(f.HopValidationField[:], b[1:4])
 	if b[1]&0x80 > 0 {
-		f.QoS = true
-		f.HopValidationField[0] &= 0x7f
+		f.FabridEnabled = true
+		if b[1]&0x40 > 0 {
+			f.ASLevelKey = true
+		}
 	}
+	f.HopValidationField[0] &= 0x3f
 }
 
 func (f *FabridHopfieldMetadata) SerializeTo(b []byte) error {
@@ -82,9 +86,12 @@ func (f *FabridHopfieldMetadata) SerializeTo(b []byte) error {
 func (f *FabridHopfieldMetadata) serializeTo(b []byte) {
 	b[0] = byte(f.EncryptedPolicyID)
 	copy(b[1:4], f.HopValidationField[:])
-	b[1] &= 0x7f // clear first bit of HVF for QoS
-	if f.QoS {
+	b[1] &= 0x3f // clear the first two (left) bits of the HVF
+	if f.FabridEnabled {
 		b[1] |= 0x80
+		if f.ASLevelKey {
+			b[1] |= 0x40
+		}
 	}
 }
 

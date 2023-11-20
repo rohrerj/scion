@@ -113,7 +113,8 @@ func TestSuccessfullValidators(t *testing.T) {
 				for j := 1; j <= extension.MaxSupportedFabridHops; j++ {
 					f.HopfieldMetadata = append(f.HopfieldMetadata, extension.FabridHopfieldMetadata{
 						EncryptedPolicyID: uint8(rand.Uint32()),
-						QoS:               rand.Intn(2) == 0,
+						FabridEnabled:     rand.Intn(2) == 0,
+						ASLevelKey:        rand.Intn(2) == 0,
 					})
 					pathKey := generateRandomBytes(16)
 					keys := [][]byte{}

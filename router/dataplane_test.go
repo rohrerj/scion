@@ -235,7 +235,7 @@ func TestDataPlaneRun(t *testing.T) {
 				asToHostKey, err := ret.DeriveASToHostKey(int32(drkey.FABRID), now,
 					dstIA, dstAddr.String())
 				assert.NoError(t, err)
-				encPolicyID, err := fabrid.EncryptPolicyID(&policyID, &identifier, asToHostKey)
+				encPolicyID, err := fabrid.EncryptPolicyID(&policyID, &identifier, asToHostKey[:])
 				assert.NoError(t, err)
 
 				mExternal := mock_router.NewMockBatchConn(ctrl)
@@ -368,7 +368,7 @@ func TestDataPlaneRun(t *testing.T) {
 										EncryptedPolicyID: encPolicyID,
 									}
 									mac := computeMAC(t, key, infField, hopField)
-									err = fabrid.ComputeVerifiedHVF(recomputedVerifiedHVF, foundIdentifier, &s, tmp, asToHostKey, mac[:])
+									err = fabrid.ComputeVerifiedHVF(recomputedVerifiedHVF, foundIdentifier, &s, tmp, asToHostKey[:], mac[:])
 									assert.NoError(t, err)
 									assert.Equal(t, encPolicyID, meta.EncryptedPolicyID)
 									assert.Equal(t, recomputedVerifiedHVF.HopValidationField, meta.HopValidationField)

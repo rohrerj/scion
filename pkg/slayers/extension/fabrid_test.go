@@ -111,9 +111,9 @@ func TestFabridDecode(t *testing.T) {
 			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeFabrid,
 				OptData: []byte{
-					0x66, 0x77, 0x88, 0x99,
-					0xaa, 0x0b, 0xcc, 0xdd,
-					0xaa, 0x81, 0x01, 0x01,
+					0x66, 0x37, 0x88, 0x99,
+					0xaa, 0x8b, 0xcc, 0xdd,
+					0xaa, 0xc1, 0x01, 0x01,
 					0x22, 0x33, 0x44, 0x55,
 				},
 			},
@@ -127,14 +127,17 @@ func TestFabridDecode(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, 3, len(fo.HopfieldMetadata))
 				assert.Equal(t, uint8(0x66), fo.HopfieldMetadata[0].EncryptedPolicyID)
-				assert.Equal(t, [3]byte{0x77, 0x88, 0x99}, fo.HopfieldMetadata[0].HopValidationField)
-				assert.Equal(t, false, fo.HopfieldMetadata[0].QoS)
+				assert.Equal(t, [3]byte{0x37, 0x88, 0x99}, fo.HopfieldMetadata[0].HopValidationField)
+				assert.Equal(t, false, fo.HopfieldMetadata[0].FabridEnabled)
+				assert.Equal(t, false, fo.HopfieldMetadata[0].ASLevelKey)
 				assert.Equal(t, uint8(0xaa), fo.HopfieldMetadata[1].EncryptedPolicyID)
 				assert.Equal(t, [3]byte{0x0b, 0xcc, 0xdd}, fo.HopfieldMetadata[1].HopValidationField)
-				assert.Equal(t, false, fo.HopfieldMetadata[1].QoS)
+				assert.Equal(t, true, fo.HopfieldMetadata[1].FabridEnabled)
+				assert.Equal(t, false, fo.HopfieldMetadata[1].ASLevelKey)
 				assert.Equal(t, uint8(0xaa), fo.HopfieldMetadata[2].EncryptedPolicyID)
 				assert.Equal(t, [3]byte{0x01, 0x01, 0x01}, fo.HopfieldMetadata[2].HopValidationField)
-				assert.Equal(t, true, fo.HopfieldMetadata[2].QoS)
+				assert.Equal(t, true, fo.HopfieldMetadata[2].FabridEnabled)
+				assert.Equal(t, true, fo.HopfieldMetadata[2].ASLevelKey)
 				assert.Equal(t, [4]byte{0x22, 0x33, 0x44, 0x55}, fo.PathValidator)
 			},
 		},
@@ -197,11 +200,13 @@ func TestFabridSerialize(t *testing.T) {
 					},
 					{
 						EncryptedPolicyID:  0xaa,
+						FabridEnabled:      true,
 						HopValidationField: [3]byte{0x0b, 0xcc, 0xdd},
 					},
 					{
 						EncryptedPolicyID:  0xaa,
-						QoS:                true,
+						FabridEnabled:      true,
+						ASLevelKey:         true,
 						HopValidationField: [3]byte{0x01, 0x01, 0x01},
 					},
 				},
@@ -210,9 +215,9 @@ func TestFabridSerialize(t *testing.T) {
 			buffer: make([]byte, 16),
 			validate: func(b []byte, err error, t *testing.T) {
 				assert.NoError(t, err)
-				assert.Equal(t, []byte{0x11, 0x22, 0x33, 0x44}, b[0:4])   //HF1
-				assert.Equal(t, []byte{0xaa, 0x0b, 0xcc, 0xdd}, b[4:8])   //HF2
-				assert.Equal(t, []byte{0xaa, 0x81, 0x01, 0x01}, b[8:12])  //HF3 with QoS
+				assert.Equal(t, []byte{0x11, 0x22, 0x33, 0x44}, b[0:4])   //HF1 without F or A
+				assert.Equal(t, []byte{0xaa, 0x8b, 0xcc, 0xdd}, b[4:8])   //HF2 with F without A
+				assert.Equal(t, []byte{0xaa, 0xc1, 0x01, 0x01}, b[8:12])  //HF3 with F and A
 				assert.Equal(t, []byte{0x11, 0x22, 0x33, 0x44}, b[12:16]) //Path validator
 			},
 		},

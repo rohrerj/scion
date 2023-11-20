@@ -1081,22 +1081,33 @@ func (p *scionPacketProcessor) reset() error {
 	return nil
 }
 
-func (dp *DataPlane) deriveASToHostKey(protocolID int32, t time.Time, dstAddr addr.IA, dst string) ([]byte, error) {
+var nullByte = [16]byte{}
+
+func (dp *DataPlane) deriveASToASKey(protocolID int32, t time.Time, dstAS addr.IA) ([16]byte, error) {
 	d := specific.Deriver{}
 	secret, err := dp.getDRKeySecret(protocolID, t)
 	if err != nil {
-		return nil, err
+		return nullByte, err
 	}
-	asToAsKey, err := d.DeriveLevel1(dstAddr, secret.Key)
+	asToAsKey, err := d.DeriveLevel1(dstAS, secret.Key)
 	if err != nil {
-		return nil, err
+		return nullByte, err
+	}
+	return asToAsKey, nil
+}
+
+func (dp *DataPlane) deriveASToHostKey(protocolID int32, t time.Time, dstAS addr.IA, dst string) ([16]byte, error) {
+	d := specific.Deriver{}
+	asToAsKey, err := dp.deriveASToASKey(protocolID, t, dstAS)
+	if err != nil {
+		return nullByte, err
 	}
 	asToHostKey, err := d.DeriveASHost(dst, asToAsKey)
 	if err != nil {
-		return nil, err
+		return nullByte, err
 	}
 
-	return asToHostKey[:], nil
+	return asToHostKey, nil
 }
 
 func (p *scionPacketProcessor) processFabrid() error {
@@ -1105,12 +1116,18 @@ func (p *scionPacketProcessor) processFabrid() error {
 	if err != nil {
 		return err
 	}
-	key, err := p.d.deriveASToHostKey(int32(drkey.FABRID), p.identifier.Timestamp,
-		p.scionLayer.DstIA, dst.String())
+	var key [16]byte
+	if p.fabrid.HopfieldMetadata[0].ASLevelKey {
+		key, err = p.d.deriveASToASKey(int32(drkey.FABRID), p.identifier.Timestamp,
+			p.scionLayer.DstIA)
+	} else {
+		key, err = p.d.deriveASToHostKey(int32(drkey.FABRID), p.identifier.Timestamp,
+			p.scionLayer.DstIA, dst.String())
+	}
 	if err != nil {
 		return err
 	}
-	policyID, err := fabrid.ComputePolicyID(&meta, p.identifier, key)
+	policyID, err := fabrid.ComputePolicyID(&meta, p.identifier, key[:])
 	if err != nil {
 		return err
 	}
@@ -1120,7 +1137,7 @@ func (p *scionPacketProcessor) processFabrid() error {
 	}
 	p.mplsLabel = mplsLabel
 
-	err = fabrid.VerifyAndUpdate(&meta, p.identifier, &p.scionLayer, p.macInputBuffer, key, p.cachedMac[:6])
+	err = fabrid.VerifyAndUpdate(&meta, p.identifier, &p.scionLayer, p.macInputBuffer, key[:], p.cachedMac[:6])
 	if err != nil {
 		return err
 	}
@@ -1146,12 +1163,15 @@ func (p *scionPacketProcessor) processHbhOptions() error {
 			if p.identifier == nil {
 				return serrors.New("Identifier HBH option must be present when using FABRID")
 			}
-			p.fabrid, err = extension.ParseFabridOptionCurrentHop(opt, &p.path.Base)
+			fabrid, err := extension.ParseFabridOptionCurrentHop(opt, &p.path.Base)
 			if err != nil {
 				return err
 			}
-			if err = p.processFabrid(); err != nil {
-				return err
+			if fabrid.HopfieldMetadata[0].FabridEnabled {
+				p.fabrid = fabrid
+				if err = p.processFabrid(); err != nil {
+					return err
+				}
 			}
 		default:
 		}

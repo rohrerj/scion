@@ -89,7 +89,7 @@ func ExtractServices(s *services) map[addr.SVC][]*net.UDPAddr {
 }
 
 func (d *DataPlane) DeriveASToHostKey(protocolID int32, t time.Time,
-	dstAddr addr.IA, dst string) ([]byte, error) {
+	dstAddr addr.IA, dst string) ([16]byte, error) {
 	return d.deriveASToHostKey(protocolID, t, dstAddr, dst)
 }
 

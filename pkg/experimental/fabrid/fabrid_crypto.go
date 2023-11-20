@@ -96,7 +96,7 @@ func ComputeBaseHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	if err != nil {
 		return err
 	}
-	computedHVF[0] &= 0x7f // ignore QoS bit
+	computedHVF[0] &= 0x3f // ignore first two (left) bits
 	copy(f.HopValidationField[:], computedHVF[0:3])
 	return nil
 }
@@ -108,7 +108,7 @@ func ComputeVerifiedHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	if err != nil {
 		return err
 	}
-	computedHVF[3] &= 0x7f //ignore QoS bit
+	computedHVF[3] &= 0x3f // ignore first two (left) bits
 	copy(f.HopValidationField[:], computedHVF[3:6])
 	return nil
 }
@@ -120,11 +120,11 @@ func VerifyAndUpdate(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	if err != nil {
 		return err
 	}
-	computedHVF[0] &= 0x7f //ignore QoS bit
+	computedHVF[0] &= 0x3f // ignore first two (left) bits
 	if !bytes.Equal(computedHVF[:3], f.HopValidationField[:]) {
 		return serrors.New("HVF is not valid")
 	}
-	computedHVF[3] &= 0x7f //ignore QoS bit
+	computedHVF[3] &= 0x3f // ignore first two (left) bits
 	copy(f.HopValidationField[:], computedHVF[3:6])
 	return nil
 }
@@ -179,8 +179,8 @@ func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption,
 		if err != nil {
 			return err
 		}
-		outBuffer[0] &= 0x7f //ignore QoS bit
-		outBuffer[3] &= 0x7f //ignore QoS bit
+		outBuffer[0] &= 0x3f // ignore first two (left) bits
+		outBuffer[3] &= 0x3f // ignore first two (left) bits
 		copy(meta.HopValidationField[:3], outBuffer[:3])
 		pathValidatorBuf[i*ext.FabridMetadataLen] = meta.EncryptedPolicyID
 		copy(pathValidatorBuf[i*ext.FabridMetadataLen+1:i*ext.FabridMetadataLen+4], outBuffer[3:6])
@@ -198,7 +198,7 @@ func VerifyPath(f *ext.FabridOption, key []byte) error {
 	buf := make([]byte, ext.FabridMetadataLen*len(f.HopfieldMetadata))
 	for i := 0; i < len(f.HopfieldMetadata); i++ {
 		f.HopfieldMetadata[i].SerializeTo(buf[i*ext.FabridMetadataLen : (i+1)*ext.FabridMetadataLen])
-		buf[i*ext.FabridMetadataLen+1] &= 0x7f //ignore QoS bit
+		buf[i*ext.FabridMetadataLen+1] &= 0x3f // ignore first two (left) bits
 	}
 	mac, err := initCMAC(key)
 	if err != nil {
