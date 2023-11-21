@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/pkg/segment/extensions/fabrid"
 	"math"
 	"sort"
 	"time"
@@ -310,22 +312,33 @@ type pathSolution struct {
 
 // Path builds the forwarding path with metadata by extracting it from a path
 // between source and destination in the DMG.
+
+// We go through the list of ASEntries and store for each IA a pointer to the FABRID
+// Map found in the ASEntries' extensions.  If there is already a map stored, check the info time,
+// and replace with the newer FABRID maps. This results in a map[IA]fabridMapEntry, which can be used
+// to find the policies that are available for each of the interface pairs on the path.
+type fabridMapEntry struct {
+	Map *fabrid.Detached
+	Ts  time.Time
+}
+
 func (solution *pathSolution) Path() Path {
 	mtu := ^uint16(0)
 	var segments segmentList
+	fabridMaps := make(map[addr.IA]fabridMapEntry)
 	var epicPathAuths [][]byte
 	for _, solEdge := range solution.edges {
 		var hops []path.HopField
 		var intfs []snet.PathInterface
 		var pathASEntries []seg.ASEntry // ASEntries that on the path, eventually in path order.
 		var epicSegAuths [][]byte
-
 		// Segments are in construction order, regardless of whether they're
 		// up or down segments. We traverse them FROM THE END. So, in reverse
 		// forwarding order for down segments and in forwarding order for
 		// up segments.
 		// We go through each ASEntry, starting from the last one until we
 		// find a shortcut (which can be 0, meaning the end of the segment).
+
 		asEntries := solEdge.segment.ASEntries
 		for asEntryIdx := len(asEntries) - 1; asEntryIdx >= solEdge.edge.Shortcut; asEntryIdx-- {
 			isShortcut := asEntryIdx == solEdge.edge.Shortcut && solEdge.edge.Shortcut != 0
@@ -379,13 +392,21 @@ func (solution *pathSolution) Path() Path {
 			pathASEntries = append(pathASEntries, asEntry)
 			epicSegAuths = append(epicSegAuths, epicAuth)
 
+			fabridMap, exists := fabridMaps[asEntry.Local]
+			if (!exists || fabridMap.Map == nil) && asEntry.UnsignedExtensions.FabridDetached != nil ||
+				fabridMap.Ts.Before(solEdge.segment.Info.Timestamp) {
+				fabridMaps[asEntry.Local] = struct {
+					Map *fabrid.Detached
+					Ts  time.Time
+				}{Map: asEntry.UnsignedExtensions.FabridDetached, Ts: solEdge.segment.Info.Timestamp}
+			}
+
 			mtu = minUint16(mtu, uint16(asEntry.MTU))
 			if forwardingLinkMtu != 0 {
 				// The first HE in a segment has MTU 0, so we ignore those
 				mtu = minUint16(mtu, uint16(forwardingLinkMtu))
 			}
 		}
-
 		// Put the hops in forwarding order. Needed for down segments
 		// since we collected hops from the end, just like for up
 		// segments.
@@ -413,19 +434,20 @@ func (solution *pathSolution) Path() Path {
 	interfaces := segments.Interfaces()
 	asEntries := segments.ASEntries()
 	staticInfo := collectMetadata(interfaces, asEntries)
-
+	policies := collectFabridPolicies(interfaces, fabridMaps)
 	path := Path{
 		SCIONPath: segments.ScionPath(),
 		Metadata: snet.PathMetadata{
-			Interfaces:   interfaces,
-			MTU:          mtu,
-			Expiry:       segments.ComputeExpTime(),
-			Latency:      staticInfo.Latency,
-			Bandwidth:    staticInfo.Bandwidth,
-			Geo:          staticInfo.Geo,
-			LinkType:     staticInfo.LinkType,
-			InternalHops: staticInfo.InternalHops,
-			Notes:        staticInfo.Notes,
+			Interfaces:     interfaces,
+			MTU:            mtu,
+			Expiry:         segments.ComputeExpTime(),
+			Latency:        staticInfo.Latency,
+			Bandwidth:      staticInfo.Bandwidth,
+			Geo:            staticInfo.Geo,
+			LinkType:       staticInfo.LinkType,
+			InternalHops:   staticInfo.InternalHops,
+			Notes:          staticInfo.Notes,
+			FabridPolicies: policies,
 		},
 		Weight: solution.cost,
 	}
@@ -438,6 +460,54 @@ func (solution *pathSolution) Path() Path {
 	}
 
 	return path
+}
+
+func collectFabridPolicies(ifaces []snet.PathInterface, maps map[addr.IA]fabridMapEntry) [][]*snet.FabridPolicyIdentifier {
+	switch {
+	case len(ifaces)%2 != 0:
+		return nil
+	case len(ifaces) == 0:
+		return nil
+	default:
+		hops := make([][]*snet.FabridPolicyIdentifier, 0, len(ifaces)/2+1)
+
+		hops = append(hops, getPoliciesForIntfs(ifaces[0].IA, 0, uint16(ifaces[0].ID), maps))
+
+		for i := 1; i < len(ifaces)-1; i += 2 {
+			hops = append(hops, getPoliciesForIntfs(ifaces[i].IA, uint16(ifaces[i].ID), uint16(ifaces[i+1].ID), maps))
+		}
+		hops = append(hops, getPoliciesForIntfs(ifaces[len(ifaces)-1].IA, uint16(ifaces[len(ifaces)-1].ID), 0, maps))
+		return hops
+	}
+}
+
+func getPoliciesForIntfs(ia addr.IA, ig, eg uint16, maps map[addr.IA]fabridMapEntry) []*snet.FabridPolicyIdentifier {
+	policies := make([]*snet.FabridPolicyIdentifier, 0)
+	fabridMap, exist := maps[ia]
+	if exist && fabridMap.Map != nil {
+		for k, v := range fabridMap.Map.SupportedIndicesMap {
+			if !k.Matches(ig, eg) {
+				continue
+			}
+			for _, policy := range v {
+				if val, ok := fabridMap.Map.IndexIdentiferMap[policy]; ok {
+					log.Info("PolicyAdded", "is", val.Identifier, "egIf", eg, "ig", ig)
+					if val.Type == fabrid.GlobalPolicy {
+						policies = append(policies, &snet.FabridPolicyIdentifier{
+							Type:       snet.FabridGlobalPolicy,
+							Identifier: val.Identifier,
+						})
+					} else {
+						policies = append(policies, &snet.FabridPolicyIdentifier{
+							Type:       snet.FabridLocalPolicy,
+							Identifier: val.Identifier,
+						})
+					}
+				}
+			}
+		}
+	}
+	return policies
 }
 
 func getAuth(a *seg.ASEntry) []byte {
@@ -461,7 +531,6 @@ func getAuthPeer(a *seg.ASEntry, i int) []byte {
 	copy(auth[6:16], a.UnsignedExtensions.EpicDetached.AuthPeerEntries[i])
 	return auth
 }
-
 func isEpicAvailable(epicPathAuths [][]byte) ([]byte, []byte, bool) {
 	l := len(epicPathAuths)
 	if l < 2 {

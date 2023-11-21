@@ -102,16 +102,26 @@ func (c *ConnectionPoint) IPNetwork() *net.IPNet {
 	}
 	return &net.IPNet{}
 }
+func (c *ConnectionPoint) MatchesIF(intf uint16) bool {
+	return ((c.Type == IPv4Range || c.Type == IPv6Range) && intf == 0) ||
+		(c.Type == Interface && c.InterfaceId == intf)
+}
 
 type ConnectionPair struct {
 	Ingress ConnectionPoint
 	Egress  ConnectionPoint
 }
 
+func (c *ConnectionPair) Matches(ingress, egress uint16) bool {
+	return c.Ingress.MatchesIF(ingress) && c.Egress.MatchesIF(egress)
+}
+
 type PolicyIdentifier struct {
 	Type       PolicyType
 	Identifier uint32
 }
+
+//TODO(jvanbommel): policy identifier to from pb
 
 func ConnectionPointToPB(point ConnectionPoint) *fabridpb.FABRIDConnectionPoint {
 	switch point.Type {

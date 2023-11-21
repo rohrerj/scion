@@ -1,0 +1,18 @@
+load("//tools/lint:go.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "fastclock.go",
+        "match.go",
+        "regexp.go",
+        "replace.go",
+        "runner.go",
+    ],
+    importpath = "github.com/scionproto/scion/pkg/regexp3",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/log:go_default_library",
+        "//pkg/regexp3/syntax:go_default_library",
+    ],
+)

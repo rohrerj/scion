@@ -56,6 +56,12 @@ func (s *BaseSequenceListener) EnterPlus(ctx *PlusContext) {}
 // ExitPlus is called when production Plus is exited.
 func (s *BaseSequenceListener) ExitPlus(ctx *PlusContext) {}
 
+// EnterPoliciesHop is called when production PoliciesHop is entered.
+func (s *BaseSequenceListener) EnterPoliciesHop(ctx *PoliciesHopContext) {}
+
+// ExitPoliciesHop is called when production PoliciesHop is exited.
+func (s *BaseSequenceListener) ExitPoliciesHop(ctx *PoliciesHopContext) {}
+
 // EnterAsterisk is called when production Asterisk is entered.
 func (s *BaseSequenceListener) EnterAsterisk(ctx *AsteriskContext) {}
 
@@ -67,6 +73,12 @@ func (s *BaseSequenceListener) EnterParentheses(ctx *ParenthesesContext) {}
 
 // ExitParentheses is called when production Parentheses is exited.
 func (s *BaseSequenceListener) ExitParentheses(ctx *ParenthesesContext) {}
+
+// EnterOnePolicyHop is called when production OnePolicyHop is entered.
+func (s *BaseSequenceListener) EnterOnePolicyHop(ctx *OnePolicyHopContext) {}
+
+// ExitOnePolicyHop is called when production OnePolicyHop is exited.
+func (s *BaseSequenceListener) ExitOnePolicyHop(ctx *OnePolicyHopContext) {}
 
 // EnterISDHop is called when production ISDHop is entered.
 func (s *BaseSequenceListener) EnterISDHop(ctx *ISDHopContext) {}
@@ -133,3 +145,57 @@ func (s *BaseSequenceListener) EnterIFace(ctx *IFaceContext) {}
 
 // ExitIFace is called when production IFace is exited.
 func (s *BaseSequenceListener) ExitIFace(ctx *IFaceContext) {}
+
+// EnterPoliciesOr is called when production PoliciesOr is entered.
+func (s *BaseSequenceListener) EnterPoliciesOr(ctx *PoliciesOrContext) {}
+
+// ExitPoliciesOr is called when production PoliciesOr is exited.
+func (s *BaseSequenceListener) ExitPoliciesOr(ctx *PoliciesOrContext) {}
+
+// EnterPoliciesParentheses is called when production PoliciesParentheses is entered.
+func (s *BaseSequenceListener) EnterPoliciesParentheses(ctx *PoliciesParenthesesContext) {}
+
+// ExitPoliciesParentheses is called when production PoliciesParentheses is exited.
+func (s *BaseSequenceListener) ExitPoliciesParentheses(ctx *PoliciesParenthesesContext) {}
+
+// EnterPoliciesConcatenation is called when production PoliciesConcatenation is entered.
+func (s *BaseSequenceListener) EnterPoliciesConcatenation(ctx *PoliciesConcatenationContext) {}
+
+// ExitPoliciesConcatenation is called when production PoliciesConcatenation is exited.
+func (s *BaseSequenceListener) ExitPoliciesConcatenation(ctx *PoliciesConcatenationContext) {}
+
+// EnterPoliciesPolicy is called when production PoliciesPolicy is entered.
+func (s *BaseSequenceListener) EnterPoliciesPolicy(ctx *PoliciesPolicyContext) {}
+
+// ExitPoliciesPolicy is called when production PoliciesPolicy is exited.
+func (s *BaseSequenceListener) ExitPoliciesPolicy(ctx *PoliciesPolicyContext) {}
+
+// EnterGlobalPolicy is called when production GlobalPolicy is entered.
+func (s *BaseSequenceListener) EnterGlobalPolicy(ctx *GlobalPolicyContext) {}
+
+// ExitGlobalPolicy is called when production GlobalPolicy is exited.
+func (s *BaseSequenceListener) ExitGlobalPolicy(ctx *GlobalPolicyContext) {}
+
+// EnterLocalPolicy is called when production LocalPolicy is entered.
+func (s *BaseSequenceListener) EnterLocalPolicy(ctx *LocalPolicyContext) {}
+
+// ExitLocalPolicy is called when production LocalPolicy is exited.
+func (s *BaseSequenceListener) ExitLocalPolicy(ctx *LocalPolicyContext) {}
+
+// EnterWildcardPolicy is called when production WildcardPolicy is entered.
+func (s *BaseSequenceListener) EnterWildcardPolicy(ctx *WildcardPolicyContext) {}
+
+// ExitWildcardPolicy is called when production WildcardPolicy is exited.
+func (s *BaseSequenceListener) ExitWildcardPolicy(ctx *WildcardPolicyContext) {}
+
+// EnterPolicyIndexWildcard is called when production PolicyIndexWildcard is entered.
+func (s *BaseSequenceListener) EnterPolicyIndexWildcard(ctx *PolicyIndexWildcardContext) {}
+
+// ExitPolicyIndexWildcard is called when production PolicyIndexWildcard is exited.
+func (s *BaseSequenceListener) ExitPolicyIndexWildcard(ctx *PolicyIndexWildcardContext) {}
+
+// EnterPolicyIndex is called when production PolicyIndex is entered.
+func (s *BaseSequenceListener) EnterPolicyIndex(ctx *PolicyIndexContext) {}
+
+// ExitPolicyIndex is called when production PolicyIndex is exited.
+func (s *BaseSequenceListener) ExitPolicyIndex(ctx *PolicyIndexContext) {}

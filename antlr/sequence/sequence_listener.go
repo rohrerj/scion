@@ -25,11 +25,17 @@ type SequenceListener interface {
 	// EnterPlus is called when entering the Plus production.
 	EnterPlus(c *PlusContext)
 
+	// EnterPoliciesHop is called when entering the PoliciesHop production.
+	EnterPoliciesHop(c *PoliciesHopContext)
+
 	// EnterAsterisk is called when entering the Asterisk production.
 	EnterAsterisk(c *AsteriskContext)
 
 	// EnterParentheses is called when entering the Parentheses production.
 	EnterParentheses(c *ParenthesesContext)
+
+	// EnterOnePolicyHop is called when entering the OnePolicyHop production.
+	EnterOnePolicyHop(c *OnePolicyHopContext)
 
 	// EnterISDHop is called when entering the ISDHop production.
 	EnterISDHop(c *ISDHopContext)
@@ -64,6 +70,33 @@ type SequenceListener interface {
 	// EnterIFace is called when entering the IFace production.
 	EnterIFace(c *IFaceContext)
 
+	// EnterPoliciesOr is called when entering the PoliciesOr production.
+	EnterPoliciesOr(c *PoliciesOrContext)
+
+	// EnterPoliciesParentheses is called when entering the PoliciesParentheses production.
+	EnterPoliciesParentheses(c *PoliciesParenthesesContext)
+
+	// EnterPoliciesConcatenation is called when entering the PoliciesConcatenation production.
+	EnterPoliciesConcatenation(c *PoliciesConcatenationContext)
+
+	// EnterPoliciesPolicy is called when entering the PoliciesPolicy production.
+	EnterPoliciesPolicy(c *PoliciesPolicyContext)
+
+	// EnterGlobalPolicy is called when entering the GlobalPolicy production.
+	EnterGlobalPolicy(c *GlobalPolicyContext)
+
+	// EnterLocalPolicy is called when entering the LocalPolicy production.
+	EnterLocalPolicy(c *LocalPolicyContext)
+
+	// EnterWildcardPolicy is called when entering the WildcardPolicy production.
+	EnterWildcardPolicy(c *WildcardPolicyContext)
+
+	// EnterPolicyIndexWildcard is called when entering the PolicyIndexWildcard production.
+	EnterPolicyIndexWildcard(c *PolicyIndexWildcardContext)
+
+	// EnterPolicyIndex is called when entering the PolicyIndex production.
+	EnterPolicyIndex(c *PolicyIndexContext)
+
 	// ExitStart is called when exiting the start production.
 	ExitStart(c *StartContext)
 
@@ -82,11 +115,17 @@ type SequenceListener interface {
 	// ExitPlus is called when exiting the Plus production.
 	ExitPlus(c *PlusContext)
 
+	// ExitPoliciesHop is called when exiting the PoliciesHop production.
+	ExitPoliciesHop(c *PoliciesHopContext)
+
 	// ExitAsterisk is called when exiting the Asterisk production.
 	ExitAsterisk(c *AsteriskContext)
 
 	// ExitParentheses is called when exiting the Parentheses production.
 	ExitParentheses(c *ParenthesesContext)
+
+	// ExitOnePolicyHop is called when exiting the OnePolicyHop production.
+	ExitOnePolicyHop(c *OnePolicyHopContext)
 
 	// ExitISDHop is called when exiting the ISDHop production.
 	ExitISDHop(c *ISDHopContext)
@@ -120,4 +159,31 @@ type SequenceListener interface {
 
 	// ExitIFace is called when exiting the IFace production.
 	ExitIFace(c *IFaceContext)
+
+	// ExitPoliciesOr is called when exiting the PoliciesOr production.
+	ExitPoliciesOr(c *PoliciesOrContext)
+
+	// ExitPoliciesParentheses is called when exiting the PoliciesParentheses production.
+	ExitPoliciesParentheses(c *PoliciesParenthesesContext)
+
+	// ExitPoliciesConcatenation is called when exiting the PoliciesConcatenation production.
+	ExitPoliciesConcatenation(c *PoliciesConcatenationContext)
+
+	// ExitPoliciesPolicy is called when exiting the PoliciesPolicy production.
+	ExitPoliciesPolicy(c *PoliciesPolicyContext)
+
+	// ExitGlobalPolicy is called when exiting the GlobalPolicy production.
+	ExitGlobalPolicy(c *GlobalPolicyContext)
+
+	// ExitLocalPolicy is called when exiting the LocalPolicy production.
+	ExitLocalPolicy(c *LocalPolicyContext)
+
+	// ExitWildcardPolicy is called when exiting the WildcardPolicy production.
+	ExitWildcardPolicy(c *WildcardPolicyContext)
+
+	// ExitPolicyIndexWildcard is called when exiting the PolicyIndexWildcard production.
+	ExitPolicyIndexWildcard(c *PolicyIndexWildcardContext)
+
+	// ExitPolicyIndex is called when exiting the PolicyIndex production.
+	ExitPolicyIndex(c *PolicyIndexContext)
 }

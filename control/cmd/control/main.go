@@ -348,7 +348,7 @@ func realMain(ctx context.Context) error {
 	})
 	// Handle fabrid map and policy requests
 	if fabridMgr.Active() {
-		polFetcher := fabridgrpc.PolicyFetcher{
+		polFetcher := fabridgrpc.BasicPolicyFetcher{
 			Dialer: &libgrpc.QUICDialer{
 				Rewriter: nc.AddressRewriter(nil),
 				Dialer:   quicStack.Dialer,
@@ -357,7 +357,7 @@ func realMain(ctx context.Context) error {
 			MaxRetries: 20,
 		}
 
-		f := &fabridgrpc.Server{FabridManager: fabridMgr, Fetcher: polFetcher}
+		f := &fabridgrpc.Server{FabridManager: fabridMgr, Fetcher: &polFetcher}
 		experimental.RegisterFABRIDIntraServiceServer(quicServer, f)
 		experimental.RegisterFABRIDInterServiceServer(tcpServer, f)
 	}

@@ -163,7 +163,10 @@ func pathToPB(path snet.Path) *sdpb.Path {
 	if nextHop := path.UnderlayNextHop(); nextHop != nil {
 		nextHopStr = nextHop.String()
 	}
-
+	fabridPolicies := make([]*sdpb.FABRIDPolicyIdentifierList, len(meta.FabridPolicies))
+	for i, v := range meta.FabridPolicies {
+		fabridPolicies[i] = fabridPolicyIdentifiersToPB(v)
+	}
 	epicAuths := &sdpb.EpicAuths{
 		AuthPhvf: append([]byte(nil), meta.EpicAuths.AuthPHVF...),
 		AuthLhvf: append([]byte(nil), meta.EpicAuths.AuthLHVF...),
@@ -174,20 +177,46 @@ func pathToPB(path snet.Path) *sdpb.Path {
 		Interface: &sdpb.Interface{
 			Address: &sdpb.Underlay{Address: nextHopStr},
 		},
-		Interfaces:   interfaces,
-		Mtu:          uint32(meta.MTU),
-		Expiration:   &timestamppb.Timestamp{Seconds: meta.Expiry.Unix()},
-		Latency:      latency,
-		Bandwidth:    meta.Bandwidth,
-		Geo:          geo,
-		LinkType:     linkType,
-		InternalHops: meta.InternalHops,
-		Notes:        meta.Notes,
-		EpicAuths:    epicAuths,
+		Interfaces:     interfaces,
+		Mtu:            uint32(meta.MTU),
+		Expiration:     &timestamppb.Timestamp{Seconds: meta.Expiry.Unix()},
+		Latency:        latency,
+		Bandwidth:      meta.Bandwidth,
+		Geo:            geo,
+		LinkType:       linkType,
+		InternalHops:   meta.InternalHops,
+		Notes:          meta.Notes,
+		EpicAuths:      epicAuths,
+		FabridPolicies: fabridPolicies,
 	}
 
 }
 
+func fabridPolicyIdentifiersToPB(fpList []*snet.FabridPolicyIdentifier) *sdpb.FABRIDPolicyIdentifierList {
+	pbPolicies := make([]*sdpb.FABRIDPolicyIdentifier, len(fpList))
+	for i, fp := range fpList {
+		switch fp.Type {
+		case snet.FabridGlobalPolicy:
+			pbPolicies[i] = &sdpb.FABRIDPolicyIdentifier{
+				PolicyType:       sdpb.FABRIDPolicyType_GLOBAL,
+				PolicyIdentifier: fp.Identifier,
+			}
+		case snet.FabridLocalPolicy:
+			pbPolicies[i] = &sdpb.FABRIDPolicyIdentifier{
+				PolicyType:       sdpb.FABRIDPolicyType_LOCAL,
+				PolicyIdentifier: fp.Identifier,
+			}
+		default:
+			pbPolicies[i] = &sdpb.FABRIDPolicyIdentifier{
+				PolicyType:       sdpb.FABRIDPolicyType_UNSPECIFIED,
+				PolicyIdentifier: fp.Identifier,
+			}
+		}
+	}
+	return &sdpb.FABRIDPolicyIdentifierList{
+		Policies: pbPolicies,
+	}
+}
 func linkTypeToPB(lt snet.LinkType) sdpb.LinkType {
 	switch lt {
 	case snet.LinkTypeDirect:

@@ -74,7 +74,3 @@ func (s Server) GetLocalPolicyDescription(_ context.Context, request *experiment
 	}
 	return &experimental.PolicyDescriptionResponse{}, errNotFound
 }
-
-//TODO(jvanbommel): - End host functionalities
-//End host should be able to find a path that satisfies properties x, x and x global policy
-//Path selector should take the policies into account.

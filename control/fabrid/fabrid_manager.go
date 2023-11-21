@@ -27,6 +27,7 @@ import (
 
 const MaxFabridPolicies = 255
 
+// TODO(jvanbommel): Can probably combine this with PolicyIdentifier
 type RemotePolicyIdentifier struct {
 	ISDAS      uint64
 	Identifier uint32
@@ -126,9 +127,26 @@ func (f *FabridManager) parseAndAdd(path string, fi os.FileInfo, err error) erro
 	}
 
 	for _, connection := range pol.SupportedBy {
+		var eg, ig fabrid.ConnectionPoint
+		if connection.Egress.Type == fabrid.Interface {
+			eg = fabrid.ConnectionPoint{
+				Type:        fabrid.Interface,
+				InterfaceId: connection.Egress.Interface,
+			}
+		} else if connection.Egress.Type == fabrid.IPv4Range || connection.Egress.Type == fabrid.IPv6Range {
+			eg = fabrid.ConnectionPointFromString(connection.Egress.IPAddress, uint32(connection.Egress.Prefix), connection.Egress.Type)
+		}
+		if connection.Ingress.Type == fabrid.Interface {
+			ig = fabrid.ConnectionPoint{
+				Type:        fabrid.Interface,
+				InterfaceId: connection.Ingress.Interface,
+			}
+		} else if connection.Ingress.Type == fabrid.IPv4Range || connection.Ingress.Type == fabrid.IPv6Range {
+			ig = fabrid.ConnectionPointFromString(connection.Ingress.IPAddress, uint32(connection.Ingress.Prefix), connection.Ingress.Type)
+		}
 		ie := fabrid.ConnectionPair{
-			Ingress: fabrid.ConnectionPointFromString(connection.Ingress.IPAddress, uint32(connection.Ingress.Prefix), connection.Ingress.Type),
-			Egress:  fabrid.ConnectionPointFromString(connection.Egress.IPAddress, uint32(connection.Egress.Prefix), connection.Egress.Type),
+			Ingress: ig,
+			Egress:  eg,
 		}
 		f.SupportedIndicesMap[ie] = append(f.SupportedIndicesMap[ie], policyIdx)
 	}

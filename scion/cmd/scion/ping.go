@@ -172,10 +172,17 @@ On other errors, ping will exit with code 2.
 					Dispatcher: dispatcher,
 				}))
 			}
+			cs := path.DefaultColorScheme(false)
 			path, err := path.Choose(traceCtx, sd, remote.IA, opts...)
 			if err != nil {
 				return err
 			}
+			// Now select the Fabrid Policies that should be applied
+			//TODO(jvanbommel): reuse?
+			selectSeq, err := pathpol.NewSequence(flags.sequence)
+			policies := selectSeq.ListSelectedPolicies(path)
+			fmt.Println(cs.Path(path))
+			fmt.Println(policies)
 
 			// If the EPIC flag is set, use the EPIC-HP path type
 			if flags.epic {

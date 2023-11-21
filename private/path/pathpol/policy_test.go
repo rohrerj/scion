@@ -644,12 +644,14 @@ func (p PathProvider) GetPaths(src, dst addr.IA) []snet.Path {
 	paths := p.g.GetPaths(src.String(), dst.String())
 	for _, ifids := range paths {
 		pathIntfs := make([]snet.PathInterface, 0, len(ifids))
+		pathPols := make([][]*snet.FabridPolicyIdentifier, 0, len(ifids))
 		for _, ifid := range ifids {
 			ia := p.g.GetParent(ifid)
 			pathIntfs = append(pathIntfs, snet.PathInterface{
 				IA: ia,
 				ID: common.IFIDType(ifid),
 			})
+			pathPols = append(pathPols, []*snet.FabridPolicyIdentifier{})
 		}
 		var srcIA, dstIA addr.IA
 		if len(pathIntfs) > 0 {
@@ -660,7 +662,8 @@ func (p PathProvider) GetPaths(src, dst addr.IA) []snet.Path {
 			Src: srcIA,
 			Dst: dstIA,
 			Meta: snet.PathMetadata{
-				Interfaces: pathIntfs,
+				Interfaces:     pathIntfs,
+				FabridPolicies: pathPols,
 			},
 		})
 	}

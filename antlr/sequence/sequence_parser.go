@@ -15,48 +15,70 @@ var _ = reflect.Copy
 var _ = strconv.Itoa
 
 var parserATN = []uint16{
-	3, 24715, 42794, 33075, 47597, 16764, 15335, 30598, 22884, 3, 16, 73, 4,
-	2, 9, 2, 4, 3, 9, 3, 4, 4, 9, 4, 4, 5, 9, 5, 4, 6, 9, 6, 4, 7, 9, 7, 3,
-	2, 3, 2, 3, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 5, 3, 24, 10, 3, 3,
-	3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 7, 3, 37,
-	10, 3, 12, 3, 14, 3, 40, 11, 3, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3,
-	4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 5, 4, 58, 10,
-	4, 3, 5, 3, 5, 5, 5, 62, 10, 5, 3, 6, 3, 6, 3, 6, 5, 6, 67, 10, 6, 3, 7,
-	3, 7, 5, 7, 71, 10, 7, 3, 7, 2, 3, 4, 8, 2, 4, 6, 8, 10, 12, 2, 2, 2, 79,
-	2, 14, 3, 2, 2, 2, 4, 23, 3, 2, 2, 2, 6, 57, 3, 2, 2, 2, 8, 61, 3, 2, 2,
-	2, 10, 66, 3, 2, 2, 2, 12, 70, 3, 2, 2, 2, 14, 15, 5, 4, 3, 2, 15, 16,
-	7, 2, 2, 3, 16, 3, 3, 2, 2, 2, 17, 18, 8, 3, 1, 2, 18, 19, 7, 15, 2, 2,
-	19, 20, 5, 4, 3, 2, 20, 21, 7, 16, 2, 2, 21, 24, 3, 2, 2, 2, 22, 24, 5,
-	6, 4, 2, 23, 17, 3, 2, 2, 2, 23, 22, 3, 2, 2, 2, 24, 38, 3, 2, 2, 2, 25,
-	26, 12, 6, 2, 2, 26, 27, 7, 14, 2, 2, 27, 37, 5, 4, 3, 7, 28, 29, 12, 5,
-	2, 2, 29, 37, 5, 4, 3, 6, 30, 31, 12, 9, 2, 2, 31, 37, 7, 11, 2, 2, 32,
-	33, 12, 8, 2, 2, 33, 37, 7, 12, 2, 2, 34, 35, 12, 7, 2, 2, 35, 37, 7, 13,
-	2, 2, 36, 25, 3, 2, 2, 2, 36, 28, 3, 2, 2, 2, 36, 30, 3, 2, 2, 2, 36, 32,
-	3, 2, 2, 2, 36, 34, 3, 2, 2, 2, 37, 40, 3, 2, 2, 2, 38, 36, 3, 2, 2, 2,
-	38, 39, 3, 2, 2, 2, 39, 5, 3, 2, 2, 2, 40, 38, 3, 2, 2, 2, 41, 58, 5, 8,
-	5, 2, 42, 43, 5, 8, 5, 2, 43, 44, 5, 10, 6, 2, 44, 58, 3, 2, 2, 2, 45,
-	46, 5, 8, 5, 2, 46, 47, 5, 10, 6, 2, 47, 48, 7, 9, 2, 2, 48, 49, 5, 12,
-	7, 2, 49, 58, 3, 2, 2, 2, 50, 51, 5, 8, 5, 2, 51, 52, 5, 10, 6, 2, 52,
-	53, 7, 9, 2, 2, 53, 54, 5, 12, 7, 2, 54, 55, 7, 10, 2, 2, 55, 56, 5, 12,
-	7, 2, 56, 58, 3, 2, 2, 2, 57, 41, 3, 2, 2, 2, 57, 42, 3, 2, 2, 2, 57, 45,
-	3, 2, 2, 2, 57, 50, 3, 2, 2, 2, 58, 7, 3, 2, 2, 2, 59, 62, 7, 4, 2, 2,
-	60, 62, 7, 5, 2, 2, 61, 59, 3, 2, 2, 2, 61, 60, 3, 2, 2, 2, 62, 9, 3, 2,
-	2, 2, 63, 67, 7, 6, 2, 2, 64, 67, 7, 7, 2, 2, 65, 67, 7, 8, 2, 2, 66, 63,
-	3, 2, 2, 2, 66, 64, 3, 2, 2, 2, 66, 65, 3, 2, 2, 2, 67, 11, 3, 2, 2, 2,
-	68, 71, 7, 4, 2, 2, 69, 71, 7, 5, 2, 2, 70, 68, 3, 2, 2, 2, 70, 69, 3,
-	2, 2, 2, 71, 13, 3, 2, 2, 2, 9, 23, 36, 38, 57, 61, 66, 70,
+	3, 24715, 42794, 33075, 47597, 16764, 15335, 30598, 22884, 3, 20, 119,
+	4, 2, 9, 2, 4, 3, 9, 3, 4, 4, 9, 4, 4, 5, 9, 5, 4, 6, 9, 6, 4, 7, 9, 7,
+	4, 8, 9, 8, 4, 9, 9, 9, 4, 10, 9, 10, 3, 2, 3, 2, 3, 2, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 5, 3, 40, 10, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 7, 3, 53, 10, 3, 12, 3, 14, 3, 56, 11, 3, 3, 4, 3,
+	4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3,
+	4, 3, 4, 3, 4, 5, 4, 74, 10, 4, 3, 5, 3, 5, 5, 5, 78, 10, 5, 3, 6, 3, 6,
+	3, 6, 5, 6, 83, 10, 6, 3, 7, 3, 7, 5, 7, 87, 10, 7, 3, 8, 3, 8, 3, 8, 3,
+	8, 3, 8, 3, 8, 5, 8, 95, 10, 8, 3, 8, 3, 8, 3, 8, 3, 8, 3, 8, 3, 8, 7,
+	8, 103, 10, 8, 12, 8, 14, 8, 106, 11, 8, 3, 9, 3, 9, 3, 9, 3, 9, 3, 9,
+	5, 9, 113, 10, 9, 3, 10, 3, 10, 5, 10, 117, 10, 10, 3, 10, 2, 4, 4, 14,
+	11, 2, 4, 6, 8, 10, 12, 14, 16, 18, 2, 2, 2, 130, 2, 20, 3, 2, 2, 2, 4,
+	39, 3, 2, 2, 2, 6, 73, 3, 2, 2, 2, 8, 77, 3, 2, 2, 2, 10, 82, 3, 2, 2,
+	2, 12, 86, 3, 2, 2, 2, 14, 94, 3, 2, 2, 2, 16, 112, 3, 2, 2, 2, 18, 116,
+	3, 2, 2, 2, 20, 21, 5, 4, 3, 2, 21, 22, 7, 2, 2, 3, 22, 3, 3, 2, 2, 2,
+	23, 24, 8, 3, 1, 2, 24, 25, 7, 15, 2, 2, 25, 26, 5, 4, 3, 2, 26, 27, 7,
+	16, 2, 2, 27, 40, 3, 2, 2, 2, 28, 29, 5, 6, 4, 2, 29, 30, 7, 17, 2, 2,
+	30, 31, 5, 16, 9, 2, 31, 40, 3, 2, 2, 2, 32, 33, 5, 6, 4, 2, 33, 34, 7,
+	17, 2, 2, 34, 35, 7, 15, 2, 2, 35, 36, 5, 14, 8, 2, 36, 37, 7, 16, 2, 2,
+	37, 40, 3, 2, 2, 2, 38, 40, 5, 6, 4, 2, 39, 23, 3, 2, 2, 2, 39, 28, 3,
+	2, 2, 2, 39, 32, 3, 2, 2, 2, 39, 38, 3, 2, 2, 2, 40, 54, 3, 2, 2, 2, 41,
+	42, 12, 8, 2, 2, 42, 43, 7, 14, 2, 2, 43, 53, 5, 4, 3, 9, 44, 45, 12, 7,
+	2, 2, 45, 53, 5, 4, 3, 8, 46, 47, 12, 11, 2, 2, 47, 53, 7, 11, 2, 2, 48,
+	49, 12, 10, 2, 2, 49, 53, 7, 12, 2, 2, 50, 51, 12, 9, 2, 2, 51, 53, 7,
+	13, 2, 2, 52, 41, 3, 2, 2, 2, 52, 44, 3, 2, 2, 2, 52, 46, 3, 2, 2, 2, 52,
+	48, 3, 2, 2, 2, 52, 50, 3, 2, 2, 2, 53, 56, 3, 2, 2, 2, 54, 52, 3, 2, 2,
+	2, 54, 55, 3, 2, 2, 2, 55, 5, 3, 2, 2, 2, 56, 54, 3, 2, 2, 2, 57, 74, 5,
+	8, 5, 2, 58, 59, 5, 8, 5, 2, 59, 60, 5, 10, 6, 2, 60, 74, 3, 2, 2, 2, 61,
+	62, 5, 8, 5, 2, 62, 63, 5, 10, 6, 2, 63, 64, 7, 9, 2, 2, 64, 65, 5, 12,
+	7, 2, 65, 74, 3, 2, 2, 2, 66, 67, 5, 8, 5, 2, 67, 68, 5, 10, 6, 2, 68,
+	69, 7, 9, 2, 2, 69, 70, 5, 12, 7, 2, 70, 71, 7, 10, 2, 2, 71, 72, 5, 12,
+	7, 2, 72, 74, 3, 2, 2, 2, 73, 57, 3, 2, 2, 2, 73, 58, 3, 2, 2, 2, 73, 61,
+	3, 2, 2, 2, 73, 66, 3, 2, 2, 2, 74, 7, 3, 2, 2, 2, 75, 78, 7, 4, 2, 2,
+	76, 78, 7, 5, 2, 2, 77, 75, 3, 2, 2, 2, 77, 76, 3, 2, 2, 2, 78, 9, 3, 2,
+	2, 2, 79, 83, 7, 6, 2, 2, 80, 83, 7, 7, 2, 2, 81, 83, 7, 8, 2, 2, 82, 79,
+	3, 2, 2, 2, 82, 80, 3, 2, 2, 2, 82, 81, 3, 2, 2, 2, 83, 11, 3, 2, 2, 2,
+	84, 87, 7, 4, 2, 2, 85, 87, 7, 5, 2, 2, 86, 84, 3, 2, 2, 2, 86, 85, 3,
+	2, 2, 2, 87, 13, 3, 2, 2, 2, 88, 89, 8, 8, 1, 2, 89, 90, 7, 15, 2, 2, 90,
+	91, 5, 14, 8, 2, 91, 92, 7, 16, 2, 2, 92, 95, 3, 2, 2, 2, 93, 95, 5, 16,
+	9, 2, 94, 88, 3, 2, 2, 2, 94, 93, 3, 2, 2, 2, 95, 104, 3, 2, 2, 2, 96,
+	97, 12, 6, 2, 2, 97, 98, 7, 14, 2, 2, 98, 103, 5, 14, 8, 7, 99, 100, 12,
+	5, 2, 2, 100, 101, 7, 10, 2, 2, 101, 103, 5, 14, 8, 6, 102, 96, 3, 2, 2,
+	2, 102, 99, 3, 2, 2, 2, 103, 106, 3, 2, 2, 2, 104, 102, 3, 2, 2, 2, 104,
+	105, 3, 2, 2, 2, 105, 15, 3, 2, 2, 2, 106, 104, 3, 2, 2, 2, 107, 108, 7,
+	18, 2, 2, 108, 113, 5, 18, 10, 2, 109, 110, 7, 19, 2, 2, 110, 113, 5, 18,
+	10, 2, 111, 113, 7, 20, 2, 2, 112, 107, 3, 2, 2, 2, 112, 109, 3, 2, 2,
+	2, 112, 111, 3, 2, 2, 2, 113, 17, 3, 2, 2, 2, 114, 117, 7, 4, 2, 2, 115,
+	117, 7, 5, 2, 2, 116, 114, 3, 2, 2, 2, 116, 115, 3, 2, 2, 2, 117, 19, 3,
+	2, 2, 2, 14, 39, 52, 54, 73, 77, 82, 86, 94, 102, 104, 112, 116,
 }
 var literalNames = []string{
 	"", "", "'0'", "", "", "", "", "'#'", "','", "'?'", "'+'", "'*'", "'|'",
-	"'('", "')'",
+	"'('", "')'", "'@'", "'G'", "'L'", "'A'",
 }
 var symbolicNames = []string{
 	"", "WHITESPACE", "ZERO", "NUM", "WILDCARDAS", "LEGACYAS", "AS", "HASH",
-	"COMMA", "QUESTIONMARK", "PLUS", "ASTERISK", "OR", "LPAR", "RPAR",
+	"COMMA", "QUESTIONMARK", "PLUS", "ASTERISK", "OR", "LPAR", "RPAR", "MONKEYTAIL",
+	"GLOBALPOLICY", "LOCALPOLICY", "WILDCARDPOLICY",
 }
 
 var ruleNames = []string{
-	"start", "sequence", "onehop", "isd", "as", "iface",
+	"start", "sequence", "onehop", "isd", "as", "iface", "policies", "onepolicy",
+	"policyindex",
 }
 
 type SequenceParser struct {
@@ -90,31 +112,38 @@ func NewSequenceParser(input antlr.TokenStream) *SequenceParser {
 
 // SequenceParser tokens.
 const (
-	SequenceParserEOF          = antlr.TokenEOF
-	SequenceParserWHITESPACE   = 1
-	SequenceParserZERO         = 2
-	SequenceParserNUM          = 3
-	SequenceParserWILDCARDAS   = 4
-	SequenceParserLEGACYAS     = 5
-	SequenceParserAS           = 6
-	SequenceParserHASH         = 7
-	SequenceParserCOMMA        = 8
-	SequenceParserQUESTIONMARK = 9
-	SequenceParserPLUS         = 10
-	SequenceParserASTERISK     = 11
-	SequenceParserOR           = 12
-	SequenceParserLPAR         = 13
-	SequenceParserRPAR         = 14
+	SequenceParserEOF            = antlr.TokenEOF
+	SequenceParserWHITESPACE     = 1
+	SequenceParserZERO           = 2
+	SequenceParserNUM            = 3
+	SequenceParserWILDCARDAS     = 4
+	SequenceParserLEGACYAS       = 5
+	SequenceParserAS             = 6
+	SequenceParserHASH           = 7
+	SequenceParserCOMMA          = 8
+	SequenceParserQUESTIONMARK   = 9
+	SequenceParserPLUS           = 10
+	SequenceParserASTERISK       = 11
+	SequenceParserOR             = 12
+	SequenceParserLPAR           = 13
+	SequenceParserRPAR           = 14
+	SequenceParserMONKEYTAIL     = 15
+	SequenceParserGLOBALPOLICY   = 16
+	SequenceParserLOCALPOLICY    = 17
+	SequenceParserWILDCARDPOLICY = 18
 )
 
 // SequenceParser rules.
 const (
-	SequenceParserRULE_start    = 0
-	SequenceParserRULE_sequence = 1
-	SequenceParserRULE_onehop   = 2
-	SequenceParserRULE_isd      = 3
-	SequenceParserRULE_as       = 4
-	SequenceParserRULE_iface    = 5
+	SequenceParserRULE_start       = 0
+	SequenceParserRULE_sequence    = 1
+	SequenceParserRULE_onehop      = 2
+	SequenceParserRULE_isd         = 3
+	SequenceParserRULE_as          = 4
+	SequenceParserRULE_iface       = 5
+	SequenceParserRULE_policies    = 6
+	SequenceParserRULE_onepolicy   = 7
+	SequenceParserRULE_policyindex = 8
 )
 
 // IStartContext is an interface to support dynamic dispatch.
@@ -214,11 +243,11 @@ func (p *SequenceParser) Start() (localctx IStartContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(12)
+		p.SetState(18)
 		p.sequence(0)
 	}
 	{
-		p.SetState(13)
+		p.SetState(19)
 		p.Match(SequenceParserEOF)
 	}
 
@@ -513,6 +542,68 @@ func (s *PlusContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+type PoliciesHopContext struct {
+	*SequenceContext
+}
+
+func NewPoliciesHopContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *PoliciesHopContext {
+	var p = new(PoliciesHopContext)
+
+	p.SequenceContext = NewEmptySequenceContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*SequenceContext))
+
+	return p
+}
+
+func (s *PoliciesHopContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *PoliciesHopContext) Onehop() IOnehopContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IOnehopContext)(nil)).Elem(), 0)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IOnehopContext)
+}
+
+func (s *PoliciesHopContext) MONKEYTAIL() antlr.TerminalNode {
+	return s.GetToken(SequenceParserMONKEYTAIL, 0)
+}
+
+func (s *PoliciesHopContext) LPAR() antlr.TerminalNode {
+	return s.GetToken(SequenceParserLPAR, 0)
+}
+
+func (s *PoliciesHopContext) Policies() IPoliciesContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPoliciesContext)(nil)).Elem(), 0)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IPoliciesContext)
+}
+
+func (s *PoliciesHopContext) RPAR() antlr.TerminalNode {
+	return s.GetToken(SequenceParserRPAR, 0)
+}
+
+func (s *PoliciesHopContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterPoliciesHop(s)
+	}
+}
+
+func (s *PoliciesHopContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitPoliciesHop(s)
+	}
+}
+
 type AsteriskContext struct {
 	*SequenceContext
 }
@@ -605,6 +696,60 @@ func (s *ParenthesesContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+type OnePolicyHopContext struct {
+	*SequenceContext
+}
+
+func NewOnePolicyHopContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *OnePolicyHopContext {
+	var p = new(OnePolicyHopContext)
+
+	p.SequenceContext = NewEmptySequenceContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*SequenceContext))
+
+	return p
+}
+
+func (s *OnePolicyHopContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *OnePolicyHopContext) Onehop() IOnehopContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IOnehopContext)(nil)).Elem(), 0)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IOnehopContext)
+}
+
+func (s *OnePolicyHopContext) MONKEYTAIL() antlr.TerminalNode {
+	return s.GetToken(SequenceParserMONKEYTAIL, 0)
+}
+
+func (s *OnePolicyHopContext) Onepolicy() IOnepolicyContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IOnepolicyContext)(nil)).Elem(), 0)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IOnepolicyContext)
+}
+
+func (s *OnePolicyHopContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterOnePolicyHop(s)
+	}
+}
+
+func (s *OnePolicyHopContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitOnePolicyHop(s)
+	}
+}
+
 func (p *SequenceParser) Sequence() (localctx ISequenceContext) {
 	return p.sequence(0)
 }
@@ -640,42 +785,81 @@ func (p *SequenceParser) sequence(_p int) (localctx ISequenceContext) {
 	var _alt int
 
 	p.EnterOuterAlt(localctx, 1)
-	p.SetState(21)
+	p.SetState(37)
 	p.GetErrorHandler().Sync(p)
-
-	switch p.GetTokenStream().LA(1) {
-	case SequenceParserLPAR:
+	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 0, p.GetParserRuleContext()) {
+	case 1:
 		localctx = NewParenthesesContext(p, localctx)
 		p.SetParserRuleContext(localctx)
 		_prevctx = localctx
 
 		{
-			p.SetState(16)
+			p.SetState(22)
 			p.Match(SequenceParserLPAR)
 		}
 		{
-			p.SetState(17)
+			p.SetState(23)
 			p.sequence(0)
 		}
 		{
-			p.SetState(18)
+			p.SetState(24)
 			p.Match(SequenceParserRPAR)
 		}
 
-	case SequenceParserZERO, SequenceParserNUM:
+	case 2:
+		localctx = NewOnePolicyHopContext(p, localctx)
+		p.SetParserRuleContext(localctx)
+		_prevctx = localctx
+		{
+			p.SetState(26)
+			p.Onehop()
+		}
+		{
+			p.SetState(27)
+			p.Match(SequenceParserMONKEYTAIL)
+		}
+		{
+			p.SetState(28)
+			p.Onepolicy()
+		}
+
+	case 3:
+		localctx = NewPoliciesHopContext(p, localctx)
+		p.SetParserRuleContext(localctx)
+		_prevctx = localctx
+		{
+			p.SetState(30)
+			p.Onehop()
+		}
+		{
+			p.SetState(31)
+			p.Match(SequenceParserMONKEYTAIL)
+		}
+		{
+			p.SetState(32)
+			p.Match(SequenceParserLPAR)
+		}
+		{
+			p.SetState(33)
+			p.policies(0)
+		}
+		{
+			p.SetState(34)
+			p.Match(SequenceParserRPAR)
+		}
+
+	case 4:
 		localctx = NewHopContext(p, localctx)
 		p.SetParserRuleContext(localctx)
 		_prevctx = localctx
 		{
-			p.SetState(20)
+			p.SetState(36)
 			p.Onehop()
 		}
 
-	default:
-		panic(antlr.NewNoViableAltException(p, nil, nil, nil, nil, nil))
 	}
 	p.GetParserRuleContext().SetStop(p.GetTokenStream().LT(-1))
-	p.SetState(36)
+	p.SetState(52)
 	p.GetErrorHandler().Sync(p)
 	_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 2, p.GetParserRuleContext())
 
@@ -685,82 +869,82 @@ func (p *SequenceParser) sequence(_p int) (localctx ISequenceContext) {
 				p.TriggerExitRuleEvent()
 			}
 			_prevctx = localctx
-			p.SetState(34)
+			p.SetState(50)
 			p.GetErrorHandler().Sync(p)
 			switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 1, p.GetParserRuleContext()) {
 			case 1:
 				localctx = NewOrContext(p, NewSequenceContext(p, _parentctx, _parentState))
 				p.PushNewRecursionContext(localctx, _startState, SequenceParserRULE_sequence)
-				p.SetState(23)
+				p.SetState(39)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 4)) {
-					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 4)", ""))
+				if !(p.Precpred(p.GetParserRuleContext(), 6)) {
+					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 6)", ""))
 				}
 				{
-					p.SetState(24)
+					p.SetState(40)
 					p.Match(SequenceParserOR)
 				}
 				{
-					p.SetState(25)
-					p.sequence(5)
+					p.SetState(41)
+					p.sequence(7)
 				}
 
 			case 2:
 				localctx = NewConcatenationContext(p, NewSequenceContext(p, _parentctx, _parentState))
 				p.PushNewRecursionContext(localctx, _startState, SequenceParserRULE_sequence)
-				p.SetState(26)
+				p.SetState(42)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 3)) {
-					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 3)", ""))
+				if !(p.Precpred(p.GetParserRuleContext(), 5)) {
+					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 5)", ""))
 				}
 				{
-					p.SetState(27)
-					p.sequence(4)
+					p.SetState(43)
+					p.sequence(6)
 				}
 
 			case 3:
 				localctx = NewQuestionMarkContext(p, NewSequenceContext(p, _parentctx, _parentState))
 				p.PushNewRecursionContext(localctx, _startState, SequenceParserRULE_sequence)
-				p.SetState(28)
+				p.SetState(44)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 7)) {
-					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 7)", ""))
+				if !(p.Precpred(p.GetParserRuleContext(), 9)) {
+					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 9)", ""))
 				}
 				{
-					p.SetState(29)
+					p.SetState(45)
 					p.Match(SequenceParserQUESTIONMARK)
 				}
 
 			case 4:
 				localctx = NewPlusContext(p, NewSequenceContext(p, _parentctx, _parentState))
 				p.PushNewRecursionContext(localctx, _startState, SequenceParserRULE_sequence)
-				p.SetState(30)
+				p.SetState(46)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 6)) {
-					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 6)", ""))
+				if !(p.Precpred(p.GetParserRuleContext(), 8)) {
+					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 8)", ""))
 				}
 				{
-					p.SetState(31)
+					p.SetState(47)
 					p.Match(SequenceParserPLUS)
 				}
 
 			case 5:
 				localctx = NewAsteriskContext(p, NewSequenceContext(p, _parentctx, _parentState))
 				p.PushNewRecursionContext(localctx, _startState, SequenceParserRULE_sequence)
-				p.SetState(32)
+				p.SetState(48)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 5)) {
-					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 5)", ""))
+				if !(p.Precpred(p.GetParserRuleContext(), 7)) {
+					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 7)", ""))
 				}
 				{
-					p.SetState(33)
+					p.SetState(49)
 					p.Match(SequenceParserASTERISK)
 				}
 
 			}
 
 		}
-		p.SetState(38)
+		p.SetState(54)
 		p.GetErrorHandler().Sync(p)
 		_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 2, p.GetParserRuleContext())
 	}
@@ -1076,14 +1260,14 @@ func (p *SequenceParser) Onehop() (localctx IOnehopContext) {
 		}
 	}()
 
-	p.SetState(55)
+	p.SetState(71)
 	p.GetErrorHandler().Sync(p)
 	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 3, p.GetParserRuleContext()) {
 	case 1:
 		localctx = NewISDHopContext(p, localctx)
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(39)
+			p.SetState(55)
 			p.Isd()
 		}
 
@@ -1091,11 +1275,11 @@ func (p *SequenceParser) Onehop() (localctx IOnehopContext) {
 		localctx = NewISDASHopContext(p, localctx)
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(40)
+			p.SetState(56)
 			p.Isd()
 		}
 		{
-			p.SetState(41)
+			p.SetState(57)
 			p.As()
 		}
 
@@ -1103,19 +1287,19 @@ func (p *SequenceParser) Onehop() (localctx IOnehopContext) {
 		localctx = NewISDASIFHopContext(p, localctx)
 		p.EnterOuterAlt(localctx, 3)
 		{
-			p.SetState(43)
+			p.SetState(59)
 			p.Isd()
 		}
 		{
-			p.SetState(44)
+			p.SetState(60)
 			p.As()
 		}
 		{
-			p.SetState(45)
+			p.SetState(61)
 			p.Match(SequenceParserHASH)
 		}
 		{
-			p.SetState(46)
+			p.SetState(62)
 			p.Iface()
 		}
 
@@ -1123,27 +1307,27 @@ func (p *SequenceParser) Onehop() (localctx IOnehopContext) {
 		localctx = NewISDASIFIFHopContext(p, localctx)
 		p.EnterOuterAlt(localctx, 4)
 		{
-			p.SetState(48)
+			p.SetState(64)
 			p.Isd()
 		}
 		{
-			p.SetState(49)
+			p.SetState(65)
 			p.As()
 		}
 		{
-			p.SetState(50)
+			p.SetState(66)
 			p.Match(SequenceParserHASH)
 		}
 		{
-			p.SetState(51)
+			p.SetState(67)
 			p.Iface()
 		}
 		{
-			p.SetState(52)
+			p.SetState(68)
 			p.Match(SequenceParserCOMMA)
 		}
 		{
-			p.SetState(53)
+			p.SetState(69)
 			p.Iface()
 		}
 
@@ -1293,7 +1477,7 @@ func (p *SequenceParser) Isd() (localctx IIsdContext) {
 		}
 	}()
 
-	p.SetState(59)
+	p.SetState(75)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
@@ -1301,7 +1485,7 @@ func (p *SequenceParser) Isd() (localctx IIsdContext) {
 		localctx = NewWildcardISDContext(p, localctx)
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(57)
+			p.SetState(73)
 			p.Match(SequenceParserZERO)
 		}
 
@@ -1309,7 +1493,7 @@ func (p *SequenceParser) Isd() (localctx IIsdContext) {
 		localctx = NewISDContext(p, localctx)
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(58)
+			p.SetState(74)
 			p.Match(SequenceParserNUM)
 		}
 
@@ -1495,7 +1679,7 @@ func (p *SequenceParser) As() (localctx IAsContext) {
 		}
 	}()
 
-	p.SetState(64)
+	p.SetState(80)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
@@ -1503,7 +1687,7 @@ func (p *SequenceParser) As() (localctx IAsContext) {
 		localctx = NewWildcardASContext(p, localctx)
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(61)
+			p.SetState(77)
 			p.Match(SequenceParserWILDCARDAS)
 		}
 
@@ -1511,7 +1695,7 @@ func (p *SequenceParser) As() (localctx IAsContext) {
 		localctx = NewLegacyASContext(p, localctx)
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(62)
+			p.SetState(78)
 			p.Match(SequenceParserLEGACYAS)
 		}
 
@@ -1519,7 +1703,7 @@ func (p *SequenceParser) As() (localctx IAsContext) {
 		localctx = NewASContext(p, localctx)
 		p.EnterOuterAlt(localctx, 3)
 		{
-			p.SetState(63)
+			p.SetState(79)
 			p.Match(SequenceParserAS)
 		}
 
@@ -1671,7 +1855,7 @@ func (p *SequenceParser) Iface() (localctx IIfaceContext) {
 		}
 	}()
 
-	p.SetState(68)
+	p.SetState(84)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
@@ -1679,7 +1863,7 @@ func (p *SequenceParser) Iface() (localctx IIfaceContext) {
 		localctx = NewWildcardIFaceContext(p, localctx)
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(66)
+			p.SetState(82)
 			p.Match(SequenceParserZERO)
 		}
 
@@ -1687,7 +1871,793 @@ func (p *SequenceParser) Iface() (localctx IIfaceContext) {
 		localctx = NewIFaceContext(p, localctx)
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(67)
+			p.SetState(83)
+			p.Match(SequenceParserNUM)
+		}
+
+	default:
+		panic(antlr.NewNoViableAltException(p, nil, nil, nil, nil, nil))
+	}
+
+	return localctx
+}
+
+// IPoliciesContext is an interface to support dynamic dispatch.
+type IPoliciesContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsPoliciesContext differentiates from other interfaces.
+	IsPoliciesContext()
+}
+
+type PoliciesContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyPoliciesContext() *PoliciesContext {
+	var p = new(PoliciesContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = SequenceParserRULE_policies
+	return p
+}
+
+func (*PoliciesContext) IsPoliciesContext() {}
+
+func NewPoliciesContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *PoliciesContext {
+	var p = new(PoliciesContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = SequenceParserRULE_policies
+
+	return p
+}
+
+func (s *PoliciesContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *PoliciesContext) CopyFrom(ctx *PoliciesContext) {
+	s.BaseParserRuleContext.CopyFrom(ctx.BaseParserRuleContext)
+}
+
+func (s *PoliciesContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *PoliciesContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+type PoliciesOrContext struct {
+	*PoliciesContext
+}
+
+func NewPoliciesOrContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *PoliciesOrContext {
+	var p = new(PoliciesOrContext)
+
+	p.PoliciesContext = NewEmptyPoliciesContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*PoliciesContext))
+
+	return p
+}
+
+func (s *PoliciesOrContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *PoliciesOrContext) AllPolicies() []IPoliciesContext {
+	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IPoliciesContext)(nil)).Elem())
+	var tst = make([]IPoliciesContext, len(ts))
+
+	for i, t := range ts {
+		if t != nil {
+			tst[i] = t.(IPoliciesContext)
+		}
+	}
+
+	return tst
+}
+
+func (s *PoliciesOrContext) Policies(i int) IPoliciesContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPoliciesContext)(nil)).Elem(), i)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IPoliciesContext)
+}
+
+func (s *PoliciesOrContext) OR() antlr.TerminalNode {
+	return s.GetToken(SequenceParserOR, 0)
+}
+
+func (s *PoliciesOrContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterPoliciesOr(s)
+	}
+}
+
+func (s *PoliciesOrContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitPoliciesOr(s)
+	}
+}
+
+type PoliciesParenthesesContext struct {
+	*PoliciesContext
+}
+
+func NewPoliciesParenthesesContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *PoliciesParenthesesContext {
+	var p = new(PoliciesParenthesesContext)
+
+	p.PoliciesContext = NewEmptyPoliciesContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*PoliciesContext))
+
+	return p
+}
+
+func (s *PoliciesParenthesesContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *PoliciesParenthesesContext) LPAR() antlr.TerminalNode {
+	return s.GetToken(SequenceParserLPAR, 0)
+}
+
+func (s *PoliciesParenthesesContext) Policies() IPoliciesContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPoliciesContext)(nil)).Elem(), 0)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IPoliciesContext)
+}
+
+func (s *PoliciesParenthesesContext) RPAR() antlr.TerminalNode {
+	return s.GetToken(SequenceParserRPAR, 0)
+}
+
+func (s *PoliciesParenthesesContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterPoliciesParentheses(s)
+	}
+}
+
+func (s *PoliciesParenthesesContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitPoliciesParentheses(s)
+	}
+}
+
+type PoliciesConcatenationContext struct {
+	*PoliciesContext
+}
+
+func NewPoliciesConcatenationContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *PoliciesConcatenationContext {
+	var p = new(PoliciesConcatenationContext)
+
+	p.PoliciesContext = NewEmptyPoliciesContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*PoliciesContext))
+
+	return p
+}
+
+func (s *PoliciesConcatenationContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *PoliciesConcatenationContext) AllPolicies() []IPoliciesContext {
+	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IPoliciesContext)(nil)).Elem())
+	var tst = make([]IPoliciesContext, len(ts))
+
+	for i, t := range ts {
+		if t != nil {
+			tst[i] = t.(IPoliciesContext)
+		}
+	}
+
+	return tst
+}
+
+func (s *PoliciesConcatenationContext) Policies(i int) IPoliciesContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPoliciesContext)(nil)).Elem(), i)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IPoliciesContext)
+}
+
+func (s *PoliciesConcatenationContext) COMMA() antlr.TerminalNode {
+	return s.GetToken(SequenceParserCOMMA, 0)
+}
+
+func (s *PoliciesConcatenationContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterPoliciesConcatenation(s)
+	}
+}
+
+func (s *PoliciesConcatenationContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitPoliciesConcatenation(s)
+	}
+}
+
+type PoliciesPolicyContext struct {
+	*PoliciesContext
+}
+
+func NewPoliciesPolicyContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *PoliciesPolicyContext {
+	var p = new(PoliciesPolicyContext)
+
+	p.PoliciesContext = NewEmptyPoliciesContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*PoliciesContext))
+
+	return p
+}
+
+func (s *PoliciesPolicyContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *PoliciesPolicyContext) Onepolicy() IOnepolicyContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IOnepolicyContext)(nil)).Elem(), 0)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IOnepolicyContext)
+}
+
+func (s *PoliciesPolicyContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterPoliciesPolicy(s)
+	}
+}
+
+func (s *PoliciesPolicyContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitPoliciesPolicy(s)
+	}
+}
+
+func (p *SequenceParser) Policies() (localctx IPoliciesContext) {
+	return p.policies(0)
+}
+
+func (p *SequenceParser) policies(_p int) (localctx IPoliciesContext) {
+	this := p
+	_ = this
+
+	var _parentctx antlr.ParserRuleContext = p.GetParserRuleContext()
+	_parentState := p.GetState()
+	localctx = NewPoliciesContext(p, p.GetParserRuleContext(), _parentState)
+	var _prevctx IPoliciesContext = localctx
+	var _ antlr.ParserRuleContext = _prevctx // TODO: To prevent unused variable warning.
+	_startState := 12
+	p.EnterRecursionRule(localctx, 12, SequenceParserRULE_policies, _p)
+
+	defer func() {
+		p.UnrollRecursionContexts(_parentctx)
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	var _alt int
+
+	p.EnterOuterAlt(localctx, 1)
+	p.SetState(92)
+	p.GetErrorHandler().Sync(p)
+
+	switch p.GetTokenStream().LA(1) {
+	case SequenceParserLPAR:
+		localctx = NewPoliciesParenthesesContext(p, localctx)
+		p.SetParserRuleContext(localctx)
+		_prevctx = localctx
+
+		{
+			p.SetState(87)
+			p.Match(SequenceParserLPAR)
+		}
+		{
+			p.SetState(88)
+			p.policies(0)
+		}
+		{
+			p.SetState(89)
+			p.Match(SequenceParserRPAR)
+		}
+
+	case SequenceParserGLOBALPOLICY, SequenceParserLOCALPOLICY, SequenceParserWILDCARDPOLICY:
+		localctx = NewPoliciesPolicyContext(p, localctx)
+		p.SetParserRuleContext(localctx)
+		_prevctx = localctx
+		{
+			p.SetState(91)
+			p.Onepolicy()
+		}
+
+	default:
+		panic(antlr.NewNoViableAltException(p, nil, nil, nil, nil, nil))
+	}
+	p.GetParserRuleContext().SetStop(p.GetTokenStream().LT(-1))
+	p.SetState(102)
+	p.GetErrorHandler().Sync(p)
+	_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 9, p.GetParserRuleContext())
+
+	for _alt != 2 && _alt != antlr.ATNInvalidAltNumber {
+		if _alt == 1 {
+			if p.GetParseListeners() != nil {
+				p.TriggerExitRuleEvent()
+			}
+			_prevctx = localctx
+			p.SetState(100)
+			p.GetErrorHandler().Sync(p)
+			switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 8, p.GetParserRuleContext()) {
+			case 1:
+				localctx = NewPoliciesOrContext(p, NewPoliciesContext(p, _parentctx, _parentState))
+				p.PushNewRecursionContext(localctx, _startState, SequenceParserRULE_policies)
+				p.SetState(94)
+
+				if !(p.Precpred(p.GetParserRuleContext(), 4)) {
+					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 4)", ""))
+				}
+				{
+					p.SetState(95)
+					p.Match(SequenceParserOR)
+				}
+				{
+					p.SetState(96)
+					p.policies(5)
+				}
+
+			case 2:
+				localctx = NewPoliciesConcatenationContext(p, NewPoliciesContext(p, _parentctx, _parentState))
+				p.PushNewRecursionContext(localctx, _startState, SequenceParserRULE_policies)
+				p.SetState(97)
+
+				if !(p.Precpred(p.GetParserRuleContext(), 3)) {
+					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 3)", ""))
+				}
+				{
+					p.SetState(98)
+					p.Match(SequenceParserCOMMA)
+				}
+				{
+					p.SetState(99)
+					p.policies(4)
+				}
+
+			}
+
+		}
+		p.SetState(104)
+		p.GetErrorHandler().Sync(p)
+		_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 9, p.GetParserRuleContext())
+	}
+
+	return localctx
+}
+
+// IOnepolicyContext is an interface to support dynamic dispatch.
+type IOnepolicyContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsOnepolicyContext differentiates from other interfaces.
+	IsOnepolicyContext()
+}
+
+type OnepolicyContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyOnepolicyContext() *OnepolicyContext {
+	var p = new(OnepolicyContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = SequenceParserRULE_onepolicy
+	return p
+}
+
+func (*OnepolicyContext) IsOnepolicyContext() {}
+
+func NewOnepolicyContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *OnepolicyContext {
+	var p = new(OnepolicyContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = SequenceParserRULE_onepolicy
+
+	return p
+}
+
+func (s *OnepolicyContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *OnepolicyContext) CopyFrom(ctx *OnepolicyContext) {
+	s.BaseParserRuleContext.CopyFrom(ctx.BaseParserRuleContext)
+}
+
+func (s *OnepolicyContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *OnepolicyContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+type LocalPolicyContext struct {
+	*OnepolicyContext
+}
+
+func NewLocalPolicyContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *LocalPolicyContext {
+	var p = new(LocalPolicyContext)
+
+	p.OnepolicyContext = NewEmptyOnepolicyContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*OnepolicyContext))
+
+	return p
+}
+
+func (s *LocalPolicyContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *LocalPolicyContext) LOCALPOLICY() antlr.TerminalNode {
+	return s.GetToken(SequenceParserLOCALPOLICY, 0)
+}
+
+func (s *LocalPolicyContext) Policyindex() IPolicyindexContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPolicyindexContext)(nil)).Elem(), 0)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IPolicyindexContext)
+}
+
+func (s *LocalPolicyContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterLocalPolicy(s)
+	}
+}
+
+func (s *LocalPolicyContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitLocalPolicy(s)
+	}
+}
+
+type GlobalPolicyContext struct {
+	*OnepolicyContext
+}
+
+func NewGlobalPolicyContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *GlobalPolicyContext {
+	var p = new(GlobalPolicyContext)
+
+	p.OnepolicyContext = NewEmptyOnepolicyContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*OnepolicyContext))
+
+	return p
+}
+
+func (s *GlobalPolicyContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *GlobalPolicyContext) GLOBALPOLICY() antlr.TerminalNode {
+	return s.GetToken(SequenceParserGLOBALPOLICY, 0)
+}
+
+func (s *GlobalPolicyContext) Policyindex() IPolicyindexContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPolicyindexContext)(nil)).Elem(), 0)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IPolicyindexContext)
+}
+
+func (s *GlobalPolicyContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterGlobalPolicy(s)
+	}
+}
+
+func (s *GlobalPolicyContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitGlobalPolicy(s)
+	}
+}
+
+type WildcardPolicyContext struct {
+	*OnepolicyContext
+}
+
+func NewWildcardPolicyContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *WildcardPolicyContext {
+	var p = new(WildcardPolicyContext)
+
+	p.OnepolicyContext = NewEmptyOnepolicyContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*OnepolicyContext))
+
+	return p
+}
+
+func (s *WildcardPolicyContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *WildcardPolicyContext) WILDCARDPOLICY() antlr.TerminalNode {
+	return s.GetToken(SequenceParserWILDCARDPOLICY, 0)
+}
+
+func (s *WildcardPolicyContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterWildcardPolicy(s)
+	}
+}
+
+func (s *WildcardPolicyContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitWildcardPolicy(s)
+	}
+}
+
+func (p *SequenceParser) Onepolicy() (localctx IOnepolicyContext) {
+	this := p
+	_ = this
+
+	localctx = NewOnepolicyContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 14, SequenceParserRULE_onepolicy)
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.SetState(110)
+	p.GetErrorHandler().Sync(p)
+
+	switch p.GetTokenStream().LA(1) {
+	case SequenceParserGLOBALPOLICY:
+		localctx = NewGlobalPolicyContext(p, localctx)
+		p.EnterOuterAlt(localctx, 1)
+		{
+			p.SetState(105)
+			p.Match(SequenceParserGLOBALPOLICY)
+		}
+		{
+			p.SetState(106)
+			p.Policyindex()
+		}
+
+	case SequenceParserLOCALPOLICY:
+		localctx = NewLocalPolicyContext(p, localctx)
+		p.EnterOuterAlt(localctx, 2)
+		{
+			p.SetState(107)
+			p.Match(SequenceParserLOCALPOLICY)
+		}
+		{
+			p.SetState(108)
+			p.Policyindex()
+		}
+
+	case SequenceParserWILDCARDPOLICY:
+		localctx = NewWildcardPolicyContext(p, localctx)
+		p.EnterOuterAlt(localctx, 3)
+		{
+			p.SetState(109)
+			p.Match(SequenceParserWILDCARDPOLICY)
+		}
+
+	default:
+		panic(antlr.NewNoViableAltException(p, nil, nil, nil, nil, nil))
+	}
+
+	return localctx
+}
+
+// IPolicyindexContext is an interface to support dynamic dispatch.
+type IPolicyindexContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsPolicyindexContext differentiates from other interfaces.
+	IsPolicyindexContext()
+}
+
+type PolicyindexContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyPolicyindexContext() *PolicyindexContext {
+	var p = new(PolicyindexContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = SequenceParserRULE_policyindex
+	return p
+}
+
+func (*PolicyindexContext) IsPolicyindexContext() {}
+
+func NewPolicyindexContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *PolicyindexContext {
+	var p = new(PolicyindexContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = SequenceParserRULE_policyindex
+
+	return p
+}
+
+func (s *PolicyindexContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *PolicyindexContext) CopyFrom(ctx *PolicyindexContext) {
+	s.BaseParserRuleContext.CopyFrom(ctx.BaseParserRuleContext)
+}
+
+func (s *PolicyindexContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *PolicyindexContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+type PolicyIndexContext struct {
+	*PolicyindexContext
+}
+
+func NewPolicyIndexContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *PolicyIndexContext {
+	var p = new(PolicyIndexContext)
+
+	p.PolicyindexContext = NewEmptyPolicyindexContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*PolicyindexContext))
+
+	return p
+}
+
+func (s *PolicyIndexContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *PolicyIndexContext) NUM() antlr.TerminalNode {
+	return s.GetToken(SequenceParserNUM, 0)
+}
+
+func (s *PolicyIndexContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterPolicyIndex(s)
+	}
+}
+
+func (s *PolicyIndexContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitPolicyIndex(s)
+	}
+}
+
+type PolicyIndexWildcardContext struct {
+	*PolicyindexContext
+}
+
+func NewPolicyIndexWildcardContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *PolicyIndexWildcardContext {
+	var p = new(PolicyIndexWildcardContext)
+
+	p.PolicyindexContext = NewEmptyPolicyindexContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*PolicyindexContext))
+
+	return p
+}
+
+func (s *PolicyIndexWildcardContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *PolicyIndexWildcardContext) ZERO() antlr.TerminalNode {
+	return s.GetToken(SequenceParserZERO, 0)
+}
+
+func (s *PolicyIndexWildcardContext) EnterRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.EnterPolicyIndexWildcard(s)
+	}
+}
+
+func (s *PolicyIndexWildcardContext) ExitRule(listener antlr.ParseTreeListener) {
+	if listenerT, ok := listener.(SequenceListener); ok {
+		listenerT.ExitPolicyIndexWildcard(s)
+	}
+}
+
+func (p *SequenceParser) Policyindex() (localctx IPolicyindexContext) {
+	this := p
+	_ = this
+
+	localctx = NewPolicyindexContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 16, SequenceParserRULE_policyindex)
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.SetState(114)
+	p.GetErrorHandler().Sync(p)
+
+	switch p.GetTokenStream().LA(1) {
+	case SequenceParserZERO:
+		localctx = NewPolicyIndexWildcardContext(p, localctx)
+		p.EnterOuterAlt(localctx, 1)
+		{
+			p.SetState(112)
+			p.Match(SequenceParserZERO)
+		}
+
+	case SequenceParserNUM:
+		localctx = NewPolicyIndexContext(p, localctx)
+		p.EnterOuterAlt(localctx, 2)
+		{
+			p.SetState(113)
 			p.Match(SequenceParserNUM)
 		}
 
@@ -1707,6 +2677,13 @@ func (p *SequenceParser) Sempred(localctx antlr.RuleContext, ruleIndex, predInde
 		}
 		return p.Sequence_Sempred(t, predIndex)
 
+	case 6:
+		var t *PoliciesContext = nil
+		if localctx != nil {
+			t = localctx.(*PoliciesContext)
+		}
+		return p.Policies_Sempred(t, predIndex)
+
 	default:
 		panic("No predicate with index: " + fmt.Sprint(ruleIndex))
 	}
@@ -1718,19 +2695,35 @@ func (p *SequenceParser) Sequence_Sempred(localctx antlr.RuleContext, predIndex 
 
 	switch predIndex {
 	case 0:
-		return p.Precpred(p.GetParserRuleContext(), 4)
-
-	case 1:
-		return p.Precpred(p.GetParserRuleContext(), 3)
-
-	case 2:
-		return p.Precpred(p.GetParserRuleContext(), 7)
-
-	case 3:
 		return p.Precpred(p.GetParserRuleContext(), 6)
 
-	case 4:
+	case 1:
 		return p.Precpred(p.GetParserRuleContext(), 5)
+
+	case 2:
+		return p.Precpred(p.GetParserRuleContext(), 9)
+
+	case 3:
+		return p.Precpred(p.GetParserRuleContext(), 8)
+
+	case 4:
+		return p.Precpred(p.GetParserRuleContext(), 7)
+
+	default:
+		panic("No predicate with index: " + fmt.Sprint(predIndex))
+	}
+}
+
+func (p *SequenceParser) Policies_Sempred(localctx antlr.RuleContext, predIndex int) bool {
+	this := p
+	_ = this
+
+	switch predIndex {
+	case 5:
+		return p.Precpred(p.GetParserRuleContext(), 4)
+
+	case 6:
+		return p.Precpred(p.GetParserRuleContext(), 3)
 
 	default:
 		panic("No predicate with index: " + fmt.Sprint(predIndex))

@@ -140,6 +140,9 @@ type PathMetadata struct {
 
 	// EpicAuths contains the EPIC authenticators.
 	EpicAuths EpicAuths
+
+	// FabridPolicies Contains the policy identifiers of interfaces on the path
+	FabridPolicies [][]*FabridPolicyIdentifier
 }
 
 func (pm *PathMetadata) Copy() *PathMetadata {
@@ -148,15 +151,17 @@ func (pm *PathMetadata) Copy() *PathMetadata {
 	}
 
 	return &PathMetadata{
-		Interfaces:   append(pm.Interfaces[:0:0], pm.Interfaces...),
-		MTU:          pm.MTU,
-		Expiry:       pm.Expiry,
-		Latency:      append(pm.Latency[:0:0], pm.Latency...),
-		Bandwidth:    append(pm.Bandwidth[:0:0], pm.Bandwidth...),
-		Geo:          append(pm.Geo[:0:0], pm.Geo...),
-		LinkType:     append(pm.LinkType[:0:0], pm.LinkType...),
-		InternalHops: append(pm.InternalHops[:0:0], pm.InternalHops...),
-		Notes:        append(pm.Notes[:0:0], pm.Notes...),
+		Interfaces:     append(pm.Interfaces[:0:0], pm.Interfaces...),
+		MTU:            pm.MTU,
+		Expiry:         pm.Expiry,
+		Latency:        append(pm.Latency[:0:0], pm.Latency...),
+		Bandwidth:      append(pm.Bandwidth[:0:0], pm.Bandwidth...),
+		Geo:            append(pm.Geo[:0:0], pm.Geo...),
+		LinkType:       append(pm.LinkType[:0:0], pm.LinkType...),
+		InternalHops:   append(pm.InternalHops[:0:0], pm.InternalHops...),
+		Notes:          append(pm.Notes[:0:0], pm.Notes...),
+		FabridPolicies: append(pm.FabridPolicies[:0:0], pm.FabridPolicies...), // TODO(jvanbommel): array in array
+
 		EpicAuths: EpicAuths{
 			AuthPHVF: append([]byte(nil), pm.EpicAuths.AuthPHVF...),
 			AuthLHVF: append([]byte(nil), pm.EpicAuths.AuthLHVF...),
@@ -200,6 +205,28 @@ type GeoCoordinates struct {
 	Longitude float32
 	// Civic address of the location.
 	Address string
+}
+
+type PolicyType int32
+
+const (
+	FabridUnspecifiedPolicy PolicyType = 0
+	FabridLocalPolicy       PolicyType = 1
+	FabridGlobalPolicy      PolicyType = 2
+)
+
+type FabridPolicyIdentifier struct {
+	Type       PolicyType
+	Identifier uint32
+}
+
+func (fpi *FabridPolicyIdentifier) String() string {
+	if fpi.Type == FabridGlobalPolicy {
+		return fmt.Sprintf("G%d", fpi.Identifier)
+	} else if fpi.Type == FabridLocalPolicy {
+		return fmt.Sprintf("L%d", fpi.Identifier)
+	}
+	return "U"
 }
 
 type PathFingerprint string

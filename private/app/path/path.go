@@ -225,36 +225,42 @@ func printAndChoose(paths []snet.Path, remote addr.IA, cs ColorScheme) (snet.Pat
 
 // ColorScheme allows customizing the path coloring.
 type ColorScheme struct {
-	Header *color.Color
-	Keys   *color.Color
-	Values *color.Color
-	Link   *color.Color
-	Intf   *color.Color
-	Good   *color.Color
-	Bad    *color.Color
+	Header       *color.Color
+	Keys         *color.Color
+	Values       *color.Color
+	Link         *color.Color
+	GlobalPolicy *color.Color
+	LocalPolicy  *color.Color
+	Intf         *color.Color
+	Good         *color.Color
+	Bad          *color.Color
 }
 
 func DefaultColorScheme(disable bool) ColorScheme {
 	if disable {
 		noColor := color.New()
 		return ColorScheme{
-			Header: noColor,
-			Keys:   noColor,
-			Values: noColor,
-			Link:   noColor,
-			Intf:   noColor,
-			Good:   noColor,
-			Bad:    noColor,
+			Header:       noColor,
+			Keys:         noColor,
+			Values:       noColor,
+			GlobalPolicy: noColor,
+			LocalPolicy:  noColor,
+			Link:         noColor,
+			Intf:         noColor,
+			Good:         noColor,
+			Bad:          noColor,
 		}
 	}
 	return ColorScheme{
-		Header: color.New(color.FgHiBlack),
-		Keys:   color.New(color.FgHiCyan),
-		Values: color.New(),
-		Link:   color.New(color.FgHiMagenta),
-		Intf:   color.New(color.FgYellow),
-		Good:   color.New(color.FgGreen),
-		Bad:    color.New(color.FgRed),
+		Header:       color.New(color.FgHiBlack),
+		Keys:         color.New(color.FgHiCyan),
+		Values:       color.New(),
+		Link:         color.New(color.FgHiMagenta),
+		Intf:         color.New(color.FgYellow),
+		Good:         color.New(color.FgGreen),
+		Bad:          color.New(color.FgRed),
+		GlobalPolicy: color.New(color.FgHiBlue),
+		LocalPolicy:  color.New(color.FgHiGreen),
 	}
 }
 
@@ -272,34 +278,53 @@ func (cs ColorScheme) KeyValues(kv ...string) []string {
 	}
 	return entries
 }
+func (cs ColorScheme) Policies(policies [][]*snet.FabridPolicyIdentifier, idx int) string {
+	if len(policies) < idx {
+		return ""
+	}
+	policyStr := make([]string, len(policies[idx]))
+	for i, v := range policies[idx] {
+		if v.Type == snet.FabridGlobalPolicy {
+			policyStr[i] = cs.GlobalPolicy.Sprintf(v.String())
+		} else if v.Type == snet.FabridLocalPolicy {
+			policyStr[i] = cs.LocalPolicy.Sprintf(v.String())
+		}
+	}
+	return fmt.Sprintf("~%s~", strings.Join(policyStr, ","))
+
+}
 
 func (cs ColorScheme) Path(path snet.Path) string {
 	if path == nil {
 		return ""
 	}
 	intfs := path.Metadata().Interfaces
+	policies := path.Metadata().FabridPolicies
 	if len(intfs) == 0 {
 		return ""
 	}
 	var hops []string
 	intf := intfs[0]
-	hops = append(hops, cs.Values.Sprintf("%s %s",
+	hops = append(hops, cs.Values.Sprintf("%s %s %s",
 		cs.Values.Sprint(intf.IA),
+		cs.Policies(policies, 0),
 		cs.Intf.Sprint(intf.ID),
 	))
 	for i := 1; i < len(intfs)-1; i += 2 {
 		inIntf := intfs[i]
 		outIntf := intfs[i+1]
-		hops = append(hops, cs.Values.Sprintf("%s %s %s",
+		hops = append(hops, cs.Values.Sprintf("%s %s %s %s",
 			cs.Intf.Sprint(inIntf.ID),
 			cs.Values.Sprint(inIntf.IA),
+			cs.Policies(policies, (i+1)/2),
 			cs.Intf.Sprint(outIntf.ID),
 		))
 	}
 	intf = intfs[len(intfs)-1]
-	hops = append(hops, cs.Values.Sprintf("%s %s",
+	hops = append(hops, cs.Values.Sprintf("%s %s %s",
 		cs.Intf.Sprint(intf.ID),
 		cs.Values.Sprint(intf.IA),
+		cs.Policies(policies, len(intfs)/2),
 	))
 	return fmt.Sprintf("[%s]", strings.Join(hops, cs.Link.Sprintf(">")))
 }

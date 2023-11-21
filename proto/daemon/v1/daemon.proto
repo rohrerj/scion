@@ -103,7 +103,30 @@ message Path {
     repeated string notes = 11;
     // EpicAuths contains the EPIC authenticators used to calculate the PHVF and LHVF.
     EpicAuths epic_auths = 12;
+    // FabridPolicies contains the fabrid policy identifiers that are supported for an interface
+    // Entry i describes the policies between interfaces i and i+1.
+    repeated FABRIDPolicyIdentifierList fabrid_policies = 13;
 }
+
+enum FABRIDPolicyType {
+    // The type of policy has not been specified
+    UNSPECIFIED = 0;
+    // The policy is AS-local
+    LOCAL = 1;
+    // The policy is global and present in the global policy description store.
+    GLOBAL = 2;
+}
+message FABRIDPolicyIdentifierList {
+    // A list of policies for a specific interface
+    repeated FABRIDPolicyIdentifier policies = 1;
+}
+message FABRIDPolicyIdentifier {
+    // The type of this policy, either local or global
+    FABRIDPolicyType policy_type = 1;
+    // The identifier for the policy
+    uint32 policy_identifier = 2;
+}
+
 
 message EpicAuths {
     // AuthPHVF is the authenticator use to calculate the PHVF.

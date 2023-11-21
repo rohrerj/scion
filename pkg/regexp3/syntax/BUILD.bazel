@@ -1,0 +1,17 @@
+load("//tools/lint:go.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "charclass.go",
+        "code.go",
+        "escape.go",
+        "parser.go",
+        "prefix.go",
+        "replacerdata.go",
+        "tree.go",
+        "writer.go",
+    ],
+    importpath = "github.com/scionproto/scion/pkg/regexp3/syntax",
+    visibility = ["//visibility:public"],
+)

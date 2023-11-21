@@ -216,7 +216,7 @@ func TestGetLocalPolicyDescription(t *testing.T) {
 	}
 }
 
-func TestRefreshMPLSMapIfNecessary(t *testing.T) {
+func TestGetMPLSMapIfNecessary(t *testing.T) {
 	baseMPLSMap := fabrid.MPLSMap{
 		Data:        map[uint32]uint32{1: 3001, 2: 2030, 3: 200, 255: 1999},
 		CurrentHash: nil,
