@@ -110,11 +110,19 @@ func Choose(
 			return nil, serrors.New("no healthy paths available")
 		}
 	}
+	var selectedPath snet.Path
 	if o.interactive {
-		return printAndChoose(paths, remote, o.colorScheme)
+		selectedPath, err = printAndChoose(paths, remote, o.colorScheme)
+		if err != nil {
+			return selectedPath, err
+		}
+	} else {
+		selectedPath = paths[rand.Intn(len(paths))]
 	}
-
-	return paths[rand.Intn(len(paths))], nil
+	if o.fabrid {
+		// TODO set policyIDs
+	}
+	return selectedPath, nil
 }
 
 func filterUnhealthy(
@@ -320,6 +328,7 @@ type options struct {
 	colorScheme ColorScheme
 	probeCfg    *ProbeConfig
 	epic        bool
+	fabrid      bool
 }
 
 type Option func(o *options)
@@ -365,5 +374,11 @@ func WithProbing(cfg *ProbeConfig) Option {
 func WithEPIC(epic bool) Option {
 	return func(o *options) {
 		o.epic = epic
+	}
+}
+
+func WithFABRID(f bool) Option {
+	return func(o *options) {
+		o.fabrid = f
 	}
 }

@@ -216,7 +216,7 @@ func (d *DataPlane) AddDRKeySecret(protocolID int32, sv control.SecretValue) err
 func (d *DataPlane) getDRKeySecret(protocolID int32, t time.Time) (*control.SecretValue, error) {
 	secrets := d.drKeySecrets[protocolID]
 	for _, sv := range secrets {
-		if !t.After(sv.EpochBegin) && sv.EpochEnd.After(t) {
+		if !sv.EpochBegin.After(t) && sv.EpochEnd.After(t) {
 			return sv, nil
 		}
 	}
@@ -536,6 +536,7 @@ func (d *DataPlane) AddNextHopBFD(ifID uint16, src, dst *net.UDPAddr, cfg contro
 func (d *DataPlane) UpdateFabridPolicies(policies map[uint8]uint32) error {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
+	log.Debug("Fabrid policy map has been updated")
 	// TODO(rohrerj): check for concurrency issues
 	// when an update happens during reading
 	d.fabridPolicyMap = policies

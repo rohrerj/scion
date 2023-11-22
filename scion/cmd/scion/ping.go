@@ -87,6 +87,7 @@ func newPing(pather CommandPather) *cobra.Command {
 		tracer      string
 		epic        bool
 		format      string
+		fabrid      bool
 	}
 
 	var cmd = &cobra.Command{
@@ -164,6 +165,7 @@ On other errors, ping will exit with code 2.
 				path.WithSequence(flags.sequence),
 				path.WithColorScheme(path.DefaultColorScheme(flags.noColor)),
 				path.WithEPIC(flags.epic),
+				path.WithFABRID(flags.fabrid),
 			}
 			if flags.healthyOnly {
 				opts = append(opts, path.WithProbing(&path.ProbeConfig{
@@ -188,6 +190,25 @@ On other errors, ping will exit with code 2.
 					remote.Path = epicPath
 				case snetpath.Empty:
 					remote.Path = s
+				default:
+					return serrors.New("unsupported path type")
+				}
+			} else if flags.fabrid {
+				switch s := path.Dataplane().(type) {
+				case snetpath.SCION:
+					fabridConfig := snetpath.FabridConfig{
+						LocalIA:         info.IA,
+						LocalAddr:       localIP.String(),
+						DestinationIA:   remote.IA,
+						DestinationAddr: remote.Host.IP.String(),
+					}
+					fabridPath, err := snetpath.NewFABRIDDataplanePath(s, path.Metadata().Interfaces,
+						path.Metadata().FabridPolicyIDs, fabridConfig)
+					if err != nil {
+						return err
+					}
+					fabridPath.RegisterDRKeyFetcher(sd.DRKeyGetASHostKey, sd.DRKeyGetHostHostKey)
+					remote.Path = fabridPath
 				default:
 					return serrors.New("unsupported path type")
 				}
@@ -363,6 +384,7 @@ SCMP echo header and payload are equal to the MTU of the path. This flag overrid
 	cmd.Flags().BoolVar(&flags.epic, "epic", false, "Enable EPIC for path probing.")
 	cmd.Flags().StringVar(&flags.format, "format", "human",
 		"Specify the output format (human|json|yaml)")
+	cmd.Flags().BoolVar(&flags.fabrid, "fabrid", false, "Enable FABRID")
 	return cmd
 }
 

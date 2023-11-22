@@ -334,6 +334,10 @@ func (r RawPath) SetPath(s *slayers.SCION) error {
 	return serrors.New("snet.RawPath does not support SetPath")
 }
 
+func (r RawPath) SetExtensions(s *slayers.SCION, p *PacketInfo) error {
+	return serrors.New("snet.RawPath does not support SetExtensions")
+}
+
 // Packet describes a SCION packet.
 type Packet struct {
 	Bytes
@@ -344,8 +348,8 @@ type Packet struct {
 func (p *Packet) Decode() error {
 	var (
 		scionLayer slayers.SCION
-		hbhLayer   slayers.HopByHopExtnSkipper
-		e2eLayer   slayers.EndToEndExtnSkipper
+		hbhLayer   slayers.HopByHopExtn
+		e2eLayer   slayers.EndToEndExtn
 		udpLayer   slayers.UDP
 		scmpLayer  slayers.SCMP
 	)
@@ -385,6 +389,12 @@ func (p *Packet) Decode() error {
 		}
 	}
 	p.Path = rpath
+	if len(hbhLayer.Options) != 0 {
+		p.HbhExtension = &hbhLayer
+	}
+	if len(e2eLayer.Options) != 0 {
+		p.E2eExtension = &e2eLayer
+	}
 
 	switch l4 {
 	case slayers.LayerTypeSCIONUDP:
@@ -555,9 +565,35 @@ func (p *Packet) Serialize() error {
 	if err := p.Path.SetPath(&scionLayer); err != nil {
 		return serrors.WrapStr("setting path", err)
 	}
+	if err := p.Path.SetExtensions(&scionLayer, &p.PacketInfo); err != nil {
+		return serrors.WrapStr("error setting the header extensions", err)
+	}
 
 	packetLayers = append(packetLayers, &scionLayer)
+	if p.HbhExtension != nil {
+		packetLayers = append(packetLayers, p.HbhExtension)
+	}
+	if p.E2eExtension != nil {
+		packetLayers = append(packetLayers, p.E2eExtension)
+	}
+
 	packetLayers = append(packetLayers, p.Payload.toLayers(&scionLayer)...)
+
+	if p.HbhExtension != nil {
+		tmp := scionLayer.NextHdr
+		scionLayer.NextHdr = slayers.HopByHopClass
+		p.HbhExtension.NextHdr = tmp
+
+		if p.E2eExtension != nil {
+			tmp = p.HbhExtension.NextHdr
+			p.HbhExtension.NextHdr = slayers.End2EndClass
+			p.E2eExtension.NextHdr = tmp
+		}
+	} else if p.E2eExtension != nil {
+		tmp := scionLayer.NextHdr
+		scionLayer.NextHdr = slayers.End2EndClass
+		p.E2eExtension.NextHdr = tmp
+	}
 
 	buffer := gopacket.NewSerializeBuffer()
 	options := gopacket.SerializeOptions{
@@ -571,7 +607,6 @@ func (p *Packet) Serialize() error {
 	if len(buffer.Bytes()) > cap(p.Bytes) {
 		return serrors.New("packet size is bigger than max possible value ")
 	}
-
 	p.Bytes = p.Bytes[:len(buffer.Bytes())]
 	return nil
 }
@@ -590,5 +625,7 @@ type PacketInfo struct {
 	// Path contains a SCION forwarding path. This field must not be nil.
 	Path DataplanePath
 	// Payload is the Payload of the message.
-	Payload Payload
+	Payload      Payload
+	HbhExtension *slayers.HopByHopExtn
+	E2eExtension *slayers.EndToEndExtn
 }

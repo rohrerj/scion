@@ -37,6 +37,8 @@ type DataplanePath interface {
 	// SetPath sets the path in the SCION header. It assumes that all the fields
 	// except the path and path type are set correctly.
 	SetPath(scion *slayers.SCION) error
+
+	SetExtensions(s *slayers.SCION, p *PacketInfo) error
 }
 
 // Path is an abstract representation of a path. Most applications do not need
@@ -91,6 +93,13 @@ func (ea *EpicAuths) SupportsEpic() bool {
 	return (len(ea.AuthPHVF) == 16 && len(ea.AuthLHVF) == 16)
 }
 
+type FabridConfig struct {
+	PolicyIDs []uint8
+	IAs       []addr.IA
+	LocalIA   addr.IA
+	LocalAddr string
+}
+
 // PathMetadata contains supplementary information about a path.
 //
 // The information about MTU, Latency, Bandwidth etc. are based solely on data
@@ -140,6 +149,8 @@ type PathMetadata struct {
 
 	// EpicAuths contains the EPIC authenticators.
 	EpicAuths EpicAuths
+
+	FabridPolicyIDs []uint8
 }
 
 func (pm *PathMetadata) Copy() *PathMetadata {

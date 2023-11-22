@@ -94,3 +94,7 @@ func (e *EPIC) SetPath(s *slayers.SCION) error {
 	s.Path, s.PathType = ep, ep.Type()
 	return nil
 }
+
+func (e *EPIC) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
+	return nil
+}

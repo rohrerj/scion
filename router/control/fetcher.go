@@ -86,7 +86,9 @@ func (f *Fetcher) queryFabridPolicies() (map[uint8]uint32, error) {
 		return nil, err
 	}
 	defer grpcconn.Close()
-	return nil, nil
+	return map[uint8]uint32{
+		0: 0,
+	}, nil
 }
 
 func (f *Fetcher) StartSecretUpdater() {
