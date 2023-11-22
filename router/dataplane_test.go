@@ -203,6 +203,8 @@ func TestDataPlaneRun(t *testing.T) {
 				key := []byte("testkey_xxxxxxxx")
 				dstIA := xtest.MustParseIA("4-ff00:0:411")
 				dstAddr := addr.MustParseHost("2.2.2.2")
+				srcIA := xtest.MustParseIA("2-ff00:0:222")
+				srcAddr := addr.MustParseHost("1.1.1.1")
 
 				asDRKey := [16]byte{
 					0x00, 0x11, 0x22, 0x33,
@@ -233,7 +235,7 @@ func TestDataPlaneRun(t *testing.T) {
 				})
 
 				asToHostKey, err := ret.DeriveASToHostKey(int32(drkey.FABRID), now,
-					dstIA, dstAddr.String())
+					srcIA, srcAddr.String())
 				assert.NoError(t, err)
 				encPolicyID, err := fabrid.EncryptPolicyID(&policyID, &identifier, asToHostKey[:])
 				assert.NoError(t, err)
@@ -263,14 +265,15 @@ func TestDataPlaneRun(t *testing.T) {
 						}
 						path.HopFields[1].Mac = computeMAC(t, key, path.InfoFields[0], path.HopFields[1])
 						rawDstAddr := dstAddr.IP().As4()
+						rawSrcAddr := srcAddr.IP().As4()
 						s := slayers.SCION{
 							NextHdr:     slayers.HopByHopClass,
 							PathType:    scion.PathType,
 							DstIA:       dstIA,
-							SrcIA:       xtest.MustParseIA("2-ff00:0:222"),
+							SrcIA:       srcIA,
 							SrcAddrType: slayers.T4Ip,
 							DstAddrType: slayers.T4Ip,
-							RawSrcAddr:  []byte{1, 1, 1, 1},
+							RawSrcAddr:  rawSrcAddr[:],
 							RawDstAddr:  rawDstAddr[:],
 							Path:        path,
 						}
@@ -280,6 +283,7 @@ func TestDataPlaneRun(t *testing.T) {
 
 						meta := extension.FabridHopfieldMetadata{
 							EncryptedPolicyID: encPolicyID,
+							FabridEnabled:     true,
 						}
 						tmp := make([]byte, 100)
 						sigma := computeMAC(t, key, path.InfoFields[0], path.HopFields[1])
