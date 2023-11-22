@@ -18,6 +18,7 @@ package ping
 import (
 	"context"
 	"encoding/binary"
+	"github.com/scionproto/scion/pkg/slayers"
 	"math/rand"
 	"net"
 	"sync"
@@ -78,6 +79,7 @@ type Config struct {
 	Dispatcher reliable.Dispatcher
 	Local      *snet.UDPAddr
 	Remote     *snet.UDPAddr
+	HBH        *slayers.HopByHopExtn
 
 	// Attempts is the number of pings to send.
 	Attempts uint16
@@ -138,6 +140,7 @@ func Run(ctx context.Context, cfg Config) (Stats, error) {
 		replies:       replies,
 		errHandler:    cfg.ErrHandler,
 		updateHandler: cfg.UpdateHandler,
+		hbh:           cfg.HBH,
 	}
 	return p.Ping(ctx, cfg.Remote)
 }
@@ -162,6 +165,8 @@ type pinger struct {
 	sentSequence     int
 	receivedSequence int
 	stats            Stats
+
+	hbh *slayers.HopByHopExtn
 }
 
 func (p *pinger) Ping(ctx context.Context, remote *snet.UDPAddr) (Stats, error) {
@@ -227,7 +232,7 @@ func (p *pinger) send(remote *snet.UDPAddr) error {
 		Identifier: uint16(p.id),
 		SeqNumber:  uint16(sequence),
 		Payload:    p.pld,
-	})
+	}, p.hbh)
 	if err != nil {
 		return err
 	}

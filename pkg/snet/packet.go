@@ -26,6 +26,7 @@ import (
 
 // Payload is the payload of the message, use the different payload type to
 // instantiate it.
+
 type Payload interface {
 	toLayers(scn *slayers.SCION) []gopacket.SerializableLayer
 	length() int
@@ -557,7 +558,15 @@ func (p *Packet) Serialize() error {
 	}
 
 	packetLayers = append(packetLayers, &scionLayer)
+	if p.HopByHopExtension != nil {
+		packetLayers = append(packetLayers, p.HopByHopExtension)
+	}
 	packetLayers = append(packetLayers, p.Payload.toLayers(&scionLayer)...)
+
+	if p.HopByHopExtension != nil {
+		p.HopByHopExtension.NextHdr = scionLayer.NextHdr
+		scionLayer.NextHdr = slayers.HopByHopClass
+	}
 
 	buffer := gopacket.NewSerializeBuffer()
 	options := gopacket.SerializeOptions{
@@ -591,4 +600,6 @@ type PacketInfo struct {
 	Path DataplanePath
 	// Payload is the Payload of the message.
 	Payload Payload
+	//TODO(jvanbommel):subtitute with justins work
+	HopByHopExtension *slayers.HopByHopExtn
 }

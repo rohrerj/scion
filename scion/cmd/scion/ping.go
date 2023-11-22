@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/scionproto/scion/pkg/slayers"
 	"math"
 	"net"
 	"os"
@@ -184,6 +185,8 @@ On other errors, ping will exit with code 2.
 			fmt.Println(cs.Path(path))
 			fmt.Println(policies)
 
+			hbh := slayers.HopByHopExtn{}
+
 			// If the EPIC flag is set, use the EPIC-HP path type
 			if flags.epic {
 				switch s := path.Dataplane().(type) {
@@ -279,6 +282,7 @@ On other errors, ping will exit with code 2.
 				Local:       local,
 				Remote:      remote,
 				PayloadSize: pldSize,
+				HBH:         &hbh,
 				ErrHandler: func(err error) {
 					fmt.Fprintf(os.Stderr, "ERROR: %s\n", err)
 				},
