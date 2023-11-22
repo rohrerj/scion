@@ -21,6 +21,7 @@ import (
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/drkey"
 	"github.com/scionproto/scion/pkg/experimental/fabrid"
+	"github.com/scionproto/scion/pkg/private/xtest"
 	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/slayers/extension"
@@ -197,11 +198,11 @@ On other errors, ping will exit with code 2.
 			key, err := sd.DRKeyGetASHostKey(traceCtx, drkey.ASHostMeta{
 				ProtoId:  drkey.Protocol(int32(drkey.FABRID)),
 				Validity: now,
-				SrcIA:    info.IA,
+				SrcIA:    xtest.MustParseIA("1-ff00:0:110"),
 				//SrcHost:  remote.Host.IP.String(),
-				DstIA: remote.IA,
+				DstIA: info.IA,
 				//DstHost: localIP.String(),
-				DstHost: remote.Host.IP.String(),
+				DstHost: localIP.String(),
 			})
 			if err != nil {
 				return err
@@ -265,6 +266,7 @@ On other errors, ping will exit with code 2.
 				if err := scionLayer.SetSrcAddr(addr.HostIP(localHostIP)); err != nil {
 					return serrors.WrapStr("setting source address", err)
 				}
+				fmt.Println("Key used is ", "key", key.Key.String())
 
 				sigma := slayerspath.MAC(mac, decoded.InfoFields[0], decoded.HopFields[1], nil)
 				err = fabrid.ComputeBaseHVF(&meta, &identifier, &scionLayer, tmp, key.Key[:], sigma[:])

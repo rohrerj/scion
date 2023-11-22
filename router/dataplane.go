@@ -1110,7 +1110,6 @@ func (dp *DataPlane) deriveASToASKey(protocolID int32, t time.Time, dstAS addr.I
 
 func (dp *DataPlane) deriveASToHostKey(protocolID int32, t time.Time, dstAS addr.IA, dst string) ([16]byte, error) {
 	d := specific.Deriver{}
-	log.Info("Destinations are", "as", dstAS.String(), "dst", dst)
 	asToAsKey, err := dp.deriveASToASKey(protocolID, t, dstAS)
 	if err != nil {
 		return nullByte, err
@@ -1125,17 +1124,17 @@ func (dp *DataPlane) deriveASToHostKey(protocolID int32, t time.Time, dstAS addr
 
 func (p *scionPacketProcessor) processFabrid() error {
 	meta := p.fabrid.HopfieldMetadata[0]
-	dst, err := p.scionLayer.DstAddr()
+	src, err := p.scionLayer.SrcAddr()
 	if err != nil {
 		return err
 	}
 	var key [16]byte
 	if p.fabrid.HopfieldMetadata[0].ASLevelKey {
 		key, err = p.d.deriveASToASKey(int32(drkey.FABRID), p.identifier.Timestamp,
-			p.scionLayer.DstIA)
+			p.scionLayer.SrcIA)
 	} else {
 		key, err = p.d.deriveASToHostKey(int32(drkey.FABRID), p.identifier.Timestamp,
-			p.scionLayer.DstIA, dst.String())
+			p.scionLayer.SrcIA, src.String())
 	}
 	if err != nil {
 		return err
