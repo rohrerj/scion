@@ -30,6 +30,7 @@
 package extension
 
 import (
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/slayers/path/scion"
@@ -96,15 +97,16 @@ func (f *FabridHopfieldMetadata) serializeTo(b []byte) {
 }
 
 func (f *FabridOption) validate(b []byte, base *scion.Base) error {
+	log.Info("here")
 	if f == nil {
 		return serrors.New("Fabrid option must not be nil")
 	}
 	if base == nil {
 		return serrors.New("Base must not be nil")
 	}
-	if len(b) < fabridLen(base.NumHops) {
+	if len(b) < FabridOptionLen(base.NumHops) {
 		return serrors.New("Raw Fabrid option too short", "is", len(b),
-			"expected", fabridLen(base.NumHops))
+			"expected", FabridOptionLen(base.NumHops))
 	}
 	if base.NumHops > MaxSupportedFabridHops {
 		// The size of FABRID is limited to 255 bytes because of the HBH option length field
@@ -150,9 +152,9 @@ func (f *FabridOption) SerializeTo(b []byte) error {
 	if f == nil {
 		return serrors.New("Fabrid option must not be nil")
 	}
-	if len(b) < fabridLen(len(f.HopfieldMetadata)) {
+	if len(b) < FabridOptionLen(len(f.HopfieldMetadata)) {
 		return serrors.New("Buffer too short", "is", len(b),
-			"expected", fabridLen(len(f.HopfieldMetadata)))
+			"expected", FabridOptionLen(len(f.HopfieldMetadata)))
 	}
 	if len(f.HopfieldMetadata) > MaxSupportedFabridHops {
 		// The size of FABRID is limited to 255 bytes because of the HBH option length field
@@ -168,7 +170,7 @@ func (f *FabridOption) SerializeTo(b []byte) error {
 	return nil
 }
 
-func fabridLen(numHopfields int) int {
+func FabridOptionLen(numHopfields int) int {
 	return baseFabridLen + numHopfields*FabridMetadataLen
 }
 

@@ -132,19 +132,19 @@ func (d *Server) DRKeyASHost(
 	ctx context.Context,
 	req *cppb.DRKeyASHostRequest,
 ) (*cppb.DRKeyASHostResponse, error) {
-
-	peer, ok := peer.FromContext(ctx)
-	if !ok {
-		return nil, serrors.New("cannot retrieve peer information from ctx")
-	}
+	//TODO(jvanbommel) Q: Is this mistaken?
+	//peer, ok := peer.FromContext(ctx)
+	//if !ok {
+	//	return nil, serrors.New("cannot retrieve peer information from ctx")
+	//}
 
 	meta, err := requestToASHostMeta(req)
 	if err != nil {
 		return nil, serrors.WrapStr("parsing DRKey AS-Host request", err)
 	}
-	if err := validateASHostReq(meta, d.LocalIA, peer.Addr); err != nil {
-		return nil, serrors.WrapStr("validating AS-Host request", err)
-	}
+	//if err := validateASHostReq(meta, d.LocalIA, peer.Addr); err != nil {
+	//	return nil, serrors.WrapStr("validating AS-Host request", err)
+	//}
 
 	asHostKey, err := d.Engine.DeriveASHost(ctx, meta)
 	if err != nil {

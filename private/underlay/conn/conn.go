@@ -48,6 +48,7 @@ type Conn interface {
 	SetReadDeadline(time.Time) error
 	SetWriteDeadline(time.Time) error
 	SetDeadline(time.Time) error
+	SetToS(uint8) error
 	Close() error
 }
 
@@ -116,6 +117,10 @@ func (c *connUDPIPv4) SetDeadline(t time.Time) error {
 	return c.pconn.SetDeadline(t)
 }
 
+func (c *connUDPIPv4) SetToS(tos uint8) error {
+	return c.pconn.SetTOS(int(tos))
+}
+
 type connUDPIPv6 struct {
 	connUDPBase
 	pconn *ipv6.PacketConn
@@ -152,6 +157,10 @@ func (c *connUDPIPv6) SetWriteDeadline(t time.Time) error {
 
 func (c *connUDPIPv6) SetDeadline(t time.Time) error {
 	return c.pconn.SetDeadline(t)
+}
+
+func (c *connUDPIPv6) SetToS(tos uint8) error {
+	return nil
 }
 
 type connUDPBase struct {

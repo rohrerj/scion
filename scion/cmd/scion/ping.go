@@ -18,9 +18,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/drkey"
+	"github.com/scionproto/scion/pkg/experimental/fabrid"
+	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/slayers"
+	"github.com/scionproto/scion/pkg/slayers/extension"
+	slayerspath "github.com/scionproto/scion/pkg/slayers/path"
+	"github.com/scionproto/scion/pkg/slayers/path/scion"
 	"math"
 	"net"
+	"net/netip"
 	"os"
 	"syscall"
 	"time"
@@ -152,7 +160,6 @@ On other errors, ping will exit with code 2.
 				return serrors.WrapStr("connecting to SCION Daemon", err)
 			}
 			defer sd.Close()
-
 			info, err := app.QueryASInfo(traceCtx, sd)
 			if err != nil {
 				return err
@@ -174,24 +181,129 @@ On other errors, ping will exit with code 2.
 				}))
 			}
 			cs := path.DefaultColorScheme(false)
-			path, err := path.Choose(traceCtx, sd, remote.IA, opts...)
+			pingPath, err := path.Choose(traceCtx, sd, remote.IA, opts...)
+
 			if err != nil {
 				return err
 			}
 			// Now select the Fabrid Policies that should be applied
 			//TODO(jvanbommel): reuse?
 			selectSeq, err := pathpol.NewSequence(flags.sequence)
-			policies := selectSeq.ListSelectedPolicies(path)
-			fmt.Println(cs.Path(path))
+			policies := selectSeq.ListSelectedPolicies(pingPath)
+			fmt.Println(cs.Path(pingPath))
 			fmt.Println(policies)
+			now := time.Now()
 
-			hbh := slayers.HopByHopExtn{}
+			key, err := sd.DRKeyGetASHostKey(traceCtx, drkey.ASHostMeta{
+				ProtoId:  drkey.Protocol(int32(drkey.FABRID)),
+				Validity: now,
+				SrcIA:    info.IA,
+				//SrcHost:  remote.Host.IP.String(),
+				DstIA: remote.IA,
+				//DstHost: localIP.String(),
+				DstHost: remote.Host.IP.String(),
+			})
+			if err != nil {
+				return err
+			}
+
+			identifier := extension.IdentifierOption{
+				Timestamp:     now,
+				PacketID:      0xabcd,
+				BaseTimestamp: uint32(now.Unix()),
+			}
+			policyID := fabrid.FabridPolicyID{
+				Global: false,
+				ID:     0x0f,
+			}
+			identifierData := make([]byte, 8)
+			identifier.Serialize(identifierData)
+			encPolicyID, err := fabrid.EncryptPolicyID(&policyID, &identifier, key.Key[:])
+
+			meta := extension.FabridHopfieldMetadata{
+				FabridEnabled:     true,
+				EncryptedPolicyID: encPolicyID,
+			}
+
+			var hbh slayers.HopByHopExtn
+			tmp := make([]byte, 100)
+			switch s := pingPath.Dataplane().(type) {
+			case snetpath.SCION:
+				var sp scion.Raw
+				if err := sp.DecodeFromBytes(s.Raw); err != nil {
+					return err
+				}
+				decoded, err := sp.ToDecoded()
+				if err != nil {
+					return err
+
+				}
+				fmt.Println()
+				mac, err := scrypto.InitMac(key.Key[:])
+				if err != nil {
+					return err
+
+				}
+
+				var scionLayer slayers.SCION
+				scionLayer.Version = 0
+				scionLayer.FlowID = 1
+				scionLayer.DstIA = remote.IA
+				scionLayer.SrcIA = info.IA
+				remoteHostIP, ok := netip.AddrFromSlice(remote.Host.IP)
+				if !ok {
+					return serrors.New("invalid remote host IP", "ip", remote.Host.IP)
+				}
+				localHostIP, ok := netip.AddrFromSlice(localIP)
+				if !ok {
+					return serrors.New("invalid local host IP", "ip", localIP)
+				}
+
+				if err := scionLayer.SetDstAddr(addr.HostIP(remoteHostIP)); err != nil {
+					return serrors.WrapStr("setting destination address", err)
+				}
+				if err := scionLayer.SetSrcAddr(addr.HostIP(localHostIP)); err != nil {
+					return serrors.WrapStr("setting source address", err)
+				}
+
+				sigma := slayerspath.MAC(mac, decoded.InfoFields[0], decoded.HopFields[1], nil)
+				err = fabrid.ComputeBaseHVF(&meta, &identifier, &scionLayer, tmp, key.Key[:], sigma[:])
+
+				fabrid := extension.FabridOption{
+					HopfieldMetadata: []extension.FabridHopfieldMetadata{
+						{},
+						meta,
+						{},
+					},
+				}
+				fabridData := make([]byte, extension.FabridOptionLen(len(decoded.HopFields)))
+				err = fabrid.SerializeTo(fabridData)
+				if err != nil {
+					return err
+				}
+				hbh = slayers.HopByHopExtn{
+					Options: []*slayers.HopByHopOption{
+						{
+							OptType:    slayers.OptTypeIdentifier,
+							OptData:    identifierData,
+							OptDataLen: uint8(len(identifierData)),
+						},
+						{
+							OptType:    slayers.OptTypeFabrid,
+							OptData:    fabridData,
+							OptDataLen: uint8(len(fabridData)),
+						},
+					},
+				}
+			default:
+				return serrors.New("unsupported path type")
+			}
 
 			// If the EPIC flag is set, use the EPIC-HP path type
 			if flags.epic {
-				switch s := path.Dataplane().(type) {
+				switch s := pingPath.Dataplane().(type) {
 				case snetpath.SCION:
-					epicPath, err := snetpath.NewEPICDataplanePath(s, path.Metadata().EpicAuths)
+					epicPath, err := snetpath.NewEPICDataplanePath(s, pingPath.Metadata().EpicAuths)
 					if err != nil {
 						return err
 					}
@@ -202,9 +314,9 @@ On other errors, ping will exit with code 2.
 					return serrors.New("unsupported path type")
 				}
 			} else {
-				remote.Path = path.Dataplane()
+				remote.Path = pingPath.Dataplane()
 			}
-			remote.NextHop = path.UnderlayNextHop()
+			remote.NextHop = pingPath.UnderlayNextHop()
 
 			// Resolve local IP based on underlay next hop
 			if localIP == nil {
@@ -218,7 +330,7 @@ On other errors, ping will exit with code 2.
 				}
 				printf("Resolved local address:\n  %s\n", localIP)
 			}
-			printf("Using path:\n  %s\n\n", path)
+			printf("Using path:\n  %s\n\n", pingPath)
 			span.SetTag("src.host", localIP)
 			local := &snet.UDPAddr{
 				IA:   info.IA,
@@ -239,7 +351,7 @@ On other errors, ping will exit with code 2.
 				pldSize = int(flags.pktSize - uint(overhead))
 			}
 			if flags.maxMTU {
-				mtu := int(path.Metadata().MTU)
+				mtu := int(pingPath.Metadata().MTU)
 				pldSize, err = calcMaxPldSize(local, remote, mtu)
 				if err != nil {
 					return err
@@ -258,18 +370,18 @@ On other errors, ping will exit with code 2.
 				count = math.MaxUint16
 			}
 
-			seq, err := pathpol.GetSequence(path)
+			seq, err := pathpol.GetSequence(pingPath)
 			if err != nil {
 				return serrors.New("get sequence from used path")
 			}
 			res := Result{
 				ScionPacketSize: pktSize,
 				Path: Path{
-					Fingerprint: snet.Fingerprint(path).String(),
-					Hops:        getHops(path),
+					Fingerprint: snet.Fingerprint(pingPath).String(),
+					Hops:        getHops(pingPath),
 					Sequence:    seq,
 					LocalIP:     localIP,
-					NextHop:     path.UnderlayNextHop().String(),
+					NextHop:     pingPath.UnderlayNextHop().String(),
 				},
 				PayloadSize: pldSize,
 			}
