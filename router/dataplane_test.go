@@ -215,11 +215,11 @@ func TestDataPlaneRun(t *testing.T) {
 				_ = ret.AddDRKeySecret(int32(drkey.FABRID),
 					control.SecretValue{
 						Key:        asDRKey,
-						EpochBegin: time.Now(),
+						EpochBegin: time.Now().Add(-time.Second),
 						EpochEnd:   time.Now().AddDate(1, 0, 0),
 					})
 				local := xtest.MustParseIA("1-ff00:0:110")
-				now := time.Unix(0, time.Now().UnixMilli()*int64(time.Millisecond))
+				now := time.Now().Truncate(time.Millisecond)
 				identifier := extension.IdentifierOption{
 					Timestamp:     now,
 					PacketID:      0xabcd,
