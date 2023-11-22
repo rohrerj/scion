@@ -38,12 +38,15 @@ import (
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/drkey"
+	"github.com/scionproto/scion/pkg/drkey/specific"
 	libepic "github.com/scionproto/scion/pkg/experimental/epic"
+	"github.com/scionproto/scion/pkg/experimental/fabrid"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/private/util"
 	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/slayers"
+	"github.com/scionproto/scion/pkg/slayers/extension"
 	"github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/pkg/slayers/path/empty"
 	"github.com/scionproto/scion/pkg/slayers/path/epic"
@@ -111,6 +114,10 @@ type DataPlane struct {
 	running           bool
 	Metrics           *Metrics
 	forwardingMetrics map[uint16]forwardingMetrics
+	drKeySecrets      [][2]*control.SecretValue
+	// determines whether index 0 or index 1 should be overwritten next
+	drKeySecretNextOverwrite []uint8
+	fabridPolicyMap          map[uint8]uint32
 
 	ExperimentalSCMPAuthentication bool
 
@@ -144,6 +151,7 @@ var (
 	macVerificationFailed         = errors.New("MAC verification failed")
 	badPacketSize                 = errors.New("bad packet size")
 	slowPathRequired              = errors.New("slow-path required")
+	drKeySecretInvalid            = errors.New("no valid drkey secret for provided time period")
 
 	// zeroBuffer will be used to reset the Authenticator option in the
 	// scionPacketProcessor.OptAuth
@@ -175,6 +183,46 @@ func (d *DataPlane) SetIA(ia addr.IA) error {
 	}
 	d.localIA = ia
 	return nil
+}
+
+func (d *DataPlane) initializeDRKey() {
+	d.drKeySecrets = make([][2]*control.SecretValue, 3)
+	for i := 0; i < 3; i++ {
+		d.drKeySecrets[i] = [2]*control.SecretValue{
+			{},
+			{},
+		}
+	}
+	d.drKeySecretNextOverwrite = make([]uint8, 3)
+}
+
+func (d *DataPlane) AddDRKeySecret(protocolID int32, sv control.SecretValue) error {
+	d.mtx.Lock()
+	defer d.mtx.Unlock()
+	if d.drKeySecrets == nil {
+		d.initializeDRKey()
+	}
+
+	if int(protocolID) > len(d.drKeySecrets) {
+		return serrors.New("Error while adding a new drkey. ProtocolID too large",
+			"protocolID", protocolID)
+	}
+	nextOverwrite := d.drKeySecretNextOverwrite[protocolID]
+	d.drKeySecrets[protocolID][nextOverwrite] = &sv
+	log.Debug("Registered new DRKey", "protocol", protocolID, "from", sv.EpochBegin, "to", sv.EpochEnd)
+	// switch nextOverwrite from 0 to 1 or from 1 to 0
+	d.drKeySecretNextOverwrite[protocolID] = 1 - nextOverwrite
+	return nil
+}
+
+func (d *DataPlane) getDRKeySecret(protocolID int32, t time.Time) (*control.SecretValue, error) {
+	secrets := d.drKeySecrets[protocolID]
+	for _, sv := range secrets {
+		if !t.After(sv.EpochBegin) && sv.EpochEnd.After(t) {
+			return sv, nil
+		}
+	}
+	return nil, drKeySecretInvalid
 }
 
 // SetKey sets the key used for MAC verification. The key provided here should
@@ -487,6 +535,15 @@ func (d *DataPlane) AddNextHopBFD(ifID uint16, src, dst *net.UDPAddr, cfg contro
 	return d.addBFDController(ifID, s, cfg, m)
 }
 
+func (d *DataPlane) UpdateFabridPolicies(policies map[uint8]uint32) error {
+	d.mtx.Lock()
+	defer d.mtx.Unlock()
+	// TODO(rohrerj): check for concurrency issues
+	// when an update happens during reading
+	d.fabridPolicyMap = policies
+	return nil
+}
+
 func max(a int, b int) int {
 	if a > b {
 		return a
@@ -504,7 +561,9 @@ func (d *DataPlane) Run(ctx context.Context, cfg *RunConfig) error {
 	d.mtx.Lock()
 	d.running = true
 	d.initMetrics()
-
+	if d.drKeySecrets == nil {
+		d.initializeDRKey()
+	}
 	processorQueueSize := max(
 		len(d.interfaces)*cfg.BatchSize/cfg.NumProcessors,
 		cfg.BatchSize)
@@ -902,6 +961,8 @@ func (d *DataPlane) runForwarder(ifID uint16, conn BatchConn,
 		available := readUpTo(c, cfg.BatchSize-remaining, remaining == 0,
 			writeMsgs[remaining:])
 		available += remaining
+		// TODO (rohrerj): implement policy based paths
+
 		written, _ := conn.WriteBatch(writeMsgs[:available], 0)
 		if written < 0 {
 			// WriteBatch returns -1 on error, we just consider this as
@@ -988,10 +1049,11 @@ type processResult struct {
 
 func newPacketProcessor(d *DataPlane) *scionPacketProcessor {
 	p := &scionPacketProcessor{
-		d:              d,
-		buffer:         gopacket.NewSerializeBuffer(),
-		mac:            d.macFactory(),
-		macInputBuffer: make([]byte, max(path.MACBufferSize, libepic.MACBufferSize)),
+		d:      d,
+		buffer: gopacket.NewSerializeBuffer(),
+		mac:    d.macFactory(),
+		macInputBuffer: make([]byte, max(path.MACBufferSize,
+			max(libepic.MACBufferSize, fabrid.FabridMacInputSize))),
 	}
 	p.scionLayer.RecyclePaths()
 	return p
@@ -1013,10 +1075,110 @@ func (p *scionPacketProcessor) reset() error {
 	p.mac.Reset()
 	p.cachedMac = nil
 	// Reset hbh layer
-	p.hbhLayer = slayers.HopByHopExtnSkipper{}
+	p.hbhLayer = slayers.HopByHopExtn{}
 	// Reset e2e layer
 	p.e2eLayer = slayers.EndToEndExtnSkipper{}
+	p.identifier = nil
+	p.fabrid = nil
 	return nil
+}
+
+var nullByte = [16]byte{}
+
+func (dp *DataPlane) deriveASToASKey(protocolID int32, t time.Time, dstAS addr.IA) ([16]byte, error) {
+	d := specific.Deriver{}
+	secret, err := dp.getDRKeySecret(protocolID, t)
+	if err != nil {
+		return nullByte, err
+	}
+	asToAsKey, err := d.DeriveLevel1(dstAS, secret.Key)
+	if err != nil {
+		return nullByte, err
+	}
+	return asToAsKey, nil
+}
+
+func (dp *DataPlane) deriveASToHostKey(protocolID int32, t time.Time, dstAS addr.IA, dst string) ([16]byte, error) {
+	d := specific.Deriver{}
+	asToAsKey, err := dp.deriveASToASKey(protocolID, t, dstAS)
+	if err != nil {
+		return nullByte, err
+	}
+	asToHostKey, err := d.DeriveASHost(dst, asToAsKey)
+	if err != nil {
+		return nullByte, err
+	}
+
+	return asToHostKey, nil
+}
+
+func (p *scionPacketProcessor) processFabrid() error {
+	meta := p.fabrid.HopfieldMetadata[0]
+	dst, err := p.scionLayer.DstAddr()
+	if err != nil {
+		return err
+	}
+	var key [16]byte
+	if p.fabrid.HopfieldMetadata[0].ASLevelKey {
+		key, err = p.d.deriveASToASKey(int32(drkey.FABRID), p.identifier.Timestamp,
+			p.scionLayer.DstIA)
+	} else {
+		key, err = p.d.deriveASToHostKey(int32(drkey.FABRID), p.identifier.Timestamp,
+			p.scionLayer.DstIA, dst.String())
+	}
+	if err != nil {
+		return err
+	}
+	policyID, err := fabrid.ComputePolicyID(&meta, p.identifier, key[:])
+	if err != nil {
+		return err
+	}
+	mplsLabel, found := p.d.fabridPolicyMap[policyID.ID]
+	if !found {
+		return serrors.New("Provided policyID is invalid", "policyID", policyID, "id", p.identifier)
+	}
+	p.mplsLabel = mplsLabel
+
+	err = fabrid.VerifyAndUpdate(&meta, p.identifier, &p.scionLayer, p.macInputBuffer, key[:], p.cachedMac[:6])
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *scionPacketProcessor) processHbhOptions() error {
+	var err error
+	for _, opt := range p.hbhLayer.Options {
+		switch opt.OptType {
+		case slayers.OptTypeIdentifier:
+			if p.identifier != nil {
+				return serrors.New("Identifier HBH option provided multiple times")
+			}
+			p.identifier, err = extension.ParseIdentifierOption(opt, p.infoField.Timestamp)
+			if err != nil {
+				return err
+			}
+		case slayers.OptTypeFabrid:
+			if p.fabrid != nil {
+				return serrors.New("FABRID HBH option provided multiple times")
+			}
+			if p.identifier == nil {
+				return serrors.New("Identifier HBH option must be present when using FABRID")
+			}
+			fabrid, err := extension.ParseFabridOptionCurrentHop(opt, &p.path.Base)
+			if err != nil {
+				return err
+			}
+			if fabrid.HopfieldMetadata[0].FabridEnabled {
+				p.fabrid = fabrid
+				if err = p.processFabrid(); err != nil {
+					return err
+				}
+			}
+		default:
+		}
+	}
+	return err
 }
 
 func (p *scionPacketProcessor) processPkt(rawPkt []byte,
@@ -1186,7 +1348,7 @@ type scionPacketProcessor struct {
 
 	// scionLayer is the SCION gopacket layer.
 	scionLayer slayers.SCION
-	hbhLayer   slayers.HopByHopExtnSkipper
+	hbhLayer   slayers.HopByHopExtn
 	e2eLayer   slayers.EndToEndExtnSkipper
 	// last is the last parsed layer, i.e. either &scionLayer, &hbhLayer or &e2eLayer
 	lastLayer gopacket.DecodingLayer
@@ -1210,6 +1372,10 @@ type scionPacketProcessor struct {
 
 	// bfdLayer is reusable buffer for parsing BFD messages
 	bfdLayer layers.BFD
+
+	identifier *extension.IdentifierOption
+	fabrid     *extension.FabridOption
+	mplsLabel  uint32
 }
 
 type slowPathType int
@@ -1781,6 +1947,9 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 	}
 	if r, err := p.handleIngressRouterAlert(); err != nil {
 		return r, err
+	}
+	if err := p.processHbhOptions(); err != nil {
+		return processResult{}, err
 	}
 	// Inbound: pkts destined to the local IA.
 	if p.scionLayer.DstIA == p.d.localIA {
@@ -2357,6 +2526,8 @@ func nextHdr(layer gopacket.DecodingLayer) slayers.L4ProtocolType {
 	case *slayers.SCION:
 		return v.NextHdr
 	case *slayers.EndToEndExtnSkipper:
+		return v.NextHdr
+	case *slayers.HopByHopExtn:
 		return v.NextHdr
 	case *slayers.HopByHopExtnSkipper:
 		return v.NextHdr

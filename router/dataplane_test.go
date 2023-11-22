@@ -33,11 +33,14 @@ import (
 	"golang.org/x/net/ipv4"
 
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/drkey"
 	libepic "github.com/scionproto/scion/pkg/experimental/epic"
+	"github.com/scionproto/scion/pkg/experimental/fabrid"
 	"github.com/scionproto/scion/pkg/private/util"
 	"github.com/scionproto/scion/pkg/private/xtest"
 	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/slayers"
+	"github.com/scionproto/scion/pkg/slayers/extension"
 	"github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/pkg/slayers/path/empty"
 	"github.com/scionproto/scion/pkg/slayers/path/epic"
@@ -194,6 +197,205 @@ func TestDataPlaneRun(t *testing.T) {
 	testCases := map[string]struct {
 		prepareDP func(*gomock.Controller, chan<- struct{}) *router.DataPlane
 	}{
+		"fabrid basic": {
+			prepareDP: func(ctrl *gomock.Controller, done chan<- struct{}) *router.DataPlane {
+				ret := &router.DataPlane{Metrics: metrics}
+				key := []byte("testkey_xxxxxxxx")
+				dstIA := xtest.MustParseIA("4-ff00:0:411")
+				dstAddr := addr.MustParseHost("2.2.2.2")
+
+				asDRKey := [16]byte{
+					0x00, 0x11, 0x22, 0x33,
+					0x44, 0x55, 0x66, 0x77,
+					0x88, 0x99, 0xaa, 0xbb,
+					0xcc, 0xdd, 0xee, 0xff,
+				}
+				_ = ret.AddDRKeySecret(int32(drkey.FABRID),
+					control.SecretValue{
+						Key:        asDRKey,
+						EpochBegin: time.Now(),
+						EpochEnd:   time.Now().AddDate(1, 0, 0),
+					})
+				local := xtest.MustParseIA("1-ff00:0:110")
+				now := time.Unix(0, time.Now().UnixMilli()*int64(time.Millisecond))
+				identifier := extension.IdentifierOption{
+					Timestamp:     now,
+					PacketID:      0xabcd,
+					BaseTimestamp: uint32(now.Unix()),
+				}
+
+				policyID := fabrid.FabridPolicyID{
+					Global: false,
+					ID:     0x0f,
+				}
+				ret.UpdateFabridPolicies(map[uint8]uint32{
+					policyID.ID: 1,
+				})
+
+				asToHostKey, err := ret.DeriveASToHostKey(int32(drkey.FABRID), now,
+					dstIA, dstAddr.String())
+				assert.NoError(t, err)
+				encPolicyID, err := fabrid.EncryptPolicyID(&policyID, &identifier, asToHostKey[:])
+				assert.NoError(t, err)
+
+				mExternal := mock_router.NewMockBatchConn(ctrl)
+
+				mExternal.EXPECT().ReadBatch(gomock.Any()).DoAndReturn(
+					func(m underlayconn.Messages) (int, error) {
+						buf := gopacket.NewSerializeBuffer()
+						path := &scion.Decoded{
+							Base: scion.Base{
+								PathMeta: scion.MetaHdr{
+									CurrHF: 1,
+									SegLen: [3]uint8{3, 0, 0},
+								},
+								NumINF:  1,
+								NumHops: 3,
+							},
+							InfoFields: []path.InfoField{
+								{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)},
+							},
+							HopFields: []path.HopField{
+								{ConsIngress: 1, ConsEgress: 2},
+								{ConsIngress: 3, ConsEgress: 4},
+								{ConsIngress: 5, ConsEgress: 6},
+							},
+						}
+						path.HopFields[1].Mac = computeMAC(t, key, path.InfoFields[0], path.HopFields[1])
+						rawDstAddr := dstAddr.IP().As4()
+						s := slayers.SCION{
+							NextHdr:     slayers.HopByHopClass,
+							PathType:    scion.PathType,
+							DstIA:       dstIA,
+							SrcIA:       xtest.MustParseIA("2-ff00:0:222"),
+							SrcAddrType: slayers.T4Ip,
+							DstAddrType: slayers.T4Ip,
+							RawSrcAddr:  []byte{1, 1, 1, 1},
+							RawDstAddr:  rawDstAddr[:],
+							Path:        path,
+						}
+
+						identifierData := make([]byte, 8)
+						identifier.Serialize(identifierData)
+
+						meta := extension.FabridHopfieldMetadata{
+							EncryptedPolicyID: encPolicyID,
+						}
+						tmp := make([]byte, 100)
+						sigma := computeMAC(t, key, path.InfoFields[0], path.HopFields[1])
+						err = fabrid.ComputeBaseHVF(&meta, &identifier, &s, tmp, asDRKey[:], sigma[:])
+						assert.NoError(t, err)
+
+						fabrid := extension.FabridOption{
+							HopfieldMetadata: []extension.FabridHopfieldMetadata{
+								{},
+								meta,
+								{},
+							},
+						}
+						fabridData := make([]byte, 16)
+						fabrid.SerializeTo(fabridData)
+						hbh := slayers.HopByHopExtn{
+							Options: []*slayers.HopByHopOption{
+								{
+									OptType:    slayers.OptTypeIdentifier,
+									OptData:    identifierData,
+									OptDataLen: uint8(len(identifierData)),
+								},
+								{
+									OptType:    slayers.OptTypeFabrid,
+									OptData:    fabridData,
+									OptDataLen: uint8(len(fabridData)),
+								},
+							},
+						}
+						err := gopacket.SerializeLayers(buf, gopacket.SerializeOptions{FixLengths: true}, &s, &hbh)
+						assert.NoError(t, err)
+						fmt.Println(buf)
+						raw := buf.Bytes()
+						copy(m[0].Buffers[0], raw)
+						m[0].N = len(raw)
+						m[0].Addr = &net.UDPAddr{IP: net.IP{10, 0, 200, 200}}
+
+						return 1, nil
+					},
+				).Times(1)
+				mExternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
+				mExternal.EXPECT().WriteTo(gomock.Any(), gomock.Any()).Return(0, nil).AnyTimes()
+
+				mExternal2 := mock_router.NewMockBatchConn(ctrl)
+				mExternal2.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
+
+				mExternal2.EXPECT().WriteBatch(gomock.Any(), 0).DoAndReturn(
+					func(ms underlayconn.Messages, flags int) (int, error) {
+						if len(ms) != 1 {
+							assert.Fail(t, "len(ms)!=1", len(ms))
+							return 0, nil
+						}
+						s := slayers.SCION{}
+						hbh := slayers.HopByHopExtn{}
+						_, err := router.DecodeLayers(ms[0].Buffers[0], &s, &hbh)
+						assert.NoError(t, err)
+						path, ok := s.Path.(*scion.Raw)
+						assert.True(t, ok)
+						hopField, err := path.GetHopField(1)
+						assert.NoError(t, err)
+						infField, err := path.GetInfoField(0)
+						assert.NoError(t, err)
+
+						containsFabrid := false
+						containsIdentifier := false
+						var foundIdentifier *extension.IdentifierOption
+						var foundFabrid *extension.FabridOption
+
+						baseTs := infField.Timestamp
+						for _, hbhOption := range hbh.Options {
+							switch hbhOption.OptType {
+							case slayers.OptTypeIdentifier:
+								containsIdentifier = true
+								foundIdentifier, err = extension.ParseIdentifierOption(hbhOption, baseTs)
+								assert.NoError(t, err)
+								assert.Equal(t, identifier.Timestamp, foundIdentifier.Timestamp)
+								assert.Equal(t, identifier.PacketID, foundIdentifier.PacketID)
+							case slayers.OptTypeFabrid:
+								containsFabrid = true
+								if containsIdentifier {
+									foundFabrid, err = extension.ParseFabridOptionFullExtension(hbhOption, &path.Base)
+									assert.NoError(t, err)
+									meta := foundFabrid.HopfieldMetadata[1]
+									tmp := make([]byte, 100)
+									recomputedVerifiedHVF := &extension.FabridHopfieldMetadata{
+										EncryptedPolicyID: encPolicyID,
+									}
+									mac := computeMAC(t, key, infField, hopField)
+									err = fabrid.ComputeVerifiedHVF(recomputedVerifiedHVF, foundIdentifier, &s, tmp, asToHostKey[:], mac[:])
+									assert.NoError(t, err)
+									assert.Equal(t, encPolicyID, meta.EncryptedPolicyID)
+									assert.Equal(t, recomputedVerifiedHVF.HopValidationField, meta.HopValidationField)
+								} else {
+									assert.Fail(t, "identifier not present before fabrid")
+								}
+							}
+						}
+						assert.True(t, containsIdentifier)
+						assert.True(t, containsFabrid)
+
+						done <- struct{}{}
+						return 1, nil
+					}).Times(1)
+				mExternal2.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
+				_ = ret.AddInternalInterface(mExternal2, net.IP{})
+
+				_ = ret.AddExternalInterface(3, mExternal)
+				_ = ret.AddLinkType(3, topology.Core)
+				_ = ret.AddExternalInterface(4, mExternal2)
+				_ = ret.AddLinkType(4, topology.Core)
+
+				_ = ret.SetIA(local)
+				_ = ret.SetKey(key)
+				return ret
+			},
+		},
 		"route 10 msg from external to internal": {
 			prepareDP: func(ctrl *gomock.Controller, done chan<- struct{}) *router.DataPlane {
 				ret := &router.DataPlane{Metrics: metrics}
