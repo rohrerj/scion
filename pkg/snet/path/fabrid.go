@@ -43,7 +43,7 @@ type FABRID struct {
 	pathKey          drkey.HostHostKey
 	drkeyFn          func(context.Context, drkey.ASHostMeta) (drkey.ASHostKey, error)
 	drkeyPathFn      func(context.Context, drkey.HostHostMeta) (drkey.HostHostKey, error)
-	conf             FabridConfig
+	conf             *FabridConfig
 	counter          uint32
 	baseTimestamp    uint32
 	tmpBuffer        []byte
@@ -52,7 +52,7 @@ type FABRID struct {
 	fabridBuffer     []byte
 }
 
-func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDs []uint8, conf FabridConfig) (*FABRID, error) {
+func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDs []uint8, conf *FabridConfig) (*FABRID, error) {
 	ias := make([]addr.IA, len(interfaces))
 	for i, pathInterface := range interfaces {
 		ias[i] = pathInterface.IA

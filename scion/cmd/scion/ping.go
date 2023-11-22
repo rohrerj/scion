@@ -196,7 +196,7 @@ On other errors, ping will exit with code 2.
 			} else if flags.fabrid {
 				switch s := path.Dataplane().(type) {
 				case snetpath.SCION:
-					fabridConfig := snetpath.FabridConfig{
+					fabridConfig := &snetpath.FabridConfig{
 						LocalIA:         info.IA,
 						LocalAddr:       localIP.String(),
 						DestinationIA:   remote.IA,
@@ -209,6 +209,17 @@ On other errors, ping will exit with code 2.
 					}
 					fabridPath.RegisterDRKeyFetcher(sd.DRKeyGetASHostKey, sd.DRKeyGetHostHostKey)
 					remote.Path = fabridPath
+					if localIP == nil {
+						target := remote.Host.IP
+						if remote.NextHop != nil {
+							target = remote.NextHop.IP
+						}
+						if localIP, err = addrutil.ResolveLocal(target); err != nil {
+							return serrors.WrapStr("resolving local address", err)
+						}
+						printf("Resolved local address:\n  %s\n", localIP)
+						fabridConfig.LocalAddr = localIP.String()
+					}
 				default:
 					return serrors.New("unsupported path type")
 				}
