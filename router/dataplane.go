@@ -224,7 +224,7 @@ func (d *DataPlane) getDRKeySecret(protocolID int32, t time.Time) (*control.Secr
 			return sv, nil
 		}
 	}
-	return nil, serrors.WrapStr("Secret was invalid", drKeySecretInvalid, "ts", t)
+	return nil, drKeySecretInvalid
 }
 
 // SetKey sets the key used for MAC verification. The key provided here should
@@ -765,8 +765,6 @@ func (d *DataPlane) runProcessor(id int, q <-chan packet,
 		result, err := processor.processPkt(p.rawPacket, p.srcAddr, p.ingress)
 		metrics.ProcessedPackets.Inc()
 		egress := result.EgressID
-		// TODO(jvanbommel): Create a special tosQ here, that does the whole ip header.
-		//tosQ <-
 		switch {
 		case err == nil:
 		case errors.Is(err, slowPathRequired):
@@ -972,7 +970,6 @@ func (d *DataPlane) runForwarder(ifID uint16, conn BatchConn,
 			writeMsgs[0].Addr = pkt.dstAddr
 		}
 		if pkt.mplsLabel != lastToS {
-			// we have to update our ToS value
 			lastToS = pkt.mplsLabel
 			_ = conn.SetToS(lastToS)
 		}
@@ -1095,26 +1092,26 @@ func (p *scionPacketProcessor) reset() error {
 
 var nullByte = [16]byte{}
 
-func (dp *DataPlane) deriveASToASKey(protocolID int32, t time.Time, dstAS addr.IA) ([16]byte, error) {
+func (dp *DataPlane) deriveASToASKey(protocolID int32, t time.Time, srcAS addr.IA) ([16]byte, error) {
 	d := specific.Deriver{}
 	secret, err := dp.getDRKeySecret(protocolID, t)
 	if err != nil {
 		return nullByte, err
 	}
-	asToAsKey, err := d.DeriveLevel1(dstAS, secret.Key)
+	asToAsKey, err := d.DeriveLevel1(srcAS, secret.Key)
 	if err != nil {
 		return nullByte, err
 	}
 	return asToAsKey, nil
 }
 
-func (dp *DataPlane) deriveASToHostKey(protocolID int32, t time.Time, dstAS addr.IA, dst string) ([16]byte, error) {
+func (dp *DataPlane) deriveASToHostKey(protocolID int32, t time.Time, srcAS addr.IA, src string) ([16]byte, error) {
 	d := specific.Deriver{}
-	asToAsKey, err := dp.deriveASToASKey(protocolID, t, dstAS)
+	asToAsKey, err := dp.deriveASToASKey(protocolID, t, srcAS)
 	if err != nil {
 		return nullByte, err
 	}
-	asToHostKey, err := d.DeriveASHost(dst, asToAsKey)
+	asToHostKey, err := d.DeriveASHost(src, asToAsKey)
 	if err != nil {
 		return nullByte, err
 	}
@@ -1170,7 +1167,6 @@ func (p *scionPacketProcessor) processHbhOptions() error {
 				return err
 			}
 		case slayers.OptTypeFabrid:
-			fmt.Println("here22")
 			if p.fabrid != nil {
 				return serrors.New("FABRID HBH option provided multiple times")
 			}
@@ -1182,13 +1178,11 @@ func (p *scionPacketProcessor) processHbhOptions() error {
 				return err
 			}
 			if fabrid.HopfieldMetadata[0].FabridEnabled {
-				fmt.Println("enabled")
 				p.fabrid = fabrid
 				if err = p.processFabrid(); err != nil {
 					return err
 				}
 			}
-			fmt.Println("here33")
 		default:
 		}
 	}
@@ -2338,17 +2332,14 @@ func (p *slowPathPacketProcessor) prepareSCMP(
 	scmpH := slayers.SCMP{TypeCode: typeCode}
 	scmpH.SetNetworkLayerForChecksum(&scionL)
 
-	needsAuth := false
-	if p.d.ExperimentalSCMPAuthentication {
-		// Error messages must be authenticated.
-		// Traceroute are OPTIONALLY authenticated ONLY IF the request
-		// was authenticated.
-		// TODO(JordiSubira): Reuse the key computed in p.hasValidAuth
-		// if SCMPTypeTracerouteReply to create the response.
-		needsAuth = cause != nil ||
-			(scmpH.TypeCode.Type() == slayers.SCMPTypeTracerouteReply &&
-				p.hasValidAuth(time.Now()))
-	}
+	// Error messages must be authenticated.
+	// Traceroute are OPTIONALLY authenticated ONLY IF the request
+	// was authenticated.
+	// TODO(JordiSubira): Reuse the key computed in p.hasValidAuth
+	// if SCMPTypeTracerouteReply to create the response.
+	needsAuth := cause != nil ||
+		(scmpH.TypeCode.Type() == slayers.SCMPTypeTracerouteReply &&
+			p.hasValidAuth(time.Now()))
 
 	var quote []byte
 	if cause != nil {

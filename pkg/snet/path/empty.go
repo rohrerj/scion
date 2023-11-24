@@ -17,11 +17,16 @@ package path
 import (
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/slayers/path/empty"
+	"github.com/scionproto/scion/pkg/snet"
 )
 
 type Empty struct{}
 
 func (e Empty) SetPath(s *slayers.SCION) error {
 	s.Path, s.PathType = empty.Path{}, empty.PathType
+	return nil
+}
+
+func (e Empty) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
 	return nil
 }

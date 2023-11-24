@@ -89,8 +89,8 @@ func ExtractServices(s *services) map[addr.SVC][]*net.UDPAddr {
 }
 
 func (d *DataPlane) DeriveASToHostKey(protocolID int32, t time.Time,
-	dstAddr addr.IA, dst string) ([16]byte, error) {
-	return d.deriveASToHostKey(protocolID, t, dstAddr, dst)
+	srcAddr addr.IA, src string) ([16]byte, error) {
+	return d.deriveASToHostKey(protocolID, t, srcAddr, src)
 }
 
 func DecodeLayers(data []byte, base gopacket.DecodingLayer,
