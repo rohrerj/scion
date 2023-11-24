@@ -42,7 +42,7 @@ const MaxSupportedFabridHops = 62
 // The FABRID option requires the Identifier option to be present in the HBH header
 // extension and defined before the FABRID option.
 type FabridOption struct {
-	HopfieldMetadata []FabridHopfieldMetadata
+	HopfieldMetadata []*FabridHopfieldMetadata
 	PathValidator    [4]byte
 }
 
@@ -122,9 +122,9 @@ func (f *FabridOption) DecodeForCurrentHop(b []byte, base *scion.Base) error {
 		return err
 	}
 	byteIndex := int(base.PathMeta.CurrHF) * FabridMetadataLen
-	md := FabridHopfieldMetadata{}
+	md := &FabridHopfieldMetadata{}
 	md.decodeFabridHopfieldMetadata(b[byteIndex : byteIndex+FabridMetadataLen])
-	f.HopfieldMetadata = []FabridHopfieldMetadata{
+	f.HopfieldMetadata = []*FabridHopfieldMetadata{
 		md,
 	}
 	return nil
@@ -135,9 +135,9 @@ func (f *FabridOption) DecodeFull(b []byte, base *scion.Base) error {
 		return err
 	}
 	byteIndex := 0
-	f.HopfieldMetadata = make([]FabridHopfieldMetadata, base.NumHops)
+	f.HopfieldMetadata = make([]*FabridHopfieldMetadata, base.NumHops)
 	for i := 0; i < base.NumHops; i++ {
-		md := FabridHopfieldMetadata{}
+		md := &FabridHopfieldMetadata{}
 		md.decodeFabridHopfieldMetadata(b[byteIndex : byteIndex+FabridMetadataLen])
 		f.HopfieldMetadata[i] = md
 		byteIndex += FabridMetadataLen

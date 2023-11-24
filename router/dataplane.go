@@ -1048,11 +1048,11 @@ type processResult struct {
 
 func newPacketProcessor(d *DataPlane) *scionPacketProcessor {
 	p := &scionPacketProcessor{
-		d:      d,
-		buffer: gopacket.NewSerializeBuffer(),
-		mac:    d.macFactory(),
-		macInputBuffer: make([]byte, max(path.MACBufferSize,
-			max(libepic.MACBufferSize, fabrid.FabridMacInputSize))),
+		d:                 d,
+		buffer:            gopacket.NewSerializeBuffer(),
+		mac:               d.macFactory(),
+		macInputBuffer:    make([]byte, max(path.MACBufferSize, libepic.MACBufferSize)),
+		fabridInputBuffer: make([]byte, fabrid.FabridMacInputSize),
 	}
 	p.scionLayer.RecyclePaths()
 	return p
@@ -1128,7 +1128,7 @@ func (p *scionPacketProcessor) processFabrid() error {
 	if err != nil {
 		return err
 	}
-	policyID, err := fabrid.ComputePolicyID(&meta, p.identifier, key[:])
+	policyID, err := fabrid.ComputePolicyID(meta, p.identifier, key[:])
 	if err != nil {
 		return err
 	}
@@ -1137,8 +1137,7 @@ func (p *scionPacketProcessor) processFabrid() error {
 		return serrors.New("Provided policyID is invalid", "policyID", policyID, "id", p.identifier)
 	}
 	p.mplsLabel = mplsLabel
-
-	err = fabrid.VerifyAndUpdate(&meta, p.identifier, &p.scionLayer, p.macInputBuffer, key[:], p.cachedMac[:6])
+	err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.cachedMac[:6])
 	if err != nil {
 		return err
 	}
@@ -1173,6 +1172,7 @@ func (p *scionPacketProcessor) processHbhOptions() error {
 				if err = p.processFabrid(); err != nil {
 					return err
 				}
+				fabrid.HopfieldMetadata[0].SerializeTo(opt.OptData[p.path.Base.PathMeta.CurrHF*4:])
 			}
 		default:
 		}
@@ -1372,9 +1372,10 @@ type scionPacketProcessor struct {
 	// bfdLayer is reusable buffer for parsing BFD messages
 	bfdLayer layers.BFD
 
-	identifier *extension.IdentifierOption
-	fabrid     *extension.FabridOption
-	mplsLabel  uint32
+	identifier        *extension.IdentifierOption
+	fabrid            *extension.FabridOption
+	fabridInputBuffer []byte
+	mplsLabel         uint32
 }
 
 type slowPathType int

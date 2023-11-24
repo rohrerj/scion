@@ -111,7 +111,7 @@ func TestSuccessfullValidators(t *testing.T) {
 				}
 				f := &extension.FabridOption{}
 				for j := 1; j <= extension.MaxSupportedFabridHops; j++ {
-					f.HopfieldMetadata = append(f.HopfieldMetadata, extension.FabridHopfieldMetadata{
+					f.HopfieldMetadata = append(f.HopfieldMetadata, &extension.FabridHopfieldMetadata{
 						EncryptedPolicyID: uint8(rand.Uint32()),
 						FabridEnabled:     rand.Intn(2) == 0,
 						ASLevelKey:        rand.Intn(2) == 0,
@@ -128,8 +128,10 @@ func TestSuccessfullValidators(t *testing.T) {
 					assert.NoError(t, err)
 
 					for i, meta := range f.HopfieldMetadata {
-						err = fabrid.VerifyAndUpdate(&meta, id, s, tmpBuffer, keys[i], sigmas[i])
-						assert.NoError(t, err)
+						if meta.FabridEnabled {
+							err = fabrid.VerifyAndUpdate(meta, id, s, tmpBuffer, keys[i], sigmas[i])
+							assert.NoError(t, err)
+						}
 					}
 					err = fabrid.VerifyPath(f, pathKey)
 					assert.NoError(t, err)

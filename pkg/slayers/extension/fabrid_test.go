@@ -173,7 +173,7 @@ func TestFabridSerialize(t *testing.T) {
 		{
 			name: "Buffer too small",
 			fabrid: &extension.FabridOption{
-				HopfieldMetadata: make([]extension.FabridHopfieldMetadata, 1),
+				HopfieldMetadata: make([]*extension.FabridHopfieldMetadata, 1),
 			},
 			buffer: make([]byte, 7),
 			validate: func(b []byte, err error, t *testing.T) {
@@ -183,7 +183,7 @@ func TestFabridSerialize(t *testing.T) {
 		{
 			name: "Too many hops",
 			fabrid: &extension.FabridOption{
-				HopfieldMetadata: make([]extension.FabridHopfieldMetadata, extension.MaxSupportedFabridHops+1),
+				HopfieldMetadata: make([]*extension.FabridHopfieldMetadata, extension.MaxSupportedFabridHops+1),
 			},
 			buffer: make([]byte, 256),
 			validate: func(b []byte, err error, t *testing.T) {
@@ -193,7 +193,7 @@ func TestFabridSerialize(t *testing.T) {
 		{
 			name: "Fabrid serializes correctly",
 			fabrid: &extension.FabridOption{
-				HopfieldMetadata: []extension.FabridHopfieldMetadata{
+				HopfieldMetadata: []*extension.FabridHopfieldMetadata{
 					{
 						EncryptedPolicyID:  0x11,
 						HopValidationField: [3]byte{0x22, 0x33, 0x44},

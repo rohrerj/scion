@@ -54,7 +54,7 @@ const FabridMacInputSize int = 40
 //	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 func computeFabridHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
-	s *slayers.SCION, tmpBuffer []byte, resultBuffer [16]byte,
+	s *slayers.SCION, tmpBuffer []byte, resultBuffer []byte,
 	key []byte, sigma []byte) error {
 	if len(key) != 16 {
 		return serrors.New("Wrong key length", "expected", 16, "actual", len(key))
@@ -65,6 +65,10 @@ func computeFabridHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	if len(tmpBuffer) < FabridMacInputSize {
 		return serrors.New("tmpBuffer too small", "expected",
 			FabridMacInputSize, "actual", len(tmpBuffer))
+	}
+	if len(resultBuffer) < 16 {
+		return serrors.New("resultBuffer too small", "expected",
+			16, "actual", len(resultBuffer))
 	}
 	id.Serialize(tmpBuffer[0:8])
 	srcIABytes, _ := s.SrcIA.MarshalText()
@@ -91,7 +95,7 @@ func computeFabridHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 
 func ComputeBaseHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
-	computedHVF := [16]byte{}
+	computedHVF := make([]byte, 16)
 	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, sigma)
 	if err != nil {
 		return err
@@ -103,7 +107,7 @@ func ComputeBaseHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 
 func ComputeVerifiedHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
-	computedHVF := [16]byte{}
+	computedHVF := make([]byte, 16)
 	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, sigma)
 	if err != nil {
 		return err
@@ -115,7 +119,7 @@ func ComputeVerifiedHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 
 func VerifyAndUpdate(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
-	computedHVF := [16]byte{}
+	computedHVF := make([]byte, 16)
 	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, sigma)
 	if err != nil {
 		return err
@@ -172,10 +176,10 @@ func EncryptPolicyID(f *FabridPolicyID, id *ext.IdentifierOption,
 func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, pathKey []byte, keys [][]byte, sigmas [][]byte) error {
 
-	outBuffer := [16]byte{}
+	outBuffer := make([]byte, 16)
 	pathValidatorBuf := make([]byte, ext.FabridMetadataLen*len(f.HopfieldMetadata))
 	for i, meta := range f.HopfieldMetadata {
-		err := computeFabridHVF(&meta, id, s, tmpBuffer, outBuffer, keys[i], sigmas[i])
+		err := computeFabridHVF(meta, id, s, tmpBuffer, outBuffer, keys[i], sigmas[i])
 		if err != nil {
 			return err
 		}

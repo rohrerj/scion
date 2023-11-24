@@ -73,9 +73,9 @@ func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDs 
 		return nil, serrors.WrapStr("decoding path", err)
 	}
 	for i, hop := range decoded.HopFields {
-		f.sigmas[i] = hop.Mac[:]
+		f.sigmas[i] = make([]byte, 6)
+		copy(f.sigmas[i], hop.Mac[:])
 	}
-
 	f.baseTimestamp = decoded.InfoFields[0].Timestamp
 	return f, nil
 }
@@ -116,10 +116,10 @@ func (f *FABRID) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
 		PacketID:      f.counter,
 	}
 	fabridOption := &extension.FabridOption{
-		HopfieldMetadata: make([]extension.FabridHopfieldMetadata, len(f.ias)),
+		HopfieldMetadata: make([]*extension.FabridHopfieldMetadata, len(f.ias)),
 	}
 	for i := 0; i < len(f.ias); i++ {
-		meta := &fabridOption.HopfieldMetadata[i]
+		meta := &extension.FabridHopfieldMetadata{}
 		meta.FabridEnabled = true
 		// TODO: replace with correct policy ID
 		policyID := &fabrid.FabridPolicyID{
@@ -131,6 +131,7 @@ func (f *FABRID) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
 			return err
 		}
 		meta.EncryptedPolicyID = encPolicyID
+		fabridOption.HopfieldMetadata[i] = meta
 	}
 	err = fabrid.InitValidators(fabridOption, identifierOption, s, f.tmpBuffer, f.pathKey.Key[:], f.keyBytes, f.sigmas)
 	if err != nil {
