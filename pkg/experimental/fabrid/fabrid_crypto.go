@@ -74,7 +74,7 @@ func computeFabridHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 		xoredKey[i] = key[i] ^ tmpBuffer[i]
 	}
 	for i := 0; i < 8; i++ {
-		xoredKey[i] = key[i+8] ^ srcIABytes[i]
+		xoredKey[i+8] = key[i+8] ^ srcIABytes[i]
 	}
 
 	srcAddr := s.RawSrcAddr
@@ -181,7 +181,11 @@ func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption,
 		}
 		outBuffer[0] &= 0x3f // ignore first two (left) bits
 		outBuffer[3] &= 0x3f // ignore first two (left) bits
-		copy(meta.HopValidationField[:3], outBuffer[:3])
+		if meta.FabridEnabled {
+			copy(meta.HopValidationField[:3], outBuffer[:3])
+		} else {
+			copy(meta.HopValidationField[:3], outBuffer[3:6])
+		}
 		pathValidatorBuf[i*ext.FabridMetadataLen] = meta.EncryptedPolicyID
 		copy(pathValidatorBuf[i*ext.FabridMetadataLen+1:i*ext.FabridMetadataLen+4], outBuffer[3:6])
 	}
