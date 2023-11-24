@@ -315,16 +315,19 @@ func fabridPolicyIdentifiersFromPB(fpList *sdpb.FABRIDPolicyIdentifierList) []*s
 			pbPolicies[i] = &snet.FabridPolicyIdentifier{
 				Type:       snet.FabridGlobalPolicy,
 				Identifier: fp.PolicyIdentifier,
+				Index:      uint8(fp.PolicyIndex),
 			}
 		case sdpb.FABRIDPolicyType_LOCAL:
 			pbPolicies[i] = &snet.FabridPolicyIdentifier{
 				Type:       snet.FabridLocalPolicy,
 				Identifier: fp.PolicyIdentifier,
+				Index:      uint8(fp.PolicyIndex),
 			}
 		default:
 			pbPolicies[i] = &snet.FabridPolicyIdentifier{
 				Type:       snet.FabridUnspecifiedPolicy,
 				Identifier: fp.PolicyIdentifier,
+				Index:      uint8(fp.PolicyIndex),
 			}
 		}
 	}

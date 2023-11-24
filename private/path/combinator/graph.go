@@ -496,11 +496,13 @@ func getPoliciesForIntfs(ia addr.IA, ig, eg uint16, maps map[addr.IA]fabridMapEn
 						policies = append(policies, &snet.FabridPolicyIdentifier{
 							Type:       snet.FabridGlobalPolicy,
 							Identifier: val.Identifier,
+							Index:      policy,
 						})
 					} else {
 						policies = append(policies, &snet.FabridPolicyIdentifier{
 							Type:       snet.FabridLocalPolicy,
 							Identifier: val.Identifier,
+							Index:      policy,
 						})
 					}
 				}

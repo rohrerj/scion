@@ -27,8 +27,7 @@ import (
 )
 
 type FabridPolicyID struct {
-	ID     uint8
-	Global bool
+	ID uint8
 }
 
 const FabridMacInputSize int = 40
@@ -144,9 +143,6 @@ func ComputePolicyID(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	policyID := f.EncryptedPolicyID ^ buf[0]
 	fp := FabridPolicyID{
 		ID: policyID,
-	}
-	if policyID >= 0x80 { // first bit is 1
-		fp.Global = true
 	}
 	return fp, nil
 }

@@ -110,9 +110,16 @@ func (s *Sequence) Eval(paths []snet.Path) []snet.Path {
 //especially the hacked regex parser. We should come up with a proper system for this, e.g.
 
 // Eval evaluates the interface sequence list and returns the set of paths that match the list
-func (s *Sequence) ListSelectedPolicies(path snet.Path) []*snet.FabridPolicyIdentifier {
+type PolicyPerHop struct {
+	Pol     *snet.FabridPolicyIdentifier
+	IA      addr.IA
+	Ingress uint16
+	Egress  uint16
+}
+
+func (s *Sequence) ListSelectedPolicies(path snet.Path) []PolicyPerHop {
 	if s == nil || s.srcstr == "" {
-		return make([]*snet.FabridPolicyIdentifier, len(path.Metadata().FabridPolicies))
+		return make([]PolicyPerHop, len(path.Metadata().FabridPolicies))
 	}
 
 	desc, err := GetSequence(path)
@@ -131,7 +138,7 @@ func (s *Sequence) ListSelectedPolicies(path snet.Path) []*snet.FabridPolicyIden
 
 	ifaces := path.Metadata().Interfaces
 	fabridPolicies := path.Metadata().FabridPolicies
-	hops := make([]*snet.FabridPolicyIdentifier, 0, len(ifaces)/2+1)
+	hops := make([]PolicyPerHop, 0, len(ifaces)/2+1)
 
 	hops = append(hops, findPolicyForHop(ifaces[0].IA, 0, ifaces[0].ID, fabridPolicies, 0, selectedPolicies))
 
@@ -142,18 +149,28 @@ func (s *Sequence) ListSelectedPolicies(path snet.Path) []*snet.FabridPolicyIden
 	return hops
 }
 
-func findPolicyForHop(ia addr.IA, ig, eg common.IFIDType, fabridPolicies [][]*snet.FabridPolicyIdentifier, polIdx int, selectedPolicies map[string][]string) *snet.FabridPolicyIdentifier {
+func findPolicyForHop(ia addr.IA, ig, eg common.IFIDType, fabridPolicies [][]*snet.FabridPolicyIdentifier, polIdx int, selectedPolicies map[string][]string) PolicyPerHop {
 	key := hop(ia, ig, eg, fabridPolicies, polIdx)
 	policiesForHop, exist := selectedPolicies[key]
 	if exist && len(policiesForHop) > 0 {
 		strPolicy := policiesForHop[0] //TODO(jvanbommel): Q multiple policies per hop or just random selection?
 		for _, policy := range fabridPolicies[polIdx] {
 			if policy.String() == strPolicy {
-				return policy
+				return PolicyPerHop{
+					Pol:     policy,
+					IA:      ia,
+					Ingress: uint16(ig),
+					Egress:  uint16(eg),
+				}
 			}
 		}
 	}
-	return &snet.FabridPolicyIdentifier{}
+	return PolicyPerHop{
+		Pol:     &snet.FabridPolicyIdentifier{},
+		IA:      ia,
+		Ingress: uint16(ig),
+		Egress:  uint16(eg),
+	}
 }
 func (s *Sequence) String() string {
 	return s.srcstr

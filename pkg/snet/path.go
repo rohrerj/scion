@@ -218,6 +218,7 @@ const (
 type FabridPolicyIdentifier struct {
 	Type       PolicyType
 	Identifier uint32
+	Index      uint8
 }
 
 func (fpi *FabridPolicyIdentifier) String() string {
@@ -226,7 +227,7 @@ func (fpi *FabridPolicyIdentifier) String() string {
 	} else if fpi.Type == FabridLocalPolicy {
 		return fmt.Sprintf("L%d", fpi.Identifier)
 	}
-	return "U"
+	return ""
 }
 
 type PathFingerprint string

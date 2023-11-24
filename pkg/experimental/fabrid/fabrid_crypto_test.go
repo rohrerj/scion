@@ -39,8 +39,7 @@ func TestEncryptPolicyID(t *testing.T) {
 	for i := 0; i < 64; i++ {
 		idNumber := uint8(rand.Uint32())
 		policyID := fabrid.FabridPolicyID{
-			ID:     idNumber,
-			Global: idNumber >= 0x80,
+			ID: idNumber,
 		}
 		key := generateRandomBytes(16)
 		encPolicyID, err := fabrid.EncryptPolicyID(&policyID, id, key)

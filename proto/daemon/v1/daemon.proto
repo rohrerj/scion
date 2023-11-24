@@ -125,6 +125,9 @@ message FABRIDPolicyIdentifier {
     FABRIDPolicyType policy_type = 1;
     // The identifier for the policy
     uint32 policy_identifier = 2;
+    // The local index, this may differ between similar policy identifiers, as it is specific to a hop.
+    uint32 policy_index = 3;
+
 }
 
 
