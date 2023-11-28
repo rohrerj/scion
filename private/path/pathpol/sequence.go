@@ -160,7 +160,7 @@ func findPolicyForHop(ia addr.IA, ig, eg common.IFIDType, fabridPolicies [][]*sn
 		}
 	}
 	return snet.FabridPolicyPerHop{
-		Pol:     &snet.FabridPolicyIdentifier{},
+		Pol:     nil,
 		IA:      ia,
 		Ingress: uint16(ig),
 		Egress:  uint16(eg),

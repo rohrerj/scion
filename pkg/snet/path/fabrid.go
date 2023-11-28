@@ -126,20 +126,34 @@ func policiesToHopFields(numHops int, policyIDs []snet.FabridPolicyPerHop, decod
 			fmt.Println("HFPol", hfIdx, hfOneToOne, hfTwoToOne, decoded.InfoFields[ifIdx].ConsDir, decoded.HopFields[hfIdx], policyIDs[polIdx])
 
 			if hfOneToOne {
-				polIds[hfIdx] = &fabrid.FabridPolicyID{
-					ID: policyIDs[polIdx].Pol.Index,
+				if policyIDs[polIdx].Pol == nil {
+					polIds[hfIdx] = nil
+					fmt.Println(hfIdx, " is not using a policy")
+
+				} else {
+					polIds[hfIdx] = &fabrid.FabridPolicyID{
+						ID: policyIDs[polIdx].Pol.Index,
+					}
+					fmt.Println(hfIdx, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
+
 				}
-				fmt.Println(hfIdx, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
 				ias[hfIdx] = policyIDs[polIdx].IA
 			} else if hfTwoToOne {
-				polIds[hfIdx] = &fabrid.FabridPolicyID{
-					ID: policyIDs[polIdx].Pol.Index,
+				if policyIDs[polIdx].Pol == nil {
+					polIds[hfIdx] = nil
+					polIds[hfIdx+1] = nil
+					fmt.Println(hfIdx, " is not using a policy")
+				} else {
+					polIds[hfIdx] = &fabrid.FabridPolicyID{
+						ID: policyIDs[polIdx].Pol.Index,
+					}
+					polIds[hfIdx+1] = &fabrid.FabridPolicyID{
+						ID: policyIDs[polIdx].Pol.Index,
+					}
+					fmt.Println(hfIdx, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
+					fmt.Println(hfIdx+1, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
+
 				}
-				polIds[hfIdx+1] = &fabrid.FabridPolicyID{
-					ID: policyIDs[polIdx].Pol.Index,
-				}
-				fmt.Println(hfIdx, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
-				fmt.Println(hfIdx+1, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
 				ias[hfIdx] = policyIDs[polIdx].IA
 				ias[hfIdx+1] = policyIDs[polIdx].IA
 				hfIdx++
