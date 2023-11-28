@@ -97,7 +97,6 @@ func (f *FabridHopfieldMetadata) serializeTo(b []byte) {
 }
 
 func (f *FabridOption) validate(b []byte, base *scion.Base) error {
-	log.Info("here")
 	if f == nil {
 		return serrors.New("Fabrid option must not be nil")
 	}

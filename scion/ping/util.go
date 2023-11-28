@@ -15,7 +15,6 @@
 package ping
 
 import (
-	"github.com/scionproto/scion/pkg/slayers"
 	"net/netip"
 
 	"github.com/scionproto/scion/pkg/addr"
@@ -27,7 +26,7 @@ import (
 // Size computes the full SCION packet size for an address pair with a given
 // payload size.
 func Size(local, remote *snet.UDPAddr, pldSize int) (int, error) {
-	pkt, err := pack(local, remote, snet.SCMPEchoRequest{Payload: make([]byte, pldSize)}, nil)
+	pkt, err := pack(local, remote, snet.SCMPEchoRequest{Payload: make([]byte, pldSize)})
 	if err != nil {
 		return 0, err
 	}
@@ -37,7 +36,7 @@ func Size(local, remote *snet.UDPAddr, pldSize int) (int, error) {
 	return len(pkt.Bytes), nil
 }
 
-func pack(local, remote *snet.UDPAddr, req snet.SCMPEchoRequest, hbh *slayers.HopByHopExtn) (*snet.Packet, error) {
+func pack(local, remote *snet.UDPAddr, req snet.SCMPEchoRequest) (*snet.Packet, error) {
 	_, isEmpty := remote.Path.(path.Empty)
 	if isEmpty && !local.IA.Equal(remote.IA) {
 		return nil, serrors.New("no path for remote ISD-AS", "local", local.IA, "remote", remote.IA)
@@ -60,9 +59,8 @@ func pack(local, remote *snet.UDPAddr, req snet.SCMPEchoRequest, hbh *slayers.Ho
 				IA:   local.IA,
 				Host: addr.HostIP(localHostIP),
 			},
-			Path:              remote.Path,
-			Payload:           req,
-			HopByHopExtension: hbh,
+			Path:    remote.Path,
+			Payload: req,
 		},
 	}
 	return pkt, nil

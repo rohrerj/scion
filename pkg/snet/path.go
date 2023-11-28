@@ -93,13 +93,6 @@ func (ea *EpicAuths) SupportsEpic() bool {
 	return (len(ea.AuthPHVF) == 16 && len(ea.AuthLHVF) == 16)
 }
 
-type FabridConfig struct {
-	PolicyIDs []uint8
-	IAs       []addr.IA
-	LocalIA   addr.IA
-	LocalAddr string
-}
-
 // PathMetadata contains supplementary information about a path.
 //
 // The information about MTU, Latency, Bandwidth etc. are based solely on data
@@ -228,6 +221,13 @@ type FabridPolicyIdentifier struct {
 	Type       PolicyType
 	Identifier uint32
 	Index      uint8
+}
+
+type FabridPolicyPerHop struct {
+	Pol     *FabridPolicyIdentifier
+	IA      addr.IA
+	Ingress uint16
+	Egress  uint16
 }
 
 func (fpi *FabridPolicyIdentifier) String() string {

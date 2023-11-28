@@ -16,6 +16,8 @@ package control
 
 import (
 	"context"
+	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/proto/control_plane/experimental"
 	"net"
 	"time"
 
@@ -86,9 +88,21 @@ func (f *Fetcher) queryFabridPolicies() (map[uint8]uint32, error) {
 		return nil, err
 	}
 	defer grpcconn.Close()
-	return map[uint8]uint32{
-		0: 0,
-	}, nil
+	client := experimental.NewFABRIDIntraServiceClient(grpcconn)
+	rep, err := client.GetMPLSMapIfNecessary(ctx,
+		&experimental.MPLSMapRequest{
+			Hash: nil,
+		})
+	if err != nil {
+		return nil, serrors.WrapStr("requesting policy", err)
+	}
+	result := make(map[uint8]uint32, len(rep.MplsLabelMap))
+	for k, v := range rep.MplsLabelMap {
+		result[uint8(k)] = v
+	}
+	//TODO(jvanbommel): add optional update.
+
+	return result, nil
 }
 
 func (f *Fetcher) StartSecretUpdater() {

@@ -231,8 +231,7 @@ func (p *pinger) send(remote *snet.UDPAddr) error {
 	pkt, err := pack(p.local, remote, snet.SCMPEchoRequest{
 		Identifier: uint16(p.id),
 		SeqNumber:  uint16(sequence),
-		Payload:    p.pld,
-	}, p.hbh)
+		Payload:    p.pld})
 	if err != nil {
 		return err
 	}

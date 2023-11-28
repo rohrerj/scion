@@ -16,6 +16,7 @@ package path
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
@@ -37,8 +38,7 @@ type FabridConfig struct {
 
 type FABRID struct {
 	Raw              []byte
-	keys             []drkey.ASHostKey
-	keyBytes         [][]byte
+	keys             map[addr.IA]drkey.ASHostKey
 	sigmas           [][]byte
 	pathKey          drkey.HostHostKey
 	drkeyFn          func(context.Context, drkey.ASHostMeta) (drkey.ASHostKey, error)
@@ -47,30 +47,33 @@ type FABRID struct {
 	counter          uint32
 	baseTimestamp    uint32
 	tmpBuffer        []byte
-	ias              []addr.IA
 	identifierBuffer []byte
 	fabridBuffer     []byte
+	numHops          int
+	hopfields        []*fabrid.FabridPolicyID
+	ias              []addr.IA
 }
 
-func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDs []uint8, conf *FabridConfig) (*FABRID, error) {
-	ias := make([]addr.IA, len(interfaces))
-	for i, pathInterface := range interfaces {
-		ias[i] = pathInterface.IA
-	}
-	f := &FABRID{
-		conf:             conf,
-		ias:              ias,
-		keys:             make([]drkey.ASHostKey, len(ias)),
-		keyBytes:         make([][]byte, len(ias)),
-		sigmas:           make([][]byte, len(ias)),
-		tmpBuffer:        make([]byte, 64),
-		identifierBuffer: make([]byte, 8),
-		fabridBuffer:     make([]byte, 8+4*len(ias)),
-		Raw:              append([]byte(nil), p.Raw...),
-	}
+func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDs []snet.FabridPolicyPerHop, conf *FabridConfig) (*FABRID, error) {
+
 	var decoded scion.Decoded
 	if err := decoded.DecodeFromBytes(p.Raw); err != nil {
 		return nil, serrors.WrapStr("decoding path", err)
+	}
+	numHops := len(decoded.HopFields)
+	keys := make(map[addr.IA]drkey.ASHostKey, len(policyIDs))
+	hopFields, ias := policiesToHopFields(numHops, policyIDs, decoded, keys)
+	f := &FABRID{
+		numHops:          numHops,
+		conf:             conf,
+		keys:             keys,
+		ias:              ias,
+		sigmas:           make([][]byte, numHops),
+		tmpBuffer:        make([]byte, 64),
+		identifierBuffer: make([]byte, 8),
+		fabridBuffer:     make([]byte, 8+4*numHops),
+		Raw:              append([]byte(nil), p.Raw...),
+		hopfields:        hopFields,
 	}
 	for i, hop := range decoded.HopFields {
 		f.sigmas[i] = hop.Mac[:]
@@ -78,6 +81,83 @@ func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDs 
 
 	f.baseTimestamp = decoded.InfoFields[0].Timestamp
 	return f, nil
+}
+func hfEqual(consDir bool, consIngress, consEgress, compIngress, compEgress uint16) bool {
+	return (consIngress == compIngress && consEgress == compEgress && consDir) ||
+		(consIngress == compEgress && consEgress == compIngress && !consDir)
+}
+
+func policiesToHopFields(numHops int, policyIDs []snet.FabridPolicyPerHop, decoded scion.Decoded,
+	keys map[addr.IA]drkey.ASHostKey) ([]*fabrid.FabridPolicyID, []addr.IA) {
+	polIds := make([]*fabrid.FabridPolicyID, numHops)
+	ias := make([]addr.IA, numHops)
+	hfIdx := 0
+	fmt.Println(policyIDs)
+	ifIdx := 0
+	polIdx := 0
+
+	for _, seglen := range decoded.PathMeta.SegLen {
+		for seg := uint8(0); seg < seglen; seg++ {
+			if polIdx >= len(policyIDs) {
+				break
+			}
+			keys[policyIDs[polIdx].IA] = drkey.ASHostKey{}
+			hfOneToOne := hfIdx < numHops && hfEqual(decoded.InfoFields[ifIdx].ConsDir,
+				decoded.HopFields[hfIdx].ConsIngress,
+				decoded.HopFields[hfIdx].ConsEgress,
+				policyIDs[polIdx].Ingress,
+				policyIDs[polIdx].Egress)
+
+			hfTwoToOne := hfIdx < numHops && hfIdx+1 < numHops &&
+				hfEqual(decoded.InfoFields[ifIdx].ConsDir,
+					decoded.HopFields[hfIdx].ConsIngress,
+					decoded.HopFields[hfIdx].ConsEgress,
+					policyIDs[polIdx].Ingress, 0) &&
+				((seg+1 < seglen &&
+					hfEqual(decoded.InfoFields[ifIdx].ConsDir,
+						decoded.HopFields[hfIdx+1].ConsIngress,
+						decoded.HopFields[hfIdx+1].ConsEgress,
+						policyIDs[polIdx].Ingress, 0)) ||
+					(seg+1 >= seglen && ifIdx+1 < decoded.NumINF &&
+						hfEqual(decoded.InfoFields[ifIdx+1].ConsDir,
+							decoded.HopFields[hfIdx+1].ConsIngress,
+							decoded.HopFields[hfIdx+1].ConsEgress, 0,
+							policyIDs[polIdx].Egress)))
+			fmt.Println("HFPol", hfIdx, hfOneToOne, hfTwoToOne, decoded.InfoFields[ifIdx].ConsDir, decoded.HopFields[hfIdx], policyIDs[polIdx])
+
+			if hfOneToOne {
+				polIds[hfIdx] = &fabrid.FabridPolicyID{
+					ID: policyIDs[polIdx].Pol.Index,
+				}
+				fmt.Println(hfIdx, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
+				ias[hfIdx] = policyIDs[polIdx].IA
+			} else if hfTwoToOne {
+				polIds[hfIdx] = &fabrid.FabridPolicyID{
+					ID: policyIDs[polIdx].Pol.Index,
+				}
+				polIds[hfIdx+1] = &fabrid.FabridPolicyID{
+					ID: policyIDs[polIdx].Pol.Index,
+				}
+				fmt.Println(hfIdx, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
+				fmt.Println(hfIdx+1, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
+				ias[hfIdx] = policyIDs[polIdx].IA
+				ias[hfIdx+1] = policyIDs[polIdx].IA
+				hfIdx++
+				seg++
+			} else {
+				polIds[hfIdx] = nil
+				fmt.Println(hfIdx, " is using policy index nil ")
+				ias[hfIdx] = policyIDs[polIdx].IA
+			}
+			hfIdx++
+			polIdx++
+		}
+		ifIdx++
+	}
+	//for _, policy := range policyIDs {
+	//
+	//}
+	return polIds, ias
 }
 
 func (f *FABRID) RegisterDRKeyFetcher(fn func(context.Context, drkey.ASHostMeta) (drkey.ASHostKey, error),
@@ -108,7 +188,7 @@ func (f *FABRID) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
 	now := time.Now().Truncate(time.Millisecond)
 	err := f.renewExpiredKeys(now)
 	if err != nil {
-		return err
+		return serrors.WrapStr("While obtaining fabrid keys", err)
 	}
 	identifierOption := &extension.IdentifierOption{
 		Timestamp:     now,
@@ -116,35 +196,35 @@ func (f *FABRID) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
 		PacketID:      f.counter,
 	}
 	fabridOption := &extension.FabridOption{
-		HopfieldMetadata: make([]extension.FabridHopfieldMetadata, len(f.ias)),
+		HopfieldMetadata: make([]extension.FabridHopfieldMetadata, f.numHops),
 	}
-	for i := 0; i < len(f.ias); i++ {
+	for i := 0; i < f.numHops; i++ {
 		meta := &fabridOption.HopfieldMetadata[i]
-		meta.FabridEnabled = true
-		// TODO: replace with correct policy ID
-		policyID := &fabrid.FabridPolicyID{
-			ID:     0,
-			Global: false,
+		if f.hopfields[i] == nil {
+			continue
 		}
-		encPolicyID, err := fabrid.EncryptPolicyID(policyID, identifierOption, f.keyBytes[i])
+		meta.FabridEnabled = true
+
+		key := f.keys[f.ias[i]].Key
+		encPolicyID, err := fabrid.EncryptPolicyID(f.hopfields[i], identifierOption, key[:])
 		if err != nil {
-			return err
+			return serrors.WrapStr("encrypting policy ID", err)
 		}
 		meta.EncryptedPolicyID = encPolicyID
 	}
-	err = fabrid.InitValidators(fabridOption, identifierOption, s, f.tmpBuffer, f.pathKey.Key[:], f.keyBytes, f.sigmas)
+	err = fabrid.InitValidators(fabridOption, identifierOption, s, f.tmpBuffer, f.pathKey.Key[:], f.keys, f.ias, f.sigmas)
 	if err != nil {
-		return err
+		return serrors.WrapStr("initializing validators failed", err)
 	}
 	err = identifierOption.Serialize(f.identifierBuffer)
 	if err != nil {
-		return err
+		return serrors.WrapStr("serializing identifier", err)
 	}
 	err = fabridOption.SerializeTo(f.fabridBuffer)
 	if err != nil {
-		return err
+		return serrors.WrapStr("serializing fabrid option", err)
 	}
-	fabridLength := 4 + 4*len(f.ias)
+	fabridLength := 4 + 4*f.numHops
 	p.HbhExtension.Options = append(p.HbhExtension.Options,
 		&slayers.HopByHopOption{
 			OptType:      slayers.OptTypeIdentifier,
@@ -163,15 +243,15 @@ func (f *FABRID) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
 }
 
 func (f *FABRID) renewExpiredKeys(t time.Time) error {
-	for i, key := range f.keys {
+	for ia, key := range f.keys {
 		if key.Epoch.NotAfter.Before(t) {
 			// key is expired, renew it
-			newKey, err := f.fetchKey(f.ias[i])
+			newKey, err := f.fetchKey(ia)
 			if err != nil {
 				return err
 			}
-			f.keys[i] = newKey
-			f.keyBytes[i] = newKey.Key[:]
+			f.keys[ia] = newKey
+			//f.keyBytes[i] = newKey.Key[:]
 		}
 	}
 	if f.pathKey.Epoch.NotAfter.Before(t) {

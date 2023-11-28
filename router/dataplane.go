@@ -1145,8 +1145,8 @@ func (p *scionPacketProcessor) processFabrid() error {
 	//if !found {
 	//	return serrors.New("Provided policyID is invalid", "policyID", policyID, "id", p.identifier)
 	//}
-	p.mplsLabel = uint32(3)
-	log.Info("Received packet that should be processed with fabrid ", "policy", policyID)
+	p.mplsLabel = p.d.fabridPolicyMap[policyID.ID]
+	log.Info("Received packet that should be processed with fabrid ", "policy", policyID, "mplslabel", p.mplsLabel)
 	err = fabrid.VerifyAndUpdate(&meta, p.identifier, &p.scionLayer, p.macInputBuffer, key[:], p.cachedMac[:6])
 	if err != nil {
 		return err
@@ -1177,7 +1177,9 @@ func (p *scionPacketProcessor) processHbhOptions() error {
 			if err != nil {
 				return err
 			}
+			log.Info("here4")
 			if fabrid.HopfieldMetadata[0].FabridEnabled {
+				log.Info("here6")
 				p.fabrid = fabrid
 				if err = p.processFabrid(); err != nil {
 					return err

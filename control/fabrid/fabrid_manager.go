@@ -65,7 +65,7 @@ func NewFabridManager(policyPath string) (*FabridManager, error) {
 		SupportedIndicesMap:      map[fabrid.ConnectionPair][]uint8{},
 		IndexIdentifierMap:       map[uint8]*fabrid.PolicyIdentifier{},
 		IdentifierDescriptionMap: map[uint32]string{},
-		MPLSMap:                  MPLSMap{},
+		MPLSMap:                  MPLSMap{Data: map[uint32]uint32{}, CurrentHash: []byte{}},
 		RemotePolicyCache:        map[RemotePolicyIdentifier]RemotePolicyDescription{},
 		autoIncrIndex:            0,
 	}

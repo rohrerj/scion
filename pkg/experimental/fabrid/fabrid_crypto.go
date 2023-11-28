@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/drkey"
 	"hash"
 
 	"github.com/dchest/cmac"
@@ -165,13 +167,14 @@ func EncryptPolicyID(f *FabridPolicyID, id *ext.IdentifierOption,
 
 // InitValidators sets all HVFs of the FABRID option and computes the
 // path validator.
-func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption,
-	s *slayers.SCION, tmpBuffer []byte, pathKey []byte, keys [][]byte, sigmas [][]byte) error {
+func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption, s *slayers.SCION, tmpBuffer []byte, pathKey []byte,
+	keys map[addr.IA]drkey.ASHostKey, ias []addr.IA, sigmas [][]byte) error {
 
 	outBuffer := [16]byte{}
 	pathValidatorBuf := make([]byte, ext.FabridMetadataLen*len(f.HopfieldMetadata))
 	for i, meta := range f.HopfieldMetadata {
-		err := computeFabridHVF(&meta, id, s, tmpBuffer, outBuffer, keys[i], sigmas[i])
+		key := keys[ias[i]].Key
+		err := computeFabridHVF(&meta, id, s, tmpBuffer, outBuffer, key[:], sigmas[i])
 		if err != nil {
 			return err
 		}

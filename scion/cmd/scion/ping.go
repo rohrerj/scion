@@ -18,18 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/scionproto/scion/pkg/addr"
-	"github.com/scionproto/scion/pkg/drkey"
-	"github.com/scionproto/scion/pkg/experimental/fabrid"
-	"github.com/scionproto/scion/pkg/private/xtest"
-	"github.com/scionproto/scion/pkg/scrypto"
-	"github.com/scionproto/scion/pkg/slayers"
-	"github.com/scionproto/scion/pkg/slayers/extension"
-	slayerspath "github.com/scionproto/scion/pkg/slayers/path"
-	"github.com/scionproto/scion/pkg/slayers/path/scion"
 	"math"
 	"net"
-	"net/netip"
 	"os"
 	"syscall"
 	"time"
@@ -193,116 +183,164 @@ On other errors, ping will exit with code 2.
 			//TODO(jvanbommel): reuse?
 			selectSeq, err := pathpol.NewSequence(flags.sequence)
 			policies := selectSeq.ListSelectedPolicies(pingPath)
+			//now := time.Now()
+			//tmp := make([]byte, 100)
+			//identifier := extension.IdentifierOption{
+			//	Timestamp:     now,
+			//	PacketID:      0xabcd,
+			//	BaseTimestamp: uint32(now.Unix()),
+			//}
+			//identifierData := make([]byte, 8)
+			//identifier.Serialize(identifierData)
+			//
+			//switch s := pingPath.Dataplane().(type) {
+			//case snetpath.SCION:
+			//
+			//	var sp scion.Raw
+			//	if err := sp.DecodeFromBytes(s.Raw); err != nil {
+			//		return err
+			//	}
+			//	decoded, err := sp.ToDecoded()
+			//	if err != nil {
+			//		return err
+			//
+			//	}
+			//	fmt.Println(decoded.HopFields)
+			//	fabridHops := make([]extension.FabridHopfieldMetadata, len(decoded.HopFields))
+			//
+			//	for _, policy := range policies {
+			//		hfOneToOne := hfIdx < len(decoded.HopFields) &&
+			//			decoded.HopFields[hfIdx].ConsIngress == policy.Ingress &&
+			//			decoded.HopFields[hfIdx].ConsEgress == policy.Egress
+			//		hfTwoToOne := hfIdx+1 < len(decoded.HopFields) &&
+			//			decoded.HopFields[hfIdx].ConsIngress == policy.Ingress &&
+			//			decoded.HopFields[hfIdx].ConsEgress == 0 &&
+			//			decoded.HopFields[hfIdx+1].ConsIngress == 0 &&
+			//			decoded.HopFields[hfIdx+1].ConsEgress == policy.Egress
+			//		if hfOneToOne {
+			//
+			//		}
+			//	}
+			//	polIdx := 0
+			//	for i := 0; i < len(decoded.HopFields); i++ {
+			//		if decoded.HopFields[i].ConsIngress == policies[polIdx].Ingress &&
+			//			decoded.HopFields[i].ConsEgress == policies[polIdx].Egress {
+			//			polIdx++
+			//		} else if decoded.HopFields[i].ConsIngress == policies[polIdx].Ingress &&
+			//			decoded.HopFields[i].ConsEgress == 0 && hf.ConsIngress == 0 && decoded.HopFields[i+1] == policies[polIdx].Egress {
+			//
+			//		}
+			//
+			//	}
+			//	//decoded.HopFields[0].
+			//	hfIdx := 0
+			//	for _, policy := range policies {
+			//		hfOneToOne := hfIdx < len(decoded.HopFields) &&
+			//			decoded.HopFields[hfIdx].ConsIngress == policy.Ingress &&
+			//			decoded.HopFields[hfIdx].ConsEgress == policy.Egress
+			//		hfTwoToOne := hfIdx+1 < len(decoded.HopFields) &&
+			//			decoded.HopFields[hfIdx].ConsIngress == policy.Ingress &&
+			//			decoded.HopFields[hfIdx].ConsEgress == 0 &&
+			//			decoded.HopFields[hfIdx+1].ConsIngress == 0 &&
+			//			decoded.HopFields[hfIdx+1].ConsEgress == policy.Egress
+			//		if policy.Pol == nil {
+			//			if hfOneToOne {
+			//				fabridHops[hfIdx] = extension.FabridHopfieldMetadata{}
+			//				hfIdx++
+			//			} else if hfTwoToOne {
+			//				fabridHops[hfIdx] = extension.FabridHopfieldMetadata{}
+			//				fabridHops[hfIdx+1] = extension.FabridHopfieldMetadata{}
+			//				hfIdx = hfIdx + 2
+			//			}
+			//			continue
+			//		}
+			//		key, err := sd.DRKeyGetASHostKey(traceCtx, drkey.ASHostMeta{
+			//			ProtoId:  drkey.Protocol(int32(drkey.FABRID)),
+			//			Validity: now,
+			//			SrcIA:    xtest.MustParseIA("1-ff00:0:110"),
+			//			DstIA:    info.IA,
+			//			DstHost:  localIP.String(),
+			//		})
+			//		if err != nil {
+			//			return err
+			//		}
+			//
+			//		policyID := fabrid.FabridPolicyID{
+			//			ID: policy.Pol.Index,
+			//		}
+			//
+			//		encPolicyID, err := fabrid.EncryptPolicyID(&policyID, &identifier, key.Key[:])
+			//
+			//		meta := extension.FabridHopfieldMetadata{
+			//			FabridEnabled:     true,
+			//			EncryptedPolicyID: encPolicyID,
+			//		}
+			//		mac, err := scrypto.InitMac(key.Key[:])
+			//		if err != nil {
+			//			return err
+			//		}
+			//
+			//		var scionLayer slayers.SCION
+			//		scionLayer.Version = 0
+			//		scionLayer.FlowID = 1
+			//		scionLayer.DstIA = remote.IA
+			//		scionLayer.SrcIA = info.IA
+			//		remoteHostIP, ok := netip.AddrFromSlice(remote.Host.IP)
+			//		if !ok {
+			//			return serrors.New("invalid remote host IP", "ip", remote.Host.IP)
+			//		}
+			//		localHostIP, ok := netip.AddrFromSlice(localIP)
+			//		if !ok {
+			//			return serrors.New("invalid local host IP", "ip", localIP)
+			//		}
+			//
+			//		if err := scionLayer.SetDstAddr(addr.HostIP(remoteHostIP)); err != nil {
+			//			return serrors.WrapStr("setting destination address", err)
+			//		}
+			//		if err := scionLayer.SetSrcAddr(addr.HostIP(localHostIP)); err != nil {
+			//			return serrors.WrapStr("setting source address", err)
+			//		}
+			//		sigma := slayerspath.MAC(mac, decoded.InfoFields[0], decoded.HopFields[1], nil)
+			//		err = fabrid.ComputeBaseHVF(&meta, &identifier, &scionLayer, tmp, key.Key[:], sigma[:])
+			//
+			//		fabridHops[i] = meta
+			//		if hfOneToOne {
+			//			fabridHops[hfIdx] = extension.FabridHopfieldMetadata{}
+			//			hfIdx++
+			//		} else if hfTwoToOne {
+			//			fabridHops[hfIdx] = extension.FabridHopfieldMetadata{}
+			//			fabridHops[hfIdx+1] = extension.FabridHopfieldMetadata{}
+			//			hfIdx = hfIdx + 2
+			//		}
+			//	}
+			//}
+			//
 			fmt.Println(cs.Path(pingPath))
 			fmt.Println(policies)
-			now := time.Now()
+			//fmt.Println(fabridHops)
 
-			key, err := sd.DRKeyGetASHostKey(traceCtx, drkey.ASHostMeta{
-				ProtoId:  drkey.Protocol(int32(drkey.FABRID)),
-				Validity: now,
-				SrcIA:    xtest.MustParseIA("1-ff00:0:110"),
-				//SrcHost:  remote.Host.IP.String(),
-				DstIA: info.IA,
-				//DstHost: localIP.String(),
-				DstHost: localIP.String(),
-			})
-			if err != nil {
-				return err
-			}
-
-			identifier := extension.IdentifierOption{
-				Timestamp:     now,
-				PacketID:      0xabcd,
-				BaseTimestamp: uint32(now.Unix()),
-			}
-			policyID := fabrid.FabridPolicyID{
-				Global: false,
-				ID:     0x0f,
-			}
-			identifierData := make([]byte, 8)
-			identifier.Serialize(identifierData)
-			encPolicyID, err := fabrid.EncryptPolicyID(&policyID, &identifier, key.Key[:])
-
-			meta := extension.FabridHopfieldMetadata{
-				FabridEnabled:     true,
-				EncryptedPolicyID: encPolicyID,
-			}
-
-			var hbh slayers.HopByHopExtn
-			tmp := make([]byte, 100)
-			switch s := pingPath.Dataplane().(type) {
-			case snetpath.SCION:
-				var sp scion.Raw
-				if err := sp.DecodeFromBytes(s.Raw); err != nil {
-					return err
-				}
-				decoded, err := sp.ToDecoded()
-				if err != nil {
-					return err
-
-				}
-				fmt.Println()
-				mac, err := scrypto.InitMac(key.Key[:])
-				if err != nil {
-					return err
-
-				}
-
-				var scionLayer slayers.SCION
-				scionLayer.Version = 0
-				scionLayer.FlowID = 1
-				scionLayer.DstIA = remote.IA
-				scionLayer.SrcIA = info.IA
-				remoteHostIP, ok := netip.AddrFromSlice(remote.Host.IP)
-				if !ok {
-					return serrors.New("invalid remote host IP", "ip", remote.Host.IP)
-				}
-				localHostIP, ok := netip.AddrFromSlice(localIP)
-				if !ok {
-					return serrors.New("invalid local host IP", "ip", localIP)
-				}
-
-				if err := scionLayer.SetDstAddr(addr.HostIP(remoteHostIP)); err != nil {
-					return serrors.WrapStr("setting destination address", err)
-				}
-				if err := scionLayer.SetSrcAddr(addr.HostIP(localHostIP)); err != nil {
-					return serrors.WrapStr("setting source address", err)
-				}
-				fmt.Println("Key used is ", "key", key.Key.String())
-
-				sigma := slayerspath.MAC(mac, decoded.InfoFields[0], decoded.HopFields[1], nil)
-				err = fabrid.ComputeBaseHVF(&meta, &identifier, &scionLayer, tmp, key.Key[:], sigma[:])
-
-				fabrid := extension.FabridOption{
-					HopfieldMetadata: []extension.FabridHopfieldMetadata{
-						{},
-						meta,
-						{},
-					},
-				}
-				fabridData := make([]byte, extension.FabridOptionLen(len(decoded.HopFields)))
-				err = fabrid.SerializeTo(fabridData)
-				if err != nil {
-					return err
-				}
-				hbh = slayers.HopByHopExtn{
-					Options: []*slayers.HopByHopOption{
-						{
-							OptType:    slayers.OptTypeIdentifier,
-							OptData:    identifierData,
-							OptDataLen: uint8(len(identifierData)),
-						},
-						{
-							OptType:    slayers.OptTypeFabrid,
-							OptData:    fabridData,
-							OptDataLen: uint8(len(fabridData)),
-						},
-					},
-				}
-			default:
-				return serrors.New("unsupported path type")
-			}
-
+			//fabrid := extension.FabridOption{
+			//	HopfieldMetadata: fabridHops,
+			//}
+			//fabridData := make([]byte, extension.FabridOptionLen(len(policies)))
+			//err = fabrid.SerializeTo(fabridData)
+			//if err != nil {
+			//	return err
+			//}
+			//hbh := slayers.HopByHopExtn{
+			//	Options: []*slayers.HopByHopOption{
+			//		{
+			//			OptType:    slayers.OptTypeIdentifier,
+			//			OptData:    identifierData,
+			//			OptDataLen: uint8(len(identifierData)),
+			//		},
+			//		{
+			//			OptType:    slayers.OptTypeFabrid,
+			//			OptData:    fabridData,
+			//			OptDataLen: uint8(len(fabridData)),
+			//		},
+			//	},
+			//}
 			// If the EPIC flag is set, use the EPIC-HP path type
 			if flags.epic {
 				switch s := pingPath.Dataplane().(type) {
@@ -318,7 +356,7 @@ On other errors, ping will exit with code 2.
 					return serrors.New("unsupported path type")
 				}
 			} else if flags.fabrid {
-				switch s := path.Dataplane().(type) {
+				switch s := pingPath.Dataplane().(type) {
 				case snetpath.SCION:
 					fabridConfig := &snetpath.FabridConfig{
 						LocalIA:         info.IA,
@@ -326,8 +364,8 @@ On other errors, ping will exit with code 2.
 						DestinationIA:   remote.IA,
 						DestinationAddr: remote.Host.IP.String(),
 					}
-					fabridPath, err := snetpath.NewFABRIDDataplanePath(s, path.Metadata().Interfaces,
-						path.Metadata().FabridPolicyIDs, fabridConfig)
+					fabridPath, err := snetpath.NewFABRIDDataplanePath(s, pingPath.Metadata().Interfaces,
+						policies, fabridConfig)
 					if err != nil {
 						return err
 					}
@@ -428,7 +466,6 @@ On other errors, ping will exit with code 2.
 				Local:       local,
 				Remote:      remote,
 				PayloadSize: pldSize,
-				HBH:         &hbh,
 				ErrHandler: func(err error) {
 					fmt.Fprintf(os.Stderr, "ERROR: %s\n", err)
 				},
@@ -520,7 +557,7 @@ SCMP echo header and payload are equal to the MTU of the path. This flag overrid
 	cmd.Flags().BoolVar(&flags.epic, "epic", false, "Enable EPIC for path probing.")
 	cmd.Flags().StringVar(&flags.format, "format", "human",
 		"Specify the output format (human|json|yaml)")
-	cmd.Flags().BoolVar(&flags.fabrid, "fabrid", false, "Enable FABRID")
+	cmd.Flags().BoolVar(&flags.fabrid, "fabrid", true, "Enable FABRID")
 	return cmd
 }
 

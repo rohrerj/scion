@@ -358,8 +358,8 @@ func realMain(ctx context.Context) error {
 		}
 
 		f := &fabridgrpc.Server{FabridManager: fabridMgr, Fetcher: &polFetcher}
-		experimental.RegisterFABRIDIntraServiceServer(quicServer, f)
-		experimental.RegisterFABRIDInterServiceServer(tcpServer, f)
+		experimental.RegisterFABRIDIntraServiceServer(tcpServer, f)
+		experimental.RegisterFABRIDInterServiceServer(quicServer, f)
 	}
 
 	// Handle segment lookup
