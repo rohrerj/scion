@@ -241,6 +241,7 @@ func TestDataPlaneRun(t *testing.T) {
 				assert.NoError(t, err)
 
 				mExternal := mock_router.NewMockBatchConn(ctrl)
+				infoField := path.InfoField{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)}
 
 				mExternal.EXPECT().ReadBatch(gomock.Any()).DoAndReturn(
 					func(m underlayconn.Messages) (int, error) {
@@ -255,7 +256,7 @@ func TestDataPlaneRun(t *testing.T) {
 								NumHops: 3,
 							},
 							InfoFields: []path.InfoField{
-								{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)},
+								infoField,
 							},
 							HopFields: []path.HopField{
 								{ConsIngress: 1, ConsEgress: 2},
@@ -281,17 +282,17 @@ func TestDataPlaneRun(t *testing.T) {
 						identifierData := make([]byte, 8)
 						identifier.Serialize(identifierData)
 
-						meta := extension.FabridHopfieldMetadata{
+						meta := &extension.FabridHopfieldMetadata{
 							EncryptedPolicyID: encPolicyID,
 							FabridEnabled:     true,
 						}
 						tmp := make([]byte, 100)
 						sigma := computeMAC(t, key, path.InfoFields[0], path.HopFields[1])
-						err = fabrid.ComputeBaseHVF(&meta, &identifier, &s, tmp, asDRKey[:], sigma[:])
+						err = fabrid.ComputeBaseHVF(meta, &identifier, &s, tmp, asToHostKey[:], sigma[:])
 						assert.NoError(t, err)
 
 						fabrid := extension.FabridOption{
-							HopfieldMetadata: []extension.FabridHopfieldMetadata{
+							HopfieldMetadata: []*extension.FabridHopfieldMetadata{
 								{},
 								meta,
 								{},
@@ -313,9 +314,8 @@ func TestDataPlaneRun(t *testing.T) {
 								},
 							},
 						}
-						err := gopacket.SerializeLayers(buf, gopacket.SerializeOptions{FixLengths: true}, &s, &hbh)
+						err = gopacket.SerializeLayers(buf, gopacket.SerializeOptions{FixLengths: true}, &s, &hbh)
 						assert.NoError(t, err)
-						fmt.Println(buf)
 						raw := buf.Bytes()
 						copy(m[0].Buffers[0], raw)
 						m[0].N = len(raw)
@@ -344,15 +344,13 @@ func TestDataPlaneRun(t *testing.T) {
 						assert.True(t, ok)
 						hopField, err := path.GetHopField(1)
 						assert.NoError(t, err)
-						infField, err := path.GetInfoField(0)
-						assert.NoError(t, err)
 
 						containsFabrid := false
 						containsIdentifier := false
 						var foundIdentifier *extension.IdentifierOption
 						var foundFabrid *extension.FabridOption
 
-						baseTs := infField.Timestamp
+						baseTs := infoField.Timestamp
 						for _, hbhOption := range hbh.Options {
 							switch hbhOption.OptType {
 							case slayers.OptTypeIdentifier:
@@ -370,8 +368,9 @@ func TestDataPlaneRun(t *testing.T) {
 									tmp := make([]byte, 100)
 									recomputedVerifiedHVF := &extension.FabridHopfieldMetadata{
 										EncryptedPolicyID: encPolicyID,
+										FabridEnabled:     true,
 									}
-									mac := computeMAC(t, key, infField, hopField)
+									mac := computeMAC(t, key, infoField, hopField)
 									err = fabrid.ComputeVerifiedHVF(recomputedVerifiedHVF, foundIdentifier, &s, tmp, asToHostKey[:], mac[:])
 									assert.NoError(t, err)
 									assert.Equal(t, encPolicyID, meta.EncryptedPolicyID)

@@ -104,7 +104,6 @@ type DataPlane struct {
 	linkTypes         map[uint16]topology.LinkType
 	neighborIAs       map[uint16]addr.IA
 	peerInterfaces    map[uint16]uint16
-	neighborAddr      map[uint16]*net.UDPAddr
 	internal          BatchConn
 	internalIP        netip.Addr
 	internalNextHops  map[uint16]*net.UDPAddr
@@ -1055,11 +1054,11 @@ type processResult struct {
 
 func newPacketProcessor(d *DataPlane) *scionPacketProcessor {
 	p := &scionPacketProcessor{
-		d:      d,
-		buffer: gopacket.NewSerializeBuffer(),
-		mac:    d.macFactory(),
-		macInputBuffer: make([]byte, max(path.MACBufferSize,
-			max(libepic.MACBufferSize, fabrid.FabridMacInputSize))),
+		d:                 d,
+		buffer:            gopacket.NewSerializeBuffer(),
+		mac:               d.macFactory(),
+		macInputBuffer:    make([]byte, max(path.MACBufferSize, libepic.MACBufferSize)),
+		fabridInputBuffer: make([]byte, fabrid.FabridMacInputSize),
 	}
 	p.scionLayer.RecyclePaths()
 	return p
@@ -1136,18 +1135,16 @@ func (p *scionPacketProcessor) processFabrid() error {
 	if err != nil {
 		return err
 	}
-	policyID, err := fabrid.ComputePolicyID(&meta, p.identifier, key[:])
+	policyID, err := fabrid.ComputePolicyID(meta, p.identifier, key[:])
 	if err != nil {
 		return err
 	}
-	//TODO(jvanbommel):
-	//mplsLabel, found := p.d.fabridPolicyMap[policyID.ID]
-	//if !found {
-	//	return serrors.New("Provided policyID is invalid", "policyID", policyID, "id", p.identifier)
-	//}
-	p.mplsLabel = p.d.fabridPolicyMap[policyID.ID]
-	log.Info("Received packet that should be processed with fabrid ", "policy", policyID, "mplslabel", p.mplsLabel)
-	err = fabrid.VerifyAndUpdate(&meta, p.identifier, &p.scionLayer, p.macInputBuffer, key[:], p.cachedMac[:6])
+	mplsLabel, found := p.d.fabridPolicyMap[policyID.ID]
+	if !found {
+		return serrors.New("Provided policyID is invalid", "policyID", policyID, "id", p.identifier)
+	}
+	p.mplsLabel = mplsLabel
+	err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.cachedMac[:6])
 	if err != nil {
 		return err
 	}
@@ -1177,13 +1174,12 @@ func (p *scionPacketProcessor) processHbhOptions() error {
 			if err != nil {
 				return err
 			}
-			log.Info("here4")
 			if fabrid.HopfieldMetadata[0].FabridEnabled {
-				log.Info("here6")
 				p.fabrid = fabrid
 				if err = p.processFabrid(); err != nil {
 					return err
 				}
+				fabrid.HopfieldMetadata[0].SerializeTo(opt.OptData[p.path.Base.PathMeta.CurrHF*4:])
 			}
 		default:
 		}
@@ -1383,9 +1379,10 @@ type scionPacketProcessor struct {
 	// bfdLayer is reusable buffer for parsing BFD messages
 	bfdLayer layers.BFD
 
-	identifier *extension.IdentifierOption
-	fabrid     *extension.FabridOption
-	mplsLabel  uint32
+	identifier        *extension.IdentifierOption
+	fabrid            *extension.FabridOption
+	fabridInputBuffer []byte
+	mplsLabel         uint32
 }
 
 type slowPathType int
