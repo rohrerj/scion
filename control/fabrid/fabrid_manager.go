@@ -90,7 +90,8 @@ func (f *FabridManager) Load() error {
 }
 
 func (f *FabridManager) Active() bool {
-	return len(f.SupportedIndicesMap) > 0
+	//return len(f.SupportedIndicesMap) > 0
+	return true
 }
 
 func (f *FabridManager) parseAndAdd(path string, fi os.FileInfo, err error) error {

@@ -175,7 +175,7 @@ func (m *Match) Policies() map[string][]string {
 
 // Nonpublic builder: add a capture to the group specified by "c"
 func (m *Match) addMatch(c, start, l int) {
-	fmt.Println("MATCH", m.regex.GroupNameFromNumber(c), c, string(m.text[start:start+l]), m.matches, m.matchcount)
+	//fmt.Println("MATCH", m.regex.GroupNameFromNumber(c), c, string(m.text[start:start+l]), m.matches, m.matchcount)
 	if m.matches[c] == nil {
 		m.matches[c] = make([]int, 2)
 	}
