@@ -178,7 +178,7 @@ func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption, s *slayers.SC
 	pathValidatorBuf := make([]byte, ext.FabridMetadataLen*len(f.HopfieldMetadata))
 	for i, meta := range f.HopfieldMetadata {
 		key := keys[ias[i]].Key
-		err := computeFabridHVF(&meta, id, s, tmpBuffer, outBuffer, key[:], sigmas[i])
+		err := computeFabridHVF(meta, id, s, tmpBuffer, outBuffer, key[:], sigmas[i])
 		if err != nil {
 			return err
 		}
