@@ -18,11 +18,10 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/drkey"
-	"hash"
 
-	"github.com/dchest/cmac"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/slayers"
 	ext "github.com/scionproto/scion/pkg/slayers/extension"
@@ -192,43 +191,7 @@ func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption, s *slayers.SC
 		pathValidatorBuf[i*ext.FabridMetadataLen] = meta.EncryptedPolicyID
 		copy(pathValidatorBuf[i*ext.FabridMetadataLen+1:i*ext.FabridMetadataLen+4], outBuffer[3:6])
 	}
-	mac, err := initCMAC(pathKey)
-	if err != nil {
-		return err
-	}
-	mac.Write(pathValidatorBuf)
-	copy(f.PathValidator[:4], mac.Sum([]byte{}))
 	return nil
-}
-
-func VerifyPath(f *ext.FabridOption, key []byte) error {
-	buf := make([]byte, ext.FabridMetadataLen*len(f.HopfieldMetadata))
-	for i := 0; i < len(f.HopfieldMetadata); i++ {
-		f.HopfieldMetadata[i].SerializeTo(buf[i*ext.FabridMetadataLen : (i+1)*ext.FabridMetadataLen])
-		buf[i*ext.FabridMetadataLen+1] &= 0x3f // ignore first two (left) bits
-	}
-	mac, err := initCMAC(key)
-	if err != nil {
-		return err
-	}
-	mac.Write(buf)
-	computedPathValidator := mac.Sum([]byte{})
-	if !bytes.Equal(computedPathValidator[:4], f.PathValidator[:]) {
-		return serrors.New("Path validator is invalid")
-	}
-	return nil
-}
-
-func initCMAC(key []byte) (hash.Hash, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, serrors.WrapStr("unable to initialize AES cipher", err)
-	}
-	mac, err := cmac.New(block)
-	if err != nil {
-		return nil, serrors.WrapStr("unable to initialize Mac", err)
-	}
-	return mac, nil
 }
 
 var zeroBlock [16]byte
