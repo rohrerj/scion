@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"encoding/binary"
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/drkey"
@@ -31,36 +32,26 @@ type FabridPolicyID struct {
 	ID uint8
 }
 
-const FabridMacInputSize int = 40
+const FabridMacInputSize int = 46
 
-//  MAC xored key input:
+//	MAC input:
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //	| Identifier (8B)                                     |
 //	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //  |                                                     |
 //	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//	| SrcISD (2B)             | SrcAS (6B)                |
+//	| Cons Ingress (2B)        |  Cons Egress (2B)        |
 //	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//	|                                                     |
+//  |ePolicyID(1B)|sHostLen(1B)| SrcHostAddr (4-16 B)     |
 //	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//
-//	MAC input:
-//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//	| Sigma (6B)                                          |
-//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//	|                         |ePolicyID(1B)| sHostLen(1B)|
-//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//	| Source Host Address (4-16 Bytes)                    |
+//  |                                                     |
 //	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 func computeFabridHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 	s *slayers.SCION, tmpBuffer []byte, resultBuffer []byte,
-	key []byte, sigma []byte) error {
+	key []byte, ingress uint16, egress uint16) error {
 	if len(key) != 16 {
 		return serrors.New("Wrong key length", "expected", 16, "actual", len(key))
-	}
-	if len(sigma) != 6 {
-		return serrors.New("Wrong sigma length", "expected", 6, "actual", len(sigma))
 	}
 	if len(tmpBuffer) < FabridMacInputSize {
 		return serrors.New("tmpBuffer too small", "expected",
@@ -70,33 +61,25 @@ func computeFabridHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 		return serrors.New("resultBuffer too small", "expected",
 			16, "actual", len(resultBuffer))
 	}
-	id.Serialize(tmpBuffer[0:8])
-	srcIABytes, _ := s.SrcIA.MarshalText()
 
-	xoredKey := make([]byte, len(key))
-	for i := 0; i < 8; i++ {
-		xoredKey[i] = key[i] ^ tmpBuffer[i]
-	}
-	for i := 0; i < 8; i++ {
-		xoredKey[i+8] = key[i+8] ^ srcIABytes[i]
-	}
+	id.Serialize(tmpBuffer[0:8])
 
 	srcAddr := s.RawSrcAddr
-	srcAddrLen := len(srcAddr)
-	usedBufferLength := 8 + srcAddrLen
-	copy(tmpBuffer[0:6], sigma[0:6])
-	tmpBuffer[6] = f.EncryptedPolicyID
-	tmpBuffer[7] = byte(s.SrcAddrType.Length())
-	copy(tmpBuffer[8:usedBufferLength], srcAddr)
+	requiredLen := 14 + len(srcAddr)
+	binary.BigEndian.PutUint16(tmpBuffer[8:10], ingress)
+	binary.BigEndian.PutUint16(tmpBuffer[10:12], egress)
+	tmpBuffer[12] = f.EncryptedPolicyID
+	tmpBuffer[13] = byte(s.SrcAddrType.Length())
+	copy(tmpBuffer[14:requiredLen], srcAddr)
 
-	macBlock(xoredKey, tmpBuffer[24:40], tmpBuffer[:usedBufferLength], resultBuffer[:])
+	macBlock(key, tmpBuffer[30:46], tmpBuffer[:requiredLen], resultBuffer[:])
 	return nil
 }
 
 func ComputeBaseHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
-	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
+	s *slayers.SCION, tmpBuffer []byte, key []byte, ingress uint16, egress uint16) error {
 	computedHVF := make([]byte, 16)
-	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, sigma)
+	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, ingress, egress)
 	if err != nil {
 		return err
 	}
@@ -106,9 +89,9 @@ func ComputeBaseHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 }
 
 func ComputeVerifiedHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
-	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
+	s *slayers.SCION, tmpBuffer []byte, key []byte, ingress uint16, egress uint16) error {
 	computedHVF := make([]byte, 16)
-	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, sigma)
+	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, ingress, egress)
 	if err != nil {
 		return err
 	}
@@ -118,9 +101,9 @@ func ComputeVerifiedHVF(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
 }
 
 func VerifyAndUpdate(f *ext.FabridHopfieldMetadata, id *ext.IdentifierOption,
-	s *slayers.SCION, tmpBuffer []byte, key []byte, sigma []byte) error {
+	s *slayers.SCION, tmpBuffer []byte, key []byte, ingress uint16, egress uint16) error {
 	computedHVF := make([]byte, 16)
-	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, sigma)
+	err := computeFabridHVF(f, id, s, tmpBuffer, computedHVF, key, ingress, egress)
 	if err != nil {
 		return err
 	}
@@ -171,13 +154,26 @@ func EncryptPolicyID(f *FabridPolicyID, id *ext.IdentifierOption,
 // InitValidators sets all HVFs of the FABRID option and computes the
 // path validator.
 func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption, s *slayers.SCION, tmpBuffer []byte, pathKey []byte,
-	keys map[addr.IA]drkey.ASHostKey, ias []addr.IA, sigmas [][]byte) error {
+	asHostKeys map[addr.IA]drkey.ASHostKey, asAsKeys map[addr.IA]drkey.Level1Key, ias []addr.IA, ingresses []uint16, egresses []uint16) error {
 
 	outBuffer := make([]byte, 16)
-	pathValidatorBuf := make([]byte, ext.FabridMetadataLen*len(f.HopfieldMetadata))
 	for i, meta := range f.HopfieldMetadata {
-		key := keys[ias[i]].Key
-		err := computeFabridHVF(meta, id, s, tmpBuffer, outBuffer, key[:], sigmas[i])
+		var key drkey.Key
+		if meta.ASLevelKey {
+			asAsKey, found := asAsKeys[ias[i]]
+			if !found {
+				return serrors.New("InitValidators expected AS to AS key but was not in dictionary", "AS", ias[i])
+			}
+			key = asAsKey.Key
+		} else {
+			asHostKey, found := asHostKeys[ias[i]]
+			if !found {
+				return serrors.New("InitValidators expected AS to AS key but was not in dictionary", "AS", ias[i])
+			}
+			key = asHostKey.Key
+		}
+
+		err := computeFabridHVF(meta, id, s, tmpBuffer, outBuffer, key[:], ingresses[i], egresses[i])
 		if err != nil {
 			return err
 		}
@@ -188,8 +184,6 @@ func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption, s *slayers.SC
 		} else {
 			copy(meta.HopValidationField[:3], outBuffer[3:6])
 		}
-		pathValidatorBuf[i*ext.FabridMetadataLen] = meta.EncryptedPolicyID
-		copy(pathValidatorBuf[i*ext.FabridMetadataLen+1:i*ext.FabridMetadataLen+4], outBuffer[3:6])
 	}
 	return nil
 }

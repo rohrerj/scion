@@ -32,12 +32,11 @@ package extension
 import (
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/slayers"
-	"github.com/scionproto/scion/pkg/slayers/path/scion"
 )
 
-const baseFabridLen int = 4
+const baseFabridLen uint8 = 4
 const FabridMetadataLen int = 4
-const MaxSupportedFabridHops = 62
+const MaxSupportedFabridHops = uint8(62)
 
 // The FABRID option requires the Identifier option to be present in the HBH header
 // extension and defined before the FABRID option.
@@ -95,21 +94,22 @@ func (f *FabridHopfieldMetadata) serializeTo(b []byte) {
 	}
 }
 
-func (f *FabridOption) validate(b []byte, base *scion.Base) error {
+func (f *FabridOption) validate(b []byte, currHf uint8, numHfs uint8) error {
 	if f == nil {
 		return serrors.New("Fabrid option must not be nil")
 	}
-	if base == nil {
-		return serrors.New("Base must not be nil")
-	}
-	if len(b) < FabridOptionLen(base.NumHops) {
+	if len(b) < int(FabridOptionLen(numHfs)) {
 		return serrors.New("Raw Fabrid option too short", "is", len(b),
-			"expected", FabridOptionLen(base.NumHops))
+			"expected", FabridOptionLen(numHfs))
 	}
-	if base.NumHops > MaxSupportedFabridHops {
+	if numHfs > MaxSupportedFabridHops {
 		// The size of FABRID is limited to 255 bytes because of the HBH option length field
 		// 4 bytes + 62 * 4 bytes = 252 bytes
 		return serrors.New("Fabrid is not supported for paths consisting of more than 62 hopfields")
+	}
+	if currHf >= numHfs {
+		return serrors.New("Current HF is >= the number of HFs", "current HF",
+			currHf, "num hops", numHfs)
 	}
 	return nil
 }
@@ -117,11 +117,11 @@ func (f *FabridOption) validate(b []byte, base *scion.Base) error {
 // DecodeForCurrentHop uses the scion meta header to determine the current hop
 // and decodes only the metadata of the current hop and stores it in f.HopfieldMetadata[0].
 // The PathValidator will not be decoded.
-func (f *FabridOption) DecodeForCurrentHop(b []byte, base *scion.Base) error {
-	if err := f.validate(b, base); err != nil {
+func (f *FabridOption) DecodeForHF(b []byte, currHf uint8, numHfs uint8) error {
+	if err := f.validate(b, currHf, numHfs); err != nil {
 		return err
 	}
-	byteIndex := int(base.PathMeta.CurrHF) * FabridMetadataLen
+	byteIndex := int(currHf) * FabridMetadataLen
 	md := &FabridHopfieldMetadata{}
 	md.decodeFabridHopfieldMetadata(b[byteIndex : byteIndex+FabridMetadataLen])
 	f.HopfieldMetadata = []*FabridHopfieldMetadata{
@@ -130,13 +130,13 @@ func (f *FabridOption) DecodeForCurrentHop(b []byte, base *scion.Base) error {
 	return nil
 }
 
-func (f *FabridOption) DecodeFull(b []byte, base *scion.Base) error {
-	if err := f.validate(b, base); err != nil {
+func (f *FabridOption) DecodeFull(b []byte, currHf uint8, numHfs uint8) error {
+	if err := f.validate(b, currHf, numHfs); err != nil {
 		return err
 	}
 	byteIndex := 0
-	f.HopfieldMetadata = make([]*FabridHopfieldMetadata, base.NumHops)
-	for i := 0; i < base.NumHops; i++ {
+	f.HopfieldMetadata = make([]*FabridHopfieldMetadata, numHfs)
+	for i := 0; i < int(numHfs); i++ {
 		md := &FabridHopfieldMetadata{}
 		md.decodeFabridHopfieldMetadata(b[byteIndex : byteIndex+FabridMetadataLen])
 		f.HopfieldMetadata[i] = md
@@ -150,11 +150,11 @@ func (f *FabridOption) SerializeTo(b []byte) error {
 	if f == nil {
 		return serrors.New("Fabrid option must not be nil")
 	}
-	if len(b) < FabridOptionLen(len(f.HopfieldMetadata)) {
+	if len(b) < int(FabridOptionLen(uint8(len(f.HopfieldMetadata)))) {
 		return serrors.New("Buffer too short", "is", len(b),
-			"expected", FabridOptionLen(len(f.HopfieldMetadata)))
+			"expected", FabridOptionLen(uint8(len(f.HopfieldMetadata))))
 	}
-	if len(f.HopfieldMetadata) > MaxSupportedFabridHops {
+	if len(f.HopfieldMetadata) > int(MaxSupportedFabridHops) {
 		// The size of FABRID is limited to 255 bytes because of the HBH option length field
 		// 4 bytes + 62 * 4 bytes = 252 bytes
 		return serrors.New("Fabrid is not supported for paths consisting of more than 62 hopfields")
@@ -168,29 +168,29 @@ func (f *FabridOption) SerializeTo(b []byte) error {
 	return nil
 }
 
-func FabridOptionLen(numHopfields int) int {
-	return baseFabridLen + numHopfields*FabridMetadataLen
+func FabridOptionLen(numHopfields uint8) uint8 {
+	return baseFabridLen + numHopfields*uint8(FabridMetadataLen)
 }
 
-func ParseFabridOptionFullExtension(o *slayers.HopByHopOption, base *scion.Base) (*FabridOption, error) {
+func ParseFabridOptionFullExtension(o *slayers.HopByHopOption, currHf uint8, numHfs uint8) (*FabridOption, error) {
 	if o.OptType != slayers.OptTypeFabrid {
 		return nil,
 			serrors.New("Wrong option type", "expected", slayers.OptTypeFabrid, "actual", o.OptType)
 	}
 	f := &FabridOption{}
-	if err := f.DecodeFull(o.OptData, base); err != nil {
+	if err := f.DecodeFull(o.OptData, currHf, numHfs); err != nil {
 		return nil, err
 	}
 	return f, nil
 }
 
-func ParseFabridOptionCurrentHop(o *slayers.HopByHopOption, base *scion.Base) (*FabridOption, error) {
+func ParseFabridOptionCurrentHop(o *slayers.HopByHopOption, currHf uint8, numHfs uint8) (*FabridOption, error) {
 	if o.OptType != slayers.OptTypeFabrid {
 		return nil,
 			serrors.New("Wrong option type", "expected", slayers.OptTypeFabrid, "actual", o.OptType)
 	}
 	f := &FabridOption{}
-	if err := f.DecodeForCurrentHop(o.OptData, base); err != nil {
+	if err := f.DecodeForHF(o.OptData, currHf, numHfs); err != nil {
 		return nil, err
 	}
 	return f, nil

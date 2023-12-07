@@ -1144,7 +1144,7 @@ func (p *scionPacketProcessor) processFabrid() error {
 		return serrors.New("Provided policyID is invalid", "policyID", policyID, "id", p.identifier)
 	}
 	p.mplsLabel = mplsLabel
-	err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.cachedMac[:6])
+	err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, p.egressInterface())
 	if err != nil {
 		return err
 	}
@@ -1170,7 +1170,11 @@ func (p *scionPacketProcessor) processHbhOptions() error {
 			if p.identifier == nil {
 				return serrors.New("Identifier HBH option must be present when using FABRID")
 			}
-			fabrid, err := extension.ParseFabridOptionCurrentHop(opt, &p.path.Base)
+			currHop := p.path.PathMeta.CurrHF
+			if p.effectiveXover {
+				currHop--
+			}
+			fabrid, err := extension.ParseFabridOptionCurrentHop(opt, currHop, uint8(p.path.NumHops))
 			if err != nil {
 				return err
 			}
@@ -1955,14 +1959,14 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 	if r, err := p.handleIngressRouterAlert(); err != nil {
 		return r, err
 	}
-	if err := p.processHbhOptions(); err != nil {
-		return processResult{}, err
-	}
 	// Inbound: pkts destined to the local IA.
 	if p.scionLayer.DstIA == p.d.localIA {
 		a, r, err := p.resolveInbound()
 		if err != nil {
 			return r, err
+		}
+		if err := p.processHbhOptions(); err != nil {
+			return processResult{}, err
 		}
 		return processResult{OutAddr: a, OutPkt: p.rawPkt}, nil
 	}
@@ -1987,6 +1991,9 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 	}
 	if r, err := p.validateEgressID(); err != nil {
 		return r, err
+	}
+	if err := p.processHbhOptions(); err != nil {
+		return processResult{}, err
 	}
 	// handle egress router alert before we check if it's up because we want to
 	// send the reply anyway, so that trace route can pinpoint the exact link

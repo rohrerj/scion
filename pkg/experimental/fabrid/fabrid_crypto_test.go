@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/drkey"
 	"github.com/scionproto/scion/pkg/experimental/fabrid"
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/slayers/extension"
@@ -109,31 +110,56 @@ func TestSuccessfullValidators(t *testing.T) {
 					SrcIA:      tc.srcIA,
 				}
 				f := &extension.FabridOption{}
-				for j := 1; j <= extension.MaxSupportedFabridHops; j++ {
+				for j := uint8(1); j <= extension.MaxSupportedFabridHops; j++ {
 					f.HopfieldMetadata = append(f.HopfieldMetadata, &extension.FabridHopfieldMetadata{
 						EncryptedPolicyID: uint8(rand.Uint32()),
 						FabridEnabled:     rand.Intn(2) == 0,
 						ASLevelKey:        rand.Intn(2) == 0,
 					})
+					ases := []addr.IA{}
 					pathKey := generateRandomBytes(16)
-					keys := [][]byte{}
-					sigmas := [][]byte{}
+					asHostKeys := make(map[addr.IA]drkey.ASHostKey)
+					asAsKeys := make(map[addr.IA]drkey.Level1Key)
+					ingresses := []uint16{}
+					egresses := []uint16{}
+
 					for i := 0; i < len(f.HopfieldMetadata); i++ {
-						keys = append(keys, generateRandomBytes(16))
-						sigmas = append(sigmas, generateRandomBytes(6))
+						ingresses = append(ingresses, uint16(rand.Int()))
+						egresses = append(egresses, uint16(rand.Int()))
+						var ia addr.IA
+						if i == 0 {
+							ia = tc.srcIA
+
+						} else {
+							ia = addr.IA(rand.Int())
+						}
+						ases = append(ases, ia)
+						keyBytes := drkey.Key{}
+						copy(keyBytes[:], generateRandomBytes(16))
+						if f.HopfieldMetadata[i].ASLevelKey {
+							asAsKeys[ia] = drkey.Level1Key{Key: drkey.Key(keyBytes)}
+						} else {
+							asHostKeys[ia] = drkey.ASHostKey{Key: drkey.Key(keyBytes)}
+						}
 					}
 
-					err := fabrid.InitValidators(f, id, s, tmpBuffer, pathKey, keys, sigmas)
+					err := fabrid.InitValidators(f, id, s, tmpBuffer, pathKey, asHostKeys, asAsKeys, ases, ingresses, egresses)
 					assert.NoError(t, err)
 
 					for i, meta := range f.HopfieldMetadata {
 						if meta.FabridEnabled {
-							err = fabrid.VerifyAndUpdate(meta, id, s, tmpBuffer, keys[i], sigmas[i])
+
+							if meta.ASLevelKey {
+								key := asAsKeys[ases[i]]
+								err = fabrid.VerifyAndUpdate(meta, id, s, tmpBuffer, key.Key[:], ingresses[i], egresses[i])
+							} else {
+								key := asHostKeys[ases[i]]
+								err = fabrid.VerifyAndUpdate(meta, id, s, tmpBuffer, key.Key[:], ingresses[i], egresses[i])
+							}
+
 							assert.NoError(t, err)
 						}
 					}
-					err = fabrid.VerifyPath(f, pathKey)
-					assert.NoError(t, err)
 				}
 			})
 		}(tc)

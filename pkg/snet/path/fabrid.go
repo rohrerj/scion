@@ -39,7 +39,8 @@ type FabridConfig struct {
 type FABRID struct {
 	Raw              []byte
 	keys             map[addr.IA]drkey.ASHostKey
-	sigmas           [][]byte
+	ingresses        []uint16
+	egresses         []uint16
 	pathKey          drkey.HostHostKey
 	drkeyFn          func(context.Context, drkey.ASHostMeta) (drkey.ASHostKey, error)
 	drkeyPathFn      func(context.Context, drkey.HostHostMeta) (drkey.HostHostKey, error)
@@ -50,34 +51,37 @@ type FABRID struct {
 	identifierBuffer []byte
 	fabridBuffer     []byte
 	numHops          int
-	hopfields        []*fabrid.FabridPolicyID
+	policyIDs        []*fabrid.FabridPolicyID
 	ias              []addr.IA
 }
 
-func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDs []snet.FabridPolicyPerHop, conf *FabridConfig) (*FABRID, error) {
+func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDsPerHop []snet.FabridPolicyPerHop, conf *FabridConfig) (*FABRID, error) {
 
 	var decoded scion.Decoded
 	if err := decoded.DecodeFromBytes(p.Raw); err != nil {
 		return nil, serrors.WrapStr("decoding path", err)
 	}
 	numHops := len(decoded.HopFields)
-	keys := make(map[addr.IA]drkey.ASHostKey, len(policyIDs))
-	hopFields, ias := policiesToHopFields(numHops, policyIDs, decoded, keys)
+	keys := make(map[addr.IA]drkey.ASHostKey, len(policyIDsPerHop))
+	policyIDs, ias := policiesToHopFields(numHops, policyIDsPerHop, decoded, keys)
 	f := &FABRID{
 		numHops:          numHops,
 		conf:             conf,
 		keys:             keys,
 		ias:              ias,
-		sigmas:           make([][]byte, numHops),
+		ingresses:        make([]uint16, numHops),
+		egresses:         make([]uint16, numHops),
 		tmpBuffer:        make([]byte, 64),
 		identifierBuffer: make([]byte, 8),
 		fabridBuffer:     make([]byte, 8+4*numHops),
 		Raw:              append([]byte(nil), p.Raw...),
-		hopfields:        hopFields,
+		policyIDs:        policyIDs,
 	}
 	for i, hop := range decoded.HopFields {
-		f.sigmas[i] = make([]byte, 6)
-		copy(f.sigmas[i], hop.Mac[:])
+		// TODO: in the xover case the metadata field should use the
+		// ingress of the first HF and the egress of the second HF
+		f.ingresses[i] = hop.ConsIngress
+		f.egresses[i] = hop.ConsEgress
 	}
 	f.baseTimestamp = decoded.InfoFields[0].Timestamp
 	return f, nil
@@ -213,7 +217,7 @@ func (f *FABRID) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
 		HopfieldMetadata: make([]*extension.FabridHopfieldMetadata, f.numHops),
 	}
 	for i := 0; i < f.numHops; i++ {
-		if f.hopfields[i] == nil {
+		if f.policyIDs[i] == nil {
 			fabridOption.HopfieldMetadata[i] = &extension.FabridHopfieldMetadata{}
 			continue
 		}
@@ -221,14 +225,14 @@ func (f *FABRID) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
 		meta.FabridEnabled = true
 
 		key := f.keys[f.ias[i]].Key
-		encPolicyID, err := fabrid.EncryptPolicyID(f.hopfields[i], identifierOption, key[:])
+		encPolicyID, err := fabrid.EncryptPolicyID(f.policyIDs[i], identifierOption, key[:])
 		if err != nil {
 			return serrors.WrapStr("encrypting policy ID", err)
 		}
 		meta.EncryptedPolicyID = encPolicyID
 		fabridOption.HopfieldMetadata[i] = meta
 	}
-	err = fabrid.InitValidators(fabridOption, identifierOption, s, f.tmpBuffer, f.pathKey.Key[:], f.keys, f.ias, f.sigmas)
+	err = fabrid.InitValidators(fabridOption, identifierOption, s, f.tmpBuffer, f.pathKey.Key[:], f.keys, nil, f.ias, f.ingresses, f.egresses)
 	if err != nil {
 		return serrors.WrapStr("initializing validators failed", err)
 	}
@@ -262,7 +266,7 @@ func (f *FABRID) renewExpiredKeys(t time.Time) error {
 	for ia, key := range f.keys {
 		if key.Epoch.NotAfter.Before(t) {
 			// key is expired, renew it
-			newKey, err := f.fetchKey(ia)
+			newKey, err := f.fetchKey(t, ia)
 			if err != nil {
 				return err
 			}
@@ -271,7 +275,7 @@ func (f *FABRID) renewExpiredKeys(t time.Time) error {
 	}
 	if f.pathKey.Epoch.NotAfter.Before(t) {
 		// key is expired, renew it
-		newKey, err := f.fetchPathKey()
+		newKey, err := f.fetchPathKey(t)
 		if err != nil {
 			return err
 		}
@@ -280,11 +284,11 @@ func (f *FABRID) renewExpiredKeys(t time.Time) error {
 	return nil
 }
 
-func (f *FABRID) fetchPathKey() (drkey.HostHostKey, error) {
+func (f *FABRID) fetchPathKey(t time.Time) (drkey.HostHostKey, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	key, err := f.drkeyPathFn(ctx, drkey.HostHostMeta{
-		Validity: time.Now(),
+		Validity: t,
 		SrcIA:    f.conf.LocalIA,
 		SrcHost:  f.conf.LocalAddr,
 		DstIA:    f.conf.DestinationIA,
@@ -297,11 +301,11 @@ func (f *FABRID) fetchPathKey() (drkey.HostHostKey, error) {
 	return key, nil
 }
 
-func (f *FABRID) fetchKey(ia addr.IA) (drkey.ASHostKey, error) {
+func (f *FABRID) fetchKey(t time.Time, ia addr.IA) (drkey.ASHostKey, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	key, err := f.drkeyFn(ctx, drkey.ASHostMeta{
-		Validity: time.Now(),
+		Validity: t,
 		SrcIA:    ia,
 		DstIA:    f.conf.LocalIA,
 		DstHost:  f.conf.LocalAddr,

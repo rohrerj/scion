@@ -227,8 +227,7 @@ func TestDataPlaneRun(t *testing.T) {
 				}
 
 				policyID := fabrid.FabridPolicyID{
-					Global: false,
-					ID:     0x0f,
+					ID: 0x0f,
 				}
 				ret.UpdateFabridPolicies(map[uint8]uint32{
 					policyID.ID: 1,
@@ -287,8 +286,7 @@ func TestDataPlaneRun(t *testing.T) {
 							FabridEnabled:     true,
 						}
 						tmp := make([]byte, 100)
-						sigma := computeMAC(t, key, path.InfoFields[0], path.HopFields[1])
-						err = fabrid.ComputeBaseHVF(meta, &identifier, &s, tmp, asToHostKey[:], sigma[:])
+						err = fabrid.ComputeBaseHVF(meta, &identifier, &s, tmp, asToHostKey[:], 3, 4)
 						assert.NoError(t, err)
 
 						fabrid := extension.FabridOption{
@@ -329,7 +327,7 @@ func TestDataPlaneRun(t *testing.T) {
 
 				mExternal2 := mock_router.NewMockBatchConn(ctrl)
 				mExternal2.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
-
+				mExternal2.EXPECT().SetToS(gomock.Any()).Times(1)
 				mExternal2.EXPECT().WriteBatch(gomock.Any(), 0).DoAndReturn(
 					func(ms underlayconn.Messages, flags int) (int, error) {
 						if len(ms) != 1 {
@@ -339,10 +337,6 @@ func TestDataPlaneRun(t *testing.T) {
 						s := slayers.SCION{}
 						hbh := slayers.HopByHopExtn{}
 						_, err := router.DecodeLayers(ms[0].Buffers[0], &s, &hbh)
-						assert.NoError(t, err)
-						path, ok := s.Path.(*scion.Raw)
-						assert.True(t, ok)
-						hopField, err := path.GetHopField(1)
 						assert.NoError(t, err)
 
 						containsFabrid := false
@@ -362,7 +356,7 @@ func TestDataPlaneRun(t *testing.T) {
 							case slayers.OptTypeFabrid:
 								containsFabrid = true
 								if containsIdentifier {
-									foundFabrid, err = extension.ParseFabridOptionFullExtension(hbhOption, &path.Base)
+									foundFabrid, err = extension.ParseFabridOptionFullExtension(hbhOption, 1, 3)
 									assert.NoError(t, err)
 									meta := foundFabrid.HopfieldMetadata[1]
 									tmp := make([]byte, 100)
@@ -370,8 +364,7 @@ func TestDataPlaneRun(t *testing.T) {
 										EncryptedPolicyID: encPolicyID,
 										FabridEnabled:     true,
 									}
-									mac := computeMAC(t, key, infoField, hopField)
-									err = fabrid.ComputeVerifiedHVF(recomputedVerifiedHVF, foundIdentifier, &s, tmp, asToHostKey[:], mac[:])
+									err = fabrid.ComputeVerifiedHVF(recomputedVerifiedHVF, foundIdentifier, &s, tmp, asToHostKey[:], 3, 4)
 									assert.NoError(t, err)
 									assert.Equal(t, encPolicyID, meta.EncryptedPolicyID)
 									assert.Equal(t, recomputedVerifiedHVF.HopValidationField, meta.HopValidationField)

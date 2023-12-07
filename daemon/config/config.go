@@ -63,7 +63,6 @@ func (cfg *Config) InitDefaults() {
 		cfg.PathDB.WithDefault(fmt.Sprintf(storage.DefaultPathDBPath, "sd")),
 		&cfg.SD,
 		&cfg.TrustEngine,
-		cfg.DRKeyLevel2DB.WithDefault(fmt.Sprintf(storage.DefaultDRKeyLevel2DBPath, "sd")),
 	)
 }
 

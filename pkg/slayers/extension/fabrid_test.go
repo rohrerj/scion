@@ -19,7 +19,6 @@ import (
 
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/slayers/extension"
-	"github.com/scionproto/scion/pkg/slayers/path/scion"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -27,33 +26,19 @@ func TestFabridDecode(t *testing.T) {
 	type test struct {
 		name     string
 		o        *slayers.HopByHopOption
-		base     *scion.Base
+		currHf   uint8
+		numHfs   uint8
 		validate func(*extension.FabridOption, error, *testing.T)
 	}
 	tests := []test{
-		{
-			name: "Base is nil",
-			o: &slayers.HopByHopOption{
-				OptType: slayers.OptTypeFabrid,
-				OptData: make([]byte, 100),
-			},
-			base: nil,
-			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
-				assert.Error(t, err)
-			},
-		},
 		{
 			name: "wrong option type",
 			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeIdentifier,
 				OptData: make([]byte, 8),
 			},
-			base: &scion.Base{
-				PathMeta: scion.MetaHdr{
-					CurrHF: 1,
-				},
-				NumHops: 1,
-			},
+			currHf: 1,
+			numHfs: 1,
 			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.Error(t, err)
 			},
@@ -62,14 +47,10 @@ func TestFabridDecode(t *testing.T) {
 			name: "Raw fabrid too short",
 			o: &slayers.HopByHopOption{
 				OptType: slayers.OptTypeFabrid,
-				OptData: make([]byte, 7),
+				OptData: make([]byte, 11),
 			},
-			base: &scion.Base{
-				PathMeta: scion.MetaHdr{
-					CurrHF: 1,
-				},
-				NumHops: 1,
-			},
+			currHf: 1,
+			numHfs: 2,
 			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.Error(t, err)
 			},
@@ -80,12 +61,8 @@ func TestFabridDecode(t *testing.T) {
 				OptType: slayers.OptTypeFabrid,
 				OptData: make([]byte, 252),
 			},
-			base: &scion.Base{
-				PathMeta: scion.MetaHdr{
-					CurrHF: 1,
-				},
-				NumHops: extension.MaxSupportedFabridHops,
-			},
+			currHf: 1,
+			numHfs: extension.MaxSupportedFabridHops,
 			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.NoError(t, err)
 			},
@@ -96,12 +73,8 @@ func TestFabridDecode(t *testing.T) {
 				OptType: slayers.OptTypeFabrid,
 				OptData: make([]byte, 1000),
 			},
-			base: &scion.Base{
-				PathMeta: scion.MetaHdr{
-					CurrHF: 1,
-				},
-				NumHops: extension.MaxSupportedFabridHops + 1,
-			},
+			currHf: 1,
+			numHfs: extension.MaxSupportedFabridHops + 1,
 			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.Error(t, err)
 			},
@@ -117,12 +90,8 @@ func TestFabridDecode(t *testing.T) {
 					0x22, 0x33, 0x44, 0x55,
 				},
 			},
-			base: &scion.Base{
-				PathMeta: scion.MetaHdr{
-					CurrHF: 1,
-				},
-				NumHops: 3,
-			},
+			currHf: 1,
+			numHfs: 3,
 			validate: func(fo *extension.FabridOption, err error, t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, 3, len(fo.HopfieldMetadata))
@@ -147,7 +116,7 @@ func TestFabridDecode(t *testing.T) {
 		func(tc test) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				f, err := extension.ParseFabridOptionFullExtension(tc.o, tc.base)
+				f, err := extension.ParseFabridOptionFullExtension(tc.o, tc.currHf, tc.numHfs)
 				tc.validate(f, err, t)
 			})
 		}(tc)
