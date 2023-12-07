@@ -25,11 +25,16 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc"
 	"gopkg.in/yaml.v2"
 
+	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/daemon"
+	drhelper "github.com/scionproto/scion/pkg/daemon/helper"
+	"github.com/scionproto/scion/pkg/drkey"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
+	drpb "github.com/scionproto/scion/pkg/proto/control_plane"
 	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/pkg/snet/addrutil"
 	snetpath "github.com/scionproto/scion/pkg/snet/path"
@@ -369,7 +374,6 @@ On other errors, ping will exit with code 2.
 					if err != nil {
 						return err
 					}
-					fabridPath.RegisterDRKeyFetcher(sd.DRKeyGetASHostKey, sd.DRKeyGetHostHostKey)
 					remote.Path = fabridPath
 					if localIP == nil {
 						target := remote.Host.IP
@@ -382,6 +386,52 @@ On other errors, ping will exit with code 2.
 						printf("Resolved local address:\n  %s\n", localIP)
 						fabridConfig.LocalAddr = localIP.String()
 					}
+					servicesInfo, err := sd.SVCInfo(ctx, []addr.SVC{addr.SvcCS})
+					if err != nil {
+						return err
+					}
+					controlServiceInfo := servicesInfo[addr.SvcCS][0]
+					localAddr := &net.TCPAddr{
+						IP:   localIP,
+						Port: 0,
+					}
+					controlAddr, err := net.ResolveTCPAddr("tcp", controlServiceInfo)
+					if err != nil {
+						return err
+					}
+
+					fmt.Println("CS:", controlServiceInfo)
+					dialer := func(ctx context.Context, addr string) (net.Conn, error) {
+						return net.DialTCP("tcp", localAddr, controlAddr)
+					}
+					grpcconn, err := grpc.DialContext(ctx, controlServiceInfo,
+						grpc.WithInsecure(), grpc.WithContextDialer(dialer))
+					if err != nil {
+						return err
+					}
+					defer grpcconn.Close()
+					client := drpb.NewDRKeyIntraServiceClient(grpcconn)
+					fabridPath.RegisterDRKeyFetcher(func(ctx context.Context, meta drkey.ASHostMeta) (drkey.ASHostKey, error) {
+						rep, err := client.DRKeyASHost(ctx, drhelper.AsHostMetaToProtoRequest(meta))
+						if err != nil {
+							return drkey.ASHostKey{}, err
+						}
+						key, err := drhelper.GetASHostKeyFromReply(rep, meta)
+						if err != nil {
+							return drkey.ASHostKey{}, err
+						}
+						return key, nil
+					}, func(ctx context.Context, meta drkey.HostHostMeta) (drkey.HostHostKey, error) {
+						rep, err := client.DRKeyHostHost(ctx, drhelper.HostHostMetaToProtoRequest(meta))
+						if err != nil {
+							return drkey.HostHostKey{}, err
+						}
+						key, err := drhelper.GetHostHostKeyFromReply(rep, meta)
+						if err != nil {
+							return drkey.HostHostKey{}, err
+						}
+						return key, nil
+					})
 				default:
 					return serrors.New("unsupported path type")
 				}

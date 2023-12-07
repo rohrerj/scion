@@ -53,6 +53,7 @@ type FABRID struct {
 	numHops          int
 	policyIDs        []*fabrid.FabridPolicyID
 	ias              []addr.IA
+	support          map[addr.IA]bool
 }
 
 func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDsPerHop []snet.FabridPolicyPerHop, conf *FabridConfig) (*FABRID, error) {
@@ -74,6 +75,7 @@ func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDsP
 		tmpBuffer:        make([]byte, 64),
 		identifierBuffer: make([]byte, 8),
 		fabridBuffer:     make([]byte, 8+4*numHops),
+		support:          make(map[addr.IA]bool),
 		Raw:              append([]byte(nil), p.Raw...),
 		policyIDs:        policyIDs,
 	}
@@ -82,6 +84,9 @@ func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDsP
 		// ingress of the first HF and the egress of the second HF
 		f.ingresses[i] = hop.ConsIngress
 		f.egresses[i] = hop.ConsEgress
+	}
+	for _, ia := range ias {
+		f.support[ia] = true
 	}
 	f.baseTimestamp = decoded.InfoFields[0].Timestamp
 	return f, nil
@@ -222,14 +227,16 @@ func (f *FABRID) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
 			continue
 		}
 		meta := &extension.FabridHopfieldMetadata{}
-		meta.FabridEnabled = true
+		if f.support[f.ias[i]] {
+			meta.FabridEnabled = true
 
-		key := f.keys[f.ias[i]].Key
-		encPolicyID, err := fabrid.EncryptPolicyID(f.policyIDs[i], identifierOption, key[:])
-		if err != nil {
-			return serrors.WrapStr("encrypting policy ID", err)
+			key := f.keys[f.ias[i]].Key
+			encPolicyID, err := fabrid.EncryptPolicyID(f.policyIDs[i], identifierOption, key[:])
+			if err != nil {
+				return serrors.WrapStr("encrypting policy ID", err)
+			}
+			meta.EncryptedPolicyID = encPolicyID
 		}
-		meta.EncryptedPolicyID = encPolicyID
 		fabridOption.HopfieldMetadata[i] = meta
 	}
 	err = fabrid.InitValidators(fabridOption, identifierOption, s, f.tmpBuffer, f.pathKey.Key[:], f.keys, nil, f.ias, f.ingresses, f.egresses)
@@ -264,13 +271,18 @@ func (f *FABRID) SetExtensions(s *slayers.SCION, p *snet.PacketInfo) error {
 
 func (f *FABRID) renewExpiredKeys(t time.Time) error {
 	for ia, key := range f.keys {
-		if key.Epoch.NotAfter.Before(t) {
-			// key is expired, renew it
-			newKey, err := f.fetchKey(t, ia)
-			if err != nil {
-				return err
+		if f.support[ia] {
+			if key.Epoch.NotAfter.Before(t) {
+				// key is expired, renew it
+				newKey, err := f.fetchKey(t, ia)
+				if err != nil {
+					f.support[ia] = false
+					fmt.Println("Error while fetching drkey for AS", ia)
+					continue
+				}
+				fmt.Println("Successfully fetched drkey for AS", ia)
+				f.keys[ia] = newKey
 			}
-			f.keys[ia] = newKey
 		}
 	}
 	if f.pathKey.Epoch.NotAfter.Before(t) {
