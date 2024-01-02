@@ -16,10 +16,11 @@ package control
 
 import (
 	"context"
-	"github.com/scionproto/scion/pkg/private/serrors"
-	"github.com/scionproto/scion/pkg/proto/control_plane/experimental"
 	"net"
 	"time"
+
+	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/proto/control_plane/experimental"
 
 	"github.com/scionproto/scion/pkg/log"
 	drpb "github.com/scionproto/scion/pkg/proto/control_plane"
@@ -32,6 +33,11 @@ type SecretValue struct {
 	EpochBegin time.Time
 	EpochEnd   time.Time
 	Key        [16]byte
+}
+
+type PolicyIPRange struct {
+	MPLSLabel uint32
+	IPPrefix  *net.IPNet
 }
 
 type Fetcher struct {
@@ -57,7 +63,7 @@ func NewFetcher(localIP string, csAddr string, dp Dataplane) (*Fetcher, error) {
 	return f, nil
 }
 
-func (f *Fetcher) StartFabridPolicyFetcher() {
+func (f *Fetcher) StartFabridPolicyFetcher(interfaces []uint16) {
 	retryAfterErrorDuration := 10 * time.Second
 	for {
 		policies, err := f.queryFabridPolicies()
@@ -66,7 +72,22 @@ func (f *Fetcher) StartFabridPolicyFetcher() {
 			time.Sleep(retryAfterErrorDuration)
 			continue
 		}
-		err = f.dp.UpdateFabridPolicies(policies)
+		// create tmp solution until control service is updated with new data structure
+		// <TODO delete this part>
+		tmp := make(map[uint32][]*PolicyIPRange)
+		for policyIndex, mplsLabel := range policies {
+			for _, iface := range interfaces {
+				_, ipprefix, _ := net.ParseCIDR("0.0.0.0/0")
+				tmp[uint32(iface)<<8+uint32(policyIndex)] = []*PolicyIPRange{
+					{
+						IPPrefix:  ipprefix,
+						MPLSLabel: mplsLabel,
+					},
+				}
+			}
+		}
+		// </>
+		err = f.dp.UpdateFabridPolicies(tmp)
 		if err != nil {
 			log.Debug("Error while adding FABRID policies", "err", err)
 			time.Sleep(retryAfterErrorDuration)

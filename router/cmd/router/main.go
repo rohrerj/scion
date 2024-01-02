@@ -139,7 +139,11 @@ func realMain(ctx context.Context) error {
 		}()
 		go func() {
 			defer log.HandlePanic()
-			fetcher.StartFabridPolicyFetcher()
+			interfaces := make([]uint16, len(controlConfig.BR.IFIDs))
+			for i, iface := range controlConfig.BR.IFIDs {
+				interfaces[i] = uint16(iface)
+			}
+			fetcher.StartFabridPolicyFetcher(interfaces)
 		}()
 	}
 	g.Go(func() error {

@@ -130,8 +130,8 @@ func (f *FabridOption) DecodeForHF(b []byte, currHf uint8, numHfs uint8) error {
 	return nil
 }
 
-func (f *FabridOption) DecodeFull(b []byte, currHf uint8, numHfs uint8) error {
-	if err := f.validate(b, currHf, numHfs); err != nil {
+func (f *FabridOption) DecodeFull(b []byte, numHfs uint8) error {
+	if err := f.validate(b, 0, numHfs); err != nil {
 		return err
 	}
 	byteIndex := 0
@@ -172,13 +172,13 @@ func FabridOptionLen(numHopfields uint8) uint8 {
 	return baseFabridLen + numHopfields*uint8(FabridMetadataLen)
 }
 
-func ParseFabridOptionFullExtension(o *slayers.HopByHopOption, currHf uint8, numHfs uint8) (*FabridOption, error) {
+func ParseFabridOptionFullExtension(o *slayers.HopByHopOption, numHfs uint8) (*FabridOption, error) {
 	if o.OptType != slayers.OptTypeFabrid {
 		return nil,
 			serrors.New("Wrong option type", "expected", slayers.OptTypeFabrid, "actual", o.OptType)
 	}
 	f := &FabridOption{}
-	if err := f.DecodeFull(o.OptData, currHf, numHfs); err != nil {
+	if err := f.DecodeFull(o.OptData, numHfs); err != nil {
 		return nil, err
 	}
 	return f, nil

@@ -430,7 +430,7 @@ func TestSlowPathProcessing(t *testing.T) {
 	}{
 		"svc nobackend": {
 			prepareDP: func(ctrl *gomock.Controller) *DataPlane {
-				return NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					map[addr.SVC][]*net.UDPAddr{},
 					xtest.MustParseIA("1-ff00:0:110"), nil, testKey)
 			},
@@ -452,7 +452,7 @@ func TestSlowPathProcessing(t *testing.T) {
 		},
 		"svc invalid": {
 			prepareDP: func(ctrl *gomock.Controller) *DataPlane {
-				return NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					map[addr.SVC][]*net.UDPAddr{},
 					xtest.MustParseIA("1-ff00:0:110"), nil, testKey)
 			},
@@ -474,7 +474,7 @@ func TestSlowPathProcessing(t *testing.T) {
 		},
 		"invalid dest": {
 			prepareDP: func(ctrl *gomock.Controller) *DataPlane {
-				return NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					map[addr.SVC][]*net.UDPAddr{},
 					xtest.MustParseIA("1-ff00:0:110"), nil, testKey)
 			},

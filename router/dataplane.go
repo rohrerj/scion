@@ -118,7 +118,8 @@ type DataPlane struct {
 	drKeySecrets      [][2]*control.SecretValue
 	// determines whether index 0 or index 1 should be overwritten next
 	drKeySecretNextOverwrite []uint8
-	fabridPolicyMap          map[uint8]uint32
+	fabridPolicyMap          map[uint32][]*control.PolicyIPRange
+	externalRemoteAddresses  map[uint16]*net.UDPAddr
 
 	ExperimentalSCMPAuthentication bool
 
@@ -283,7 +284,7 @@ func (d *DataPlane) AddInternalInterface(conn BatchConn, ip net.IP) error {
 // AddExternalInterface adds the inter AS connection for the given interface ID.
 // If a connection for the given ID is already set this method will return an
 // error. This can only be called on a not yet running dataplane.
-func (d *DataPlane) AddExternalInterface(ifID uint16, conn BatchConn) error {
+func (d *DataPlane) AddExternalInterface(ifID uint16, conn BatchConn, remoteAddr *net.UDPAddr) error {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 	if d.running {
@@ -298,11 +299,15 @@ func (d *DataPlane) AddExternalInterface(ifID uint16, conn BatchConn) error {
 	if d.external == nil {
 		d.external = make(map[uint16]BatchConn)
 	}
+	if d.externalRemoteAddresses == nil {
+		d.externalRemoteAddresses = make(map[uint16]*net.UDPAddr)
+	}
 	if d.interfaces == nil {
 		d.interfaces = make(map[uint16]BatchConn)
 	}
 	d.interfaces[ifID] = conn
 	d.external[ifID] = conn
+	d.externalRemoteAddresses[ifID] = remoteAddr
 	return nil
 }
 
@@ -536,7 +541,7 @@ func (d *DataPlane) AddNextHopBFD(ifID uint16, src, dst *net.UDPAddr, cfg contro
 	return d.addBFDController(ifID, s, cfg, m)
 }
 
-func (d *DataPlane) UpdateFabridPolicies(policies map[uint8]uint32) error {
+func (d *DataPlane) UpdateFabridPolicies(policies map[uint32][]*control.PolicyIPRange) error {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 	// TODO(rohrerj): check for concurrency issues
@@ -1086,6 +1091,7 @@ func (p *scionPacketProcessor) reset() error {
 	p.identifier = nil
 	p.fabrid = nil
 	p.mplsLabel = 0
+	p.nextHop = nil
 	return nil
 }
 
@@ -1139,16 +1145,22 @@ func (p *scionPacketProcessor) processFabrid() error {
 	if err != nil {
 		return err
 	}
-	mplsLabel, found := p.d.fabridPolicyMap[policyID.ID]
+	policyMapKey := uint32(p.ingressID)<<8 + uint32(policyID.ID)
+	ipRanges, found := p.d.fabridPolicyMap[policyMapKey]
 	if !found {
-		return serrors.New("Provided policyID is invalid", "policyID", policyID, "id", p.identifier)
+		return serrors.New("Provided policyID is invalid", "ingress", p.ingressID, "policy index", policyID.ID)
 	}
-	p.mplsLabel = mplsLabel
-	err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, p.egressInterface())
-	if err != nil {
-		return err
+	for _, r := range ipRanges {
+		if r.IPPrefix.Contains(p.nextHop.IP) {
+			p.mplsLabel = r.MPLSLabel
+			err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, p.egressInterface())
+			if err != nil {
+				return err
+			}
+			return nil
+		}
 	}
-	return nil
+	return serrors.New("Provided policyID is not valid for ")
 }
 
 func (p *scionPacketProcessor) processHbhOptions() error {
@@ -1171,6 +1183,7 @@ func (p *scionPacketProcessor) processHbhOptions() error {
 				return serrors.New("Identifier HBH option must be present when using FABRID")
 			}
 			currHop := p.path.PathMeta.CurrHF
+			currHop--
 			if p.effectiveXover {
 				currHop--
 			}
@@ -1183,7 +1196,7 @@ func (p *scionPacketProcessor) processHbhOptions() error {
 				if err = p.processFabrid(); err != nil {
 					return err
 				}
-				fabrid.HopfieldMetadata[0].SerializeTo(opt.OptData[p.path.Base.PathMeta.CurrHF*4:])
+				fabrid.HopfieldMetadata[0].SerializeTo(opt.OptData[currHop*4:])
 			}
 		default:
 		}
@@ -1387,6 +1400,7 @@ type scionPacketProcessor struct {
 	fabrid            *extension.FabridOption
 	fabridInputBuffer []byte
 	mplsLabel         uint32
+	nextHop           *net.UDPAddr
 }
 
 type slowPathType int
@@ -1965,6 +1979,7 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 		if err != nil {
 			return r, err
 		}
+		p.nextHop = a
 		if err := p.processHbhOptions(); err != nil {
 			return processResult{}, err
 		}
@@ -1992,9 +2007,6 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 	if r, err := p.validateEgressID(); err != nil {
 		return r, err
 	}
-	if err := p.processHbhOptions(); err != nil {
-		return processResult{}, err
-	}
 	// handle egress router alert before we check if it's up because we want to
 	// send the reply anyway, so that trace route can pinpoint the exact link
 	// that failed.
@@ -2009,10 +2021,23 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 		if err := p.processEgress(); err != nil {
 			return processResult{}, err
 		}
-		return processResult{EgressID: egressID, OutPkt: p.rawPkt}, nil
+		// TODO(rohrerj) Add process HBH options with FABRID because this requires dst address
+		if a, ok := p.d.externalRemoteAddresses[egressID]; ok {
+			p.nextHop = a
+			if err := p.processHbhOptions(); err != nil {
+				return processResult{}, err
+			}
+			return processResult{EgressID: egressID, OutPkt: p.rawPkt}, nil
+		} else {
+			return processResult{}, serrors.New("External remote address map not consistent with external interfaces", "expected", egressID, "actual", p.d.externalRemoteAddresses)
+		}
 	}
 	// ASTransit: pkts leaving from another AS BR.
 	if a, ok := p.d.internalNextHops[egressID]; ok {
+		p.nextHop = a
+		if err := p.processHbhOptions(); err != nil {
+			return processResult{}, err
+		}
 		return processResult{OutAddr: a, OutPkt: p.rawPkt}, nil
 	}
 	errCode := slayers.SCMPCodeUnknownHopFieldEgress

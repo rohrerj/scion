@@ -118,30 +118,34 @@ func TestDataPlaneAddExternalInterface(t *testing.T) {
 
 		d := &router.DataPlane{}
 		d.FakeStart()
-		assert.Error(t, d.AddExternalInterface(42, mock_router.NewMockBatchConn(ctrl)))
+		remoteIP1, _ := net.ResolveUDPAddr("udp", "127.0.0.7:8888")
+		assert.Error(t, d.AddExternalInterface(42, mock_router.NewMockBatchConn(ctrl), remoteIP1))
 	})
 	t.Run("setting nil value is not allowed", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
 		d := &router.DataPlane{}
-		assert.Error(t, d.AddExternalInterface(42, nil))
+		assert.Error(t, d.AddExternalInterface(42, nil, nil))
 	})
 	t.Run("normal add works", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
 		d := &router.DataPlane{}
-		assert.NoError(t, d.AddExternalInterface(42, mock_router.NewMockBatchConn(ctrl)))
-		assert.NoError(t, d.AddExternalInterface(45, mock_router.NewMockBatchConn(ctrl)))
+		remoteIP1, _ := net.ResolveUDPAddr("udp", "127.0.0.7:8888")
+		remoteIP2, _ := net.ResolveUDPAddr("udp", "127.0.0.7:8888")
+		assert.NoError(t, d.AddExternalInterface(42, mock_router.NewMockBatchConn(ctrl), remoteIP1))
+		assert.NoError(t, d.AddExternalInterface(45, mock_router.NewMockBatchConn(ctrl), remoteIP2))
 	})
 	t.Run("overwrite fails", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
 		d := &router.DataPlane{}
-		assert.NoError(t, d.AddExternalInterface(42, mock_router.NewMockBatchConn(ctrl)))
-		assert.Error(t, d.AddExternalInterface(42, mock_router.NewMockBatchConn(ctrl)))
+		remoteIP1, _ := net.ResolveUDPAddr("udp", "127.0.0.7:8888")
+		assert.NoError(t, d.AddExternalInterface(42, mock_router.NewMockBatchConn(ctrl), remoteIP1))
+		assert.Error(t, d.AddExternalInterface(42, mock_router.NewMockBatchConn(ctrl), remoteIP1))
 	})
 }
 
@@ -229,8 +233,15 @@ func TestDataPlaneRun(t *testing.T) {
 				policyID := fabrid.FabridPolicyID{
 					ID: 0x0f,
 				}
-				ret.UpdateFabridPolicies(map[uint8]uint32{
-					policyID.ID: 1,
+				_, ipPrefix, _ := net.ParseCIDR("0.0.0.0/0")
+				ret.UpdateFabridPolicies(map[uint32][]*control.PolicyIPRange{
+					// ingress 3 with policy index 0x0f
+					(3<<8 + 0x0f): {
+						{
+							MPLSLabel: 1,
+							IPPrefix:  ipPrefix,
+						},
+					},
 				})
 
 				asToHostKey, err := ret.DeriveASToHostKey(int32(drkey.FABRID), now,
@@ -356,7 +367,7 @@ func TestDataPlaneRun(t *testing.T) {
 							case slayers.OptTypeFabrid:
 								containsFabrid = true
 								if containsIdentifier {
-									foundFabrid, err = extension.ParseFabridOptionFullExtension(hbhOption, 1, 3)
+									foundFabrid, err = extension.ParseFabridOptionFullExtension(hbhOption, 3)
 									assert.NoError(t, err)
 									meta := foundFabrid.HopfieldMetadata[1]
 									tmp := make([]byte, 100)
@@ -382,9 +393,9 @@ func TestDataPlaneRun(t *testing.T) {
 				mExternal2.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 				_ = ret.AddInternalInterface(mExternal2, net.IP{})
 
-				_ = ret.AddExternalInterface(3, mExternal)
+				_ = ret.AddExternalInterface(3, mExternal, xtest.MustParseUDPAddr(t, "127.0.0.7:8888"))
 				_ = ret.AddLinkType(3, topology.Core)
-				_ = ret.AddExternalInterface(4, mExternal2)
+				_ = ret.AddExternalInterface(4, mExternal2, xtest.MustParseUDPAddr(t, "127.0.0.8:8888"))
 				_ = ret.AddLinkType(4, topology.Core)
 
 				_ = ret.SetIA(local)
@@ -455,7 +466,7 @@ func TestDataPlaneRun(t *testing.T) {
 				mExternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 				mExternal.EXPECT().WriteTo(gomock.Any(), gomock.Any()).Return(0, nil).AnyTimes()
 
-				_ = ret.AddExternalInterface(1, mExternal)
+				_ = ret.AddExternalInterface(1, mExternal, xtest.MustParseUDPAddr(t, "127.0.0.6:8888"))
 
 				_ = ret.SetIA(local)
 				_ = ret.SetKey(key)
@@ -645,7 +656,7 @@ func TestDataPlaneRun(t *testing.T) {
 				}
 				_ = ret.SetKey([]byte("randomkeyformacs"))
 				_ = ret.AddInternalInterface(mInternal, net.IP{})
-				_ = ret.AddExternalInterface(ifID, mExternal)
+				_ = ret.AddExternalInterface(ifID, mExternal, xtest.MustParseUDPAddr(t, "127.0.0.8:8888"))
 				_ = ret.AddExternalInterfaceBFD(ifID, mExternal, local, remote, bfd())
 
 				return ret
@@ -725,7 +736,7 @@ func TestDataPlaneRun(t *testing.T) {
 				}
 				_ = ret.SetKey([]byte("randomkeyformacs"))
 				_ = ret.AddInternalInterface(mInternal, net.IP{})
-				_ = ret.AddExternalInterface(1, mExternal)
+				_ = ret.AddExternalInterface(1, mExternal, xtest.MustParseUDPAddr(t, "127.0.0.8:8888"))
 				_ = ret.AddExternalInterfaceBFD(1, mExternal, local, remote, bfd())
 
 				return ret
@@ -783,7 +794,7 @@ func TestProcessPkt(t *testing.T) {
 	}{
 		"inbound": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return router.NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					nil, xtest.MustParseIA("1-ff00:0:110"), nil, key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
@@ -814,6 +825,9 @@ func TestProcessPkt(t *testing.T) {
 				return router.NewDP(
 					map[uint16]router.BatchConn{
 						uint16(1): mock_router.NewMockBatchConn(ctrl),
+					},
+					map[uint16]*net.UDPAddr{
+						1: xtest.MustParseUDPAddr(t, "127.0.0.8:8888"),
 					},
 					map[uint16]topology.LinkType{
 						1: topology.Child,
@@ -850,6 +864,9 @@ func TestProcessPkt(t *testing.T) {
 					map[uint16]router.BatchConn{
 						uint16(2): mock_router.NewMockBatchConn(ctrl),
 					},
+					map[uint16]*net.UDPAddr{
+						2: xtest.MustParseUDPAddr(t, "127.0.0.8:8888"),
+					},
 					map[uint16]topology.LinkType{
 						1: topology.Parent,
 						2: topology.Child,
@@ -885,6 +902,9 @@ func TestProcessPkt(t *testing.T) {
 					map[uint16]router.BatchConn{
 						uint16(2): mock_router.NewMockBatchConn(ctrl),
 					},
+					map[uint16]*net.UDPAddr{
+						2: xtest.MustParseUDPAddr(t, "127.0.0.8:8888"),
+					},
 					map[uint16]topology.LinkType{
 						2: topology.Parent,
 						1: topology.Child,
@@ -919,6 +939,9 @@ func TestProcessPkt(t *testing.T) {
 				return router.NewDP(
 					map[uint16]router.BatchConn{
 						uint16(2): mock_router.NewMockBatchConn(ctrl),
+					},
+					map[uint16]*net.UDPAddr{
+						2: xtest.MustParseUDPAddr(t, "127.0.0.8:8888"),
 					},
 					map[uint16]topology.LinkType{
 						1: topology.Peer,
@@ -990,6 +1013,9 @@ func TestProcessPkt(t *testing.T) {
 				return router.NewDP(
 					map[uint16]router.BatchConn{
 						uint16(1): mock_router.NewMockBatchConn(ctrl),
+					},
+					map[uint16]*net.UDPAddr{
+						1: xtest.MustParseUDPAddr(t, "127.0.0.8:8888"),
 					},
 					map[uint16]topology.LinkType{
 						1: topology.Peer,
@@ -1070,6 +1096,9 @@ func TestProcessPkt(t *testing.T) {
 					map[uint16]router.BatchConn{
 						uint16(2): mock_router.NewMockBatchConn(ctrl),
 					},
+					map[uint16]*net.UDPAddr{
+						2: xtest.MustParseUDPAddr(t, "127.0.0.8:8888"),
+					},
 					map[uint16]topology.LinkType{
 						1: topology.Peer,
 						2: topology.Child,
@@ -1144,6 +1173,9 @@ func TestProcessPkt(t *testing.T) {
 				return router.NewDP(
 					map[uint16]router.BatchConn{
 						uint16(1): mock_router.NewMockBatchConn(ctrl),
+					},
+					map[uint16]*net.UDPAddr{
+						1: xtest.MustParseUDPAddr(t, "127.0.0.8:8888"),
 					},
 					map[uint16]topology.LinkType{
 						1: topology.Peer,
@@ -1227,7 +1259,7 @@ func TestProcessPkt(t *testing.T) {
 		},
 		"astransit direct": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(nil,
+				return router.NewDP(nil, nil,
 					map[uint16]topology.LinkType{
 						1: topology.Core,
 						3: topology.Core,
@@ -1258,7 +1290,7 @@ func TestProcessPkt(t *testing.T) {
 		},
 		"astransit xover": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(nil,
+				return router.NewDP(nil, nil,
 					map[uint16]topology.LinkType{
 						51: topology.Child,
 						3:  topology.Core,
@@ -1311,7 +1343,7 @@ func TestProcessPkt(t *testing.T) {
 		},
 		"svc": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return router.NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					map[addr.SVC][]*net.UDPAddr{
 						addr.SvcCS: {
 							&net.UDPAddr{
@@ -1348,6 +1380,7 @@ func TestProcessPkt(t *testing.T) {
 		"onehop inbound": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
 				return router.NewDP(
+					nil,
 					nil,
 					nil,
 					mock_router.NewMockBatchConn(ctrl), nil,
@@ -1411,7 +1444,7 @@ func TestProcessPkt(t *testing.T) {
 		"onehop inbound invalid src": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
 				return router.NewDP(
-					nil, nil, nil, nil, nil,
+					nil, nil, nil, nil, nil, nil,
 					xtest.MustParseIA("1-ff00:0:110"),
 					map[uint16]addr.IA{
 						uint16(1): xtest.MustParseIA("1-ff00:0:111"),
@@ -1450,6 +1483,9 @@ func TestProcessPkt(t *testing.T) {
 				return router.NewDP(
 					map[uint16]router.BatchConn{
 						uint16(1): mock_router.NewMockBatchConn(ctrl),
+					},
+					map[uint16]*net.UDPAddr{
+						1: xtest.MustParseUDPAddr(t, "127.0.0.8:8888"),
 					},
 					nil,
 					mock_router.NewMockBatchConn(ctrl), nil,
@@ -1511,6 +1547,9 @@ func TestProcessPkt(t *testing.T) {
 					map[uint16]router.BatchConn{
 						uint16(2): mock_router.NewMockBatchConn(ctrl),
 					},
+					map[uint16]*net.UDPAddr{
+						2: xtest.MustParseUDPAddr(t, "127.0.0.8:8888"),
+					},
 					nil,
 					mock_router.NewMockBatchConn(ctrl), nil,
 					nil,
@@ -1554,7 +1593,7 @@ func TestProcessPkt(t *testing.T) {
 		},
 		"epic inbound": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return router.NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					nil, xtest.MustParseIA("1-ff00:0:110"), nil, key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
@@ -1570,7 +1609,7 @@ func TestProcessPkt(t *testing.T) {
 		},
 		"epic malformed path": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return router.NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					nil, xtest.MustParseIA("1-ff00:0:110"), nil, key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
@@ -1587,7 +1626,7 @@ func TestProcessPkt(t *testing.T) {
 		},
 		"epic invalid timestamp": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return router.NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					nil, xtest.MustParseIA("1-ff00:0:110"), nil, key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
@@ -1606,7 +1645,7 @@ func TestProcessPkt(t *testing.T) {
 		},
 		"epic invalid LHVF": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return router.NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					nil, xtest.MustParseIA("1-ff00:0:110"), nil, key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {

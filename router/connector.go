@@ -141,7 +141,7 @@ func (c *Connector) AddExternalInterface(localIfID common.IFIDType, link control
 			return serrors.WrapStr("adding external BFD", err, "if_id", localIfID)
 		}
 	}
-	return c.DataPlane.AddExternalInterface(intf, connection)
+	return c.DataPlane.AddExternalInterface(intf, connection, link.Remote.Addr)
 }
 
 // AddSvc adds the service address for the given ISD-AS.
@@ -172,7 +172,7 @@ func (c *Connector) AddDRKeySecret(protocolID int32, sv control.SecretValue) err
 	return c.DataPlane.AddDRKeySecret(protocolID, sv)
 }
 
-func (c *Connector) UpdateFabridPolicies(policies map[uint8]uint32) error {
+func (c *Connector) UpdateFabridPolicies(policies map[uint32][]*control.PolicyIPRange) error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	return c.DataPlane.UpdateFabridPolicies(policies)

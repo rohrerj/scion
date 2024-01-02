@@ -116,7 +116,7 @@ func TestFabridDecode(t *testing.T) {
 		func(tc test) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				f, err := extension.ParseFabridOptionFullExtension(tc.o, tc.currHf, tc.numHfs)
+				f, err := extension.ParseFabridOptionFullExtension(tc.o, tc.numHfs)
 				tc.validate(f, err, t)
 			})
 		}(tc)
