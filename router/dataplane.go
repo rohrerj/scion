@@ -1148,19 +1148,25 @@ func (p *scionPacketProcessor) processFabrid() error {
 	policyMapKey := uint32(p.ingressID)<<8 + uint32(policyID.ID)
 	ipRanges, found := p.d.fabridPolicyMap[policyMapKey]
 	if !found {
-		return serrors.New("Provided policyID is invalid", "ingress", p.ingressID, "policy index", policyID.ID)
+		return serrors.New("Provided policyID is invalid", "ingress", p.ingressID, "index", policyID.ID)
 	}
+	var bestRange *control.PolicyIPRange
 	for _, r := range ipRanges {
 		if r.IPPrefix.Contains(p.nextHop.IP) {
-			p.mplsLabel = r.MPLSLabel
-			err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, p.egressInterface())
-			if err != nil {
-				return err
+			if bestRange == nil || bestRange.IPPrefix.Contains(r.IPPrefix.IP) {
+				bestRange = r
 			}
-			return nil
 		}
 	}
-	return serrors.New("Provided policyID is not valid for ")
+	if bestRange == nil {
+		return serrors.New("Provided policy index is not valid for nexthop.", "index", policyID.ID, "ip", p.nextHop.IP)
+	}
+	p.mplsLabel = bestRange.MPLSLabel
+	err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, p.egressInterface())
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (p *scionPacketProcessor) processHbhOptions() error {
