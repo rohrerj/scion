@@ -158,31 +158,29 @@ func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption, s *slayers.SC
 
 	outBuffer := make([]byte, 16)
 	for i, meta := range f.HopfieldMetadata {
-		var key drkey.Key
-		if meta.ASLevelKey {
-			asAsKey, found := asAsKeys[ias[i]]
-			if !found {
-				return serrors.New("InitValidators expected AS to AS key but was not in dictionary", "AS", ias[i])
-			}
-			key = asAsKey.Key
-		} else {
-			asHostKey, found := asHostKeys[ias[i]]
-			if !found {
-				return serrors.New("InitValidators expected AS to AS key but was not in dictionary", "AS", ias[i])
-			}
-			key = asHostKey.Key
-		}
-
-		err := computeFabridHVF(meta, id, s, tmpBuffer, outBuffer, key[:], ingresses[i], egresses[i])
-		if err != nil {
-			return err
-		}
-		outBuffer[0] &= 0x3f // ignore first two (left) bits
-		outBuffer[3] &= 0x3f // ignore first two (left) bits
 		if meta.FabridEnabled {
+			var key drkey.Key
+			if meta.ASLevelKey {
+				asAsKey, found := asAsKeys[ias[i]]
+				if !found {
+					return serrors.New("InitValidators expected AS to AS key but was not in dictionary", "AS", ias[i])
+				}
+				key = asAsKey.Key
+			} else {
+				asHostKey, found := asHostKeys[ias[i]]
+				if !found {
+					return serrors.New("InitValidators expected AS to AS key but was not in dictionary", "AS", ias[i])
+				}
+				key = asHostKey.Key
+			}
+
+			err := computeFabridHVF(meta, id, s, tmpBuffer, outBuffer, key[:], ingresses[i], egresses[i])
+			if err != nil {
+				return err
+			}
+			outBuffer[0] &= 0x3f // ignore first two (left) bits
+			outBuffer[3] &= 0x3f // ignore first two (left) bits
 			copy(meta.HopValidationField[:3], outBuffer[:3])
-		} else {
-			copy(meta.HopValidationField[:3], outBuffer[3:6])
 		}
 	}
 	return nil

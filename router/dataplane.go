@@ -1145,6 +1145,16 @@ func (p *scionPacketProcessor) processFabrid() error {
 	if err != nil {
 		return err
 	}
+
+	// Verify and update for 0 policy, no MPLS label
+	if policyID.ID == 0 {
+		err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, p.egressInterface())
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
 	policyMapKey := uint32(p.ingressID)<<8 + uint32(policyID.ID)
 	ipRanges, found := p.d.fabridPolicyMap[policyMapKey]
 	if !found {
