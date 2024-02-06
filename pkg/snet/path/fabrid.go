@@ -63,9 +63,11 @@ func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDsP
 		return nil, serrors.WrapStr("decoding path", err)
 	}
 	numSegs := len(decoded.InfoFields)
-	numHops := len(decoded.HopFields) - numSegs + 1 // Remove second hop on crossovers
-	if decoded.InfoFields[0].Peer {
-		numHops++ // Re-add one hop if the segment change is from a peering link
+	var numHops int
+	if isPeering(decoded) {
+		numHops = len(decoded.HopFields)
+	} else {
+		numHops = len(decoded.HopFields) - numSegs + 1 // Remove hops introduced by crossovers
 	}
 	keys := make(map[addr.IA]drkey.ASHostKey, len(policyIDsPerHop))
 	var policyIDs []*fabrid.FabridPolicyID
@@ -117,6 +119,12 @@ func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDsP
 	f.baseTimestamp = decoded.InfoFields[0].Timestamp
 	return f, nil
 }
+
+func isPeering(path scion.Decoded) bool {
+	// Explicit check for assumption that peering paths can only have 2 segments
+	return path.NumINF == 2 && path.InfoFields[0].Peer && path.InfoFields[1].Peer
+}
+
 func hfEqual(consDir bool, consIngress, consEgress, compIngress, compEgress uint16) bool {
 	return (consIngress == compIngress && consEgress == compEgress && consDir) ||
 		(consIngress == compEgress && consEgress == compIngress && !consDir)

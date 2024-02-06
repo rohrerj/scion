@@ -1205,9 +1205,8 @@ func (p *scionPacketProcessor) processHbhOptions(egressIF uint16) error {
 				currHop -= p.path.PathMeta.CurrINF
 			}
 
-			// Exit if this is an intermediary egress router
+			// SKip if this is an intermediary egress router
 			if p.ingressID == 0 && currHop != 0 {
-				// Intermediary egress router. Skipping
 				return nil
 			}
 
