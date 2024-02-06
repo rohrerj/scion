@@ -1124,7 +1124,7 @@ func (dp *DataPlane) deriveASToHostKey(protocolID int32, t time.Time, srcAS addr
 	return asToHostKey, nil
 }
 
-func (p *scionPacketProcessor) processFabrid() error {
+func (p *scionPacketProcessor) processFabrid(egressIF uint16) error {
 	meta := p.fabrid.HopfieldMetadata[0]
 	src, err := p.scionLayer.SrcAddr()
 	if err != nil {
@@ -1148,7 +1148,7 @@ func (p *scionPacketProcessor) processFabrid() error {
 
 	// Verify and update for 0 policy, no MPLS label
 	if policyID.ID == 0 {
-		err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, p.egressInterface())
+		err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, egressIF)
 		if err != nil {
 			return err
 		}
@@ -1172,14 +1172,14 @@ func (p *scionPacketProcessor) processFabrid() error {
 		return serrors.New("Provided policy index is not valid for nexthop.", "index", policyID.ID, "ip", p.nextHop.IP)
 	}
 	p.mplsLabel = bestRange.MPLSLabel
-	err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, p.egressInterface())
+	err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, egressIF)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (p *scionPacketProcessor) processHbhOptions() error {
+func (p *scionPacketProcessor) processHbhOptions(egressIF uint16) error {
 	var err error
 	for _, opt := range p.hbhLayer.Options {
 		switch opt.OptType {
@@ -1198,18 +1198,31 @@ func (p *scionPacketProcessor) processHbhOptions() error {
 			if p.identifier == nil {
 				return serrors.New("Identifier HBH option must be present when using FABRID")
 			}
+
+			// Calculate FABRID hop index
 			currHop := p.path.PathMeta.CurrHF
-			currHop--
-			if p.effectiveXover {
-				currHop--
+			if !p.infoField.Peer {
+				currHop -= p.path.PathMeta.CurrINF
 			}
-			fabrid, err := extension.ParseFabridOptionCurrentHop(opt, currHop, uint8(p.path.NumHops))
+
+			// Exit if this is an intermediary egress router
+			if p.ingressID == 0 && currHop != 0 {
+				// Intermediary egress router. Skipping
+				return nil
+			}
+
+			// Calculate number of FABRID hops
+			numHFs := p.path.NumHops - p.path.NumINF + 1
+			if p.infoField.Peer {
+				numHFs++
+			}
+			fabrid, err := extension.ParseFabridOptionCurrentHop(opt, currHop, uint8(numHFs))
 			if err != nil {
 				return err
 			}
 			if fabrid.HopfieldMetadata[0].FabridEnabled {
 				p.fabrid = fabrid
-				if err = p.processFabrid(); err != nil {
+				if err = p.processFabrid(egressIF); err != nil {
 					return err
 				}
 				fabrid.HopfieldMetadata[0].SerializeTo(opt.OptData[currHop*4:])
@@ -1996,7 +2009,7 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 			return r, err
 		}
 		p.nextHop = a
-		if err := p.processHbhOptions(); err != nil {
+		if err := p.processHbhOptions(0); err != nil {
 			return processResult{}, err
 		}
 		return processResult{OutAddr: a, OutPkt: p.rawPkt}, nil
@@ -2034,15 +2047,14 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 	}
 	egressID := p.egressInterface()
 	if _, ok := p.d.external[egressID]; ok {
+		if err := p.processHbhOptions(egressID); err != nil {
+			return processResult{}, err
+		}
 		if err := p.processEgress(); err != nil {
 			return processResult{}, err
 		}
-		// TODO(rohrerj) Add process HBH options with FABRID because this requires dst address
 		if a, ok := p.d.externalRemoteAddresses[egressID]; ok {
 			p.nextHop = a
-			if err := p.processHbhOptions(); err != nil {
-				return processResult{}, err
-			}
 			return processResult{EgressID: egressID, OutPkt: p.rawPkt}, nil
 		} else {
 			return processResult{}, serrors.New("External remote address map not consistent with external interfaces", "expected", egressID, "actual", p.d.externalRemoteAddresses)
@@ -2051,7 +2063,7 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 	// ASTransit: pkts leaving from another AS BR.
 	if a, ok := p.d.internalNextHops[egressID]; ok {
 		p.nextHop = a
-		if err := p.processHbhOptions(); err != nil {
+		if err := p.processHbhOptions(egressID); err != nil {
 			return processResult{}, err
 		}
 		return processResult{OutAddr: a, OutPkt: p.rawPkt}, nil

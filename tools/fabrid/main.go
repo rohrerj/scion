@@ -73,7 +73,7 @@ type Pong struct {
 
 var (
 	remote                 snet.UDPAddr
-	timeout                = &util.DurWrap{Duration: 2 * time.Second}
+	timeout                = &util.DurWrap{Duration: 10 * time.Second}
 	scionPacketConnMetrics = metrics.NewSCIONPacketConnMetrics()
 	scmpErrorsCounter      = scionPacketConnMetrics.SCMPErrors
 	epic                   bool
@@ -346,7 +346,7 @@ func (c *client) attemptRequest(n int) bool {
 				DestinationIA:   remote.IA,
 				DestinationAddr: remote.Host.IP.String(),
 			}
-			policies := getZeroPolicies(path.Metadata().Interfaces)
+			var policies []snet.FabridPolicyPerHop
 			fabridPath, err := snetpath.NewFABRIDDataplanePath(s, path.Metadata().Interfaces,
 				policies, fabridConfig)
 			if err != nil {
@@ -425,35 +425,6 @@ func (c *client) attemptRequest(n int) bool {
 		return false
 	}
 	return true
-}
-
-func getZeroPolicies(interfaces []snet.PathInterface) []snet.FabridPolicyPerHop {
-
-	numHops := len(interfaces)/2 + 1
-
-	policies := make([]snet.FabridPolicyPerHop, numHops)
-
-	policies[0] = snet.FabridPolicyPerHop{
-		Pol:     &snet.FabridPolicyIdentifier{},
-		IA:      interfaces[0].IA,
-		Ingress: 0,
-		Egress:  uint16(interfaces[0].ID),
-	}
-	for i := 1; i < numHops-1; i++ {
-		policies[i] = snet.FabridPolicyPerHop{
-			Pol:     &snet.FabridPolicyIdentifier{},
-			IA:      interfaces[2*i-1].IA,
-			Ingress: uint16(interfaces[2*i-1].ID),
-			Egress:  uint16(interfaces[2*i].ID),
-		}
-	}
-	policies[numHops-1] = snet.FabridPolicyPerHop{
-		Pol:     &snet.FabridPolicyIdentifier{},
-		IA:      interfaces[2*(numHops-1)-1].IA,
-		Ingress: uint16(interfaces[2*(numHops-1)-1].ID),
-		Egress:  0,
-	}
-	return policies
 }
 
 func (c *client) ping(ctx context.Context, n int, path snet.Path) error {

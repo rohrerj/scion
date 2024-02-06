@@ -62,9 +62,25 @@ func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDsP
 	if err := decoded.DecodeFromBytes(p.Raw); err != nil {
 		return nil, serrors.WrapStr("decoding path", err)
 	}
-	numHops := len(decoded.HopFields)
+	numSegs := len(decoded.InfoFields)
+	numHops := len(decoded.HopFields) - numSegs + 1 // Remove second hop on crossovers
+	if decoded.InfoFields[0].Peer {
+		numHops++ // Re-add one hop if the segment change is from a peering link
+	}
 	keys := make(map[addr.IA]drkey.ASHostKey, len(policyIDsPerHop))
-	policyIDs, ias := policiesToHopFields(numHops, policyIDsPerHop, decoded, keys)
+	var policyIDs []*fabrid.FabridPolicyID
+	var ias []addr.IA
+	if len(policyIDsPerHop) > 0 {
+		policyIDs, ias = policiesToHopFields(numHops, policyIDsPerHop, decoded, keys)
+	} else {
+		// If no policies are provided, use zero policy for all hops
+		policyIDs = make([]*fabrid.FabridPolicyID, numHops)
+		for i := 0; i < numHops; i++ {
+			policyIDs[i] = &fabrid.FabridPolicyID{ID: 0}
+		}
+		ias = make([]addr.IA, numHops)
+
+	}
 	f := &FABRID{
 		numHops:          numHops,
 		conf:             conf,
@@ -79,12 +95,22 @@ func NewFABRIDDataplanePath(p SCION, interfaces []snet.PathInterface, policyIDsP
 		Raw:              append([]byte(nil), p.Raw...),
 		policyIDs:        policyIDs,
 	}
-	for i, hop := range decoded.HopFields {
-		// TODO: in the xover case the metadata field should use the
-		// ingress of the first HF and the egress of the second HF
-		f.ingresses[i] = hop.ConsIngress
-		f.egresses[i] = hop.ConsEgress
+
+	// Get ingress/egress IFs and IAs from path interfaces
+	f.ingresses[0] = 0
+	f.egresses[0] = uint16(interfaces[0].ID)
+	f.ias[0] = interfaces[0].IA
+	f.keys[f.ias[0]] = drkey.ASHostKey{}
+	for i := 1; i < numHops-1; i++ {
+		f.ingresses[i] = uint16(interfaces[2*i-1].ID)
+		f.egresses[i] = uint16(interfaces[2*i].ID)
+		f.ias[i] = interfaces[2*i-1].IA
+		f.keys[f.ias[i]] = drkey.ASHostKey{}
 	}
+	f.ingresses[numHops-1] = uint16(interfaces[(numHops-1)*2-1].ID)
+	f.egresses[numHops-1] = 0
+	f.ias[numHops-1] = interfaces[(numHops-1)*2-1].IA
+	f.keys[f.ias[numHops-1]] = drkey.ASHostKey{}
 	for _, ia := range ias {
 		f.support[ia] = true
 	}
@@ -117,22 +143,7 @@ func policiesToHopFields(numHops int, policyIDs []snet.FabridPolicyPerHop, decod
 				policyIDs[polIdx].Ingress,
 				policyIDs[polIdx].Egress)
 
-			hfTwoToOne := hfIdx < numHops && hfIdx+1 < numHops &&
-				hfEqual(decoded.InfoFields[ifIdx].ConsDir,
-					decoded.HopFields[hfIdx].ConsIngress,
-					decoded.HopFields[hfIdx].ConsEgress,
-					policyIDs[polIdx].Ingress, 0) &&
-				((seg+1 < seglen &&
-					hfEqual(decoded.InfoFields[ifIdx].ConsDir,
-						decoded.HopFields[hfIdx+1].ConsIngress,
-						decoded.HopFields[hfIdx+1].ConsEgress,
-						policyIDs[polIdx].Ingress, 0)) ||
-					(seg+1 >= seglen && ifIdx+1 < decoded.NumINF &&
-						hfEqual(decoded.InfoFields[ifIdx+1].ConsDir,
-							decoded.HopFields[hfIdx+1].ConsIngress,
-							decoded.HopFields[hfIdx+1].ConsEgress, 0,
-							policyIDs[polIdx].Egress)))
-			fmt.Println("HFPol", hfIdx, hfOneToOne, hfTwoToOne, decoded.InfoFields[ifIdx].ConsDir, decoded.HopFields[hfIdx], policyIDs[polIdx])
+			fmt.Println("HFPol", hfIdx, hfOneToOne, decoded.InfoFields[ifIdx].ConsDir, decoded.HopFields[hfIdx], policyIDs[polIdx])
 
 			if hfOneToOne {
 				if policyIDs[polIdx].Pol == nil {
@@ -147,26 +158,6 @@ func policiesToHopFields(numHops int, policyIDs []snet.FabridPolicyPerHop, decod
 
 				}
 				ias[hfIdx] = policyIDs[polIdx].IA
-			} else if hfTwoToOne {
-				if policyIDs[polIdx].Pol == nil {
-					polIds[hfIdx] = nil
-					polIds[hfIdx+1] = nil
-					fmt.Println(hfIdx, " is not using a policy")
-				} else {
-					polIds[hfIdx] = &fabrid.FabridPolicyID{
-						ID: policyIDs[polIdx].Pol.Index,
-					}
-					polIds[hfIdx+1] = &fabrid.FabridPolicyID{
-						ID: policyIDs[polIdx].Pol.Index,
-					}
-					fmt.Println(hfIdx, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
-					fmt.Println(hfIdx+1, " is using policy index: ", policyIDs[polIdx].Pol.Index, policyIDs[polIdx].IA)
-
-				}
-				ias[hfIdx] = policyIDs[polIdx].IA
-				ias[hfIdx+1] = policyIDs[polIdx].IA
-				hfIdx++
-				seg++
 			} else {
 				polIds[hfIdx] = nil
 				fmt.Println(hfIdx, " is using policy index nil ")
