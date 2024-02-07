@@ -24,6 +24,8 @@ import (
 	"fmt"
 	drhelper "github.com/scionproto/scion/pkg/daemon/helper"
 	"github.com/scionproto/scion/pkg/drkey"
+	"github.com/scionproto/scion/pkg/drkey/specific"
+	"github.com/scionproto/scion/pkg/experimental/fabrid"
 	drpb "github.com/scionproto/scion/pkg/proto/control_plane"
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/slayers/extension"
@@ -101,7 +103,8 @@ func realMain() int {
 	}
 	defer closeTracer()
 	if integration.Mode == integration.ModeServer {
-		server{}.run()
+		s := server{}
+		s.run()
 		return 0
 	}
 	c := client{}
@@ -128,9 +131,13 @@ func validateFlags() {
 	}
 }
 
-type server struct{}
+type server struct {
+	grpcConn *grpc.ClientConn
+}
 
-func (s server) run() {
+func (s *server) run() {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout.Duration)
+	defer cancel()
 	log.Info("Starting server", "isd_as", integration.Local.IA)
 	defer log.Info("Finished server", "isd_as", integration.Local.IA)
 
@@ -144,7 +151,7 @@ func (s server) run() {
 		},
 		SCIONPacketConnMetrics: scionPacketConnMetrics,
 	}
-	conn, port, err := connFactory.Register(context.Background(), integration.Local.IA,
+	conn, port, err := connFactory.Register(ctx, integration.Local.IA,
 		integration.Local.Host, addr.SvcNone)
 	if err != nil {
 		integration.LogFatal("Error listening", "err", err)
@@ -154,6 +161,30 @@ func (s server) run() {
 		// Needed for integration test ready signal.
 		fmt.Printf("Port=%d\n", port)
 		fmt.Printf("%s%s\n\n", libint.ReadySignal, integration.Local.IA)
+	}
+
+	servicesInfo, err := sdConn.SVCInfo(ctx, []addr.SVC{addr.SvcCS})
+	if err != nil {
+		integration.LogFatal("Error getting services", "err", err)
+	}
+	controlServiceInfo := servicesInfo[addr.SvcCS][0]
+	localAddr := &net.TCPAddr{
+		IP:   integration.Local.Host.IP,
+		Port: 0,
+	}
+	controlAddr, err := net.ResolveTCPAddr("tcp", controlServiceInfo)
+	if err != nil {
+		integration.LogFatal("Error resolving CS", "err", err)
+	}
+
+	dialer := func(ctx context.Context, addr string) (net.Conn, error) {
+		return net.DialTCP("tcp", localAddr, controlAddr)
+	}
+
+	s.grpcConn, err = grpc.DialContext(ctx, controlServiceInfo,
+		grpc.WithInsecure(), grpc.WithContextDialer(dialer))
+	if err != nil {
+		integration.LogFatal("Error connecting to CS", "err", err)
 	}
 	log.Info("Listening", "local", fmt.Sprintf("%v:%d", integration.Local.Host, port))
 
@@ -165,7 +196,7 @@ func (s server) run() {
 	}
 }
 
-func (s server) handlePing(conn snet.PacketConn) error {
+func (s *server) handlePing(conn snet.PacketConn) error {
 	var p snet.Packet
 	var ov net.UDPAddr
 	if err := readFrom(conn, &p, &ov); err != nil {
@@ -176,31 +207,59 @@ func (s server) handlePing(conn snet.PacketConn) error {
 	var identifierOption *extension.IdentifierOption
 	var fabridOption *extension.FabridOption
 	var err error
-	if p.HbhExtension != nil {
-		for _, opt := range p.HbhExtension.Options {
-			switch opt.OptType {
-			case slayers.OptTypeIdentifier:
-				decoded := scion.Decoded{}
-				err := decoded.DecodeFromBytes(p.Path.(snet.RawPath).Raw)
-				if err != nil {
-					return err
-				}
-				baseTimestamp := decoded.InfoFields[0].Timestamp
-				identifierOption, err = extension.ParseIdentifierOption(opt, baseTimestamp)
-				if err != nil {
-					return err
-				}
-			case slayers.OptTypeFabrid:
-				fabridOption, err = extension.ParseFabridOptionFullExtension(opt, (opt.OptDataLen-4)/4)
-				if err != nil {
-					return err
+
+	// Only check FABRID for remote connections
+	if p.Source.IA != integration.Local.IA {
+		if p.HbhExtension != nil {
+			for _, opt := range p.HbhExtension.Options {
+				switch opt.OptType {
+				case slayers.OptTypeIdentifier:
+					decoded := scion.Decoded{}
+					err := decoded.DecodeFromBytes(p.Path.(snet.RawPath).Raw)
+					if err != nil {
+						return err
+					}
+					baseTimestamp := decoded.InfoFields[0].Timestamp
+					identifierOption, err = extension.ParseIdentifierOption(opt, baseTimestamp)
+					if err != nil {
+						return err
+					}
+				case slayers.OptTypeFabrid:
+					fabridOption, err = extension.ParseFabridOptionFullExtension(opt, (opt.OptDataLen-4)/4)
+					if err != nil {
+						return err
+					}
 				}
 			}
+		} else {
+			return serrors.New("Missing HBH extension")
+		}
+
+		if fabridOption == nil {
+			return serrors.New("Missing FABRID option")
+		}
+
+		if identifierOption == nil {
+			return serrors.New("Missing identifier option")
+		}
+
+		hostASKey, err := s.fetchHostASKey(identifierOption.Timestamp, p.Source.IA)
+		if err != nil {
+			return err
+		}
+
+		hostHostKey, err := s.deriveHostHostKey(p.Source.Host.IP().String(), hostASKey)
+		if err != nil {
+			return err
+		}
+
+		tmpBuffer := make([]byte, (len(fabridOption.HopfieldMetadata)*3+15)&^15+16)
+		_, err = fabrid.VerifyPathValidator(fabridOption, tmpBuffer, hostHostKey[:])
+		if err != nil {
+			return err
 		}
 	}
-	if fabridOption != nil && identifierOption != nil {
-		log.Debug("Options", "fabrid", fabridOption, "id", identifierOption)
-	}
+
 	udp, ok := p.Payload.(snet.UDPPayload)
 	if !ok {
 		return serrors.New("unexpected payload received",
@@ -268,7 +327,7 @@ func (s server) handlePing(conn snet.PacketConn) error {
 	// reverse path
 	rpath, ok := p.Path.(snet.RawPath)
 	if !ok {
-		return serrors.New("unecpected path", "type", common.TypeOf(p.Path))
+		return serrors.New("unexpected path", "type", common.TypeOf(p.Path))
 	}
 	replypather := snet.DefaultReplyPather{}
 	replyPath, err := replypather.ReplyPath(rpath)
@@ -282,6 +341,37 @@ func (s server) handlePing(conn snet.PacketConn) error {
 	}
 	log.Info("Sent pong to", "client", p.Destination)
 	return nil
+}
+
+func (s *server) fetchHostASKey(t time.Time, dstIA addr.IA) (drkey.HostASKey, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	drkeyClient := drpb.NewDRKeyIntraServiceClient(s.grpcConn)
+	meta := drkey.HostASMeta{
+		Validity: t,
+		SrcIA:    integration.Local.IA,
+		SrcHost:  integration.Local.Host.IP.String(),
+		DstIA:    dstIA,
+		ProtoId:  drkey.FABRID,
+	}
+	rep, err := drkeyClient.DRKeyHostAS(ctx, drhelper.HostASMetaToProtoRequest(meta))
+	if err != nil {
+		return drkey.HostASKey{}, err
+	}
+	key, err := drhelper.GetHostASKeyFromReply(rep, meta)
+	if err != nil {
+		return drkey.HostASKey{}, err
+	}
+	return key, nil
+}
+
+func (s *server) deriveHostHostKey(dstHost string, hostAsKey drkey.HostASKey) (drkey.Key, error) {
+	d := specific.Deriver{}
+	hostHostKey, err := d.DeriveHostHost(dstHost, hostAsKey.Key)
+	if err != nil {
+		return drkey.Key{}, err
+	}
+	return hostHostKey, nil
 }
 
 type client struct {
@@ -370,7 +460,6 @@ func (c *client) attemptRequest(n int) bool {
 				return false
 			}
 
-			fmt.Println("CS:", controlServiceInfo)
 			dialer := func(ctx context.Context, addr string) (net.Conn, error) {
 				return net.DialTCP("tcp", localAddr, controlAddr)
 			}
@@ -381,9 +470,9 @@ func (c *client) attemptRequest(n int) bool {
 				return false
 			}
 			defer grpcconn.Close()
-			client := drpb.NewDRKeyIntraServiceClient(grpcconn)
+			drkeyClient := drpb.NewDRKeyIntraServiceClient(grpcconn)
 			fabridPath.RegisterDRKeyFetcher(func(ctx context.Context, meta drkey.ASHostMeta) (drkey.ASHostKey, error) {
-				rep, err := client.DRKeyASHost(ctx, drhelper.AsHostMetaToProtoRequest(meta))
+				rep, err := drkeyClient.DRKeyASHost(ctx, drhelper.AsHostMetaToProtoRequest(meta))
 				if err != nil {
 					return drkey.ASHostKey{}, err
 				}
@@ -393,7 +482,7 @@ func (c *client) attemptRequest(n int) bool {
 				}
 				return key, nil
 			}, func(ctx context.Context, meta drkey.HostHostMeta) (drkey.HostHostKey, error) {
-				rep, err := client.DRKeyHostHost(ctx, drhelper.HostHostMetaToProtoRequest(meta))
+				rep, err := drkeyClient.DRKeyHostHost(ctx, drhelper.HostHostMetaToProtoRequest(meta))
 				if err != nil {
 					return drkey.HostHostKey{}, err
 				}

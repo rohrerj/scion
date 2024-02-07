@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"encoding/base64"
 	"encoding/binary"
 
 	"github.com/scionproto/scion/pkg/addr"
@@ -151,12 +152,37 @@ func EncryptPolicyID(f *FabridPolicyID, id *ext.IdentifierOption,
 	return policyID, nil
 }
 
+// VerifyPathValidator recomputes the path validator from the updated HVFs and compares it
+// with the path validator in the packet. Returns the secret 5th byte of the computed validator.
+// `tmpBuffer` requires at least (numHops*3 rounded up to next multiple of 16) + 16 bytes
+func VerifyPathValidator(f *ext.FabridOption, tmpBuffer []byte, pathKey []byte) (uint8, error) {
+	inputLength := 3 * len(f.HopfieldMetadata)
+	requiredBufferLength := 16 + (inputLength+15)&^15
+	if len(tmpBuffer) < requiredBufferLength {
+		return 0, serrors.New("tmpBuffer length is invalid", "expected", requiredBufferLength, "actual", len(tmpBuffer))
+	}
+	for i, meta := range f.HopfieldMetadata {
+		copy(tmpBuffer[16+i*3:16+(i+1)*3], meta.HopValidationField[:3])
+	}
+	err := macBlock(pathKey, tmpBuffer[:16], tmpBuffer[16:16+inputLength], tmpBuffer[16:])
+	if err != nil {
+		return 0, err
+	}
+	validationNumber := tmpBuffer[20]
+	if !bytes.Equal(tmpBuffer[16:20], f.PathValidator[:]) {
+		return validationNumber, serrors.New("Path validator is not valid", "validator", base64.StdEncoding.EncodeToString(f.PathValidator[:]), "computed", base64.StdEncoding.EncodeToString(tmpBuffer[16:20]))
+	}
+	return validationNumber, nil
+}
+
 // InitValidators sets all HVFs of the FABRID option and computes the
 // path validator.
 func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption, s *slayers.SCION, tmpBuffer []byte, pathKey []byte,
 	asHostKeys map[addr.IA]drkey.ASHostKey, asAsKeys map[addr.IA]drkey.Level1Key, ias []addr.IA, ingresses []uint16, egresses []uint16) error {
 
 	outBuffer := make([]byte, 16)
+	pathValInputLength := 3 * len(f.HopfieldMetadata)
+	pathValBuffer := make([]byte, (pathValInputLength+15)&^15)
 	for i, meta := range f.HopfieldMetadata {
 		if meta.FabridEnabled {
 			var key drkey.Key
@@ -181,8 +207,14 @@ func InitValidators(f *ext.FabridOption, id *ext.IdentifierOption, s *slayers.SC
 			outBuffer[0] &= 0x3f // ignore first two (left) bits
 			outBuffer[3] &= 0x3f // ignore first two (left) bits
 			copy(meta.HopValidationField[:3], outBuffer[:3])
+			copy(pathValBuffer[i*3:(i+1)*3], outBuffer[3:6])
 		}
 	}
+	err := macBlock(pathKey, tmpBuffer[:16], pathValBuffer[:pathValInputLength], pathValBuffer)
+	if err != nil {
+		return err
+	}
+	copy(f.PathValidator[:4], pathValBuffer[:4])
 	return nil
 }
 

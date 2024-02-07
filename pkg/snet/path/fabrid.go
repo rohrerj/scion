@@ -300,10 +300,10 @@ func (f *FABRID) fetchPathKey(t time.Time) (drkey.HostHostKey, error) {
 	defer cancel()
 	key, err := f.drkeyPathFn(ctx, drkey.HostHostMeta{
 		Validity: t,
-		SrcIA:    f.conf.LocalIA,
-		SrcHost:  f.conf.LocalAddr,
-		DstIA:    f.conf.DestinationIA,
-		DstHost:  f.conf.DestinationAddr,
+		SrcIA:    f.conf.DestinationIA,
+		SrcHost:  f.conf.DestinationAddr,
+		DstIA:    f.conf.LocalIA,
+		DstHost:  f.conf.LocalAddr,
 		ProtoId:  drkey.FABRID,
 	})
 	if err != nil {
