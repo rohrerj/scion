@@ -46,7 +46,7 @@ var (
 )
 
 func getCmd() (string, bool) {
-	return cmd, strings.Contains(cmd, "end2end")
+	return cmd, strings.Contains(cmd, "end2end") || strings.Contains(cmd, "fabrid")
 }
 
 func main() {

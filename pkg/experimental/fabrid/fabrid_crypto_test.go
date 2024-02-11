@@ -73,7 +73,7 @@ func TestSuccessfullValidators(t *testing.T) {
 	}
 	unixNow := uint32(time.Now().Unix())
 
-	tmpBuffer := make([]byte, fabrid.FabridMacInputSize)
+	tmpBuffer := make([]byte, (extension.MaxSupportedFabridHops*3+15)&^15+16)
 	tests := []test{
 		{
 			name:       "random 16 byte src addr",
@@ -160,6 +160,8 @@ func TestSuccessfullValidators(t *testing.T) {
 							assert.NoError(t, err)
 						}
 					}
+					_, err = fabrid.VerifyPathValidator(f, tmpBuffer, pathKey)
+					assert.NoError(t, err)
 				}
 			})
 		}(tc)
