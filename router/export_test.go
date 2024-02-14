@@ -43,7 +43,6 @@ var SlowPathRequired error = slowPathRequired
 
 func NewDP(
 	external map[uint16]BatchConn,
-	externalRemoteAddresses map[uint16]*net.UDPAddr,
 	linkTypes map[uint16]topology.LinkType,
 	internal BatchConn,
 	internalNextHops map[uint16]*net.UDPAddr,
@@ -53,15 +52,14 @@ func NewDP(
 	key []byte) *DataPlane {
 
 	dp := &DataPlane{
-		localIA:                 local,
-		external:                external,
-		linkTypes:               linkTypes,
-		neighborIAs:             neighbors,
-		internalNextHops:        internalNextHops,
-		svc:                     &services{m: svc},
-		internal:                internal,
-		externalRemoteAddresses: externalRemoteAddresses,
-		internalIP:              netip.MustParseAddr("198.51.100.1"),
+		localIA:          local,
+		external:         external,
+		linkTypes:        linkTypes,
+		neighborIAs:      neighbors,
+		internalNextHops: internalNextHops,
+		svc:              &services{m: svc},
+		internal:         internal,
+		internalIP:       netip.MustParseAddr("198.51.100.1"),
 	}
 	if err := dp.SetKey(key); err != nil {
 		panic(err)

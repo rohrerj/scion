@@ -119,7 +119,6 @@ type DataPlane struct {
 	// determines whether index 0 or index 1 should be overwritten next
 	drKeySecretNextOverwrite []uint8
 	fabridPolicyMap          map[uint32][]*control.PolicyIPRange
-	externalRemoteAddresses  map[uint16]*net.UDPAddr
 
 	ExperimentalSCMPAuthentication bool
 
@@ -299,15 +298,11 @@ func (d *DataPlane) AddExternalInterface(ifID uint16, conn BatchConn, remoteAddr
 	if d.external == nil {
 		d.external = make(map[uint16]BatchConn)
 	}
-	if d.externalRemoteAddresses == nil {
-		d.externalRemoteAddresses = make(map[uint16]*net.UDPAddr)
-	}
 	if d.interfaces == nil {
 		d.interfaces = make(map[uint16]BatchConn)
 	}
 	d.interfaces[ifID] = conn
 	d.external[ifID] = conn
-	d.externalRemoteAddresses[ifID] = remoteAddr
 	return nil
 }
 
@@ -1092,6 +1087,7 @@ func (p *scionPacketProcessor) reset() error {
 	p.fabrid = nil
 	p.mplsLabel = 0
 	p.nextHop = nil
+	p.isBRTransit = false
 	return nil
 }
 
@@ -1145,38 +1141,46 @@ func (p *scionPacketProcessor) processFabrid(egressIF uint16) error {
 	if err != nil {
 		return err
 	}
-
-	// Verify and update for 0 policy, no MPLS label
-	if policyID.ID == 0 {
-		err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, egressIF)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-
-	policyMapKey := uint32(p.ingressID)<<8 + uint32(policyID.ID)
-	ipRanges, found := p.d.fabridPolicyMap[policyMapKey]
-	if !found {
-		return serrors.New("Provided policyID is invalid", "ingress", p.ingressID, "index", policyID.ID)
-	}
-	var bestRange *control.PolicyIPRange
-	for _, r := range ipRanges {
-		if r.IPPrefix.Contains(p.nextHop.IP) {
-			if bestRange == nil || bestRange.IPPrefix.Contains(r.IPPrefix.IP) {
-				bestRange = r
-			}
-		}
-	}
-	if bestRange == nil {
-		return serrors.New("Provided policy index is not valid for nexthop.", "index", policyID.ID, "ip", p.nextHop.IP)
-	}
-	p.mplsLabel = bestRange.MPLSLabel
 	err = fabrid.VerifyAndUpdate(meta, p.identifier, &p.scionLayer, p.fabridInputBuffer, key[:], p.ingressID, egressIF)
 	if err != nil {
 		return err
 	}
+	// Check / set MPLS label only if policy ID != 0
+	// and only if we have either an inbound or AS transit next hop
+	if policyID.ID != 0 && !p.isBRTransit {
+		mplsLabel, err := p.d.getFabridMplsLabel(uint32(p.ingressID), uint32(policyID.ID), p.nextHop.IP)
+		if err != nil {
+			return err
+		}
+		p.mplsLabel = mplsLabel
+	}
 	return nil
+}
+
+func (d *DataPlane) getFabridMplsLabel(ingressID uint32, policyIndex uint32, nextHopIP net.IP) (uint32, error) {
+	policyMapKey := ingressID<<8 + policyIndex
+	ipRanges, found := d.fabridPolicyMap[policyMapKey]
+	if !found {
+		return 0, serrors.New("Provided policyID is invalid", "ingress", ingressID, "index", policyIndex)
+	}
+	var bestRange *control.PolicyIPRange
+	for _, r := range ipRanges {
+		if r.IPPrefix.Contains(nextHopIP) {
+			if bestRange == nil {
+				bestRange = r
+			} else {
+				bestPrefixLength, _ := bestRange.IPPrefix.Mask.Size()
+				currentPrefixLength, _ := r.IPPrefix.Mask.Size()
+				if currentPrefixLength > bestPrefixLength {
+					bestRange = r
+				}
+			}
+		}
+	}
+	if bestRange == nil {
+		return 0, serrors.New("Provided policy index is not valid for nexthop.", "index", policyIndex, "next hop IP", nextHopIP)
+	}
+	return bestRange.MPLSLabel, nil
 }
 
 func (p *scionPacketProcessor) processHbhOptions(egressIF uint16) error {
@@ -1205,7 +1209,7 @@ func (p *scionPacketProcessor) processHbhOptions(egressIF uint16) error {
 				currHop -= p.path.PathMeta.CurrINF
 			}
 
-			// SKip if this is an intermediary egress router
+			// Skip if this is an intermediary egress router
 			if p.ingressID == 0 && currHop != 0 {
 				return nil
 			}
@@ -1428,7 +1432,9 @@ type scionPacketProcessor struct {
 	fabrid            *extension.FabridOption
 	fabridInputBuffer []byte
 	mplsLabel         uint32
-	nextHop           *net.UDPAddr
+	// IP of the next hop. Only valid for the inbound or AS transit cases
+	nextHop     *net.UDPAddr
+	isBRTransit bool
 }
 
 type slowPathType int
@@ -2046,18 +2052,14 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 	}
 	egressID := p.egressInterface()
 	if _, ok := p.d.external[egressID]; ok {
+		p.isBRTransit = true
 		if err := p.processHbhOptions(egressID); err != nil {
 			return processResult{}, err
 		}
 		if err := p.processEgress(); err != nil {
 			return processResult{}, err
 		}
-		if a, ok := p.d.externalRemoteAddresses[egressID]; ok {
-			p.nextHop = a
-			return processResult{EgressID: egressID, OutPkt: p.rawPkt}, nil
-		} else {
-			return processResult{}, serrors.New("External remote address map not consistent with external interfaces", "expected", egressID, "actual", p.d.externalRemoteAddresses)
-		}
+		return processResult{EgressID: egressID, OutPkt: p.rawPkt}, nil
 	}
 	// ASTransit: pkts leaving from another AS BR.
 	if a, ok := p.d.internalNextHops[egressID]; ok {

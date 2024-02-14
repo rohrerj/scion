@@ -39,6 +39,7 @@ import (
 	"github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/pkg/slayers/path/scion"
 	underlayconn "github.com/scionproto/scion/private/underlay/conn"
+	"github.com/scionproto/scion/router/control"
 	"github.com/scionproto/scion/router/mock_router"
 )
 
@@ -210,6 +211,87 @@ func TestForwarder(t *testing.T) {
 		t.Fail()
 		dp.running = false
 	}
+}
+
+func TestFabridPolicies(t *testing.T) {
+	type testcase struct {
+		name              string
+		policies          map[uint32][]*control.PolicyIPRange
+		packetIngress     uint32
+		packetPolicyIndex uint32
+		nextHopIP         net.IP
+		expectedMplsLabel uint32
+		expectsError      bool
+	}
+	testcases := []testcase{
+		{
+			name: "ingress and policyindex tuple exists with single ip range",
+			policies: map[uint32][]*control.PolicyIPRange{
+				0xa<<8 + 0xf: {
+					&control.PolicyIPRange{
+						MPLSLabel: 1,
+						IPPrefix:  xtest.MustParseCIDR(t, "127.0.0.0/24"),
+					},
+				},
+			},
+			expectedMplsLabel: 1,
+			packetIngress:     0xa,
+			packetPolicyIndex: 0xf,
+			nextHopIP:         xtest.MustParseIP(t, "127.0.0.1"),
+		},
+		{
+			name:              "ingress and policyindex tuple doesn't exist",
+			policies:          map[uint32][]*control.PolicyIPRange{},
+			expectedMplsLabel: 1,
+			packetIngress:     0xa,
+			packetPolicyIndex: 0xf,
+			nextHopIP:         xtest.MustParseIP(t, "127.0.0.1"),
+			expectsError:      true,
+		},
+		{
+			name: "ingress and policyindex tuple exists with multiple ip ranges",
+			policies: map[uint32][]*control.PolicyIPRange{
+				0xa<<8 + 0xf: {
+					&control.PolicyIPRange{
+						MPLSLabel: 1,
+						IPPrefix:  xtest.MustParseCIDR(t, "127.0.0.0/24"),
+					},
+					&control.PolicyIPRange{
+						MPLSLabel: 2,
+						IPPrefix:  xtest.MustParseCIDR(t, "127.0.0.0/31"),
+					},
+					&control.PolicyIPRange{
+						MPLSLabel: 3,
+						IPPrefix:  xtest.MustParseCIDR(t, "127.0.0.0/30"),
+					},
+					&control.PolicyIPRange{
+						MPLSLabel: 4,
+						IPPrefix:  xtest.MustParseCIDR(t, "127.0.0.2/32"),
+					},
+				},
+			},
+			expectedMplsLabel: 2,
+			packetIngress:     0xa,
+			packetPolicyIndex: 0xf,
+			nextHopIP:         xtest.MustParseIP(t, "127.0.0.1"),
+		},
+	}
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			dp := &DataPlane{Metrics: metrics}
+			err := dp.UpdateFabridPolicies(tc.policies)
+			assert.NoError(t, err)
+			t.Log(dp.fabridPolicyMap)
+			mplsLabel, err := dp.getFabridMplsLabel(tc.packetIngress, tc.packetPolicyIndex, tc.nextHopIP)
+			if tc.expectsError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.expectedMplsLabel, mplsLabel)
+			}
+		})
+	}
+
 }
 
 func TestComputeProcId(t *testing.T) {
@@ -430,7 +512,7 @@ func TestSlowPathProcessing(t *testing.T) {
 	}{
 		"svc nobackend": {
 			prepareDP: func(ctrl *gomock.Controller) *DataPlane {
-				return NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					map[addr.SVC][]*net.UDPAddr{},
 					xtest.MustParseIA("1-ff00:0:110"), nil, testKey)
 			},
@@ -452,7 +534,7 @@ func TestSlowPathProcessing(t *testing.T) {
 		},
 		"svc invalid": {
 			prepareDP: func(ctrl *gomock.Controller) *DataPlane {
-				return NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					map[addr.SVC][]*net.UDPAddr{},
 					xtest.MustParseIA("1-ff00:0:110"), nil, testKey)
 			},
@@ -474,7 +556,7 @@ func TestSlowPathProcessing(t *testing.T) {
 		},
 		"invalid dest": {
 			prepareDP: func(ctrl *gomock.Controller) *DataPlane {
-				return NewDP(nil, nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+				return NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
 					map[addr.SVC][]*net.UDPAddr{},
 					xtest.MustParseIA("1-ff00:0:110"), nil, testKey)
 			},
