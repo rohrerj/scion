@@ -87,7 +87,7 @@ func (f *Fetcher) StartFabridPolicyFetcher(interfaces []uint16) {
 			}
 		}
 		// </>
-		err = f.dp.UpdateFabridPolicies(tmp)
+		err = f.dp.UpdateFabridPolicies(tmp, nil)
 		if err != nil {
 			log.Debug("Error while adding FABRID policies", "err", err)
 			time.Sleep(retryAfterErrorDuration)

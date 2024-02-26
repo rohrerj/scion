@@ -38,7 +38,8 @@ type Dataplane interface {
 	DelSvc(ia addr.IA, svc addr.SVC, ip net.IP) error
 	SetKey(ia addr.IA, index int, key []byte) error
 	AddDRKeySecret(protocolID int32, sv SecretValue) error
-	UpdateFabridPolicies(policies map[uint32][]*PolicyIPRange) error
+	UpdateFabridPolicies(ipRangePolicies map[uint32][]*PolicyIPRange,
+		interfacePolicies map[uint64]uint32) error
 }
 
 // LinkInfo contains the information about a link between an internal and

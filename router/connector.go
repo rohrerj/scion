@@ -172,10 +172,11 @@ func (c *Connector) AddDRKeySecret(protocolID int32, sv control.SecretValue) err
 	return c.DataPlane.AddDRKeySecret(protocolID, sv)
 }
 
-func (c *Connector) UpdateFabridPolicies(policies map[uint32][]*control.PolicyIPRange) error {
+func (c *Connector) UpdateFabridPolicies(ipRangePolicies map[uint32][]*control.PolicyIPRange,
+	interfacePolicies map[uint64]uint32) error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
-	return c.DataPlane.UpdateFabridPolicies(policies)
+	return c.DataPlane.UpdateFabridPolicies(ipRangePolicies, interfacePolicies)
 }
 
 // SetKey sets the key for the given ISD-AS at the given index.
