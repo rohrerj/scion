@@ -53,6 +53,8 @@ Decimal Option
 ======= =================================
 0       :ref:`Pad1 Option <pad-1-option>`
 1       :ref:`PadN Option <pad-n-option>`
+3       :ref:`Identifier Option <identifier-option>`
+4       :ref:`FABRID Option <fabrid-option>`
 253     use for experimentation and testing
 254     use for experimentation and testing
 255     reserved
