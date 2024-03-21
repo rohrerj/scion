@@ -1,38 +1,43 @@
 ********
 FABRID
 ********
-.. _fabrid:
+.. _fabrid-design:
 
-- Author: Justin Rohrer, Jelte van Bommel
-- Last Updated: 2024-03-18
+- Author: Justin Rohrer, Jelte van Bommel, Marc Odermatt, Marc Wyss, Cyrill Krähenbühl
+- Last Updated: 2024-03-21
 - Discussion at:
 
 Abstract
 ===========
 
 In SCION the endhosts have the option to choose inter-AS paths to forward packets to a destination.
-However some applications require more fine grained path selection like“Do not route traffic over devices
-produced by hardware manufacturer X or that run software Y with version < Z” for the intra-AS paths.
+However some applications require more fine grained path selection like "Do not route traffic over devices
+produced by hardware manufacturer X or that run software Y with version < Z" for the intra-AS paths.
 This is useful for example if there exists a known bug in certain router versions that affect secure communication,
 or if an entity simply does not trust a certain manufacturer.
+This can also be seen as an enhancement for keeping traffic within a certain jurisdiction, e.g. by avoiding routers
+of a manufacturer from a certain country.
 
 Background
 ===========
 
-FABRID, `see here <https://netsec.ethz.ch/publications/papers/2023_usenix_fabrid.pdf>`_, is suggested as a solution to the
+`FABRID <https://netsec.ethz.ch/publications/papers/2023_usenix_fabrid.pdf>`_, is suggested as a solution to the
 aforementioned problem.
-An implementation of FABRID in SCIONLab allows for wider testing and evaluations of the protocol.
+An implementation of FABRID in SCIONLab allows for wider testing and evaluations of the protocol
+and gives other people the possibility to use it for their applications.
+FABRID also implicitly implements `EPIC <https://netsec.ethz.ch/publications/papers/Legner_Usenix2020_EPIC.pdf>`_,
+with a slightly little less accurate timestamp.
 
 Proposal
 ========
 
-The proposal consists of a header design, namely two new Hop-by-Hop extension options, forwarding support in the routers
-and additional beaconing information from the control service.
+The proposal consists of a header design, namely two new Hop-by-Hop extension options, forwarding support in the routers,
+path validation for the destination endhost and additional beaconing information from the control service.
 
 Header design
 --------------
 
-The FABRID header design is built using the SCION Hop-by-Hop extensions (HBH) because the allow incremental deployability.
+The FABRID header design is built using the SCION Hop-by-Hop extensions (HBH) because it allows for incremental deployability.
 We created two different HBH options.
 The Identifier option that contains the packet ID and a timestamp which us used to uniquely identify a packet of a flow.
 And the FABRID option that contains the FABRID hopfield metadata fields and a path validator field.
@@ -51,13 +56,14 @@ The Identifier Option always has a length of 8 bytes and look like::
                                     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
                                     |  OptType = 3  |  OptLen = 8   |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |R R R R R R|              Timestamp                            |
+    |R R R R R|                Timestamp                            |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |                          Packet ID                            |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 Timestamp
-    The 26 bit timestamp of when the packet has been sent with 1 second precision.
+    The 27 bit timestamp of when the packet has been sent with 1 millisecond precision
+    relative to the timestamp of the first InfoField of the SCION header.
 Packet ID
     The 32 bit packet ID that is used together with the timestamp to uniquely identify
     the packet originating from a particular flow.
@@ -96,7 +102,9 @@ A
 Hop Validation Field
     22 bit Message Authentication Code to authenticate the FABRID extension metadata field.
 Path Validator
-    4 byte Path Validator.
+    4 byte Path Validator. The sending endhost will compute the path validator and the
+    receiving endhost can then recompute the path validator to verify that the packet
+    has been sent over the correct path.
 
 Identifier and FABRID Option combined
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -145,7 +153,7 @@ Processing at the router
 
 Whenever a FABRID enabled router receives a SCION packet, it has to figure out whether it should be processed as FABRID or not.
 In both cases, all the logic of a normal SCION packet will be applied too.
-The router determines whether the SCION packet is a FABRID packet as follow:
+The router determines whether the SCION packet is a FABRID packet as follows:
 
 .. image:: fig/FABRID/FABRIDActivation.png
     :scale: 70%
@@ -161,8 +169,10 @@ Processing at the endhost
 
 To be able to send a FABRID packet, the endhost has to choose a path that supports its path constraints.
 Then it can request the necessary DRKeys from its local control service.
-With this the endhost is able to create FABRID packets and then send them to the border router for furhter forwarding.
+With this the endhost is able to create FABRID packets and then send them to the border router for further forwarding.
 The receiving endhost can then recompute the path validator to verify that the packet was forwarded over this path.
+The FABRID snet implementation will automatically request the necessary DRKeys and compute the hop validation fields.
+The endhost only has to provide the path and the FABRID policies.
 
 Control plane
 ---------------
@@ -170,9 +180,11 @@ Control plane
 Control service
 ^^^^^^^^^^^^^^^^^
 
-The control plane for FABRID is responsible for parsing FABRID policies into corresponding data structures, and making
-these datastructures available to routers in the same AS, clients in the AS, as well as clients from a remote AS.
-Information for FABRID is also included in the PCBs emitted by each FABRID enabled AS.
+The control plane for FABRID is responsible for parsing FABRID policies into corresponding data structures.
+Through gRPC, border routers can query the control service for the list of supported policies per interface,
+as well as the mapping from policies to MPLS labels.
+Policies are disseminated to remote ASes through PCBs, which clients in the AS can query from their Path Servers.
+This policy information can also be requested directly from remote ASes over gRPC.
 
 The control service introduces a FABRID service with the following endpoints:
 
@@ -188,15 +200,28 @@ Important data structures
 The FABRID service uses the following important data structures:
 
 - SupportedIndicesMap
-    Maps a connection pair consisting of two ConnectionPoints (Type: string, IP: string, Prefix: uint32, InterfaceId: uint16) to a list of policy indices. This map shows for each connection pair which policy indices are supported, which can be one or multiple policies.
+    Maps a connection pair consisting of two ConnectionPoints (Type: string, IP: string, Prefix: uint32, InterfaceId: uint16)
+    to a list of policy indices.
+    This map shows for each connection pair which policy indices are supported, which can be one or multiple policies.
+    A ConnectionPoint is either an interface, an IP range or wildcard.
+    For all intermediary hops interface to interface connection points will be used whereas interface to IP range is used for the last hop.
 - IndexIdentifierMap
-    A policy index is to be embedded in the HBH extension and therefore has to be minimal in size. The size of a policy index is 8 bits, whereas identifiers can be a multiple of this (especially global identifiers). The policy index is thus different to the policy identifier. In order to decode which policies are supported on which interfaces, a mapping is required from policy index to local and global identifiers. This mapping is provided by this map.
+    A policy index is to be embedded in the HBH extension and therefore has to be minimal in size.
+    The size of a policy index is 8 bits, whereas identifiers can be a multiple of this (especially global identifiers).
+    The policy index is thus different to the policy identifier. In order to decode which policies are supported on which interfaces,
+    a mapping is required from policy index to local and global identifiers.
+    This mapping is provided by this map.
 - IdentifierDescriptionMap
-    Global identifiers can be found in a global datastore, but local identifiers are specific to an AS. This map maps a local policy identifier to its corresponding description.
-- MPLSMap
-    Routers need to be aware of the supported policy indices and the corresponding MPLS config they need to apply to packets to enforce the policy in the internal network. The MPLSMap data structure stores a mapping between policy indices and the integer MPLS label that is applied to the packet at the border router. Routers periodically fetch this map from the control service. A hash of the MPLS map is maintained, such that routers only have to update if their hash differs from the one at the control service.
+    Global identifiers can be found in a global datastore, but local identifiers are specific to an AS.
+    This map maps a local policy identifier to its corresponding description.
+- MPLSMaps
+    Routers need to be aware of the supported policy indices and the corresponding MPLS config they need to apply to packets to
+    enforce the policy in the internal network.
+    Routers periodically fetch this map from the control service.
+    A hash of the MPLS map is maintained, such that routers only have to update if their hash differs from the one at the control service.
 - RemotePolicyCache
-    When a local policy is queried at a remote AS, the resulting policy description is cached at the requesting AS’ FABRID Manager, such that subsequent requests can be served from cache.
+    When a local policy is queried at a remote AS, the resulting policy description is cached at the requesting AS' FABRID Manager,
+    such that subsequent requests can be served from cache.
 
 
 PCB dissemination
@@ -283,6 +308,25 @@ We decided to move the packet ID and packet timestamp to another HBH option, the
 because this might also be useful for other HBH extensions and not just for FABRID (e.g., it would allow to port EPIC-HP from a path type to a HBH extension).
 Since FABRID still requires the packetID and packet timestamp, providing the Identifier option became mandatory for FABRID packets.
 
+Length of PacketID and PacketTimestamp for the Identifier HBH option
+---------------------------------------------------------------------
+
+The Identifier has a timestamp with a length of 27 bits, which encodes the relative time in milliseconds after
+the timestamp value of the first InfoField of the SCION header.
+The 27 bit allow to save relative timestamps with a difference of up to 37 hours which fulfills the requirement
+that a path can be valid for up to 24 hours.
+
+Length of FABRID policyID and how to determinte whether policy is local or global
+----------------------------------------------------------------------------------
+
+The decision on whether a certain FABRID policy is a local or global policy is done by the control service,
+hence we do not have to reserve any bits of the FABRID policy index in the FABRID packets to encode whether
+it is a local or global policy.
+In the header design the FABRID policyIndex has a length of 1 byte, which allows 256 different options.
+But since the control service can configure the policies per interface pair and / or per IP range, there
+are many more options than the 256.
+
+
 Compatibility
 ===============
 
@@ -296,4 +340,10 @@ when computing the FABRID path validator.
 Implementation
 ================
 
-The implementation will be implemented in a single pullrequest.
+The implementation will be implemented in the following steps:
+
+- Support in the border router to set MPLS labels to outgoing packets
+
+- The basic FABRID implementation as described in this design document
+
+- Full FABRID with path validation also at source
