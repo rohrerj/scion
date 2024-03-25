@@ -120,6 +120,7 @@ A
     Stands for “AS-level key”. If this is set to true, instead of a AS-Host Key, an AS-AS DRKey will be used.
 Hop Validation Field
     22 bit Message Authentication Code to authenticate the FABRID extension metadata field.
+    With this the receiving endhost can be sure that the packet has actually been processed by that AS.
 Path Validator
     4 byte Path Validator. The sending endhost will compute the path validator and the
     receiving endhost can then recompute the path validator to verify that the packet
