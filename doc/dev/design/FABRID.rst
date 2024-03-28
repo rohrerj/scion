@@ -3,35 +3,35 @@ FABRID
 ********
 .. _fabrid-design:
 
-- Author: Justin Rohrer, Jelte van Bommel, Marc Odermatt, Marc Wyss, Cyrill Krähenbühl
-- Last Updated: 2024-03-21
+- Author: Justin Rohrer, Jelte van Bommel, Marc Odermatt, Marc Wyss, Cyrill Krähenbühl, Juan A. García-Pardo
+- Last Updated: 2024-03-28
 - Discussion at:
 
 Abstract
 ===========
 
-In SCION the endhosts have the option to choose inter-AS paths to forward packets to a destination.
-However some applications require more fine grained path selection like "Do not route traffic over devices
-produced by hardware manufacturer X or that run software Y with version < Z" for the intra-AS paths.
+In SCION the endhosts have the option to choose *inter-AS* paths to forward packets to a destination.
+However, some applications require more fine grained path selection like "Do not route traffic over devices
+produced by hardware manufacturer X or that run software Y with version < Z" which requires transparency and
+control also with respect to *intra-AS* paths.
 This is useful for example if there exists a known bug in certain router versions that affect secure communication,
-or if an entity simply does not trust a certain manufacturer.
-This can also be seen as an enhancement for keeping traffic within a certain jurisdiction, e.g. by avoiding routers
-of a manufacturer from a certain country.
+or if an entity simply does not trust a certain hardware manufacturer.
+This can also be seen as an enhancement for keeping traffic within a certain jurisdiction, e.g., by routing traffic
+only along devices located in a specific country.
 
 Background
 ===========
 
 `FABRID <https://netsec.ethz.ch/publications/papers/2023_usenix_fabrid.pdf>`_, is suggested as a solution to the
 aforementioned problem.
-An implementation of FABRID in SCIONLab allows for wider testing and evaluations of the protocol
-and gives other people the possibility to use it for their applications.
-FABRID also implicitly implements `EPIC <https://netsec.ethz.ch/publications/papers/Legner_Usenix2020_EPIC.pdf>`_,
-with a slightly little less accurate timestamp.
+A deployment of FABRID in SCIONLab makes its next-generation features available to interested parties around the globe.
+FABRID also implicitly implements the `EPIC <https://netsec.ethz.ch/publications/papers/Legner_Usenix2020_EPIC.pdf>`_,
+features source authentication for routers and destination host and path validation for source and destination hosts.
 
 Proposal
 ========
 
-We introduce FABRID policies which can be thought of as additional path constraints that should be applied for intra-AS paths.
+FABRID indroduces policies, which can be thought of as additional path constraints that should be applied to intra-AS paths.
 The border routers use those policies to decide on the intra-AS path to forward, e.g. by using MPLS labels.
 Some FABRID policies are globally defined and others locally per AS.
 The AS network operator configures which global FABRID policies are supported for the local AS and can add additional local FABRID
@@ -39,26 +39,35 @@ policies that are valid for this AS.
 A source endhost can then select a path together with FABRID policies and forward the FABRID packet over this path to a destination endhost.
 The destination endhost will then be able to recompute the path validator to verify that the packet had been forwarded over that inter-AS path.
 
-The implementation of FABRID allows for incremental deployment at router- and AS-level.
-This could lead to the situation that we cannot find an end-to-end FABRID-enabled path.
-In this case, the sending endhost can disable FABRID for that AS when sending a packet but will not have any of the guarantees provided by FABRID for that AS.
+Our proposed design and implementation of FABRID allows for incremental deployment at router- and AS-level, i.e., some AS operators may want to
+deploy FABRID while others do not, and those who do may only want to deploy it on a subset of border routers.
+This allows for a smooth migration where an AS can test-wise update some border routers and test that nothing breaks.
+However, this could lead to the situation that we cannot find an end-to-end FABRID-enabled path.
+The end host can still send its traffic along that inter-domain path by disabling FABRID for the on-path ASes that do not support it,
+but without any of the guarantees provided by FABRID for those ASes.
 
-Since each AS can create their own FABRID policies, the other ASes have to learn them.
+Since each AS can create their own local FABRID policies, the end hosts have to learn them.
+In our design, end hosts fetch policies from their local AS, and the local AS fetches them from the desired remote AS.
 Those policies are only fetched on demand by the local control service and will be cached till end of their validity.
-This also makes sure that the beacon size does not grow too big.
+This allows for better scalability for the FABRID policies because an AS does not have to learn all FABRID policies from all other ASes.
+Even though the beacon had to be adapted, the size increase is negligible.
 The source endhost does not have to do anything about that, he will learn the policies from its local control service
 which will either return the cached policies of query the remote control service.
 
-The proposal consists of a header design, namely two new Hop-by-Hop extension options, forwarding support in the routers,
+This design document specifies the details of the of a header design, namely two new Hop-by-Hop extension options, forwarding support in the routers,
 path validation for the destination endhost and additional beaconing information from the control service.
+
+The design document will be extended in the future to also specify features that will be implemented in a later
+iteration e,g. path validation for source end host.
+
 
 Header design
 --------------
 
-The FABRID header design is built using the SCION Hop-by-Hop extensions (HBH) because it allows for incremental deployability.
+The FABRID header design is built using the SCION Hop-by-Hop extensions (HBH), which allows for incremental deployability.
 We created two different HBH options.
-The Identifier option that contains the packet ID and a timestamp which is used to uniquely identify a packet of a flow.
-And the FABRID option that contains the FABRID hopfield metadata fields and a path validator field.
+First, the Identifier option that contains the packet ID and a timestamp which is used to uniquely identify a packet of a flow.
+And second, the FABRID option that contains the FABRID hopfield metadata fields and a path validator field.
 The Identifier option can be used without the FABRID option and can therefore also be used by other extensions.
 The FABRID option on the other hand requires that the Identifier option is specified in the HBH extension before the FABRID option.
 
@@ -115,9 +124,12 @@ Encrypted PolicyID
 F
     Stands for “FABRID enabled” and if this is set to false, the router responsible for
     that hop will not apply any FABRID logic to this packet.
-    This can be used e.g. if an on-path AS does not support FABRID.
+    This can be used e.g. if an on-path AS does not support FABRID, or if the endhost does not care
+    about FABRID for that AS.
 A
     Stands for “AS-level key”. If this is set to true, instead of a AS-Host Key, an AS-AS DRKey will be used.
+    This can be used to achieve scalability in future in-network DDoS defense solutions, see `RAINBOW`_.
+    Using the AS-Host Key is the default option in FABRID.
 Hop Validation Field
     22 bit Message Authentication Code to authenticate the FABRID extension metadata field.
     With this the receiving endhost can be sure that the packet has actually been processed by that AS.
@@ -129,7 +141,7 @@ Path Validator
 Identifier and FABRID Option combined
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Both the Identifier and FABRID extension together could look like this::
+If no other HBH extension options are present, the HBH options of a FABRID-enabled packet look like this::
 
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -158,12 +170,16 @@ Header fields computation
 
 .. math::
     \begin{align*}
-        &encryptedPolicyID = policyID \oplus AES.Encrypt(K_i, Identifier)[0]\\\\
-        &policyID = encryptedPolicyID \oplus AES.Encrypt(K_i, Identifier)[0]\\\\
-        &K_i = DRKey\,(AS\,A_i \rightarrow AS_0:Endhost)\,or\,(AS\,A_i \rightarrow AS_0)\\\\
-        &HVF_i = MAC_{K_i}(Identifier, ingress_i, egress_i, encryptedPolicyID_i,\\& srcAddrLen, srcHostAddr)[0:3] \oplus 0x3FFFFF\\\\
-        &HVFVerified_i = MAC_{K_i}(Identifier, ingress_i, egress_i, encryptedPolicyID_i,\\& srcAddrLen, srcHostAddr)[3:6] \oplus 0x3FFFFF\\\\
+        &\text{encryptedPolicyID = policyID} \oplus \text{AES.Encrypt(}K_i\text{, Identifier)[0]}\\\\
+        &\text{policyID = encryptedPolicyID} \oplus \text{AES.Encrypt(}K_i\text{, Identifier)[0]}\\\\
+        &K_i \text{ = DRKey (AS A}_i \rightarrow \text{AS}_0\text{:Endhost) or (AS A}_i \rightarrow \text{AS}_0)\\\\
+        &\text{HVF}_i = \text{MAC}_{K_i}\text{(Identifier, ingress}_i\text{, egress}_i\text{, encryptedPolicyID}_i, \\& \text{srcAddrLen, srcHostAddr)[0:3] } \& \text{ 0x3FFFFF}\\\\
+        &\text{HVFVerified}_i = \text{MAC}_{K_i}\text{(Identifier, ingress}_i\text{, egress}_i\text{, encryptedPolicyID}_i, \\& \text{srcAddrLen, srcHostAddr)[3:6] } \& \text{ 0x3FFFFF}\\\\
     \end{align*}
+
+
+For accessing a sub slice we use the [a:b] notation, where we take the bytes from index a to index b, where b is exclusive.
+For the used DRKeys we use the notation AS A :math:`_i \rightarrow` AS :math:`_j`:Endhost TODO
 
 Data plane
 ----------
@@ -309,20 +325,29 @@ SCMP response
 ^^^^^^^^^^^^^^^
 
 With the current implementation, the sending endhost is not being informed when his packet gets dropped due to a FABRID error.
-In the future the border routers might send an SCMP response if they encounter an error when processing FABRID which might
-help the sending endhost in figuring out why his packet does not arrive at its destination.
+In the future the border routers we might think about whether to enable routers to send an SCMP response if they encounter
+an error when processing FABRID which might help the sending endhost in figuring out why his packet does not arrive at its destination.
+However, we have to be careful to not introduce additional attack vectors, e.g. for volumetric denial-of-service or reflection attacks.
 
 EPIC-HP as extension with Identifier option
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-We could create a new HBH extension for EPIC hidden-path, which uses the Identifier option.
+We could create a new HBH extension for EPIC hidden-path, which uses the Identifier option, instead of the
+current design which uses a SCION path-type.
 This allows the use of EPIC HP also in a incremental deployment like we have with FABRID.
 And additionally, we could also use FABRID together with EPIC HP.
+
+.. _RAINBOW:
 
 The RAINBOW system
 ^^^^^^^^^^^^^^^^^^^^^
 
-Add some text here.
+The RAINBOW system is a future extension of FABRID, which allows marking traffic as higher quality of service, to be
+prioritized at on-path BRs.
+Specifically, each BR reserves a certain amount of bandwidth for RAINBOW traffic, which is divided evenly between different source ASes.
+As this division happens on the level of ASes and not individual endhosts, the BR also needs to be able to authenticate traffic at an AS level.
+The FABRID HBH extension makes this possible, by including an "AS level key" flag, which specifies that the original HVF has been authenticated
+again by an AS-AS DRKey, that is only known to trusted infrastructure in the source AS.
 
 Rationale
 ==========
@@ -333,13 +358,18 @@ Path type vs HBH extension
 FABRID can be implemented either as a HBH extension or a path type.
 The reason why we decided against a path type is that FABRID as a HBH extension is incrementally deployable, whereas
 a new path type is not.
+The drawback of this solution is that for the FABRID HBH extension, the Identifier HBH extension, and the HBH extension
+header itself, we need in total 8 additional bytes compared to a design that uses a path-type.
 
-Identifier option vs include everything in FABRID option
-------------------------------------------------------------
+Separate Identifier option
+---------------------------
 
-We decided to move the packet ID and packet timestamp to another HBH option, the so called Identifier option,
-because this might also be useful for other HBH extensions and not just for FABRID (e.g., it would allow to port EPIC-HP from a path type to a HBH extension).
+Instead of just having a single FABRID HBH option, we decided to move the packet ID and packet timestamp to another HBH option,
+the so called Identifier option, because this might also be useful for other HBH extensions and not just for FABRID
+(e.g., it would allow to port EPIC-HP from a path type to a HBH extension).
 Since FABRID still requires the packetID and packet timestamp, providing the Identifier option became mandatory for FABRID packets.
+The cost of moving the Identifier to a separate HBH extension is 4 bytes, where 2 bytes are used for the HBH option type and length
+fields and 2 bytes for padding to have the FABRID HBH extension 4 bytes alligned.
 
 Length of PacketID and PacketTimestamp for the Identifier HBH option
 ---------------------------------------------------------------------
@@ -364,19 +394,25 @@ Compatibility
 ===============
 
 FABRID is a new extension which uses the SCION Hop-by-Hop extension which allows
-for incremential deployment of FABRID. If a border router does not understand the FABRID Hop-by-Hop extension
+for incremental deployment of FABRID.
+If a border router does not understand the FABRID Hop-by-Hop extension
 it will simply ignore it and hence not provide any of the FABRID functionality and forward the packet as if it
-is a normal SCION packet. Since the sending endhost should be aware of whether a certain AS supports FABRID or not,
-he can just set the "FABRID enabled" flag to false for the non-FABRID aware ASes which will be taken into account
-when computing the FABRID path validator.
+is a normal SCION packet.
+The "FABRID enabled" flag allows the sending endhost to choose for which ASes to enable path validation,
+but is also specifically required, for edge-cases where an AS just starts to roll out FABRID functionality to its
+border routers, but the sender does not yet know that this AS is FABRID aware.
+Because if a packet does not contain a HVF for this AS, the packet has to be dropped unless the sender can explicitly
+state that FABRID is disabled for this hop.
 
 Implementation
 ================
 
-The implementation will be implemented in the following steps:
+We plan to provide the implementation in the following steps (PRs):
 
 - Support in the border router to set MPLS labels to outgoing packets
 
 - The basic FABRID implementation as described in this design document
 
 - Full FABRID with path validation also at source
+
+- FABRID Intra-AS emulation for SCIONLab
