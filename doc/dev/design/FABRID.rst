@@ -4,7 +4,7 @@ FABRID
 .. _fabrid-design:
 
 - Author: Justin Rohrer, Jelte van Bommel, Marc Odermatt, Marc Wyss, Cyrill Krähenbühl, Juan A. García-Pardo
-- Last Updated: 2024-03-28
+- Last Updated: 2024-04-01
 - Discussion at:
 
 Abstract
@@ -165,6 +165,8 @@ If no other HBH extension options are present, the HBH options of a FABRID-enabl
     |                       Path Validator                          |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
+.. _fabrid-formulas:
+
 Header fields computation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -179,7 +181,7 @@ Header fields computation
 
 
 For accessing a sub slice we use the [a:b] notation, where we take the bytes from index a to index b, where b is exclusive.
-For the used DRKeys we use the notation AS A :math:`_i \rightarrow` AS :math:`_j`:Endhost TODO
+For the DRKey notation, see :doc:`/cryptography/drkey`.
 
 Data plane
 ----------
@@ -188,17 +190,19 @@ Processing at the router
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Whenever a FABRID enabled router receives a SCION packet, it has to figure out whether it should be processed as FABRID or not.
+If an AS receives a FABRID packet but does not support FABRID, it treats the packet as a normal SCION packet.
 In both cases, all the logic of a normal SCION packet will be applied too.
 The router determines whether the SCION packet is a FABRID packet as follows:
 
 .. image:: fig/FABRID/FABRIDActivation.png
     :scale: 70%
 
-If the SCION packet uses FABRID, the router is going to verify the correctness of the current FABRID Hop-validation-field using
-either the AS-to-AS or AS-to-Host DRKey and verifies whether the encrypted policy index matches a valid FABRID policy.
-If this is the case, the router will update the FABRID Hop-validation-field accordingly and route the packet over
-an intra-AS path matching the provided FABRID policy.
-The corresponding intra-AS paths are provided to the border routers by the local control service.
+If the router supports FABRID and the SCION packet contains the FABRID HBH extension, the router is going to verify the
+correctness of the current FABRID Hop-validation-field using either the AS-to-AS or AS-to-Host DRKey and verifies whether
+the encrypted policy index matches a valid FABRID policy.
+If this is the case, the router will update the FABRID HVF to HVFVerified, see the :ref:`Header fields computation <_fabrid-formulas>`,
+and route the packet over an intra-AS path matching the provided FABRID policy.
+All intra-AS paths are configured by the AS operator, and are provided to the border routers by the local control service.
 
 Processing at the endhost
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -206,9 +210,9 @@ Processing at the endhost
 To be able to send a FABRID packet, the endhost has to choose a path that supports its path constraints.
 Then it can request the necessary DRKeys from its local control service.
 With this the endhost is able to create FABRID packets and then send them to the border router for further forwarding.
-The receiving endhost can then recompute the path validator to verify that the packet was forwarded over this path.
-The FABRID snet implementation will automatically request the necessary DRKeys and compute the hop validation fields.
-The endhost only has to provide the path and the FABRID policies.
+The FABRID snet implementation will automatically request the necessary DRKeys and compute the hop validation fields,
+the endhost only has to provide the path and the FABRID policies.
+Then the receiving endhost can recompute the path validator to verify that the packet was forwarded over this path.
 
 Control plane
 ---------------
@@ -216,8 +220,10 @@ Control plane
 Control service
 ^^^^^^^^^^^^^^^^^
 
-The control plane for FABRID is responsible for parsing FABRID policies into corresponding data structures.
-Through gRPC, border routers can query the control service for the list of supported policies per interface,
+The control service for FABRID is responsible for maintaining the by the AS-operator configured FABRID policies, intra-AS paths,
+and making them accessible for the routers, the endhosts and other remote control services.
+The policies are defined between interface pairs and for the last AS on the path also per interface - IP range pair.
+Through gRPC, border routers can query the control service for the list of supported policies,
 as well as the mapping from policies to MPLS labels.
 Policies are disseminated to remote ASes through PCBs, which clients in the AS can query from their Path Servers.
 This policy information can also be requested directly from remote ASes over gRPC.
@@ -226,15 +232,21 @@ The control service introduces a FABRID service with the following endpoints whe
 from the local AS and inter-AS means it can be reached from a remote AS:
 
 - GetMPLSMapIfNecessary (intra-AS)
+    Is used by the router to retrieve the MPLS map for the intra-AS paths.
+    The map is only returned if the router does not have an up to date MPLS map.
 - GetRemotePolicyDescription (intra-AS)
+    Is used by the endhosts of the local AS to request the policy description of a policy identifier for a remote AS.
 - GetSupportedIndicesMap (inter-AS, intra-AS)
+    Returns the per interface-pair supported FABRID indices.
 - GetIndexIdentifierMap (inter-AS, intra-AS)
+    Returns a map that maps identifiers to indicies which can then be used for sending FABRID packets.
 - GetLocalPolicyDescription (inter-AS, intra-AS)
+    Is used to request the policy description of a policy identifier for the local AS.
 
 Important data structures
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The FABRID service uses the following important data structures:
+The following list explains the most important data structures used in the FABRID service:
 
 - SupportedIndicesMap
     Maps a connection pair consisting of two ConnectionPoints (Type: string, IP: string, Prefix: uint32, InterfaceId: uint16)
@@ -266,6 +278,7 @@ PCB dissemination
 
 The IndexIdentifierMap and SupportedIndicesMap are included in a (unsigned) detachable extension in the PCBs for an AS.
 Hashes of these maps are maintained in a Signed AS Entry, such that the authenticity of these maps can be verified.
+The detachable extension can also be present in the PCB, i.e. it does not have to be detached in all cases, e.g. if there are only very few policies.
 If the maps are detached, they can be fetched from the control service of that AS and the received maps can be verified with the hashes.
 To ensure a consistent hash calculation, the key entries of these maps have to be sorted, such that they are accessed in a consistent order.
 
@@ -275,7 +288,7 @@ Exposing policies to the end hosts
 The path combinator finds the most recent FABRID map per AS among the received segments and subsequently uses this map to find the FABRID
 policies that are available for each interface pair of hops.
 This results in a set of PolicyIdentifiers per hop, which can then be used by the application, such as with the usage of a
-specific ‘sequence’ parameter which incorporates the policies.
+specific 'sequence' parameter which incorporates the policies.
 Once the application has decided which policies to use, it can craft a FABRID HBH extension and include this as an option when sending
 the packet.
 
