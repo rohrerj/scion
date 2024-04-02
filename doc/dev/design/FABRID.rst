@@ -200,7 +200,7 @@ The router determines whether the SCION packet is a FABRID packet as follows:
 If the router supports FABRID and the SCION packet contains the FABRID HBH extension, the router is going to verify the
 correctness of the current FABRID Hop-validation-field using either the AS-to-AS or AS-to-Host DRKey and verifies whether
 the encrypted policy index matches a valid FABRID policy.
-If this is the case, the router will update the FABRID HVF to HVFVerified, see the :ref:`Header fields computation <_fabrid-formulas>`,
+If this is the case, the router will update the FABRID HVF to HVFVerified, see the :ref:`Header fields computation <fabrid-formulas>`,
 and route the packet over an intra-AS path matching the provided FABRID policy.
 All intra-AS paths are configured by the AS operator, and are provided to the border routers by the local control service.
 
