@@ -4,7 +4,7 @@ FABRID
 .. _fabrid-design:
 
 - Author: Justin Rohrer, Jelte van Bommel, Marc Odermatt, Marc Wyss, Cyrill Krähenbühl, Juan A. García-Pardo
-- Last Updated: 2024-04-01
+- Last Updated: 2024-04-08
 - Discussion at:
 
 Abstract
@@ -14,52 +14,73 @@ In SCION the endhosts have the option to choose *inter-AS* paths to forward pack
 However, some applications require more fine grained path selection like "Do not route traffic over devices
 produced by hardware manufacturer X or that run software Y with version < Z" which requires transparency and
 control also with respect to *intra-AS* paths.
-This is useful for example if there exists a known bug in certain router versions that affect secure communication,
-or if an entity simply does not trust a certain hardware manufacturer.
+Such fine-grained path selection is useful for example if there exists a known bug in certain router versions that affect secure communication,
+or if an entity simply does not trust a certain hardware manufacturer, so that traffic can be steered around those devices.
 This can also be seen as an enhancement for keeping traffic within a certain jurisdiction, e.g., by routing traffic
 only along devices located in a specific country.
 
 Background
 ===========
 
-`FABRID <https://netsec.ethz.ch/publications/papers/2023_usenix_fabrid.pdf>`_, is suggested as a solution to the
-aforementioned problem.
+The `FABRID <https://netsec.ethz.ch/publications/papers/2023_usenix_fabrid.pdf>`_,
+protocol allows to implement such fine-grained path selection.
 A deployment of FABRID in SCIONLab makes its next-generation features available to interested parties around the globe.
 FABRID also implicitly implements the `EPIC <https://netsec.ethz.ch/publications/papers/Legner_Usenix2020_EPIC.pdf>`_,
-features source authentication for routers and destination host and path validation for source and destination hosts.
+features source authentication for routers and the destination host, and path validation for source and destination hosts.
 
 Proposal
 ========
 
-FABRID indroduces policies, which can be thought of as additional path constraints that should be applied to intra-AS paths.
+FABRID indroduces policies, which can be thought of as additional path constraints such that the ASes only use intra-AS paths that fulfill that policy.
+The ASes announce those policies to the end hosts, who then can use those additional path constraint when constructing a path.
 The border routers use those policies to decide on the intra-AS path to forward, e.g. by using MPLS labels.
 Some FABRID policies are globally defined and others locally per AS.
+Global policies makes sense to have known policies for the common use cases where each end host knows that if an AS supports that policy,
+then it knows the constraints of that policy without the need of fetching the full policy description.
 The AS network operator configures which global FABRID policies are supported for the local AS and can add additional local FABRID
 policies that are valid for this AS.
+The FABRID policy identifiers are provided to the endhosts inside of the PCB or as an detachable PCB extension.
+The FABRID policy descriptions on the other hand have to be requested from the local control service which will then either return
+the cached FABRID policy description or query the policy description from the remote AS.
+That way we can minimize the overhead that the FABRID polices cause to the PCB size.
 A source endhost can then select a path together with FABRID policies and forward the FABRID packet over this path to a destination endhost.
-The destination endhost will then be able to recompute the path validator to verify that the packet had been forwarded over that inter-AS path.
+The on-path border routers will then add some proof of transit such that the destination endhost can later verify that the packet indeed followed the intended path.
 
 Our proposed design and implementation of FABRID allows for incremental deployment at router- and AS-level, i.e., some AS operators may want to
 deploy FABRID while others do not, and those who do may only want to deploy it on a subset of border routers.
 This allows for a smooth migration where an AS can test-wise update some border routers and test that nothing breaks.
-However, this could lead to the situation that we cannot find an end-to-end FABRID-enabled path.
-The end host can still send its traffic along that inter-domain path by disabling FABRID for the on-path ASes that do not support it,
-but without any of the guarantees provided by FABRID for those ASes.
+However, this could lead to the situation where an end host does not have paths available for which all on-path ASes support FABRID.
+In such a situation the end host can still send its traffic along that path, but without any of the guarantees provided by FABRID for those ASes.
 
-Since each AS can create their own local FABRID policies, the end hosts have to learn them.
-In our design, end hosts fetch policies from their local AS, and the local AS fetches them from the desired remote AS.
+Since each AS can create their own local FABRID policies, end hosts have to learn them.
+In our design, end hosts have to learn them from their local AS, and the local AS has to learn them remote AS, similar to how SCION path retrieval is implemented.
 Those policies are only fetched on demand by the local control service and will be cached till end of their validity.
 This allows for better scalability for the FABRID policies because an AS does not have to learn all FABRID policies from all other ASes.
 Even though the beacon had to be adapted, the size increase is negligible.
-The source endhost does not have to do anything about that, he will learn the policies from its local control service
-which will either return the cached policies of query the remote control service.
 
-This design document specifies the details of the of a header design, namely two new Hop-by-Hop extension options, forwarding support in the routers,
-path validation for the destination endhost and additional beaconing information from the control service.
+The design document specifies:
+
+- The header design
+    Specification of the two new Hop-by-Hop extension options, their fields and how they are computed.
+- The data plane
+    Describes how the FABRID packets are processed and forwarded at the border routers, how the endhosts can send FABRID packets,
+    and the path validation for the destination endhost.
+- The control plane
+    Describes how the FABRID policies are defined, additional beaconing information, and new FABRID control service endpoints which are used for
+    communicating the FABRID policies to the endhosts and remote ASes.
+- Configuration
+    Describes how the border router and the control service have to be configured such that they are able to process FABRID packets.
 
 The design document will be extended in the future to also specify features that will be implemented in a later
-iteration e,g. path validation for source end host.
+iteration e.g. path validation for the source end host.
 
+.. figure:: fig/FABRID/NetworkTopology.png
+    
+    Example network topology; different router colors indicate different manufacturers.
+    Here we have the Hosts H01 from AS01 and Host H02 from AS02 who try to communicate with each other.
+    This topology allows constraints like "Do not route traffic over devices produced by hardware manufacturer red", or
+    "Route traffic only over devices produced by hardware manufacturer green or blue".
+    Since all paths between Host H01 and Host H02 traverse a green router, it is not possible to find a path that does not traverse green routers.
 
 Header design
 --------------
@@ -195,7 +216,6 @@ In both cases, all the logic of a normal SCION packet will be applied too.
 The router determines whether the SCION packet is a FABRID packet as follows:
 
 .. image:: fig/FABRID/FABRIDActivation.png
-    :scale: 70%
 
 If the router supports FABRID and the SCION packet contains the FABRID HBH extension, the router is going to verify the
 correctness of the current FABRID Hop-validation-field using either the AS-to-AS or AS-to-Host DRKey and verifies whether
@@ -319,7 +339,7 @@ This could look like this::
     [drkey.delegation]
     FABRID = [ "fd00:f00d:cafe::7f00:11", "fd00:f00d:cafe::7f00:12", "fd00:f00d:cafe::7f00:13"]
 
-The FABRID policies are configured in the control service. TODO(jelte): add more details
+The FABRID policies are configured in the control service.
 
 Border router
 ^^^^^^^^^^^^^^^
