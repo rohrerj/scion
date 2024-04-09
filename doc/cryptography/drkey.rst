@@ -487,5 +487,5 @@ Decimal Identifier Description                                                  
 ======= ========== ============================================================== =============
 0       Generic    Identifier for Level 1 key in :ref:`drkey-generic-derivation`  :ref:`drkey-generic-derivation`
 1       SCMP       Authentication of SCMP messages                                :ref:`scmp-specification`
-2       FABRID     FABRID HVFs, policy encryption, path validation                :doc:`/dev/design/FABRID`
+2       FABRID     FABRID authentication and path validation                      :doc:`/dev/design/FABRID`
 ======= ========== ============================================================== =============

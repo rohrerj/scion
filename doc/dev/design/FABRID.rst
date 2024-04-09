@@ -32,7 +32,7 @@ Proposal
 ========
 
 FABRID indroduces policies, which can be thought of as additional path constraints such that the ASes only use intra-AS paths that fulfill that policy.
-The ASes announce those policies to the end hosts, who then can use those additional path constraint when constructing a path.
+The ASes announce those policies to the end hosts, who then can use those additional path constraint during path selection.
 The border routers use those policies to decide on the intra-AS path to forward, e.g. by using MPLS labels.
 Some FABRID policies are globally defined and others locally per AS.
 Global policies makes sense to have known policies for the common use cases where each end host knows that if an AS supports that policy,
@@ -53,7 +53,7 @@ However, this could lead to the situation where an end host does not have paths 
 In such a situation the end host can still send its traffic along that path, but without any of the guarantees provided by FABRID for those ASes.
 
 Since each AS can create their own local FABRID policies, end hosts have to learn them.
-In our design, end hosts have to learn them from their local AS, and the local AS has to learn them remote AS, similar to how SCION path retrieval is implemented.
+In our design, end hosts have to learn them from their local AS, and the local AS has to learn them from the remote AS, similar to how SCION path retrieval is implemented.
 Those policies are only fetched on demand by the local control service and will be cached till end of their validity.
 This allows for better scalability for the FABRID policies because an AS does not have to learn all FABRID policies from all other ASes.
 Even though the beacon had to be adapted, the size increase is negligible.
@@ -195,7 +195,7 @@ Header fields computation
     \begin{align*}
         &\text{encryptedPolicyID = policyID} \oplus \text{AES.Encrypt(}K_i\text{, Identifier)[0]}\\\\
         &\text{policyID = encryptedPolicyID} \oplus \text{AES.Encrypt(}K_i\text{, Identifier)[0]}\\\\
-        &K_i \text{ = DRKey (AS A}_i \rightarrow \text{AS}_0\text{:Endhost) or (AS A}_i \rightarrow \text{AS}_0)\\\\
+        &K_i \text{ = DRKey (AS A}_i \rightarrow \text{AS}_0\text{:Endhost) or DRKey (AS A}_i \rightarrow \text{AS}_0)\\\\
         &\text{HVF}_i = \text{MAC}_{K_i}\text{(Identifier, ingress}_i\text{, egress}_i\text{, encryptedPolicyID}_i, \\& \text{srcAddrLen, srcHostAddr)[0:3] } \& \text{ 0x3FFFFF}\\\\
         &\text{HVFVerified}_i = \text{MAC}_{K_i}\text{(Identifier, ingress}_i\text{, egress}_i\text{, encryptedPolicyID}_i, \\& \text{srcAddrLen, srcHostAddr)[3:6] } \& \text{ 0x3FFFFF}\\\\
     \end{align*}
@@ -228,7 +228,6 @@ Processing at the endhost
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To be able to send a FABRID packet, the endhost has to choose a path that supports its path constraints.
-Then it can request the necessary DRKeys from its local control service.
 With this the endhost is able to create FABRID packets and then send them to the border router for further forwarding.
 The FABRID snet implementation will automatically request the necessary DRKeys and compute the hop validation fields,
 the endhost only has to provide the path and the FABRID policies.
