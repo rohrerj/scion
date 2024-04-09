@@ -203,6 +203,7 @@ Header fields computation
 
 For accessing a sub slice we use the [a:b] notation, where we take the bytes from index a to index b, where b is exclusive.
 For the DRKey notation, see :doc:`/cryptography/drkey`.
+The srcAddrLen and srcHostAddr are used as a MAC input for both the AS-Host DRKey case and the AS-AS DRKey case for simplicity.
 
 Data plane
 ----------
