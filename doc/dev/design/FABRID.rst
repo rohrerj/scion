@@ -35,7 +35,7 @@ FABRID indroduces policies, which can be thought of as additional path constrain
 The ASes announce those policies to the end hosts, who then can use those additional path constraint during path selection.
 The border routers use those policies to decide on the intra-AS path to forward, e.g. by using MPLS labels.
 Some FABRID policies are globally defined and others locally per AS.
-Global policies makes sense to have known policies for the common use cases where each end host knows that if an AS supports that policy,
+Global policies make sense in order to have known policies for the common use cases where each end host knows that if an AS supports that policy,
 then it knows the constraints of that policy without the need of fetching the full policy description.
 The AS network operator configures which global FABRID policies are supported for the local AS and can add additional local FABRID
 policies that are valid for this AS.
@@ -49,13 +49,13 @@ The on-path border routers will then add some proof of transit such that the des
 Our proposed design and implementation of FABRID allows for incremental deployment at router- and AS-level, i.e., some AS operators may want to
 deploy FABRID while others do not, and those who do may only want to deploy it on a subset of border routers.
 This allows for a smooth migration where an AS can test-wise update some border routers and test that nothing breaks.
-However, this could lead to the situation where an end host does not have paths available for which all on-path ASes support FABRID.
-In such a situation the end host can still send its traffic along that path, but without any of the guarantees provided by FABRID for those ASes.
+However, this could lead to the situation where an end host does not have paths available with all on-path ASes supporting FABRID.
+In such a situation the end host can still send its traffic along that path, but the guarantees provided by FABRID only hold for the FABRID-enabled ASes.
 
-Since each AS can create their own local FABRID policies, end hosts have to learn them.
-In our design, end hosts have to learn them from their local AS, and the local AS has to learn them from the remote AS, similar to how SCION path retrieval is implemented.
+Since each AS can create their own local FABRID policies, end hosts have to retrieve them.
+In our design, end hosts have to retrieve them from their local AS, and the local AS has to retrieve them from the remote AS, similar to how SCION path retrieval is implemented.
 Those policies are only fetched on demand by the local control service and will be cached till end of their validity.
-This allows for better scalability for the FABRID policies because an AS does not have to learn all FABRID policies from all other ASes.
+This allows for better scalability for the FABRID policies because an AS does not have to retrieve all FABRID policies from all other ASes.
 Even though the beacon had to be adapted, the size increase is negligible.
 
 The design document specifies:
@@ -76,7 +76,7 @@ iteration e.g. path validation for the source end host.
 
 .. figure:: fig/FABRID/NetworkTopology.png
     
-    Example network topology; different router colors indicate different manufacturers.
+    Example network topology; different intra-AS router colors indicate different manufacturers.
     Here we have the Hosts H01 from AS01 and Host H02 from AS02 who try to communicate with each other.
     This topology allows constraints like "Do not route traffic over devices produced by hardware manufacturer red", or
     "Route traffic only over devices produced by hardware manufacturer green or blue".
@@ -97,7 +97,9 @@ The FABRID option on the other hand requires that the Identifier option is speci
 Identifier Option
 ^^^^^^^^^^^^^^^^^^
 
-The Identifier Option always has a length of 8 bytes and look like::
+The Identifier Option always has a length of 8 bytes and look like:
+
+.. code-block::
 
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -122,7 +124,9 @@ FABRID Option
 ^^^^^^^^^^^^^^
 
 The FABRID Option has a length of (#NumberOfOnPathASes + 1)*4 bytes.
-This hop-by-hop option has an allignment of 4 bytes::
+This hop-by-hop option has an alignment of 4 bytes:
+
+.. code-block::
 
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -153,6 +157,8 @@ A
     Using the AS-Host Key is the default option in FABRID.
 Hop Validation Field
     22 bit Message Authentication Code to authenticate the FABRID extension metadata field.
+    The on-path border routers recompute this field to verify that it matches the expected HVF.
+    If the FABRID packet is processed correctly, the border routers update the value of the HVF to the verified HVF.
     With this the receiving endhost can be sure that the packet has actually been processed by that AS.
 Path Validator
     4 byte Path Validator. The sending endhost will compute the path validator and the
@@ -162,7 +168,9 @@ Path Validator
 Identifier and FABRID Option combined
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If no other HBH extension options are present, the HBH options of a FABRID-enabled packet look like this::
+If no other HBH extension options are present, the HBH options of a FABRID-enabled packet look like this:
+
+.. code-block::
 
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -191,6 +199,8 @@ If no other HBH extension options are present, the HBH options of a FABRID-enabl
 Header fields computation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+These formulas correspond to the previously mentioned FABRID HBH extension fields.
+
 .. math::
     \begin{align*}
         &\text{encryptedPolicyID = policyID} \oplus \text{AES.Encrypt(}K_i\text{, Identifier)[0]}\\\\
@@ -201,9 +211,9 @@ Header fields computation
     \end{align*}
 
 
-For accessing a sub slice we use the [a:b] notation, where we take the bytes from index a to index b, where b is exclusive.
+For accessing a sub slice we use the [a:b] notation, where we take the bytes from index a to index b, where b is excluded.
 For the DRKey notation, see :doc:`/cryptography/drkey`.
-The srcAddrLen and srcHostAddr are used as a MAC input for both the AS-Host DRKey case and the AS-AS DRKey case for simplicity.
+The *srcAddrLen* and *srcHostAddr* are used as a MAC input for both the AS-Host DRKey case and the AS-AS DRKey case for simplicity.
 
 Data plane
 ----------
@@ -248,8 +258,8 @@ as well as the mapping from policies to MPLS labels.
 Policies are disseminated to remote ASes through PCBs, which clients in the AS can query from their Path Servers.
 This policy information can also be requested directly from remote ASes over gRPC.
 
-The control service introduces a FABRID service with the following endpoints where intra-AS means it can be reached
-from the local AS and inter-AS means it can be reached from a remote AS:
+The control service introduces a FABRID service with the following endpoints where *intra-AS* means it can be reached
+from the local AS and *inter-AS* means it can be reached from a remote AS:
 
 - GetMPLSMapIfNecessary (intra-AS)
     Is used by the router to retrieve the MPLS map for the intra-AS paths.
@@ -269,8 +279,16 @@ Important data structures
 The following list explains the most important data structures used in the FABRID service:
 
 - SupportedIndicesMap
-    Maps a connection pair consisting of two ConnectionPoints (Type: string, IP: string, Prefix: uint32, InterfaceId: uint16)
-    to a list of policy indices.
+    .. code-block:: go
+
+        type ConnectionPoint struct {
+            Type        string
+            IP          string
+            Prefix      uint32
+            InterfaceID uint16
+        }
+
+    Maps a connection pair consisting of two ConnectionPoints to a list of policy indices.
     This map shows for each connection pair which policy indices are supported, which can be one or multiple policies.
     A ConnectionPoint is either an interface, an IP range or wildcard.
     For all intermediary hops interface to interface connection points will be used whereas interface to IP range is used for the last hop.
@@ -296,7 +314,7 @@ The following list explains the most important data structures used in the FABRI
 PCB dissemination
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The IndexIdentifierMap and SupportedIndicesMap are included in a (unsigned) detachable extension in the PCBs for an AS.
+The *IndexIdentifierMap* and *SupportedIndicesMap* are included in a (unsigned) detachable extension in the PCBs for an AS.
 Hashes of these maps are maintained in a Signed AS Entry, such that the authenticity of these maps can be verified.
 The detachable extension can also be present in the PCB, i.e. it does not have to be detached in all cases, e.g. if there are only very few policies.
 If the maps are detached, they can be fetched from the control service of that AS and the received maps can be verified with the hashes.
@@ -307,7 +325,7 @@ Exposing policies to the end hosts
 
 The path combinator finds the most recent FABRID map per AS among the received segments and subsequently uses this map to find the FABRID
 policies that are available for each interface pair of hops.
-This results in a set of PolicyIdentifiers per hop, which can then be used by the application, such as with the usage of a
+This results in a set of *PolicyIdentifiers* per hop, which can then be used by the application, such as with the usage of a
 specific 'sequence' parameter which incorporates the policies.
 Once the application has decided which policies to use, it can craft a FABRID HBH extension and include this as an option when sending
 the packet.
@@ -324,7 +342,7 @@ Configuration
 Control service
 ^^^^^^^^^^^^^^^^^^
 
-To be able to use DRKey, one has to configure the control service setting "drkey.level1_db" and "drkey.secret_value_db".
+To be able to use DRKey, one has to configure the control service setting *drkey.level1_db* and *drkey.secret_value_db*.
 Additionally, since the border routers will fetch the secret value from the control service, the control service also has to
 add the internal IP address of all border routers of the local AS to the DRKey delegation list for FABRID.
 
@@ -392,7 +410,7 @@ FABRID can be implemented either as a HBH extension or a path type.
 The reason why we decided against a path type is that FABRID as a HBH extension is incrementally deployable, whereas
 a new path type is not.
 The drawback of this solution is that for the FABRID HBH extension, the Identifier HBH extension, and the HBH extension
-header itself, we need in total 8 additional bytes compared to a design that uses a path-type.
+header itself, we need in total 8 additional bytes per path compared to a design that uses a path-type.
 
 Separate Identifier option
 ---------------------------
@@ -440,11 +458,13 @@ state that FABRID is disabled for this hop.
 Implementation
 ================
 
-We plan to provide the implementation in the following steps (PRs):
+We plan to provide the base implementation in the following steps (PRs):
 
 - Support in the border router to set MPLS labels to outgoing packets
 
 - The basic FABRID implementation as described in this design document
+
+And in a second stage:
 
 - Full FABRID with path validation also at source
 
