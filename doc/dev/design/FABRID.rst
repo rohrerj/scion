@@ -238,7 +238,7 @@ All intra-AS paths are configured by the AS operator, and are provided to the bo
 Processing at the endhost
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To be able to send a FABRID packet, the endhost has to choose a path that supports its path constraints.
+To be able to send a FABRID packet, the endhost has to choose a path that supports its path and policy constraints. A detailed explanation on how endhost applications can find such paths is given in the section :ref:`Exposing policies to the end hosts <endhost_policy_selection>`. Once a path has been found, with specific policies for each hop in the path, the path and an array containing one policy per hop is given to the FABRID snet implementation. The snet implementation then constructs the FABRID packet by automatically requesting the necessary DRKeys and computing the hop validation fields. The packet can then be sent to the border router for further forwarding. A receiving endhost can recompute the path validator to verify that the packet was forwarded over this path.
 With this the endhost is able to create FABRID packets and then send them to the border router for further forwarding.
 The FABRID snet implementation will automatically request the necessary DRKeys and compute the hop validation fields,
 the endhost only has to provide the path and the FABRID policies.
@@ -323,10 +323,71 @@ To ensure a consistent hash calculation, the key entries of these maps have to b
 Exposing policies to the end hosts
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+.. _endhost_policy_selection:
 The path combinator finds the most recent FABRID map per AS among the received segments and subsequently uses this map to find the FABRID
 policies that are available for each interface pair of hops.
-This results in a set of *PolicyIdentifiers* per hop, which can then be used by the application, such as with the usage of a
-specific 'sequence' parameter which incorporates the policies.
+This results in a set of *PolicyIdentifiers* per hop, which can then be used by the application, such as by defining an application parameter that then selects the policies to use on the path and hands these to the snet implementation, e.g. ``--fabridpolicy``. 
+
+
+``fabridpolicy`` parameter
+''''''''''''''''''''''''''''
+A custom language is used to make a selection out of the available paths and policies. The basic components of the language are as follows:
+
+* **Identifiers**
+
+  An identifier matches with a specific hop in the path and applies a policy to that hop. Parts of this hop identifier may be a wildcard, such that the identifier can match with multiple hops in the path. An identifier is structured as follows: 
+  ``ISD-AS#IGIF,EGIF@POLICY``,
+  where 
+
+  * ISD can be either the ISD number (e.g. ``1``), or a wildcard (``0``).
+  * AS can be either the AS number seperated by underscores (e.g. ``ff00_0_110`` or a wildcard (``0``).
+  * IGIF can be either the ingress interface number (e.g. ``42``), or a wildcard (``0``).
+  * EGIF can be either the egress interface number (e.g. ``41``, or a wildcard (``0``).
+  * POLICY can be either the policy to apply, where a local policy is denoted as ``L`` + the policy identifier (e.g. ``L100``) and a global policy is denoted by ``G`` + the policy identifier (e.g. ``G100``), a wildcard (``0``), or a rejection ``REJECT``. Rejection means that this path should not be chosen. 
+
+  When used in a query, the identifier evaluates to true when at least a single hop in the path matches the identifier.
+
+* **Concatenations**
+
+  Multiple identifiers can be combined by using a concatenation (and/or parentheses). Concatenations are created by the ``+`` symbol. 
+
+  Example:
+
+  ``(1-0#0,0@G300 + 1-0#0,0@G200)`` applies both policy G300 and policy G200.
+
+  When used in a query, a concatenation evaluates to true when *all* identifiers in the concatenation also evaluate to true.
+
+
+* **Queries**
+
+  You can query for the existence of a specific hop and/or policy through a query. Queries are structured as follows: ``{ QUERY_EXPRESSION ? EXPRESSION_IF_TRUE : EXPRESSION_IF_FALSE}``. The query expression is evaluated, and if an identifier matches with a specific hop, the ``expression_if_true`` branch is applied. If no matches can be found in the path, the ``expression_if_false`` branch is applied. Identifiers in the query expression are not applied, e.g. if a query expression queries for a specific policy, the specific policy is not applied to the hops it matches, unless the same expression is also given under the ``expression_if_true`` branch.
+
+  Example:
+
+  With the path
+  ``1-ff00:0:109#0,5@() 1-ff00:0:110#4,1@(G100, G200) -> 1-ff00:0:111#2,0@(G200, G300)``
+
+  When an expression queries for ``1-0#0,0@G200`` using ``{1-0#0,0@G200 ? 1-0#0,0@G300 : 1-0#0,0@REJECT}``, the policies that are applied to the hops are only policy G300 for the last hop. To also apply policy G200, the query has to be structured as ``{1-0#0,0@G200 ? (1-0#0,0@G300 + 1-0#0,0@G200) : 1-0#0,0@REJECT}``.
+
+  When a query is used within another query, the query_expression is first used to determine which branch is used for the result. If the query would apply the ``expression_if_true`` branch, the result of the query is the evaluation of the ``expression_if_true`` branch. The same applies for the ``expression_if_false`` branch. 
+
+**Evaluation Order**
+The language is evaluated left to right, for each hop only a single policy can be applied. The first identifier match applies the policy, so the order of the query is important. 
+
+Example:
+
+``(0-0#0,0@REJECT + 1-0#0,0@00)``
+
+Will reject all paths, whereas
+
+``(1-0#0,0@0 + 0-0#0,0@REJECT)``
+
+Will reject all paths that are not within ISD 1.
+
+**Possible Extensions**
+Shortcuts could be added, for the identifiers, such as : 
+``2@REJECT``, to reject all paths that pass through ISD2.
+
 Once the application has decided which policies to use, it can craft a FABRID HBH extension and include this as an option when sending
 the packet.
 
@@ -357,7 +418,49 @@ This could look like this::
     [drkey.delegation]
     FABRID = [ "fd00:f00d:cafe::7f00:11", "fd00:f00d:cafe::7f00:12", "fd00:f00d:cafe::7f00:13"]
 
-The FABRID policies are configured in the control service.
+
+Configuring FABRID Policies
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FABRID policies are configured in the control service using YAML files. A YAML configuration contains the information necessary to create entries in the SupportedIndicesMap, IndexIdentifierMap, IdentifierDescriptionMap (for local policies) and the MPLSMaps. Concretely the YAML file should contain the following entries:
+
+* ``local`` (bool): Indicating whether the policy is a local policy (true) or global policy (false).
+* ``local_description`` (string): The description that is fetched by remote AS'es for this specific policy. Only used for local policies, as for global policies this is stored in a global datastore. Required when ``local`` is true, ignored otherwise.
+* ``local_identifier`` (integer): The integer identifier that this policy is known by. Required when ``local`` is true, ignored otherwise.
+* ``global_identifier`` (integer): The integer identifier of the policy from the global datastore that this configured policy should implement. Required when ``local`` is false, ignored otherwise.
+* ``connections`` (list of ConnectionPoints): The connection points on which this policy applies.
+
+
+Connection Points
+'''''''''''''''''''
+A connection point in the YAML file is defined by providing the ingress and egress of the connection as well as the integer MPLS label that should be applied to enforce the policy on that connection. The egress can be either an interface, an IPv4/IPv6 prefix or a wildcard. The ingress of a connection point is limited to a wildcard or interface.The rationale behind this is that an IPv4/IPv6 ingress would indicate a packet coming from an endhost. Upon arrival at the border router, the packet would have already traversed the internal network and the border router would not be able to enforce a policy (e.g. by applying an MPLS label).
+
+Example of a list of connection points:
+
+::
+
+    - ingress:
+          type: interface
+          interface: 2
+      egress:
+          type: interface
+          interface: 1
+      mpls_label: 1    
+    - ingress:
+          type: interface
+          interface: 2
+      egress:
+          type: ipv4
+          ip: 192.168.5.1
+          prefix: 24
+      mpls_label: 55
+    - ingress:
+          type: wildcard
+      egress:
+          type: interface
+          interface: 2
+      mpls_label: 3
+
+
 
 Border router
 ^^^^^^^^^^^^^^^
