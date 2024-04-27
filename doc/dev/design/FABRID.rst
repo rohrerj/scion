@@ -70,7 +70,8 @@ The design document specifies:
     Describes the format of FABRID policies, the modifications to the path construction beacons,
     and the FABRID control service endpoints used to communicate policies to endhosts and other ASes.
 - Configuration
-    Describes how the border router and the control service have to be configured such that they are able to process FABRID packets.
+    Describes how the border router and the control service have to be configured such that they are able to process FABRID packets,
+    how the FABRID policies can be configured, and how the MPLS labels can be set for a pair of connection points.
 - Rationale
     Describes different design options and the reasoning behind the decision behind our choice.
 - Implementation
