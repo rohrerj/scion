@@ -226,7 +226,7 @@ already in the DRKey derivation.
 However, to simplify the definitions by having a uniform MAC input, we include those values also in the input to the HVF computation.
 
 Modifications of the data plane
-----------
+----------------------------------
 
 Processing at the router
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -256,7 +256,7 @@ The packet can then be sent to the border router for further forwarding.
 A receiving endhost can recompute the path validator to verify that the packet was forwarded over this path.
 
 Modifications of the control plane
----------------
+------------------------------------
 
 Control service
 ^^^^^^^^^^^^^^^^^
@@ -331,10 +331,11 @@ The detachable extension can also be present in the PCB, i.e. it does not have t
 If the maps are detached, they can be fetched from the control service of that AS and the received maps can be verified with the hashes.
 To ensure a consistent hash calculation, the key entries of these maps have to be sorted, such that they are accessed in a consistent order.
 
+.. _endhost_policy_selection:
+
 Exposing policies to the endhosts
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. _endhost_policy_selection:
 The path combinator finds the most recent FABRID map per AS among the received segments and subsequently uses this map to find the FABRID
 policies that are available for each interface pair of hops.
 This results in a set of *PolicyIdentifiers* per hop, which can then be used by the application, such as by defining an application parameter
