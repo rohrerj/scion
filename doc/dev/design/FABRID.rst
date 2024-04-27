@@ -4,20 +4,20 @@ FABRID
 .. _fabrid-design:
 
 - Author: Justin Rohrer, Jelte van Bommel, Marc Odermatt, Marc Wyss, Cyrill Krähenbühl, Juan A. García-Pardo
-- Last Updated: 2024-04-08
+- Last Updated: 2024-04-27
 - Discussion at:
 
 Abstract
 ===========
 
-In SCION the endhosts have the option to choose *inter-AS* paths to forward packets to a destination.
-However, some applications require more fine grained path selection like "Do not route traffic over devices
+In SCION, endhosts have the option to choose *inter-AS* paths to forward packets to their desired destination.
+However, some applications require more fine-grained path selection like "Do not route traffic over devices
 produced by hardware manufacturer X or that run software Y with version < Z" which requires transparency and
 control also with respect to *intra-AS* paths.
 Such fine-grained path selection is useful for example if there exists a known bug in certain router versions that affect secure communication,
 or if an entity simply does not trust a certain hardware manufacturer, so that traffic can be steered around those devices.
 This can also be seen as an enhancement for keeping traffic within a certain jurisdiction, e.g., by routing traffic
-only along devices located in a specific country.
+only along devices located in a specific country, because a single AS could cover multiple countries.
 
 Background
 ===========
@@ -25,70 +25,76 @@ Background
 The `FABRID <https://netsec.ethz.ch/publications/papers/2023_usenix_fabrid.pdf>`_,
 protocol allows to implement such fine-grained path selection.
 A deployment of FABRID in SCIONLab makes its next-generation features available to interested parties around the globe.
-FABRID also implicitly implements the `EPIC <https://netsec.ethz.ch/publications/papers/Legner_Usenix2020_EPIC.pdf>`_,
-features source authentication for routers and the destination host, and path validation for source and destination hosts.
+FABRID also implicitly implements the `EPIC' <https://netsec.ethz.ch/publications/papers/Legner_Usenix2020_EPIC.pdf>`_
+features, including source authentication for routers and the destination host, and path validation for source and destination hosts.
 
 Proposal
 ========
 
-FABRID indroduces policies, which can be thought of as additional path constraints such that the ASes only use intra-AS paths that fulfill that policy.
-The ASes announce those policies to the end hosts, who then can use those additional path constraint during path selection.
-The border routers use those policies to decide on the intra-AS path to forward, e.g. by using MPLS labels.
+FABRID indroduces policies, which can be thought of as additional path constraints: ASes on an endhost's selected inter-domain path only
+forward traffic over intra-AS paths of their network that match the endhost's selected policy.
+ASes announce the policies they satisfy to endhosts, which use them during path selection to further constrain the desired forwarding paths.
+The endhosts communicate the selected policies to the on-path ASes by encoding them in SCION data packets.
+On-path border routers read the encoded policies from each packet, and forward the packet along one of potentially multiple policy-compliant intra-AS paths.
+Enforcing correct traversal of an intra-AS path can for example be achieved through MPLS.
 Some FABRID policies are globally defined and others locally per AS.
-Global policies make sense in order to have known policies for the common use cases where each end host knows that if an AS supports that policy,
-then it knows the constraints of that policy without the need of fetching the full policy description.
-The AS network operator configures which global FABRID policies are supported for the local AS and can add additional local FABRID
-policies that are valid for this AS.
-The FABRID policy identifiers are provided to the endhosts inside of the PCB or as an detachable PCB extension.
-The FABRID policy descriptions on the other hand have to be requested from the local control service which will then either return
-the cached FABRID policy description or query the policy description from the remote AS.
-That way we can minimize the overhead that the FABRID polices cause to the PCB size.
-A source endhost can then select a path together with FABRID policies and forward the FABRID packet over this path to a destination endhost.
-The on-path border routers will then add some proof of transit such that the destination endhost can later verify that the packet indeed followed the intended path.
+Global policies serve the purpose of avoiding redundancy for policies implemented by many ASes.
+The AS network operator specifies in a configuration which global policies are supported, and can additionally define arbitrary local policies.
+We distinguish between policy identifier and policy description.
+The policy identifiers are provided to the endhosts inside the PCB, or if the number of policies is large, as an detachable PCB extension.
+The policy descriptions on the other hand have to be requested from the local control service which will then either return
+the cached policy description or query the policy description from the remote AS.
+By only encoding the policy identifiers, but not the policy descriptions, inside the PCBs, we can minimize FABRID's PCB size overhead, which is negligible.
+A source endhost can then select a SCION forwarding path, where it encodes up to one policy index for each on-path AS (it can also select no policy for an AS) in its packets.
+On-path border routers will then add a proof of transit such that the destination endhost can later verify that the packet indeed followed the intended path.
 
 Our proposed design and implementation of FABRID allows for incremental deployment at router- and AS-level, i.e., some AS operators may want to
 deploy FABRID while others do not, and those who do may only want to deploy it on a subset of border routers.
-This allows for a smooth migration where an AS can test-wise update some border routers and test that nothing breaks.
-However, this could lead to the situation where an end host does not have paths available with all on-path ASes supporting FABRID.
-In such a situation the end host can still send its traffic along that path, but the guarantees provided by FABRID only hold for the FABRID-enabled ASes.
+This allows for a smooth migration, during wich an AS can test-wise update some border routers and verify that everything works as intended.
+However, allowing for incremental deployment can lead to the situation in which an endhost may not have any forwarding path available for which every on-path AS supports FABRID.
+In such a situation, the endhost's traffic is still forwarded along that inter-domain path, but FABRID's intra-domain forwarding guarantees only apply to the FABRID-enabled ASes.
 
-Since each AS can create their own local FABRID policies, end hosts have to retrieve them.
-In our design, end hosts have to retrieve them from their local AS, and the local AS has to retrieve them from the remote AS, similar to how SCION path retrieval is implemented.
-Those policies are only fetched on demand by the local control service and will be cached till end of their validity.
-This allows for better scalability for the FABRID policies because an AS does not have to retrieve all FABRID policies from all other ASes.
-Even though the beacon had to be adapted, the size increase is negligible.
+Since each AS can create their own local policies, endhosts need a mechanism to discover them.
+In our design, endhosts retrieve them from their local AS, and the local AS retrieves them from the remote AS, similar to how SCION path retrieval is implemented.
+Those policies are only fetched on demand by the local control service and will be cached until they expire.
+This on-demand policy retrieval improves the scalability of the control service compared to simply fetching all the policies from all ASes in the internet.
 
 The design document specifies:
 
 - The header design
-    Specification of the two new Hop-by-Hop extension options, their fields and how they are computed.
-- The data plane
-    Describes how the FABRID packets are processed and forwarded at the border routers, how the endhosts can send FABRID packets,
-    and the path validation for the destination endhost.
-- The control plane
-    Describes how the FABRID policies are defined, additional beaconing information, and new FABRID control service endpoints which are used for
-    communicating the FABRID policies to the endhosts and remote ASes.
+    Specifies the two new Hop-by-Hop extension options, including definitions of their option fields.
+- Modifications of the data plane
+    Describes the packet generation process at endhosts, the forwarding process at border routers,
+    and the path valildation procedure at the destination endhost.
+- Modifications of the control plane
+    Describes the format of FABRID policies, the modifications to the path construction beacons,
+    and the FABRID control service endpoints used to communicate policies to endhosts and other ASes.
 - Configuration
     Describes how the border router and the control service have to be configured such that they are able to process FABRID packets.
+- Rationale
+    Describes different design options and the reasoning behind the decision behind our choice.
+- Implementation
+    Lists the steps in which FABRID is going to be implemented.
 
 The design document will be extended in the future to also specify features that will be implemented in a later
-iteration e.g. path validation for the source end host.
+iteration e.g. path validation for the source endhost.
 
 .. figure:: fig/FABRID/NetworkTopology.png
     
-    Example network topology; different intra-AS router colors indicate different manufacturers.
-    Here we have the Hosts H01 from AS01 and Host H02 from AS02 who try to communicate with each other.
+    Example network topology.
+    Different intra-AS router colors indicate different manufacturers.
+    H01 in AS01 and H02 in AS02 want to communicate with each other.
     This topology allows constraints like "Do not route traffic over devices produced by hardware manufacturer red", or
     "Route traffic only over devices produced by hardware manufacturer green or blue".
-    Since all paths between Host H01 and Host H02 traverse a green router, it is not possible to find a path that does not traverse green routers.
+    Note that, since all paths between Host H01 and Host H02 traverse a green router, it is not possible to find a path that does not traverse green routers.
 
 Header design
 --------------
 
-The FABRID header design is built using the SCION Hop-by-Hop extensions (HBH), which allows for incremental deployability.
-We created two different HBH options.
-First, the Identifier option that contains the packet ID and a timestamp which is used to uniquely identify a packet of a flow.
-And second, the FABRID option that contains the FABRID hopfield metadata fields and a path validator field.
+The FABRID header design is based on SCION Hop-by-Hop extensions (HBH), in order to allow for incremental deployability.
+We define two options, the Identifier option and the FABRID option.
+The Identifier option contains the packet ID and a timestamp, which are used to uniquely identify a packet.
+The FABRID option contains the FABRID hopfield metadata fields and a path validator field.
 The Identifier option can be used without the FABRID option and can therefore also be used by other extensions.
 The FABRID option on the other hand requires that the Identifier option is specified in the HBH extension before the FABRID option.
 
@@ -112,11 +118,11 @@ The Identifier Option always has a length of 8 bytes and look like:
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 Timestamp
-    The 27 bit timestamp of when the packet has been sent with 1 millisecond precision
-    relative to the timestamp of the first InfoField of the SCION header.
+    The 27 bit timestamp referring to the packet's transmission time with 1 millisecond precision
+    relative to the timestamp of the first :ref:`InfoField <scion-path-info-field>` of the SCION header.
+    
 Packet ID
-    The 32 bit packet ID that is used together with the timestamp to uniquely identify
-    the packet originating from a particular flow.
+    The 32 bit packet ID that, together with the timestamp, uniquely identifies a source endhost's packet.
 
 .. _fabrid-option:
 
@@ -147,23 +153,25 @@ This hop-by-hop option has an alignment of 4 bytes:
 Encrypted PolicyID
     The 8 bit encrypted FABRID policy index.
 F
-    Stands for “FABRID enabled” and if this is set to false, the router responsible for
+    Stands for "FABRID enabled" and if this is set to false, the router responsible for
     that hop will not apply any FABRID logic to this packet.
     This can be used e.g. if an on-path AS does not support FABRID, or if the endhost does not care
-    about FABRID for that AS.
+    about any policies regarding that specific AS.
 A
-    Stands for “AS-level key”. If this is set to true, instead of a AS-Host Key, an AS-AS DRKey will be used.
+    Stands for "AS-level key". If this is set to true, instead of a AS-Host Key, an AS-AS DRKey will be used.
     This can be used to achieve scalability in future in-network DDoS defense solutions, see `RAINBOW`_.
     Using the AS-Host Key is the default option in FABRID.
 Hop Validation Field
-    22 bit Message Authentication Code to authenticate the FABRID extension metadata field.
-    The on-path border routers recompute this field to verify that it matches the expected HVF.
-    If the FABRID packet is processed correctly, the border routers update the value of the HVF to the verified HVF.
-    With this the receiving endhost can be sure that the packet has actually been processed by that AS.
+    22 bit Message Authentication Code (MAC) to authenticate the FABRID extension metadata field.
+    This field is initially set by the source endhost and enables authentication of the source and packet information
+    to on-path ASes and proof-of-transit for path validation.
+    When receiving a FABRID packet, on-path border routers recompute the MAC using the corresponding DRKey and
+    packet header fields, and compare the result against the value in this Hop Validation Field (HVF).
+    If the values match, the border routers update the value of the HVF to the verified HVF.
 Path Validator
-    4 byte Path Validator. The sending endhost will compute the path validator and the
-    receiving endhost can then recompute the path validator to verify that the packet
-    has been sent over the correct path.
+    4 byte Path Validator.
+    The sending endhost computes the path validator and the receiving endhost later recomputes the path validator
+    to verify that the packet has been sent over the correct path.
 
 Identifier and FABRID Option combined
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -213,16 +221,18 @@ These formulas correspond to the previously mentioned FABRID HBH extension field
 
 For accessing a sub slice we use the [a:b] notation, where we take the bytes from index a to index b, where b is excluded.
 For the DRKey notation, see :doc:`/cryptography/drkey`.
-The *srcAddrLen* and *srcHostAddr* are used as a MAC input for both the AS-Host DRKey case and the AS-AS DRKey case for simplicity.
+In principle, the *srcAddrLen* and *srcHostAddr* could be omitted in the AS-Host DRKey case, as those values are implicitly used
+already in the DRKey derivation.
+However, to simplify the definitions by having a uniform MAC input, we include those values also in the input to the HVF computation.
 
-Data plane
+Modifications of the data plane
 ----------
 
 Processing at the router
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Whenever a FABRID enabled router receives a SCION packet, it has to figure out whether it should be processed as FABRID or not.
-If an AS receives a FABRID packet but does not support FABRID, it treats the packet as a normal SCION packet.
+Whenever a FABRID-enabled router receives a SCION packet, it has to figure out whether it should be processed as FABRID or not.
+If a border router receives a FABRID packet but does not support FABRID, it treats the packet as a normal SCION packet.
 In both cases, all the logic of a normal SCION packet will be applied too.
 The router determines whether the SCION packet is a FABRID packet as follows:
 
@@ -238,13 +248,14 @@ All intra-AS paths are configured by the AS operator, and are provided to the bo
 Processing at the endhost
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To be able to send a FABRID packet, the endhost has to choose a path that supports its path and policy constraints. A detailed explanation on how endhost applications can find such paths is given in the section :ref:`Exposing policies to the end hosts <endhost_policy_selection>`. Once a path has been found, with specific policies for each hop in the path, the path and an array containing one policy per hop is given to the FABRID snet implementation. The snet implementation then constructs the FABRID packet by automatically requesting the necessary DRKeys and computing the hop validation fields. The packet can then be sent to the border router for further forwarding. A receiving endhost can recompute the path validator to verify that the packet was forwarded over this path.
-With this the endhost is able to create FABRID packets and then send them to the border router for further forwarding.
-The FABRID snet implementation will automatically request the necessary DRKeys and compute the hop validation fields,
-the endhost only has to provide the path and the FABRID policies.
-Then the receiving endhost can recompute the path validator to verify that the packet was forwarded over this path.
+To be able to send a FABRID packet, the endhost has to choose a path that supports its path and policy constraints.
+A detailed explanation on how endhost applications can find such paths is given in the section :ref:`Exposing policies to the end hosts <endhost_policy_selection>`.
+Once a path has been found, with specific policies for each hop in the path, the path and an array containing one policy per hop is given to the FABRID snet implementation.
+The snet implementation then constructs the FABRID packet by automatically requesting the necessary DRKeys and computing the hop validation fields.
+The packet can then be sent to the border router for further forwarding.
+A receiving endhost can recompute the path validator to verify that the packet was forwarded over this path.
 
-Control plane
+Modifications of the control plane
 ---------------
 
 Control service
@@ -320,13 +331,14 @@ The detachable extension can also be present in the PCB, i.e. it does not have t
 If the maps are detached, they can be fetched from the control service of that AS and the received maps can be verified with the hashes.
 To ensure a consistent hash calculation, the key entries of these maps have to be sorted, such that they are accessed in a consistent order.
 
-Exposing policies to the end hosts
+Exposing policies to the endhosts
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. _endhost_policy_selection:
 The path combinator finds the most recent FABRID map per AS among the received segments and subsequently uses this map to find the FABRID
 policies that are available for each interface pair of hops.
-This results in a set of *PolicyIdentifiers* per hop, which can then be used by the application, such as by defining an application parameter that then selects the policies to use on the path and hands these to the snet implementation, e.g. ``--fabridpolicy``. 
+This results in a set of *PolicyIdentifiers* per hop, which can then be used by the application, such as by defining an application parameter
+that then selects the policies to use on the path and hands these to the snet implementation, e.g. ``--fabridpolicy``. 
 
 
 ``fabridpolicy`` parameter
@@ -335,15 +347,19 @@ A custom language is used to make a selection out of the available paths and pol
 
 * **Identifiers**
 
-  An identifier matches with a specific hop in the path and applies a policy to that hop. Parts of this hop identifier may be a wildcard, such that the identifier can match with multiple hops in the path. An identifier is structured as follows: 
+  An identifier matches with a specific hop in the path and applies a policy to that hop. Parts of this hop identifier may be a wildcard,
+  such that the identifier can match with multiple hops in the path.
+  An identifier is structured as follows: 
   ``ISD-AS#IGIF,EGIF@POLICY``,
   where 
 
   * ISD can be either the ISD number (e.g. ``1``), or a wildcard (``0``).
-  * AS can be either the AS number seperated by underscores (e.g. ``ff00_0_110`` or a wildcard (``0``).
+  * AS can be either the AS number seperated by underscores (e.g. ``ff00_0_110``) or a wildcard (``0``).
   * IGIF can be either the ingress interface number (e.g. ``42``), or a wildcard (``0``).
-  * EGIF can be either the egress interface number (e.g. ``41``, or a wildcard (``0``).
-  * POLICY can be either the policy to apply, where a local policy is denoted as ``L`` + the policy identifier (e.g. ``L100``) and a global policy is denoted by ``G`` + the policy identifier (e.g. ``G100``), a wildcard (``0``), or a rejection ``REJECT``. Rejection means that this path should not be chosen. 
+  * EGIF can be either the egress interface number (e.g. ``41``), or a wildcard (``0``).
+  * POLICY can be either the policy to apply, where a local policy is denoted as ``L`` + the policy identifier (e.g. ``L100``) and a global policy
+    is denoted by ``G`` + the policy identifier (e.g. ``G100``), a wildcard (``0``), or a rejection ``REJECT``.
+    Rejection means that this path should not be chosen. 
 
   When used in a query, the identifier evaluates to true when at least a single hop in the path matches the identifier.
 
@@ -360,19 +376,29 @@ A custom language is used to make a selection out of the available paths and pol
 
 * **Queries**
 
-  You can query for the existence of a specific hop and/or policy through a query. Queries are structured as follows: ``{ QUERY_EXPRESSION ? EXPRESSION_IF_TRUE : EXPRESSION_IF_FALSE}``. The query expression is evaluated, and if an identifier matches with a specific hop, the ``expression_if_true`` branch is applied. If no matches can be found in the path, the ``expression_if_false`` branch is applied. Identifiers in the query expression are not applied, e.g. if a query expression queries for a specific policy, the specific policy is not applied to the hops it matches, unless the same expression is also given under the ``expression_if_true`` branch.
+  You can query for the existence of a specific hop and/or policy through a query.
+  Queries are structured as follows: ``{ QUERY_EXPRESSION ? EXPRESSION_IF_TRUE : EXPRESSION_IF_FALSE}``.
+  The query expression is evaluated, and if an identifier matches with a specific hop, the ``expression_if_true`` branch is applied.
+  If no matches can be found in the path, the ``expression_if_false`` branch is applied.
+  Identifiers in the query expression are not applied, e.g. if a query expression queries for a specific policy, the specific policy
+  is not applied to the hops it matches, unless the same expression is also given under the ``expression_if_true`` branch.
 
   Example:
 
   With the path
   ``1-ff00:0:109#0,5@() 1-ff00:0:110#4,1@(G100, G200) -> 1-ff00:0:111#2,0@(G200, G300)``
 
-  When an expression queries for ``1-0#0,0@G200`` using ``{1-0#0,0@G200 ? 1-0#0,0@G300 : 1-0#0,0@REJECT}``, the policies that are applied to the hops are only policy G300 for the last hop. To also apply policy G200, the query has to be structured as ``{1-0#0,0@G200 ? (1-0#0,0@G300 + 1-0#0,0@G200) : 1-0#0,0@REJECT}``.
+  When an expression queries for ``1-0#0,0@G200`` using ``{1-0#0,0@G200 ? 1-0#0,0@G300 : 1-0#0,0@REJECT}``, the policies that are
+  applied to the hops are only policy G300 for the last hop.
+  To also apply policy G200, the query has to be structured as ``{1-0#0,0@G200 ? (1-0#0,0@G300 + 1-0#0,0@G200) : 1-0#0,0@REJECT}``.
 
-  When a query is used within another query, the query_expression is first used to determine which branch is used for the result. If the query would apply the ``expression_if_true`` branch, the result of the query is the evaluation of the ``expression_if_true`` branch. The same applies for the ``expression_if_false`` branch. 
+  When a query is used within another query, the query_expression is first used to determine which branch is used for the result.
+  If the query would apply the ``expression_if_true`` branch, the result of the query is the evaluation of the ``expression_if_true`` branch.
+  The same applies for the ``expression_if_false`` branch. 
 
 **Evaluation Order**
-The language is evaluated left to right, for each hop only a single policy can be applied. The first identifier match applies the policy, so the order of the query is important. 
+The language is evaluated left to right, for each hop only a single policy can be applied.
+The first identifier match applies the policy, so the order of the query is important. 
 
 Example:
 
@@ -383,10 +409,6 @@ Will reject all paths, whereas
 ``(1-0#0,0@0 + 0-0#0,0@REJECT)``
 
 Will reject all paths that are not within ISD 1.
-
-**Possible Extensions**
-Shortcuts could be added, for the identifiers, such as : 
-``2@REJECT``, to reject all paths that pass through ISD2.
 
 Once the application has decided which policies to use, it can craft a FABRID HBH extension and include this as an option when sending
 the packet.
@@ -496,12 +518,19 @@ And additionally, we could also use FABRID together with EPIC HP.
 The RAINBOW system
 ^^^^^^^^^^^^^^^^^^^^^
 
-The RAINBOW system is a future extension of FABRID, which allows marking traffic as higher quality of service, to be
+The RAINBOW system allows marking traffic as higher quality of service, to be
 prioritized at on-path BRs.
-Specifically, each BR reserves a certain amount of bandwidth for RAINBOW traffic, which is divided evenly between different source ASes.
+RAINBOW can be implemented based on FABRID.
+Specifically, each border router reserves a certain amount of bandwidth for RAINBOW traffic, which is divided evenly between different source ASes.
 As this division happens on the level of ASes and not individual endhosts, the BR also needs to be able to authenticate traffic at an AS level.
 The FABRID HBH extension makes this possible, by including an "AS level key" flag, which specifies that the original HVF has been authenticated
 again by an AS-AS DRKey, that is only known to trusted infrastructure in the source AS.
+
+FABRID policy selection shortcuts
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In the FABRID policy selection procedure, we could add short cuts for the identifiers, such as:
+``2@REJECT``, to reject all paths that pass through ISD2.
 
 Rationale
 ==========
@@ -519,10 +548,10 @@ Separate Identifier option
 ---------------------------
 
 Instead of just having a single FABRID HBH option, we decided to move the packet ID and packet timestamp to another HBH option,
-the so called Identifier option, because this might also be useful for other HBH extensions and not just for FABRID
+the so called Packet Identifier Option, because this might also be useful for other HBH extensions and not just for FABRID
 (e.g., it would allow to port EPIC-HP from a path type to a HBH extension).
-Since FABRID still requires the packetID and packet timestamp, providing the Identifier option became mandatory for FABRID packets.
-The cost of moving the Identifier to a separate HBH extension is 4 bytes, where 2 bytes are used for the HBH option type and length
+Since FABRID still requires the packetID and packet timestamp, providing the Packet Identifier Option became mandatory for FABRID packets.
+The cost of moving the Packet Identifier to a separate HBH extension is 4 bytes, where 2 bytes are used for the HBH option type and length
 fields and 2 bytes for padding to have the FABRID HBH extension 4 bytes alligned.
 
 Length of PacketID and PacketTimestamp for the Identifier HBH option
