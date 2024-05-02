@@ -3,9 +3,9 @@ FABRID
 ********
 .. _fabrid-design:
 
-- Author: Justin Rohrer, Jelte van Bommel, Marc Odermatt, Marc Wyss, Cyrill Krähenbühl, Juan A. García-Pardo
-- Last Updated: 2024-04-27
-- Discussion at:
+- **Author**: Justin Rohrer, Jelte van Bommel, Marc Odermatt, Marc Wyss, Cyrill Krähenbühl, Juan A. García-Pardo
+- **Last updated**: 2024-05-03
+- **Discussion at**: -
 
 Abstract
 ===========
@@ -40,11 +40,15 @@ Enforcing correct traversal of an intra-AS path can for example be achieved thro
 Some FABRID policies are globally defined and others locally per AS.
 Global policies serve the purpose of avoiding redundancy for policies implemented by many ASes.
 The AS network operator specifies in a configuration which global policies are supported, and can additionally define arbitrary local policies.
+Since each AS can create their own local policies, endhosts need a mechanism to discover them.
 We distinguish between policy identifier and policy description.
-The policy identifiers are provided to the endhosts inside the PCB, or if the number of policies is large, as an detachable PCB extension.
+The policy identifiers are provided to the endhosts as a detachable PCB extension.
 The policy descriptions on the other hand have to be requested from the local control service which will then either return
 the cached policy description or query the policy description from the remote AS.
-By only encoding the policy identifiers, but not the policy descriptions, inside the PCBs, we can minimize FABRID's PCB size overhead, which is negligible.
+By only encoding the policy identifiers, but not the policy descriptions, inside the PCBs, we can minimize FABRID's PCB size overhead, which thus becomes negligible.
+In our design, endhosts retrieve the policies from their local AS, and the local AS retrieves them from the remote AS, similar to how SCION path retrieval is implemented.
+Those policies are only fetched on demand by the local control service and will be cached until they expire.
+This on-demand policy retrieval improves the scalability of the control service compared to simply fetching all the policies from all ASes in the internet.
 A source endhost can then select a SCION forwarding path, where it encodes up to one policy index for each on-path AS (it can also select no policy for an AS) in its packets.
 On-path border routers will then add a proof of transit such that the destination endhost can later verify that the packet indeed followed the intended path.
 
@@ -53,11 +57,6 @@ deploy FABRID while others do not, and those who do may only want to deploy it o
 This allows for a smooth migration, during wich an AS can test-wise update some border routers and verify that everything works as intended.
 However, allowing for incremental deployment can lead to the situation in which an endhost may not have any forwarding path available for which every on-path AS supports FABRID.
 In such a situation, the endhost's traffic is still forwarded along that inter-domain path, but FABRID's intra-domain forwarding guarantees only apply to the FABRID-enabled ASes.
-
-Since each AS can create their own local policies, endhosts need a mechanism to discover them.
-In our design, endhosts retrieve them from their local AS, and the local AS retrieves them from the remote AS, similar to how SCION path retrieval is implemented.
-Those policies are only fetched on demand by the local control service and will be cached until they expire.
-This on-demand policy retrieval improves the scalability of the control service compared to simply fetching all the policies from all ASes in the internet.
 
 The design document specifies:
 
@@ -71,19 +70,19 @@ The design document specifies:
     and the FABRID control service endpoints used to communicate policies to endhosts and other ASes.
 - Configuration
     Describes how the border router and the control service have to be configured such that they are able to process FABRID packets,
-    how the FABRID policies can be configured, and how the MPLS labels can be set for a pair of connection points.
+    how the FABRID policies can be configured, and how the MPLS labels can be set for a pair of connection points (interface to interface or interface to IP range).
 - Rationale
     Describes different design options and the reasoning behind the decision behind our choice.
 - Implementation
     Lists the steps in which FABRID is going to be implemented.
 
 The design document will be extended in the future to also specify features that will be implemented in a later
-iteration e.g. path validation for the source endhost.
+iteration e.g. when adding path validation also for the source endhost.
 
 .. figure:: fig/FABRID/NetworkTopology.png
     
     Example network topology.
-    Different intra-AS router colors indicate different manufacturers.
+    Different colors for intra-AS routers indicate different manufacturers.
     H01 in AS01 and H02 in AS02 want to communicate with each other.
     This topology allows constraints like "Do not route traffic over devices produced by hardware manufacturer red", or
     "Route traffic only over devices produced by hardware manufacturer green or blue".
@@ -104,7 +103,7 @@ The FABRID option on the other hand requires that the Identifier option is speci
 Identifier Option
 ^^^^^^^^^^^^^^^^^^
 
-The Identifier Option always has a length of 8 bytes and look like:
+The Identifier Option always has a length of 8 bytes and looks like:
 
 .. code-block::
 
@@ -154,13 +153,13 @@ This hop-by-hop option has an alignment of 4 bytes:
 Encrypted PolicyID
     The 8 bit encrypted FABRID policy index.
 F
-    Stands for "FABRID enabled" and if this is set to false, the router responsible for
-    that hop will not apply any FABRID logic to this packet.
-    This can be used e.g. if an on-path AS does not support FABRID, or if the endhost does not care
+    Stands for "FABRID enabled".
+    If this is set to false, the router responsible for that hop will not apply any FABRID logic to this packet.
+    This can be used for example if an on-path AS does not support FABRID, or if the endhost does not care
     about any policies regarding that specific AS.
 A
     Stands for "AS-level key". If this is set to true, instead of a AS-Host Key, an AS-AS DRKey will be used.
-    This can be used to achieve scalability in future in-network DDoS defense solutions, see `RAINBOW`_.
+    This can be used to achieve scalability for future in-network DDoS defense solutions, see `RAINBOW`_.
     Using the AS-Host Key is the default option in FABRID.
 Hop Validation Field
     22 bit Message Authentication Code (MAC) to authenticate the FABRID extension metadata field.
@@ -170,11 +169,11 @@ Hop Validation Field
     packet header fields, and compare the result against the value in this Hop Validation Field (HVF).
     If the values match, the border routers update the value of the HVF to the verified HVF.
 Path Validator
-    4 byte Path Validator.
+    4 byte Message Authenitcation Code (MAC) to authenticate the verified HVFs and the path.
     The sending endhost computes the path validator and the receiving endhost later recomputes the path validator
     to verify that the packet has been sent over the correct path.
 
-Identifier and FABRID Option combined
+Combined Identifier and FABRID option
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If no other HBH extension options are present, the HBH options of a FABRID-enabled packet look like this:
@@ -253,7 +252,7 @@ To be able to send a FABRID packet, the endhost has to choose a path that suppor
 A detailed explanation on how endhost applications can find such paths is given in the section :ref:`Exposing policies to the end hosts <endhost_policy_selection>`.
 Once a path has been found, with specific policies for each hop in the path, the path and an array containing one policy per hop is given to the FABRID snet implementation.
 The snet implementation then constructs the FABRID packet by automatically requesting the necessary DRKeys and computing the hop validation fields.
-The packet can then be sent to the border router for further forwarding.
+The packet can then be sent to the local AS' border router for further forwarding.
 A receiving endhost can recompute the path validator to verify that the packet was forwarded over this path.
 
 Modifications of the control plane
@@ -262,15 +261,18 @@ Modifications of the control plane
 Control service
 ^^^^^^^^^^^^^^^^^
 
-The control service for FABRID is responsible for maintaining the by the AS-operator configured FABRID policies, intra-AS paths,
+The control service for FABRID is responsible for maintaining the AS-operator-configured FABRID policies, intra-AS paths,
 and making them accessible for the routers, the endhosts and other remote control services.
+We distinguish between a FABRID policy identifier and a policy index.
+The policy identifier is used to uniqely identify a FABRID policy, whereas the policy index has to me small (1 byte) and depends on the used AS interfaces.
+Hence, a policy index is mapped to a policy indentifer using the *IndexIdentifierMap*, which can be fetched from the control service.
 The policies are defined between interface pairs and for the last AS on the path also per interface - IP range pair.
 Through gRPC, border routers can query the control service for the list of supported policies,
 as well as the mapping from policies to MPLS labels.
-Policies are disseminated to remote ASes through PCBs, which clients in the AS can query from their Path Servers.
+Policies are disseminated to remote ASes through PCBs, which clients in the AS can query from their Path Servers, see :ref:`PCB dissemination <fabrid_pcb_dissemination>`.
 This policy information can also be requested directly from remote ASes over gRPC.
 
-The control service introduces a FABRID service with the following endpoints where *intra-AS* means it can be reached
+The control service introduces a FABRID service with the following interface, where *intra-AS* means it can be reached
 from the local AS and *inter-AS* means it can be reached from a remote AS:
 
 - GetMPLSMapIfNecessary (intra-AS)
@@ -279,18 +281,24 @@ from the local AS and *inter-AS* means it can be reached from a remote AS:
 - GetRemotePolicyDescription (intra-AS)
     Is used by the endhosts of the local AS to request the policy description of a policy identifier for a remote AS.
 - GetSupportedIndicesMap (inter-AS, intra-AS)
-    Returns the per interface-pair supported FABRID indices.
+    Returns the policy indicies supported between each interface pair.
 - GetIndexIdentifierMap (inter-AS, intra-AS)
-    Returns a map that maps identifiers to indicies which can then be used for sending FABRID packets.
+    Returns a map from policy identifiers to policy indices.
+    This is needed because the policy indicies have to me small (1 byte) and depend on the used AS interfaces.
 - GetLocalPolicyDescription (inter-AS, intra-AS)
     Is used to request the policy description of a policy identifier for the local AS.
 
 Important data structures
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The following list explains the most important data structures used in the FABRID service:
+The following list explains the most important maps used in the FABRID service:
 
-- SupportedIndicesMap
+- Supported indices
+    Maps a connection pair consisting of two connection points to a list of policy indices.
+    The map indicates the policy indices (one or multiple) supported on each interface pair.
+    A connection point is either an interface, an IP range, or wildcard.
+    For all intermediary hops interface to interface connection points will be used whereas interface to IP range is used for the last hop.
+
     .. code-block:: go
 
         type ConnectionPoint struct {
@@ -299,29 +307,27 @@ The following list explains the most important data structures used in the FABRI
             Prefix      uint32
             InterfaceID uint16
         }
-
-    Maps a connection pair consisting of two ConnectionPoints to a list of policy indices.
-    This map shows for each connection pair which policy indices are supported, which can be one or multiple policies.
-    A ConnectionPoint is either an interface, an IP range or wildcard.
-    For all intermediary hops interface to interface connection points will be used whereas interface to IP range is used for the last hop.
-- IndexIdentifierMap
+    
+- Index identifiers
     A policy index is to be embedded in the HBH extension and therefore has to be minimal in size.
     The size of a policy index is 8 bits, whereas identifiers can be a multiple of this (especially global identifiers).
     The policy index is thus different to the policy identifier. In order to decode which policies are supported on which interfaces,
     a mapping is required from policy index to local and global identifiers.
     This mapping is provided by this map.
-- IdentifierDescriptionMap
+- Identifier descriptions
     Global identifiers can be found in a global datastore, but local identifiers are specific to an AS.
     This map maps a local policy identifier to its corresponding description.
-- MPLSMaps
+- MPLS
     Routers need to be aware of the supported policy indices and the corresponding MPLS config they need to apply to packets to
     enforce the policy in the internal network.
     Routers periodically fetch this map from the control service.
     A hash of the MPLS map is maintained, such that routers only have to update if their hash differs from the one at the control service.
-- RemotePolicyCache
+- Remote policy cache
     When a local policy is queried at a remote AS, the resulting policy description is cached at the requesting AS' FABRID Manager,
     such that subsequent requests can be served from cache.
 
+
+.. _fabrid_pcb_dissemination:
 
 PCB dissemination
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -339,9 +345,9 @@ Exposing policies to the endhosts
 
 The path combinator finds the most recent FABRID map per AS among the received segments and subsequently uses this map to find the FABRID
 policies that are available for each interface pair of hops.
-This results in a set of *PolicyIdentifiers* per hop, which can then be used by the application, such as by defining an application parameter
-that then selects the policies to use on the path and hands these to the snet implementation, e.g. ``--fabridpolicy``. 
-
+For ASes that do not yet support FABRID it will return an empty set for that hop.
+This information can then be used by the application, such as by defining an application parameter (we will use ``--fabridpolicy``)
+that then selects the policies to use on the path and hands these to the snet implementation.
 
 ``fabridpolicy`` parameter
 ''''''''''''''''''''''''''''
@@ -363,8 +369,6 @@ A custom language is used to make a selection out of the available paths and pol
     is denoted by ``G`` + the policy identifier (e.g. ``G100``), a wildcard (``0``), or a rejection ``REJECT``.
     Rejection means that this path should not be chosen. 
 
-  When used in a query, the identifier evaluates to true when at least a single hop in the path matches the identifier.
-
 * **Concatenations**
 
   Multiple identifiers can be combined by using a concatenation (and/or parentheses). Concatenations are created by the ``+`` symbol. 
@@ -373,30 +377,26 @@ A custom language is used to make a selection out of the available paths and pol
 
   ``(1-0#0,0@G300 + 1-0#0,0@G200)`` applies both policy G300 and policy G200.
 
-  When used in a query, a concatenation evaluates to true when *all* identifiers in the concatenation also evaluate to true.
-
-
 * **Queries**
 
-  You can query for the existence of a specific hop and/or policy through a query.
+  You can query for the existence of a specific hop or policy (or both) through a query.
   Queries are structured as follows: ``{ QUERY_EXPRESSION ? EXPRESSION_IF_TRUE : EXPRESSION_IF_FALSE}``.
-  The query expression is evaluated, and if an identifier matches with a specific hop, the ``expression_if_true`` branch is applied.
-  If no matches can be found in the path, the ``expression_if_false`` branch is applied.
+  The query expression is evaluated, and if an identifier matches with a specific hop, the ``EXPRESSION_IF_TRUE`` branch is applied.
+  If no matches can be found in the path, the ``EXPRESSION_IF_FALSE`` branch is applied.
   Identifiers in the query expression are not applied, e.g. if a query expression queries for a specific policy, the specific policy
-  is not applied to the hops it matches, unless the same expression is also given under the ``expression_if_true`` branch.
+  is not applied to the hops it matches, unless the same expression is also given under the ``EXPRESSION_IF_TRUE`` branch.
+  An identifier evaluates to true when at least a single hop in the path matches the identifier and a concatenation evaluates to true when
+  *all* identifiers in the concatenation also evaluate to true.
 
-  Example:
-
-  With the path
-  ``1-ff00:0:109#0,5@() 1-ff00:0:110#4,1@(G100, G200) -> 1-ff00:0:111#2,0@(G200, G300)``
+  To illustrate this, see the ``Example`` using the path ``1-ff00:0:109#0,5@() 1-ff00:0:110#4,1@(G100, G200) -> 1-ff00:0:111#2,0@(G200, G300)``:
 
   When an expression queries for ``1-0#0,0@G200`` using ``{1-0#0,0@G200 ? 1-0#0,0@G300 : 1-0#0,0@REJECT}``, the policies that are
   applied to the hops are only policy G300 for the last hop.
   To also apply policy G200, the query has to be structured as ``{1-0#0,0@G200 ? (1-0#0,0@G300 + 1-0#0,0@G200) : 1-0#0,0@REJECT}``.
 
   When a query is used within another query, the query_expression is first used to determine which branch is used for the result.
-  If the query would apply the ``expression_if_true`` branch, the result of the query is the evaluation of the ``expression_if_true`` branch.
-  The same applies for the ``expression_if_false`` branch. 
+  If the query would apply the ``EXPRESSION_IF_TRUE`` branch, the result of the query is the evaluation of the ``EXPRESSION_IF_TRUE`` branch.
+  The same applies for the ``EXPRESSION_IF_FALSE`` branch.
 
 **Evaluation Order**
 The language is evaluated left to right, for each hop only a single policy can be applied.
@@ -431,7 +431,7 @@ To be able to use DRKey, one has to configure the control service setting *drkey
 Additionally, since the border routers will fetch the secret value from the control service, the control service also has to
 add the internal IP address of all border routers of the local AS to the DRKey delegation list for FABRID.
 
-This could look like this::
+Example (cs1-ff00_0_110-1.toml)::
 
     [drkey.level1_db]
     connection = "gen-cache/cs1-ff00_0_110-1.drkey-level1.db"
@@ -445,18 +445,34 @@ This could look like this::
 
 Configuring FABRID Policies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-FABRID policies are configured in the control service using YAML files. A YAML configuration contains the information necessary to create entries in the SupportedIndicesMap, IndexIdentifierMap, IdentifierDescriptionMap (for local policies) and the MPLSMaps. Concretely the YAML file should contain the following entries:
+FABRID policies are configured in the control service using YAML files. A YAML configuration contains the information necessary to create entries in
+the SupportedIndicesMap, IndexIdentifierMap, IdentifierDescriptionMap (for local policies) and the MPLSMaps.
+Concretely the YAML file should contain the following entries:
 
-* ``local`` (bool): Indicating whether the policy is a local policy (true) or global policy (false).
-* ``local_description`` (string): The description that is fetched by remote AS'es for this specific policy. Only used for local policies, as for global policies this is stored in a global datastore. Required when ``local`` is true, ignored otherwise.
-* ``local_identifier`` (integer): The integer identifier that this policy is known by. Required when ``local`` is true, ignored otherwise.
-* ``global_identifier`` (integer): The integer identifier of the policy from the global datastore that this configured policy should implement. Required when ``local`` is false, ignored otherwise.
-* ``connections`` (list of ConnectionPoints): The connection points on which this policy applies.
+* ``local`` (bool):
+    Indicating whether the policy is a local policy (true) or global policy (false).
+* ``local_description`` (string):
+    The description that is fetched by remote AS'es for this specific policy.
+    Only used for local policies, as for global policies this is stored in a global datastore.
+    Required when ``local`` is true, ignored otherwise.
+* ``local_identifier`` (integer):
+    The integer identifier that this policy is known by. Required when ``local`` is true, ignored otherwise.
+* ``global_identifier`` (integer):
+    The integer identifier of the policy from the global datastore that this configured policy should implement.
+    Required when ``local`` is false, ignored otherwise.
+* ``connections`` (list of ConnectionPoints):
+    The connection points on which this policy applies.
 
 
 Connection Points
 '''''''''''''''''''
-A connection point in the YAML file is defined by providing the ingress and egress of the connection as well as the integer MPLS label that should be applied to enforce the policy on that connection. The egress can be either an interface, an IPv4/IPv6 prefix or a wildcard. The ingress of a connection point is limited to a wildcard or interface.The rationale behind this is that an IPv4/IPv6 ingress would indicate a packet coming from an endhost. Upon arrival at the border router, the packet would have already traversed the internal network and the border router would not be able to enforce a policy (e.g. by applying an MPLS label).
+A connection point in the YAML file is defined by the ingress and egress of the connection as well as the integer MPLS label that should be
+applied to enforce the policy on that connection.
+The egress can be either an interface, an IPv4/IPv6 prefix, or a wildcard.
+The ingress of a connection point is limited to a wildcard or interface.
+The rationale behind this is that an IPv4/IPv6 ingress would indicate a packet coming from an endhost.
+Upon arrival at the border router, the packet would have already traversed the internal network and the router would not have been able to
+enforce a policy (e.g. by applying an MPLS label).
 
 Example of a list of connection points:
 
@@ -491,7 +507,7 @@ Border router
 
 For a router to query the DRKey secret value from the control service, once has to enable this.
 
-This could look like this::
+Example (br1-ff00_0_110-1.toml)::
 
     [router]
     use_drkey = true
@@ -522,11 +538,11 @@ The RAINBOW system
 
 The RAINBOW system allows marking traffic as higher quality of service, to be
 prioritized at on-path BRs.
-RAINBOW can be implemented based on FABRID.
-Specifically, each border router reserves a certain amount of bandwidth for RAINBOW traffic, which is divided evenly between different source ASes.
+We have designed FABRID such that RAINBOW can be implemented on top of it.
+In RAINBOW, a border router reserves a certain amount of bandwidth for RAINBOW traffic, which is divided evenly between different source ASes.
 As this division happens on the level of ASes and not individual endhosts, the BR also needs to be able to authenticate traffic at an AS level.
 The FABRID HBH extension makes this possible, by including an "AS level key" flag, which specifies that the original HVF has been authenticated
-again by an AS-AS DRKey, that is only known to trusted infrastructure in the source AS.
+again by the corresponding AS-AS DRKey, which is only known to trusted infrastructure in the source AS.
 
 FABRID policy selection shortcuts
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -564,29 +580,27 @@ the timestamp value of the first InfoField of the SCION header.
 The 27 bit allow to save relative timestamps with a difference of up to 37 hours which fulfills the requirement
 that a path can be valid for up to 24 hours.
 
-Length of FABRID policyID and how to determinte whether policy is local or global
+PolicyID length and how to determinte whether policy is local or global
 ----------------------------------------------------------------------------------
 
-The decision on whether a certain FABRID policy is a local or global policy is done by the control service,
-hence we do not have to reserve any bits of the FABRID policy index in the FABRID packets to encode whether
-it is a local or global policy.
 In the header design the FABRID policyIndex has a length of 1 byte, which allows 256 different options.
 But since the control service can configure the policies per interface pair and / or per IP range, there
 are many more options than the 256.
-
+Note that the decision on whether a certain FABRID policy is a local or global policy is done by the control service,
+hence we do not have to reserve any bits of the FABRID policy index in the FABRID packets to encode whether
+it is a local or global policy.
 
 Compatibility
 ===============
 
-FABRID is a new extension which uses the SCION Hop-by-Hop extension which allows
-for incremental deployment of FABRID.
+FABRID uses the SCION Hop-by-Hop extension which allows for incremental deployment of FABRID.
 If a border router does not understand the FABRID Hop-by-Hop extension
 it will simply ignore it and hence not provide any of the FABRID functionality and forward the packet as if it
-is a normal SCION packet.
+were a normal SCION packet.
 The "FABRID enabled" flag allows the sending endhost to choose for which ASes to enable path validation,
-but is also specifically required, for edge-cases where an AS just starts to roll out FABRID functionality to its
-border routers, but the sender does not yet know that this AS is FABRID aware.
-Because if a packet does not contain a HVF for this AS, the packet has to be dropped unless the sender can explicitly
+but is also specifically required for edge-cases where an AS just starts to roll out FABRID functionality to its
+border routers (without FABRID support in the control service yet), but the sender does not yet know that this AS is FABRID-aware.
+Because if a FABRID packet does not contain a valid HVF for this AS, the packet has to be dropped unless the sender can explicitly
 state that FABRID is disabled for this hop.
 
 Implementation
