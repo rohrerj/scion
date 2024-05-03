@@ -335,6 +335,7 @@ PCB dissemination
 The *IndexIdentifierMap* and *SupportedIndicesMap* are included in a (unsigned) detachable extension in the PCBs for an AS.
 Hashes of these maps are maintained in a Signed AS Entry, such that the authenticity of these maps can be verified.
 The detachable extension can also be present in the PCB, i.e. it does not have to be detached in all cases, e.g. if there are only very few policies.
+The default is to include the maps directly inside the PCB.
 If the maps are detached, they can be fetched from the control service of that AS and the received maps can be verified with the hashes.
 To ensure a consistent hash calculation, the key entries of these maps have to be sorted, such that they are accessed in a consistent order.
 
@@ -371,7 +372,7 @@ A custom language is used to make a selection out of the available paths and pol
 
 * **Concatenations**
 
-  Multiple identifiers can be combined by using a concatenation (and/or parentheses). Concatenations are created by the ``+`` symbol. 
+  Multiple identifiers can be combined by using a concatenation. Concatenations are created by the ``+`` symbol. 
 
   Example:
 
@@ -388,15 +389,31 @@ A custom language is used to make a selection out of the available paths and pol
   An identifier evaluates to true when at least a single hop in the path matches the identifier and a concatenation evaluates to true when
   *all* identifiers in the concatenation also evaluate to true.
 
-  To illustrate this, see the ``Example`` using the path ``1-ff00:0:109#0,5@() 1-ff00:0:110#4,1@(G100, G200) -> 1-ff00:0:111#2,0@(G200, G300)``:
+  To illustrate this, take the path ``1-ff00:0:109#0,5@() -> 1-ff00:0:110#4,1@(G100, G200) -> 1-ff00:0:111#2,0@(G200, G300)`` as an example,
+  where the parentheses denote a list of all supported policies on that hop:
 
   When an expression queries for ``1-0#0,0@G200`` using ``{1-0#0,0@G200 ? 1-0#0,0@G300 : 1-0#0,0@REJECT}``, the policies that are
   applied to the hops are only policy G300 for the last hop.
   To also apply policy G200, the query has to be structured as ``{1-0#0,0@G200 ? (1-0#0,0@G300 + 1-0#0,0@G200) : 1-0#0,0@REJECT}``.
 
+  In general there are two ways to reject a path based on policies.
+
+  - a whitelist (a concatenation of allowed policies and at the end of the concatenation a wildcard REJECT policy)
+  - a blacklist (if a specific policy occurs, reject the paths)
+
   When a query is used within another query, the query_expression is first used to determine which branch is used for the result.
   If the query would apply the ``EXPRESSION_IF_TRUE`` branch, the result of the query is the evaluation of the ``EXPRESSION_IF_TRUE`` branch.
   The same applies for the ``EXPRESSION_IF_FALSE`` branch.
+
+  Example:
+  
+  There is a specific policy that signals that the middleboxes in this AS are from a specific manufacturer, e.g. ``G150``.
+  This manufacturer is known to have a security vulnerability that allows malicious users to intercept traffic.
+  The traffic to be sent is highly confidential, so the path should not be used.
+  In this case the query ``{0-0#0,0@G150 ? 0-0#0,0@REJECT : 0-0#0,0@0}`` can be used.
+  ``G150`` in this case is a blacklisted policy. 
+  (An alternative is a whitelist, where a user would specify all manufacturers that are allowed,
+  i.e. ``G151``, ``G152``, ``G153``: ``0-0#0,0@G151 + 0-0#0,0@G152 + 0-0#0,0@G153 + 0-0#0,0@REJECT}``)
 
 **Evaluation Order**
 The language is evaluated left to right, for each hop only a single policy can be applied.
@@ -430,6 +447,8 @@ Control service
 To be able to use DRKey, one has to configure the control service setting *drkey.level1_db* and *drkey.secret_value_db*.
 Additionally, since the border routers will fetch the secret value from the control service, the control service also has to
 add the internal IP address of all border routers of the local AS to the DRKey delegation list for FABRID.
+The control service has to know the folder in which it can find the FABRID policy configurations (see :ref:`Configuring FABRID Policies <fabrid_yaml_config>`.).
+This is configured using *fabrid_path*.
 
 Example (cs1-ff00_0_110-1.toml)::
 
@@ -442,9 +461,14 @@ Example (cs1-ff00_0_110-1.toml)::
     [drkey.delegation]
     FABRID = [ "fd00:f00d:cafe::7f00:11", "fd00:f00d:cafe::7f00:12", "fd00:f00d:cafe::7f00:13"]
 
+    [general]
+    fabrid_path = "gen/ASff00_0_110/fabrid/"
+
+.. _fabrid_yaml_config:
 
 Configuring FABRID Policies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 FABRID policies are configured in the control service using YAML files. A YAML configuration contains the information necessary to create entries in
 the SupportedIndicesMap, IndexIdentifierMap, IdentifierDescriptionMap (for local policies) and the MPLSMaps.
 Concretely the YAML file should contain the following entries:
@@ -463,6 +487,15 @@ Concretely the YAML file should contain the following entries:
 * ``connections`` (list of ConnectionPoints):
     The connection points on which this policy applies.
 
+Example (example-fabrid-policy.yaml):
+
+::
+
+    local: true
+    local_identifier: 1103
+    local_description: Fabrid Example Policy
+    connections:
+    ...
 
 Connection Points
 '''''''''''''''''''
@@ -544,11 +577,14 @@ As this division happens on the level of ASes and not individual endhosts, the B
 The FABRID HBH extension makes this possible, by including an "AS level key" flag, which specifies that the original HVF has been authenticated
 again by the corresponding AS-AS DRKey, which is only known to trusted infrastructure in the source AS.
 
-FABRID policy selection shortcuts
+FABRID policy selection extensions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In the FABRID policy selection procedure, we could add short cuts for the identifiers, such as:
 ``2@REJECT``, to reject all paths that pass through ISD2.
+
+The query mechanism could be extended to only apply policies from EXPRESSION_IF_TRUE on the hops that have matched the QUERY_EXPRESSION.
+Similarly policies from EXPRESSION_IF_FALSE would be applied to hops that do not match the QUERY_EXPRESSION.
 
 Rationale
 ==========
