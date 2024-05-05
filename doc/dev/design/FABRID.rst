@@ -52,6 +52,14 @@ This on-demand policy retrieval improves the scalability of the control service 
 A source endhost can then select a SCION forwarding path, where it encodes up to one policy index for each on-path AS (it can also select no policy for an AS) in its packets.
 On-path border routers will then add a proof of transit such that the destination endhost can later verify that the packet indeed followed the intended path.
 
+.. figure:: fig/FABRID/Overview.png
+
+    System overview. During beaconing, every AS adds its supported policies to the PCB (green). Endpoint EF fetches the
+    corresponding path including the added policies from its control service, which resolves and caches unknown policies (orange).
+    For packets destined to EC, EF encodes its policy choice PX in the respective headers, except for AS G, which does not support
+    this policy, and AS F, which supports the policy by default (red). Although not all ASes support PX, EF still decides to send its
+    traffic over the path.
+
 Our proposed design and implementation of FABRID allows for incremental deployment at router- and AS-level, i.e., some AS operators may want to
 deploy FABRID while others do not, and those who do may only want to deploy it on a subset of border routers.
 This allows for a smooth migration, during wich an AS can test-wise update some border routers and verify that everything works as intended.
@@ -239,16 +247,16 @@ The router determines whether the SCION packet is a FABRID packet as follows:
 .. image:: fig/FABRID/FABRIDActivation.png
 
 If the router supports FABRID and the SCION packet contains the FABRID HBH extension, the router is going to verify the
-correctness of the current FABRID Hop-validation-field using either the AS-to-AS or AS-to-Host DRKey and verifies whether
+correctness of the current FABRID hop validation field using either the AS-to-AS or AS-to-Host DRKey and verifies whether
 the encrypted policy index matches a valid FABRID policy.
-If this is the case, the router will update the FABRID HVF to HVFVerified, see the :ref:`Header fields computation <fabrid-formulas>`,
+If this is the case, the router will update the FABRID HVF to HVFVerified, (see the :ref:`Header fields computation <fabrid-formulas>`),
 and route the packet over an intra-AS path matching the provided FABRID policy.
 All intra-AS paths are configured by the AS operator, and are provided to the border routers by the local control service.
 
 Processing at the endhost
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To be able to send a FABRID packet, the endhost has to choose a path that supports its path and policy constraints.
+To send a FABRID packet, the endhost has to choose a path that supports its path and policy constraints.
 A detailed explanation on how endhost applications can find such paths is given in the section :ref:`Exposing policies to the end hosts <endhost_policy_selection>`.
 Once a path has been found, with specific policies for each hop in the path, the path and an array containing one policy per hop is given to the FABRID snet implementation.
 The snet implementation then constructs the FABRID packet by automatically requesting the necessary DRKeys and computing the hop validation fields.
@@ -261,15 +269,15 @@ Modifications of the control plane
 Control service
 ^^^^^^^^^^^^^^^^^
 
-The control service for FABRID is responsible for maintaining the AS-operator-configured FABRID policies, intra-AS paths,
-and making them accessible for the routers, the endhosts and other remote control services.
+The control service for FABRID is responsible for maintaining the AS-operator-configured FABRID policies and intra-AS paths,
+and making them accessible for its routers, its endhosts and other remote control services.
 We distinguish between a FABRID policy identifier and a policy index.
 The policy identifier is used to uniqely identify a FABRID policy, whereas the policy index has to me small (1 byte) and depends on the used AS interfaces.
 Hence, a policy index is mapped to a policy indentifer using the *IndexIdentifierMap*, which can be fetched from the control service.
 The policies are defined between interface pairs and for the last AS on the path also per interface - IP range pair.
 Through gRPC, border routers can query the control service for the list of supported policies,
 as well as the mapping from policies to MPLS labels.
-Policies are disseminated to remote ASes through PCBs, which clients in the AS can query from their Path Servers, see :ref:`PCB dissemination <fabrid_pcb_dissemination>`.
+Policies are disseminated to remote ASes through PCBs, which clients in the AS can query from their path servers, see :ref:`PCB dissemination <fabrid_pcb_dissemination>`.
 This policy information can also be requested directly from remote ASes over gRPC.
 
 The control service introduces a FABRID service with the following interface, where *intra-AS* means it can be reached
@@ -326,7 +334,6 @@ The following list explains the most important maps used in the FABRID service:
     When a local policy is queried at a remote AS, the resulting policy description is cached at the requesting AS' FABRID Manager,
     such that subsequent requests can be served from cache.
 
-
 .. _fabrid_pcb_dissemination:
 
 PCB dissemination
@@ -346,9 +353,12 @@ Exposing policies to the endhosts
 
 The path combinator finds the most recent FABRID map per AS among the received segments and subsequently uses this map to find the FABRID
 policies that are available for each interface pair of hops.
-For ASes that do not yet support FABRID it will return an empty set for that hop.
+If an endhost decides to query for policies at an AS that does not support FABRID, there is a timeout of a few seconds.
+What should be done after the timeout is up to the application.
+The global policy list is not yet implemented.
 This information can then be used by the application, such as by defining an application parameter (we will use ``--fabridpolicy``)
 that then selects the policies to use on the path and hands these to the snet implementation.
+If an endhost decides to query for the policy description, the endhost will be able to see the textual policy description, not just an index or identifier.
 
 ``fabridpolicy`` parameter
 ''''''''''''''''''''''''''''
@@ -356,8 +366,10 @@ A custom language is used to make a selection out of the available paths and pol
 
 * **Identifiers**
 
-  An identifier matches with a specific hop in the path and applies a policy to that hop. Parts of this hop identifier may be a wildcard,
-  such that the identifier can match with multiple hops in the path.
+  An identifier matches with a specific hop in the path and applies a policy to that hop.
+  This means, that we select that policy for that hop when sending a FABRID packet.
+  In case of multiple matches, the first match (from left to right) will be selected.
+  Parts of this hop identifier may be a wildcard, such that the identifier can match with multiple hops in the path.
   An identifier is structured as follows: 
   ``ISD-AS#IGIF,EGIF@POLICY``,
   where 
@@ -435,7 +447,7 @@ the packet.
 DRKey
 ^^^^^^
 
-FABRID uses DRKey for computing the Encrypted Policy Indices, the FABRID Hop Validation Fields and the Path Validator.
+FABRID uses DRKey for computing the encrypted policy indices, the FABRID HVFs and the path validator.
 The routers use the fast key derivation side, whereas the endhosts will use the slow side.
 
 Configuration
@@ -580,11 +592,18 @@ again by the corresponding AS-AS DRKey, which is only known to trusted infrastru
 FABRID policy selection extensions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In the FABRID policy selection procedure, we could add short cuts for the identifiers, such as:
-``2@REJECT``, to reject all paths that pass through ISD2.
+In the FABRID policy selection procedure, we could add shortcuts for the identifiers, such as
+``2@REJECT``, which rejects all paths that pass through ISD2.
 
 The query mechanism could be extended to only apply policies from EXPRESSION_IF_TRUE on the hops that have matched the QUERY_EXPRESSION.
 Similarly policies from EXPRESSION_IF_FALSE would be applied to hops that do not match the QUERY_EXPRESSION.
+
+Global policy list
+^^^^^^^^^^^^^^^^^^^^^
+
+In the current implementation, we only have local policies.
+To use global policies we need a place where we can store them in a append-only fashion, that can be fetched from all ASes.
+A possible suggestion would be to create an append-only list and store it in the SCIONLab github repository.
 
 Rationale
 ==========
