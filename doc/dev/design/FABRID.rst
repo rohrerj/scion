@@ -4,7 +4,7 @@ FABRID
 .. _fabrid-design:
 
 - **Author**: Justin Rohrer, Jelte van Bommel, Marc Odermatt, Marc Wyss, Cyrill Krähenbühl, Juan A. García-Pardo
-- **Last updated**: 2024-05-03
+- **Last updated**: 2024-05-06
 - **Discussion at**: -
 
 Abstract
@@ -18,6 +18,15 @@ Such fine-grained path selection is useful for example if there exists a known b
 or if an entity simply does not trust a certain hardware manufacturer, so that traffic can be steered around those devices.
 This can also be seen as an enhancement for keeping traffic within a certain jurisdiction, e.g., by routing traffic
 only along devices located in a specific country, because a single AS could cover multiple countries.
+
+.. figure:: fig/FABRID/NetworkTopology.png
+    
+    Example network topology.
+    Different colors for intra-AS routers indicate different manufacturers.
+    H01 in AS01 and H02 in AS02 want to communicate with each other.
+    This topology allows constraints like "Do not route traffic over devices produced by hardware manufacturer red", or
+    "Route traffic only over devices produced by hardware manufacturer green or blue".
+    Note that, since all paths between Host H01 and Host H02 traverse a green router, it is not possible to find a path that does not traverse green routers.
 
 Background
 ===========
@@ -54,10 +63,10 @@ On-path border routers will then add a proof of transit such that the destinatio
 
 .. figure:: fig/FABRID/Overview.png
 
-    System overview. During beaconing, every AS adds its supported policies to the PCB (green). Endpoint EF fetches the
+    Policy-driven intra-AS Routing with FABRID. During beaconing, every AS adds its supported policies to the PCB (green). Endpoint :math:`E_F` fetches the
     corresponding path including the added policies from its control service, which resolves and caches unknown policies (orange).
-    For packets destined to EC, EF encodes its policy choice PX in the respective headers, except for AS G, which does not support
-    this policy, and AS F, which supports the policy by default (red). Although not all ASes support PX, EF still decides to send its
+    For packets destined to :math:`E_C`, :math:`E_F` encodes its policy choice :math:`P_X` in the respective headers, except for AS G, which does not support
+    this policy, and AS F, which supports the policy by default (red). Although not all ASes support :math:`P_X`, :math:`E_F` still decides to send its
     traffic over the path.
 
 Our proposed design and implementation of FABRID allows for incremental deployment at router- and AS-level, i.e., some AS operators may want to
@@ -86,15 +95,6 @@ The design document specifies:
 
 The design document will be extended in the future to also specify features that will be implemented in a later
 iteration e.g. when adding path validation also for the source endhost.
-
-.. figure:: fig/FABRID/NetworkTopology.png
-    
-    Example network topology.
-    Different colors for intra-AS routers indicate different manufacturers.
-    H01 in AS01 and H02 in AS02 want to communicate with each other.
-    This topology allows constraints like "Do not route traffic over devices produced by hardware manufacturer red", or
-    "Route traffic only over devices produced by hardware manufacturer green or blue".
-    Note that, since all paths between Host H01 and Host H02 traverse a green router, it is not possible to find a path that does not traverse green routers.
 
 Header design
 --------------
@@ -353,12 +353,12 @@ Exposing policies to the endhosts
 
 The path combinator finds the most recent FABRID map per AS among the received segments and subsequently uses this map to find the FABRID
 policies that are available for each interface pair of hops.
-If an endhost decides to query for policies at an AS that does not support FABRID, there is a timeout of a few seconds.
-What should be done after the timeout is up to the application.
 The global policy list is not yet implemented.
 This information can then be used by the application, such as by defining an application parameter (we will use ``--fabridpolicy``)
 that then selects the policies to use on the path and hands these to the snet implementation.
 If an endhost decides to query for the policy description, the endhost will be able to see the textual policy description, not just an index or identifier.
+If an endhost decides to query for policies at an AS that does not support FABRID, there is a timeout of a few seconds.
+What should be done after the timeout is up to the application.
 
 ``fabridpolicy`` parameter
 ''''''''''''''''''''''''''''
@@ -367,7 +367,7 @@ A custom language is used to make a selection out of the available paths and pol
 * **Identifiers**
 
   An identifier matches with a specific hop in the path and applies a policy to that hop.
-  This means, that we select that policy for that hop when sending a FABRID packet.
+  Applying a policy refers to selecting that specific policy for that hop when sending a FABRID packet.
   In case of multiple matches, the first match (from left to right) will be selected.
   Parts of this hop identifier may be a wildcard, such that the identifier can match with multiple hops in the path.
   An identifier is structured as follows: 
@@ -603,7 +603,7 @@ Global policy list
 
 In the current implementation, we only have local policies.
 To use global policies we need a place where we can store them in a append-only fashion, that can be fetched from all ASes.
-A possible suggestion would be to create an append-only list and store it in the SCIONLab github repository.
+One possibility could be to create an append-only list and store it in the SCIONLab GitHub repository.
 
 Rationale
 ==========
