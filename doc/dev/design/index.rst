@@ -40,6 +40,7 @@ Active
    uri
    grpc
    BorderRouter
+   FABRID
 
 .. _design-docs-completed:
 
