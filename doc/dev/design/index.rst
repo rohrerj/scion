@@ -43,6 +43,7 @@ Active
    router-perf-model
    router-port-dispatch
    scmp-authentication
+   FABRID
 
 .. _design-docs-completed:
 
