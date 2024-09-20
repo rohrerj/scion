@@ -176,7 +176,7 @@ func (l *pathpolicyConstraintsListener) ExitWildcardAS(c *pathpolicyconstraints.
 
 // ExitLegacyAS is called when exiting the LegacyAS production.
 func (l *pathpolicyConstraintsListener) ExitLegacyAS(c *pathpolicyconstraints.LegacyASContext) {
-	as, err := addr.ParseASSep(c.GetText()[1:], "_")
+	as, err := addr.ParseFormattedAS(c.GetText()[1:], addr.WithSeparator("_"))
 	if err != nil {
 		c.SetException(antlr.NewFailedPredicateException(c.GetParser(), c.GetText(), err.Error()))
 	}
@@ -186,7 +186,7 @@ func (l *pathpolicyConstraintsListener) ExitLegacyAS(c *pathpolicyconstraints.Le
 
 // ExitAS is called when exiting the AS production.
 func (l *pathpolicyConstraintsListener) ExitAS(c *pathpolicyconstraints.ASContext) {
-	as, err := addr.ParseASSep(c.GetText()[1:], "_")
+	as, err := addr.ParseFormattedAS(c.GetText()[1:], addr.WithSeparator("_"))
 	if err != nil {
 		c.SetException(antlr.NewFailedPredicateException(c.GetParser(), c.GetText(), err.Error()))
 	}
