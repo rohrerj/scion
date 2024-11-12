@@ -4,7 +4,7 @@ FABRID
 .. _fabrid-design:
 
 - **Author**: Justin Rohrer, Jelte van Bommel, Marc Odermatt, Marc Wyss, Cyrill Krähenbühl, Juan A. García-Pardo
-- **Last updated**: 2024-05-06
+- **Last updated**: 2024-11-12
 - **Discussion at**: -
 
 Abstract
@@ -473,8 +473,9 @@ Example (cs1-ff00_0_110-1.toml)::
     [drkey.delegation]
     FABRID = [ "fd00:f00d:cafe::7f00:11", "fd00:f00d:cafe::7f00:12", "fd00:f00d:cafe::7f00:13"]
 
-    [general]
-    fabrid_path = "gen/ASff00_0_110/fabrid/"
+    [fabrid]
+    enabled = true
+    path = "gen/ASff00_0_110/fabrid/"
 
 .. _fabrid_yaml_config:
 
@@ -550,13 +551,23 @@ Example of a list of connection points:
 Border router
 ^^^^^^^^^^^^^^^
 
-For a router to query the DRKey secret value from the control service, once has to enable this.
+For a router to query the DRKey secret value from the control service, one has to enable this.
 
 Example (br1-ff00_0_110-1.toml)::
 
     [router]
     drkey = ["FABRID"]
     fabrid = true
+
+SCION daemon
+^^^^^^^^^^^^^^^
+
+For a SCION daemon to cache the DRKeys, one has to enable this.
+
+Example (sd1-ff00_0_0_110-1.toml)::
+
+    [drkey_level2_db]
+    connection = "gen-cache/sd1-ff00_0_110-1.drkey.db"
 
 Considerations for future work
 --------------------------------
