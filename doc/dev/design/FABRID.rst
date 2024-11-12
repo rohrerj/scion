@@ -564,7 +564,7 @@ SCION daemon
 
 For a SCION daemon to cache the DRKeys, one has to enable this.
 
-Example (sd1-ff00_0_0_110-1.toml)::
+Example (sd1-ff00_0_110-1.toml)::
 
     [drkey_level2_db]
     connection = "gen-cache/sd1-ff00_0_110-1.drkey.db"
