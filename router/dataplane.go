@@ -516,6 +516,12 @@ func (d *DataPlane) Run(ctx context.Context, cfg *RunConfig) error {
 	d.initPacketPool(cfg, processorQueueSize)
 	procQs, fwQs, slowQs := initQueues(cfg, d.interfaces, processorQueueSize)
 
+	// run proof of forwarding monitor
+	go func() {
+		defer log.HandlePanic()
+		d.runMonitor()
+	}()
+
 	for ifID, conn := range d.interfaces {
 		go func(ifID uint16, conn BatchConn) {
 			defer log.HandlePanic()
