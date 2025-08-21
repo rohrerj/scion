@@ -17,6 +17,7 @@ package monitor_test
 import (
 	"crypto/sha256"
 	"hash"
+	"hash/crc64"
 	"hash/fnv"
 	"testing"
 	"time"
@@ -85,6 +86,7 @@ func BenchmarkHash(b *testing.B) {
 	pkt, err := generatePacket(6, 130)
 	assert.NoError(b, err)
 	blake, _ := blake2b.New256(nil)
+
 	hashFunctions := []struct {
 		name   string
 		hasher hash.Hash
@@ -93,6 +95,7 @@ func BenchmarkHash(b *testing.B) {
 		{"blake2b 256bit", blake},
 		{"fnv1a-128bit", fnv.New128a()},
 		{"xxhash 64bit", xxhash.New()},
+		{"crc 64bit", crc64.New(crc64.MakeTable(crc64.ISO))},
 	}
 	for _, h := range hashFunctions {
 		b.Run(h.name, func(b *testing.B) {
@@ -101,7 +104,8 @@ func BenchmarkHash(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				monitor.HashPacket(pkt, hashBuffer)
+				_, err := monitor.HashPacket(pkt, hashBuffer)
+				assert.NoError(b, err)
 			}
 		})
 	}
