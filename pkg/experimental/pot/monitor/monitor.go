@@ -21,14 +21,19 @@ import (
 )
 
 type Monitor struct {
-	collector collector.Collector
-	hasher    hash.Hash
+	collector       collector.Collector
+	hasher          hash.Hash
+	Parser          Parser
+	hashSampleSlice [256]byte
+	Sampler         Sampler
 }
 
 func NewMonitor(collector collector.Collector, hasher hash.Hash) Monitor {
 	m := Monitor{
 		collector: collector,
 		hasher:    hasher,
+		Parser:    Parser{},
+		Sampler:   &StrideSampler{},
 	}
 	return m
 }
@@ -38,14 +43,51 @@ func (m *Monitor) ComputeTimeWindowIndex(flowID int8) uint8 {
 	return 0
 }
 
-func (m *Monitor) HashPacket(packet []byte, hashBuffer []byte) ([]byte, error) {
-	//TODO: we might have to exclude certain bytes here, for now we just hash everything
+func (m *Monitor) HashAllPacket(packet []byte, hashBuffer []byte) error {
 	m.hasher.Reset()
-	_, err := m.hasher.Write(packet)
+	err := m.Parser.Parse(packet)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return m.hasher.Sum(hashBuffer[:0]), nil
+	_, err = m.hasher.Write(m.Parser.HashRegions[0])
+	if err != nil {
+		return err
+	}
+	_, err = m.hasher.Write(m.Parser.HashRegions[1])
+	if err != nil {
+		return err
+	}
+	m.hasher.Sum(hashBuffer[:0])
+	m.Parser.UndoZero(packet)
+	return nil
+}
+
+func (m *Monitor) HashPacket(packet []byte, hashBuffer []byte) error {
+	m.hasher.Reset()
+	err := m.Parser.Parse(packet)
+	if err != nil {
+		return err
+	}
+	_, err = m.hasher.Write(m.Parser.HashRegions[0])
+	if err != nil {
+		return err
+	}
+	n := len(m.Parser.HashRegions[1])
+	if n <= len(m.hashSampleSlice) {
+		_, err = m.hasher.Write(m.Parser.HashRegions[1])
+		if err != nil {
+			return err
+		}
+	} else {
+		m.Sampler.Sample(m.Parser.HashRegions[1], m.hashSampleSlice[:])
+		_, err = m.hasher.Write(m.hashSampleSlice[:])
+		if err != nil {
+			return err
+		}
+	}
+	m.hasher.Sum(hashBuffer[:0])
+	m.Parser.UndoZero(packet)
+	return nil
 }
 
 func (m *Monitor) Collect(ingress int, egress int, time_window int, hash int) {

@@ -16,9 +16,9 @@ package monitor_test
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"hash"
 	"hash/crc64"
-	"hash/fnv"
 	"testing"
 	"time"
 
@@ -28,13 +28,14 @@ import (
 	"github.com/scionproto/scion/pkg/private/util"
 	"github.com/scionproto/scion/pkg/private/xtest"
 	"github.com/scionproto/scion/pkg/slayers"
+	"github.com/scionproto/scion/pkg/slayers/extension"
 	"github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/pkg/slayers/path/scion"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/crypto/blake2b"
 )
 
-func generatePacket(numHops uint8, payloadSize uint16) ([]byte, error) {
+func generatePacket(numHops uint8, payloadSize uint16, useHbhExtension bool) ([]byte, *slayers.SCION, error) {
 	buffer := gopacket.NewSerializeBuffer()
 	s := &slayers.SCION{
 		Version:      0,
@@ -68,23 +69,75 @@ func generatePacket(numHops uint8, payloadSize uint16) ([]byte, error) {
 		})
 	}
 	s.Path = scionpath
+
 	payload := make([]byte, payloadSize)
 	for i := 0; i < int(payloadSize); i++ {
 		payload[i] = byte(i)
 	}
-	err := gopacket.SerializeLayers(buffer,
-		gopacket.SerializeOptions{FixLengths: true},
-		s, gopacket.Payload(payload))
-	if err != nil {
-		return nil, err
+	if useHbhExtension {
+		s.NextHdr = slayers.HopByHopClass
+		identifier := extension.IdentifierOption{
+			BaseTimestamp: scionpath.InfoFields[0].Timestamp,
+			Timestamp:     time.Unix(0, int64(time.Millisecond)*int64(1785+1000*scionpath.InfoFields[0].Timestamp)),
+			PacketID:      555}
+		identifierData := make([]byte, 8)
+		identifier.Serialize(identifierData)
+		hbhExt := &slayers.HopByHopExtn{
+			Options: []*slayers.HopByHopOption{
+				{
+					OptType:      slayers.OptTypeIdentifier,
+					OptDataLen:   8,
+					ActualLength: 8,
+					OptData:      identifierData,
+				},
+			},
+		}
+		err := gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true}, s, hbhExt, gopacket.Payload(payload))
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		err := gopacket.SerializeLayers(buffer,
+			gopacket.SerializeOptions{FixLengths: true},
+			s, gopacket.Payload(payload))
+		if err != nil {
+			return nil, nil, err
+		}
 	}
-	return buffer.Bytes(), nil
+
+	return buffer.Bytes(), s, nil
+}
+
+func BenchmarkParser(b *testing.B) {
+	payloadSizes := []int{130, 380, 880, 4880}
+	for _, payloadSize := range payloadSizes {
+		b.Run(fmt.Sprintf("Parsing_no_hbh_%d", payloadSize), func(b *testing.B) {
+			pkt, _, err := generatePacket(6, uint16(payloadSize), false)
+			assert.NoError(b, err)
+			parser := monitor.Parser{}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				err := parser.Parse(pkt)
+				assert.NoError(b, err)
+				parser.UndoZero(pkt)
+			}
+		})
+		b.Run(fmt.Sprintf("Parsing_with_hbh_%d", payloadSize), func(b *testing.B) {
+			pkt, _, err := generatePacket(6, uint16(payloadSize), true)
+			assert.NoError(b, err)
+			parser := monitor.Parser{}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				err := parser.Parse(pkt)
+				assert.NoError(b, err)
+				parser.UndoZero(pkt)
+			}
+		})
+	}
 }
 
 func BenchmarkHash(b *testing.B) {
 	// first generate a packet
-	pkt, err := generatePacket(6, 130)
-	assert.NoError(b, err)
 	blake, _ := blake2b.New256(nil)
 
 	hashFunctions := []struct {
@@ -93,20 +146,50 @@ func BenchmarkHash(b *testing.B) {
 	}{
 		{"sha256", sha256.New()},
 		{"blake2b 256bit", blake},
-		{"fnv1a-128bit", fnv.New128a()},
 		{"xxhash 64bit", xxhash.New()},
 		{"crc 64bit", crc64.New(crc64.MakeTable(crc64.ISO))},
 	}
-	for _, h := range hashFunctions {
-		b.Run(h.name, func(b *testing.B) {
-			monitor := monitor.NewMonitor(nil, h.hasher)
-			hashBuffer := make([]byte, h.hasher.Size())
-			b.ResetTimer()
-
-			for i := 0; i < b.N; i++ {
-				_, err := monitor.HashPacket(pkt, hashBuffer)
+	payloadSizes := []int{130, 380, 880, 4880}
+	for _, payloadSize := range payloadSizes {
+		for _, h := range hashFunctions {
+			b.Run(fmt.Sprintf("%s_no_hbh_%d", h.name, payloadSize), func(b *testing.B) {
+				pkt, _, err := generatePacket(6, uint16(payloadSize), false)
 				assert.NoError(b, err)
-			}
-		})
+				monitor := monitor.NewMonitor(nil, h.hasher)
+				hashBuffer := make([]byte, h.hasher.Size())
+				pktCopy := make([]byte, len(pkt))
+				copy(pktCopy, pkt)
+				err = monitor.HashPacket(pkt, hashBuffer)
+				assert.NoError(b, err)
+				assert.Equal(b, pkt, pktCopy)
+
+				assert.NoError(b, err)
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					err := monitor.HashPacket(pkt, hashBuffer)
+					assert.NoError(b, err)
+				}
+			})
+			b.Run(fmt.Sprintf("%s_with_hbh_%d", h.name, payloadSize), func(b *testing.B) {
+				pkt, _, err := generatePacket(6, uint16(payloadSize), true)
+				assert.NoError(b, err)
+				monitor := monitor.NewMonitor(nil, h.hasher)
+				hashBuffer := make([]byte, h.hasher.Size())
+				pktCopy := make([]byte, len(pkt))
+				copy(pktCopy, pkt)
+				err = monitor.HashPacket(pkt, hashBuffer)
+				assert.NoError(b, err)
+				assert.Equal(b, pkt, pktCopy)
+
+				assert.NoError(b, err)
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					err := monitor.HashPacket(pkt, hashBuffer)
+					assert.NoError(b, err)
+				}
+			})
+		}
 	}
 }
