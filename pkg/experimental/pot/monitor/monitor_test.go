@@ -69,7 +69,10 @@ func generatePacket(numHops uint8, payloadSize uint16, useHbhExtension bool) ([]
 		})
 	}
 	s.Path = scionpath
-
+	udp := &slayers.UDP{
+		SrcPort: 1234,
+		DstPort: 4321,
+	}
 	payload := make([]byte, payloadSize)
 	for i := 0; i < int(payloadSize); i++ {
 		payload[i] = byte(i)
@@ -92,7 +95,8 @@ func generatePacket(numHops uint8, payloadSize uint16, useHbhExtension bool) ([]
 				},
 			},
 		}
-		err := gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true}, s, hbhExt, gopacket.Payload(payload))
+		err := gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true},
+			s, hbhExt, udp, gopacket.Payload(payload))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -106,34 +110,6 @@ func generatePacket(numHops uint8, payloadSize uint16, useHbhExtension bool) ([]
 	}
 
 	return buffer.Bytes(), s, nil
-}
-
-func BenchmarkParser(b *testing.B) {
-	payloadSizes := []int{130, 380, 880, 4880}
-	for _, payloadSize := range payloadSizes {
-		b.Run(fmt.Sprintf("Parsing_no_hbh_%d", payloadSize), func(b *testing.B) {
-			pkt, _, err := generatePacket(6, uint16(payloadSize), false)
-			assert.NoError(b, err)
-			parser := monitor.Parser{}
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				err := parser.Parse(pkt)
-				assert.NoError(b, err)
-				parser.UndoZero(pkt)
-			}
-		})
-		b.Run(fmt.Sprintf("Parsing_with_hbh_%d", payloadSize), func(b *testing.B) {
-			pkt, _, err := generatePacket(6, uint16(payloadSize), true)
-			assert.NoError(b, err)
-			parser := monitor.Parser{}
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				err := parser.Parse(pkt)
-				assert.NoError(b, err)
-				parser.UndoZero(pkt)
-			}
-		})
-	}
 }
 
 func BenchmarkHash(b *testing.B) {
@@ -150,12 +126,13 @@ func BenchmarkHash(b *testing.B) {
 		{"crc 64bit", crc64.New(crc64.MakeTable(crc64.ISO))},
 	}
 	payloadSizes := []int{130, 380, 880, 4880}
+	sampler := &monitor.StrideSampler{}
 	for _, payloadSize := range payloadSizes {
 		for _, h := range hashFunctions {
 			b.Run(fmt.Sprintf("%s_no_hbh_%d", h.name, payloadSize), func(b *testing.B) {
 				pkt, _, err := generatePacket(6, uint16(payloadSize), false)
 				assert.NoError(b, err)
-				monitor := monitor.NewMonitor(nil, h.hasher)
+				monitor := monitor.NewMonitor(nil, h.hasher, sampler)
 				hashBuffer := make([]byte, h.hasher.Size())
 				pktCopy := make([]byte, len(pkt))
 				copy(pktCopy, pkt)
@@ -174,7 +151,7 @@ func BenchmarkHash(b *testing.B) {
 			b.Run(fmt.Sprintf("%s_with_hbh_%d", h.name, payloadSize), func(b *testing.B) {
 				pkt, _, err := generatePacket(6, uint16(payloadSize), true)
 				assert.NoError(b, err)
-				monitor := monitor.NewMonitor(nil, h.hasher)
+				monitor := monitor.NewMonitor(nil, h.hasher, sampler)
 				hashBuffer := make([]byte, h.hasher.Size())
 				pktCopy := make([]byte, len(pkt))
 				copy(pktCopy, pkt)
@@ -192,4 +169,9 @@ func BenchmarkHash(b *testing.B) {
 			})
 		}
 	}
+}
+
+func TestHashing(t *testing.T) {
+	//monitor := monitor.NewMonitor(nil, sha256.New(), &monitor.StrideSampler{})
+
 }

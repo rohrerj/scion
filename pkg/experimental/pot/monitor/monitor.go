@@ -28,12 +28,12 @@ type Monitor struct {
 	Sampler         Sampler
 }
 
-func NewMonitor(collector collector.Collector, hasher hash.Hash) Monitor {
+func NewMonitor(collector collector.Collector, hasher hash.Hash, sampler Sampler) Monitor {
 	m := Monitor{
 		collector: collector,
 		hasher:    hasher,
 		Parser:    Parser{},
-		Sampler:   &StrideSampler{},
+		Sampler:   sampler,
 	}
 	return m
 }

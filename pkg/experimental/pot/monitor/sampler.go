@@ -18,6 +18,8 @@ type Sampler interface {
 	Sample([]byte, []byte)
 }
 
+// StrideSampler samples using a computed stride depending on the data and out length.
+// Requires that len(data) >= len(out).
 type StrideSampler struct{}
 
 func (s *StrideSampler) Sample(data []byte, out []byte) {
@@ -29,4 +31,15 @@ func (s *StrideSampler) Sample(data []byte, out []byte) {
 		out[i] = data[currentIndex]
 		currentIndex += stride
 	}
+}
+
+// FirstAndLastSampler samples the N/2 first and N/2 last bytes of data.
+// Requires that len(data) >= len(out) and len(out) is divisible by 2.
+type FirstAndLastSampler struct{}
+
+func (s *FirstAndLastSampler) Sample(data []byte, out []byte) {
+	halfSampleLen := len(out) >> 2
+	dataLen := len(data)
+	copy(out[:halfSampleLen], data[:halfSampleLen])
+	copy(out[halfSampleLen:], data[dataLen-halfSampleLen:])
 }
