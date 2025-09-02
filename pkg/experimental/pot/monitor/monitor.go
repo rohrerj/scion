@@ -17,33 +17,81 @@ package monitor
 import (
 	"hash"
 
-	"github.com/scionproto/scion/pkg/experimental/pot/collector"
+	"github.com/scionproto/scion/pkg/private/serrors"
 )
 
+type Bucket []byte
+
 type Monitor struct {
-	collector       collector.Collector
-	hasher          hash.Hash
-	Parser          Parser
-	hashSampleSlice [256]byte
-	Sampler         Sampler
+	workers []MonitorWorker
 }
 
-func NewMonitor(collector collector.Collector, hasher hash.Hash, sampler Sampler) Monitor {
-	m := Monitor{
-		collector: collector,
-		hasher:    hasher,
-		Parser:    Parser{},
-		Sampler:   sampler,
+type MonitorWorker struct {
+	hasher          hash.Hash
+	Parser          Parser
+	hashSampleSlice [64]byte
+	Sampler         Sampler
+	Buckets         [4]map[uint32]Bucket
+	HashBuffer      []byte
+}
+
+func (monitor *Monitor) NewMonitorWorker(hasher hash.Hash, sampler Sampler) MonitorWorker {
+	m := MonitorWorker{
+		hasher:     hasher,
+		Parser:     Parser{},
+		Sampler:    sampler,
+		Buckets:    [4]map[uint32]Bucket{},
+		HashBuffer: make([]byte, hasher.Size()),
 	}
+	for i := 0; i < len(m.Buckets); i++ {
+		m.Buckets[i] = make(map[uint32]Bucket)
+	}
+	monitor.workers = append(monitor.workers, m)
+
 	return m
 }
 
-func (m *Monitor) ComputeTimeWindowIndex(flowID int8) uint8 {
-	//TODO
-	return 0
+func (m *MonitorWorker) ProcessPacket(packet []byte, ingress uint16, egress uint16) error {
+	time_window := packet[3] & 0x3
+	err := m.HashPacket(packet)
+	if err != nil {
+		return err
+	}
+	return m.StoreValueInBucket(m.HashBuffer, ingress, egress, time_window)
 }
 
-func (m *Monitor) HashAllPacket(packet []byte, hashBuffer []byte) error {
+func (m *MonitorWorker) StoreValueInBucket(value []byte, ingress uint16, egress uint16, time_window uint8) error {
+	if int(time_window) > len(m.Buckets) {
+		return serrors.New("time_window index out of bounds")
+	}
+	index := uint32(ingress)<<16 + uint32(egress)
+	item, found := m.Buckets[time_window][index]
+	if !found {
+		// bucket does not exist, create new bucket
+		m.Buckets[time_window][index] = make(Bucket, len(value))
+		copy(m.Buckets[time_window][index], value)
+	} else {
+		m.aggregate(item, value)
+	}
+	return nil
+}
+
+func (m *MonitorWorker) aggregate(storedValue []byte, newValue []byte) error {
+	if len(storedValue) != len(newValue) {
+		return serrors.New("slices need equal length")
+	}
+	for i := 0; i < len(storedValue); i++ {
+		storedValue[i] ^= newValue[i]
+	}
+	return nil
+}
+
+func (m *MonitorWorker) ComputeTimeWindowIndex(flowID int) uint8 {
+
+	return uint8(flowID & 0x3)
+}
+
+func (m *MonitorWorker) HashAllPacket(packet []byte) error {
 	m.hasher.Reset()
 	err := m.Parser.Parse(packet)
 	if err != nil {
@@ -57,12 +105,12 @@ func (m *Monitor) HashAllPacket(packet []byte, hashBuffer []byte) error {
 	if err != nil {
 		return err
 	}
-	m.hasher.Sum(hashBuffer[:0])
+	m.hasher.Sum(m.HashBuffer[:0])
 	m.Parser.UndoZero(packet)
 	return nil
 }
 
-func (m *Monitor) HashPacket(packet []byte, hashBuffer []byte) error {
+func (m *MonitorWorker) HashPacket(packet []byte) error {
 	m.hasher.Reset()
 	err := m.Parser.Parse(packet)
 	if err != nil {
@@ -73,7 +121,7 @@ func (m *Monitor) HashPacket(packet []byte, hashBuffer []byte) error {
 		return err
 	}
 	n := len(m.Parser.HashRegions[1])
-	if n <= len(m.hashSampleSlice) {
+	if m.Sampler == nil || n <= len(m.hashSampleSlice) {
 		_, err = m.hasher.Write(m.Parser.HashRegions[1])
 		if err != nil {
 			return err
@@ -85,11 +133,7 @@ func (m *Monitor) HashPacket(packet []byte, hashBuffer []byte) error {
 			return err
 		}
 	}
-	m.hasher.Sum(hashBuffer[:0])
+	m.hasher.Sum(m.HashBuffer[:0])
 	m.Parser.UndoZero(packet)
 	return nil
-}
-
-func (m *Monitor) Collect(ingress int, egress int, time_window int, hash int) {
-	m.collector.Collect(ingress, egress, time_window, hash)
 }

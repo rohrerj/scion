@@ -132,11 +132,11 @@ func BenchmarkHash(b *testing.B) {
 			b.Run(fmt.Sprintf("%s_no_hbh_%d", h.name, payloadSize), func(b *testing.B) {
 				pkt, _, err := generatePacket(6, uint16(payloadSize), false)
 				assert.NoError(b, err)
-				monitor := monitor.NewMonitor(nil, h.hasher, sampler)
-				hashBuffer := make([]byte, h.hasher.Size())
+				monitor := monitor.Monitor{}
+				monitorWorker := monitor.NewMonitorWorker(h.hasher, sampler)
 				pktCopy := make([]byte, len(pkt))
 				copy(pktCopy, pkt)
-				err = monitor.HashPacket(pkt, hashBuffer)
+				err = monitorWorker.HashPacket(pkt)
 				assert.NoError(b, err)
 				assert.Equal(b, pkt, pktCopy)
 
@@ -144,18 +144,18 @@ func BenchmarkHash(b *testing.B) {
 				b.ResetTimer()
 
 				for i := 0; i < b.N; i++ {
-					err := monitor.HashPacket(pkt, hashBuffer)
+					err := monitorWorker.HashPacket(pkt)
 					assert.NoError(b, err)
 				}
 			})
 			b.Run(fmt.Sprintf("%s_with_hbh_%d", h.name, payloadSize), func(b *testing.B) {
 				pkt, _, err := generatePacket(6, uint16(payloadSize), true)
 				assert.NoError(b, err)
-				monitor := monitor.NewMonitor(nil, h.hasher, sampler)
-				hashBuffer := make([]byte, h.hasher.Size())
+				monitor := monitor.Monitor{}
+				monitorWorker := monitor.NewMonitorWorker(h.hasher, sampler)
 				pktCopy := make([]byte, len(pkt))
 				copy(pktCopy, pkt)
-				err = monitor.HashPacket(pkt, hashBuffer)
+				err = monitorWorker.HashPacket(pkt)
 				assert.NoError(b, err)
 				assert.Equal(b, pkt, pktCopy)
 
@@ -163,7 +163,7 @@ func BenchmarkHash(b *testing.B) {
 				b.ResetTimer()
 
 				for i := 0; i < b.N; i++ {
-					err := monitor.HashPacket(pkt, hashBuffer)
+					err := monitorWorker.HashPacket(pkt)
 					assert.NoError(b, err)
 				}
 			})

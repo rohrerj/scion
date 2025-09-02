@@ -4,6 +4,7 @@ require (
 	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20220209173558-ad29539cd2e9
 	github.com/bazelbuild/rules_go v0.47.1
 	github.com/buildkite/go-buildkite/v2 v2.9.0
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dchest/cmac v1.0.0
 	github.com/deepmap/oapi-codegen/v2 v2.1.0
 	github.com/fatih/color v1.17.0
@@ -61,7 +62,6 @@ require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
-	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 // indirect

@@ -966,7 +966,7 @@ func (d *DataPlane) runForwarder(ifID uint16, conn BatchConn, cfg *RunConfig, c 
 	}
 
 	metrics := d.forwardingMetrics[ifID]
-
+	//monitor := monitor.NewMonitor(sha256.New(), &monitor.FirstAndLastSampler{})
 	toWrite := 0
 	for d.running {
 		toWrite += readUpTo(c, cfg.BatchSize-toWrite, toWrite == 0, pkts[toWrite:])
@@ -989,6 +989,10 @@ func (d *DataPlane) runForwarder(ifID uint16, conn BatchConn, cfg *RunConfig, c 
 		updateOutputMetrics(metrics, pkts[:written])
 
 		for _, p := range pkts[:written] {
+			/*err := monitor.ProcessPacket(p.rawPacket, p.ingress, ifID)
+			if err != nil {
+				log.Debug("Monitor returned error", "err", err)
+			}*/
 			d.returnPacketToPool(p.rawPacket)
 		}
 
