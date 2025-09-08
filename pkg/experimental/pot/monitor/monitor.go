@@ -16,6 +16,7 @@ package monitor
 
 import (
 	"hash"
+	"sync"
 
 	"github.com/scionproto/scion/pkg/private/serrors"
 )
@@ -23,7 +24,10 @@ import (
 type Bucket []byte
 
 type Monitor struct {
-	workers []MonitorWorker
+	workers    []*MonitorWorker
+	mtx        sync.Mutex
+	NewHasher  func() hash.Hash
+	NewSampler func() Sampler
 }
 
 type MonitorWorker struct {
@@ -35,19 +39,21 @@ type MonitorWorker struct {
 	HashBuffer      []byte
 }
 
-func (monitor *Monitor) NewMonitorWorker(hasher hash.Hash, sampler Sampler) MonitorWorker {
-	m := MonitorWorker{
+func (monitor *Monitor) NewMonitorWorker() *MonitorWorker {
+	monitor.mtx.Lock()
+	defer monitor.mtx.Unlock()
+	hasher := monitor.NewHasher()
+	m := &MonitorWorker{
 		hasher:     hasher,
 		Parser:     Parser{},
-		Sampler:    sampler,
+		Sampler:    monitor.NewSampler(),
 		Buckets:    [4]map[uint32]Bucket{},
 		HashBuffer: make([]byte, hasher.Size()),
 	}
+	monitor.workers = append(monitor.workers, m)
 	for i := 0; i < len(m.Buckets); i++ {
 		m.Buckets[i] = make(map[uint32]Bucket)
 	}
-	monitor.workers = append(monitor.workers, m)
-
 	return m
 }
 
@@ -68,15 +74,16 @@ func (m *MonitorWorker) StoreValueInBucket(value []byte, ingress uint16, egress 
 	item, found := m.Buckets[time_window][index]
 	if !found {
 		// bucket does not exist, create new bucket
-		m.Buckets[time_window][index] = make(Bucket, len(value))
-		copy(m.Buckets[time_window][index], value)
+		new_bucket := make(Bucket, len(value))
+		copy(new_bucket, value)
+		m.Buckets[time_window][index] = new_bucket
 	} else {
-		m.aggregate(item, value)
+		m.Aggregate(item, value)
 	}
 	return nil
 }
 
-func (m *MonitorWorker) aggregate(storedValue []byte, newValue []byte) error {
+func (m *MonitorWorker) Aggregate(storedValue []byte, newValue []byte) error {
 	if len(storedValue) != len(newValue) {
 		return serrors.New("slices need equal length")
 	}

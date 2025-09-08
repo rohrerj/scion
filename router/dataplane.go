@@ -39,6 +39,7 @@ import (
 	"github.com/scionproto/scion/pkg/drkey"
 	libepic "github.com/scionproto/scion/pkg/experimental/epic"
 	"github.com/scionproto/scion/pkg/experimental/fabrid/crypto"
+	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/processmetrics"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -117,6 +118,7 @@ type DataPlane struct {
 
 	ExperimentalSCMPAuthentication bool
 	Fabrid                         bool
+	Monitor                        *monitor.Monitor
 
 	// The pool that stores all the packet buffers as described in the design document. See
 	// https://github.com/scionproto/scion/blob/master/doc/dev/design/BorderRouter.rst
@@ -516,12 +518,6 @@ func (d *DataPlane) Run(ctx context.Context, cfg *RunConfig) error {
 	d.initPacketPool(cfg, processorQueueSize)
 	procQs, fwQs, slowQs := initQueues(cfg, d.interfaces, processorQueueSize)
 
-	// run proof of forwarding monitor
-	go func() {
-		defer log.HandlePanic()
-		d.runMonitor()
-	}()
-
 	for ifID, conn := range d.interfaces {
 		go func(ifID uint16, conn BatchConn) {
 			defer log.HandlePanic()
@@ -719,6 +715,11 @@ func (d *DataPlane) runProcessor(id int, q <-chan packet,
 
 	log.Debug("Initialize processor with", "id", id)
 	processor := newPacketProcessor(d)
+	var monitorWorker *monitor.MonitorWorker = nil
+	if d.Monitor != nil {
+		monitorWorker = d.Monitor.NewMonitorWorker()
+		log.Debug("Initializing monitor worker")
+	}
 	for d.running {
 		p, ok := <-q
 		if !ok {
@@ -746,6 +747,9 @@ func (d *DataPlane) runProcessor(id int, q <-chan packet,
 			metrics.DroppedPacketsInvalid.Inc()
 			d.returnPacketToPool(p.rawPacket)
 			continue
+		}
+		if monitorWorker != nil {
+			monitorWorker.ProcessPacket(p.rawPacket, p.ingress, egress)
 		}
 		if result.OutPkt == nil { // e.g. BFD case no message is forwarded
 			d.returnPacketToPool(p.rawPacket)
@@ -966,7 +970,6 @@ func (d *DataPlane) runForwarder(ifID uint16, conn BatchConn, cfg *RunConfig, c 
 	}
 
 	metrics := d.forwardingMetrics[ifID]
-	//monitor := monitor.NewMonitor(sha256.New(), &monitor.FirstAndLastSampler{})
 	toWrite := 0
 	for d.running {
 		toWrite += readUpTo(c, cfg.BatchSize-toWrite, toWrite == 0, pkts[toWrite:])
@@ -989,10 +992,6 @@ func (d *DataPlane) runForwarder(ifID uint16, conn BatchConn, cfg *RunConfig, c 
 		updateOutputMetrics(metrics, pkts[:written])
 
 		for _, p := range pkts[:written] {
-			/*err := monitor.ProcessPacket(p.rawPacket, p.ingress, ifID)
-			if err != nil {
-				log.Debug("Monitor returned error", "err", err)
-			}*/
 			d.returnPacketToPool(p.rawPacket)
 		}
 

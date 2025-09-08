@@ -126,14 +126,16 @@ func BenchmarkHash(b *testing.B) {
 		{"crc 64bit", crc64.New(crc64.MakeTable(crc64.ISO))},
 	}
 	payloadSizes := []int{130, 380, 880, 4880}
-	sampler := &monitor.StrideSampler{}
 	for _, payloadSize := range payloadSizes {
 		for _, h := range hashFunctions {
 			b.Run(fmt.Sprintf("%s_no_hbh_%d", h.name, payloadSize), func(b *testing.B) {
 				pkt, _, err := generatePacket(6, uint16(payloadSize), false)
 				assert.NoError(b, err)
-				monitor := monitor.Monitor{}
-				monitorWorker := monitor.NewMonitorWorker(h.hasher, sampler)
+				monitor := monitor.Monitor{
+					NewHasher:  sha256.New,
+					NewSampler: func() monitor.Sampler { return &monitor.StrideSampler{} },
+				}
+				monitorWorker := monitor.NewMonitorWorker()
 				pktCopy := make([]byte, len(pkt))
 				copy(pktCopy, pkt)
 				err = monitorWorker.HashPacket(pkt)
@@ -151,8 +153,11 @@ func BenchmarkHash(b *testing.B) {
 			b.Run(fmt.Sprintf("%s_with_hbh_%d", h.name, payloadSize), func(b *testing.B) {
 				pkt, _, err := generatePacket(6, uint16(payloadSize), true)
 				assert.NoError(b, err)
-				monitor := monitor.Monitor{}
-				monitorWorker := monitor.NewMonitorWorker(h.hasher, sampler)
+				monitor := monitor.Monitor{
+					NewHasher:  sha256.New,
+					NewSampler: func() monitor.Sampler { return &monitor.StrideSampler{} },
+				}
+				monitorWorker := monitor.NewMonitorWorker()
 				pktCopy := make([]byte, len(pkt))
 				copy(pktCopy, pkt)
 				err = monitorWorker.HashPacket(pkt)
@@ -171,7 +176,24 @@ func BenchmarkHash(b *testing.B) {
 	}
 }
 
-func TestHashing(t *testing.T) {
-	//monitor := monitor.NewMonitor(nil, sha256.New(), &monitor.StrideSampler{})
-
+func TestMonitor(t *testing.T) {
+	monitor := monitor.Monitor{
+		NewHasher:  sha256.New,
+		NewSampler: func() monitor.Sampler { return &monitor.FirstAndLastSampler{} },
+	}
+	pkt1, _, err := generatePacket(6, uint16(250), false)
+	assert.NoError(t, err)
+	pkt2, _, err := generatePacket(6, uint16(350), false)
+	assert.NoError(t, err)
+	pkt3, _, err := generatePacket(6, uint16(450), false)
+	assert.NoError(t, err)
+	w1 := monitor.NewMonitorWorker()
+	w2 := monitor.NewMonitorWorker()
+	err = w1.ProcessPacket(pkt1, 1, 2)
+	assert.NoError(t, err)
+	err = w1.ProcessPacket(pkt2, 1, 2)
+	assert.NoError(t, err)
+	err = w2.ProcessPacket(pkt3, 1, 2)
+	assert.NoError(t, err)
+	//unit test work in progress
 }

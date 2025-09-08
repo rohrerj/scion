@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/private/app"
@@ -138,6 +140,17 @@ func realMain(ctx context.Context) error {
 		controlServiceAddr.String(), dp)
 	if err != nil {
 		return err
+	}
+	if controlConfig.BR.MonitorAddr != nil {
+		m := &monitor.Monitor{
+			NewHasher:  sha256.New,
+			NewSampler: func() monitor.Sampler { return &monitor.FirstAndLastSampler{} },
+		}
+		dp.DataPlane.Monitor = m
+		go func(m *monitor.Monitor) {
+			defer log.HandlePanic()
+			control.StartMonitorService(m, controlConfig.BR.MonitorAddr)
+		}(m)
 	}
 	if len(globalCfg.Router.DRKey) != 0 {
 		go func() {

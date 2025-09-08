@@ -94,6 +94,8 @@ type (
 		Name string
 		// InternalAddr is the local data-plane address.
 		InternalAddr netip.AddrPort
+		// MonitorAddr is the local address for the proof of forwarding monitoring endpoint
+		MonitorAddr *net.TCPAddr
 		// IFIDs is a sorted list of the interface IDs.
 		IFIDs []common.IFIDType
 		// IFs is a map of interface IDs.
@@ -268,6 +270,13 @@ func (t *RWTopology) populateBR(raw *jsontopo.Topology) error {
 			Name:         name,
 			InternalAddr: intAddr,
 			IFs:          make(map[common.IFIDType]*IFInfo),
+		}
+		if rawBr.MonitorAddr != "" {
+			monitorAddr, err := net.ResolveTCPAddr("tcp", rawBr.MonitorAddr)
+			if err != nil {
+				return serrors.WrapStr("unable to extract underlay monitor address", err)
+			}
+			brInfo.MonitorAddr = monitorAddr
 		}
 		for ifid, rawIntf := range rawBr.Interfaces {
 			var err error
@@ -467,6 +476,7 @@ func (i *BRInfo) copy() *BRInfo {
 	return &BRInfo{
 		Name:         i.Name,
 		InternalAddr: i.InternalAddr,
+		MonitorAddr:  i.MonitorAddr,
 		IFIDs:        append(i.IFIDs[:0:0], i.IFIDs...),
 		IFs:          copyIFsMap(i.IFs),
 	}

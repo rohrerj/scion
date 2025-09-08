@@ -1,4 +1,4 @@
-// Copyright 2025 ETH Zurich
+// Copyright 2025 ETH Zürich
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package router
+package control
 
-func (d *DataPlane) runMonitor() {
+import (
+	"net"
 
+	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
+	"github.com/scionproto/scion/pkg/log"
+)
+
+func StartMonitorService(m *monitor.Monitor, monitorAddr *net.TCPAddr) error {
+	log.Debug("Starting monitor server", "addr", monitorAddr)
+	lis, err := net.ListenTCP("tcp", monitorAddr)
+	if err != nil {
+		return err
+	}
+	server, err := monitor.NewMonitorService(m, monitorAddr)
+	if err != nil {
+		return err
+	}
+	err = server.Serve(lis)
+	return err
 }

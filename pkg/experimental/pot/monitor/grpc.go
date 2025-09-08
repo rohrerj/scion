@@ -29,10 +29,25 @@ type MonitorServer struct {
 }
 
 func (m *MonitorServer) Collect(ctx context.Context, req *proof_of_forwarding.CollectRequest) (*proof_of_forwarding.CollectResponse, error) {
-	/*if int(req.TimeWindow) > len(m.monitor.Buckets) {
-		return nil, serrors.New("time window out of bounds")
+	m.monitor.mtx.Lock()
+	defer m.monitor.mtx.Unlock()
+	buckets := map[uint32]Bucket{}
+	time_window := req.TimeWindow
+	for _, worker := range m.monitor.workers {
+		for key, bucket := range worker.Buckets[time_window] {
+			current_bucket, ok := buckets[key]
+			if ok {
+				err := worker.Aggregate(current_bucket, bucket)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				new_bucket := make([]byte, len(bucket))
+				copy(new_bucket, bucket)
+				buckets[key] = new_bucket
+			}
+		}
 	}
-	buckets := m.monitor.Buckets[req.TimeWindow]
 	responseEntries := make([]*proof_of_forwarding.CollectResponseEntry, 0, len(buckets))
 	for key, bucket := range buckets {
 		ingress := uint16(key >> 16)
@@ -46,13 +61,10 @@ func (m *MonitorServer) Collect(ctx context.Context, req *proof_of_forwarding.Co
 	res := &proof_of_forwarding.CollectResponse{
 		Entries: responseEntries,
 	}
-	return res, nil*/
-	return nil, nil
+	return res, nil
 }
 
-type MonitorService struct{}
-
-func NewMonitorService(m *Monitor, addr *net.TCPAddr) error {
+func NewMonitorService(m *Monitor, addr *net.TCPAddr) (*grpc.Server, error) {
 	server := grpc.NewServer(
 		libgrpc.UnaryServerInterceptor(),
 		libgrpc.DefaultMaxConcurrentStreams(),
@@ -60,10 +72,5 @@ func NewMonitorService(m *Monitor, addr *net.TCPAddr) error {
 	proof_of_forwarding.RegisterMonitorServiceServer(server, &MonitorServer{
 		monitor: m,
 	})
-	lis, err := net.ListenTCP("tcp", addr)
-	if err != nil {
-		return err
-	}
-	server.Serve(lis)
-	return nil
+	return server, nil
 }

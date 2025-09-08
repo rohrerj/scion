@@ -321,11 +321,14 @@ class TopoGenerator(object):
 
         if self.topo_dicts[local]["border_routers"].get(local_br) is None:
             intl_port = 30042
+            monitor_port = 30542
             if not self.args.docker:
                 intl_port = self.args.port_gen.register(local_br + "_internal")
+                monitor_port = self.args.port_gen.register(local_br + "_monitor")
 
             self.topo_dicts[local]["border_routers"][local_br] = {
                 'internal_addr': join_host_port(intl_addr.ip, intl_port),
+                'monitor_addr': join_host_port(intl_addr.ip, monitor_port),
                 'interfaces': {
                     l_ifid: intf
                 }
