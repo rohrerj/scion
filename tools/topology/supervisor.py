@@ -68,6 +68,7 @@ class SupervisorGenerator(object):
         entries.extend(self._br_entries(topo, "bin/router", base))
         entries.extend(self._control_service_entries(topo, base))
         entries.append(self._sciond_entry(topo_id, base))
+        entries.append(self._collector_entry(topo_id, base))
         return entries
 
     def _br_entries(self, topo, cmd, base):
@@ -96,6 +97,14 @@ class SupervisorGenerator(object):
             os.path.join(conf_dir, SD_CONFIG_NAME)
         ]
         return (sd_name, self._common_entry(sd_name, cmd_args))
+    
+    def _collector_entry(self, topo_id, conf_dir):
+        col_name = "col%s" % topo_id.file_fmt()
+        cmd_args = [
+            "bin/collector", "--config",
+            os.path.join(conf_dir, "collector.toml")
+        ]
+        return (col_name, self._common_entry(col_name, cmd_args))
 
     def _add_dispatcher(self, config):
         name, entry = self._dispatcher_entry()

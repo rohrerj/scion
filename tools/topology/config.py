@@ -137,6 +137,7 @@ class ConfigGenerator(object):
         args = self._go_args(topo_dicts)
         go_gen = GoGenerator(args)
         go_gen.generate_br()
+        go_gen.generate_collector()
         if self.args.endhosts:
             go_gen.generate_endhost()
         go_gen.generate_sciond()

@@ -101,6 +101,24 @@ class GoGenerator(object):
                 'fabrid': True,
             }
         return raw_entry
+    
+    def generate_collector(self):
+        for topo_id, topo in self.args.topo_dicts.items():
+            elem_id = "collector"
+            base = topo_id.base_dir(self.args.output_dir)
+            collector_conf = self._build_collector_conf(topo_id, topo["isd_as"], base, elem_id)
+            write_file(os.path.join(base, "%s.toml" % elem_id), toml.dumps(collector_conf))
+
+    def _build_collector_conf(self, topo_id, ia, base, name):
+        config_dir = '/etc/scion' if self.args.docker else base
+        raw_entry = {
+            'general': {
+                'id': name,
+                'config_dir': config_dir,
+            },
+            'log': self._log_entry(name),
+        }
+        return raw_entry
 
     def generate_control_service(self):
         for topo_id, topo in self.args.topo_dicts.items():

@@ -73,6 +73,8 @@ type Topology interface {
 	//
 	// XXX(scrye): Return value is a shallow copy.
 	BR(name string) (BRInfo, bool)
+	// BorderRouters returns an array of all border routers
+	BorderRouters() ([]BRInfo, error)
 	// IFInfoMap returns the mapping between interface IDs an internal addresses.
 	//
 	// FIXME(scrye): Simplify return type and make it topology format agnostic.
@@ -201,6 +203,21 @@ func (t *topologyS) Gateways() ([]GatewayInfo, error) {
 func (t *topologyS) BR(name string) (BRInfo, bool) {
 	br, ok := t.Topology.BR[name]
 	return br, ok
+}
+
+func (t *topologyS) BorderRouters() ([]BRInfo, error) {
+	ret := []BRInfo{}
+	keys := []string{}
+	for k := range t.Topology.BR {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		v := t.Topology.BR[k]
+		ret = append(ret, v)
+	}
+	return ret, nil
 }
 
 func (t *topologyS) PublicAddress(svc addr.SVC, name string) *net.UDPAddr {

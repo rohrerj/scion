@@ -12,4 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package collector
+package config
+
+import (
+	"io"
+
+	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/private/config"
+	"github.com/scionproto/scion/private/env"
+)
+
+type Config struct {
+	General env.General `toml:"general,omitempty"`
+	Logging log.Config  `toml:"log,omitempty"`
+}
+
+func (cfg *Config) InitDefaults() {}
+
+func (cfg *Config) Validate() error { return nil }
+
+func (cfg *Config) Sample(dst io.Writer, path config.Path, _ config.CtxMap) {}
