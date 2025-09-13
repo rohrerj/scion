@@ -176,6 +176,164 @@ func BenchmarkHash(b *testing.B) {
 	}
 }
 
+func TestComputeTimeWindow(t *testing.T) {
+	type Test struct {
+		name           string
+		flowID         uint8
+		arrival_time   time.Time
+		expected_index uint8
+	}
+	tests := []Test{
+		{
+			name:           "window_even_first_half",
+			flowID:         0,
+			arrival_time:   time.Unix(int64(monitor.Window_length.Seconds()), 0),
+			expected_index: 1,
+		},
+		{
+			name:           "window_even_second_half",
+			flowID:         0,
+			arrival_time:   time.Unix(int64(monitor.Window_length.Seconds()), -1),
+			expected_index: 1,
+		},
+		{
+			name:           "window_odd_first_half",
+			flowID:         1,
+			arrival_time:   time.Unix(int64(monitor.Window_length.Seconds()), 0),
+			expected_index: 1,
+		},
+		{
+			name:           "window_odd_second_half",
+			flowID:         1,
+			arrival_time:   time.Unix(int64(monitor.Window_length.Seconds()), -1),
+			expected_index: 0,
+		},
+		{
+			name:           "window_even_first_half_2T",
+			flowID:         0,
+			arrival_time:   time.Unix(int64(monitor.Window_length.Seconds()*2), 15),
+			expected_index: 2,
+		},
+		{
+			name:           "window_even_first_half_3T",
+			flowID:         0,
+			arrival_time:   time.Unix(int64(monitor.Window_length.Seconds()*3), 15),
+			expected_index: 3,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected_index, monitor.ComputeTimeWindowIndex(int(test.flowID), test.arrival_time))
+		})
+	}
+}
+
+// This test tests that as long as latency and clock screw are within
+// a certain bound, the same time window is chosen.
+// If the base time is close the middle, the odd bit should be chosen
+// and if the base time is closer to the edge of the time window, take the even bit
+func TestComputeTimeWindowDifferentTime(t *testing.T) {
+	type Entry struct {
+		Latency_and_clock_screw time.Duration
+	}
+	type Test struct {
+		name    string
+		flowid  int
+		t_base  time.Time
+		entries []Entry
+	}
+	tests := []Test{
+		{
+			name:   "odd_middle",
+			flowid: 1,
+			t_base: time.Unix(int64(monitor.Window_length.Seconds()+monitor.Window_length.Seconds()/2), 0),
+			entries: []Entry{
+				{
+					Latency_and_clock_screw: -1000 * time.Millisecond,
+				},
+				{
+					Latency_and_clock_screw: 999 * time.Millisecond,
+				},
+			},
+		},
+		{
+			name:   "even_begin",
+			flowid: 0,
+			t_base: time.Unix(int64(monitor.Window_length.Seconds()), 0),
+			entries: []Entry{
+				{
+					Latency_and_clock_screw: -1000 * time.Millisecond,
+				},
+				{
+					Latency_and_clock_screw: 999 * time.Millisecond,
+				},
+			},
+		},
+		{
+			name:   "even_end",
+			flowid: 0,
+			t_base: time.Unix(int64(monitor.Window_length.Seconds()*2), -1),
+			entries: []Entry{
+				{
+					Latency_and_clock_screw: -999 * time.Millisecond,
+				},
+				{
+					Latency_and_clock_screw: 1000 * time.Millisecond,
+				},
+			},
+		},
+		{
+			name:   "even_middle",
+			flowid: 0,
+			t_base: time.Unix(int64(monitor.Window_length.Seconds()+monitor.Window_length.Seconds()/2), 0),
+			entries: []Entry{
+				{
+					Latency_and_clock_screw: 0 * time.Millisecond,
+				},
+				{
+					Latency_and_clock_screw: 999 * time.Millisecond,
+				},
+			},
+		},
+		{
+			name:   "odd_begin",
+			flowid: 1,
+			t_base: time.Unix(int64(monitor.Window_length.Seconds()), 0),
+			entries: []Entry{
+				{
+					Latency_and_clock_screw: 0 * time.Millisecond,
+				},
+				{
+					Latency_and_clock_screw: 999 * time.Millisecond,
+				},
+			},
+		},
+		{
+			name:   "odd_end",
+			flowid: 1,
+			t_base: time.Unix(int64(monitor.Window_length.Seconds()*2), -1),
+			entries: []Entry{
+				{
+					Latency_and_clock_screw: -999 * time.Millisecond,
+				},
+				{
+					Latency_and_clock_screw: 0 * time.Millisecond,
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			index_base := monitor.ComputeTimeWindowIndex(test.flowid, test.t_base)
+			for _, entry := range test.entries {
+				current_time := test.t_base.Add(entry.Latency_and_clock_screw)
+				current_index := monitor.ComputeTimeWindowIndex(test.flowid, current_time)
+				assert.Equal(t, index_base, current_index)
+			}
+		})
+	}
+}
+
 func TestMonitor(t *testing.T) {
 	monitor := monitor.Monitor{
 		NewHasher:  sha256.New,

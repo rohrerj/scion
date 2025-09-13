@@ -18,6 +18,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
 	libgrpc "github.com/scionproto/scion/pkg/grpc"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/proto/proof_of_forwarding"
@@ -28,20 +29,21 @@ type Collector struct {
 }
 
 func (c *Collector) InitCollector(routers []topology.BRInfo) error {
+	ticker := time.NewTicker(monitor.Window_length)
 	for {
-		time.Sleep(time.Second * 10)
+		t := <-ticker.C
+		time_window := (monitor.WindowIndex(t) - monitor.Num_windows/2 + monitor.Num_windows) % monitor.Num_windows
 		ctx, cancelF := context.WithTimeout(context.Background(), time.Second)
 		for _, router := range routers {
 			dialer := libgrpc.TCPDialer{}
 			conn, err := dialer.Dial(ctx, router.MonitorAddr)
-			time_window := uint32(1)
 			if err != nil {
 				log.Error("Error dialing monitor", "addr", router.MonitorAddr, "err", err)
 				continue
 			}
 			client := proof_of_forwarding.NewMonitorServiceClient(conn)
 			resp, err := client.Collect(ctx, &proof_of_forwarding.CollectRequest{
-				TimeWindow: time_window,
+				TimeWindow: uint32(time_window),
 			})
 			conn.Close()
 			if err != nil {

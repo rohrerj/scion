@@ -17,9 +17,13 @@ package monitor
 import (
 	"hash"
 	"sync"
+	"time"
 
 	"github.com/scionproto/scion/pkg/private/serrors"
 )
+
+const Window_length = 2 * time.Second
+const Num_windows = 4
 
 type Bucket []byte
 
@@ -35,7 +39,7 @@ type MonitorWorker struct {
 	Parser          Parser
 	hashSampleSlice [64]byte
 	Sampler         Sampler
-	Buckets         [4]map[uint32]Bucket
+	Buckets         [Num_windows]map[uint32]Bucket
 	HashBuffer      []byte
 }
 
@@ -47,18 +51,18 @@ func (monitor *Monitor) NewMonitorWorker() *MonitorWorker {
 		hasher:     hasher,
 		Parser:     Parser{},
 		Sampler:    monitor.NewSampler(),
-		Buckets:    [4]map[uint32]Bucket{},
+		Buckets:    [Num_windows]map[uint32]Bucket{},
 		HashBuffer: make([]byte, hasher.Size()),
 	}
 	monitor.workers = append(monitor.workers, m)
-	for i := 0; i < len(m.Buckets); i++ {
+	for i := 0; i < Num_windows; i++ {
 		m.Buckets[i] = make(map[uint32]Bucket)
 	}
 	return m
 }
 
 func (m *MonitorWorker) ProcessPacket(packet []byte, ingress uint16, egress uint16) error {
-	time_window := packet[3] & 0x3
+	time_window := ComputeTimeWindowIndex(int(packet[3]), time.Now())
 	err := m.HashPacket(packet)
 	if err != nil {
 		return err
@@ -67,7 +71,7 @@ func (m *MonitorWorker) ProcessPacket(packet []byte, ingress uint16, egress uint
 }
 
 func (m *MonitorWorker) StoreValueInBucket(value []byte, ingress uint16, egress uint16, time_window uint8) error {
-	if int(time_window) > len(m.Buckets) {
+	if int(time_window) > Num_windows {
 		return serrors.New("time_window index out of bounds")
 	}
 	index := uint32(ingress)<<16 + uint32(egress)
@@ -93,9 +97,26 @@ func (m *MonitorWorker) Aggregate(storedValue []byte, newValue []byte) error {
 	return nil
 }
 
-func (m *MonitorWorker) ComputeTimeWindowIndex(flowID int) uint8 {
+func WindowIndex(t time.Time) uint8 {
+	cycle := Window_length * time.Duration(Num_windows)
+	d := time.Duration(t.UnixNano())
+	offset := d % cycle
+	return uint8(offset / Window_length)
+}
 
-	return uint8(flowID & 0x3)
+func ComputeTimeWindowIndex(flowID int, arrival_time time.Time) uint8 {
+	parity_bit := flowID & 0x1
+	if arrival_time.Second()%2 != parity_bit {
+		if (time.Duration(arrival_time.UnixNano()) % Window_length) < Window_length/2 {
+			// arrival_time lies in first half of time_window
+			return WindowIndex(arrival_time)
+		} else {
+			// arrival_time lies in second half of time_window
+			return WindowIndex(arrival_time.Add(Window_length))
+		}
+	} else {
+		return WindowIndex(arrival_time)
+	}
 }
 
 func (m *MonitorWorker) HashAllPacket(packet []byte) error {
