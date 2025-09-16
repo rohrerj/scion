@@ -104,18 +104,24 @@ func WindowIndex(t time.Time) uint8 {
 	return uint8(offset / Window_length)
 }
 
+func GetFlowIDForTime(send_time time.Time) int {
+	return int(WindowIndex(send_time) % 2)
+}
+
 func ComputeTimeWindowIndex(flowID int, arrival_time time.Time) uint8 {
 	parity_bit := flowID & 0x1
-	if arrival_time.Second()%2 != parity_bit {
-		if (time.Duration(arrival_time.UnixNano()) % Window_length) < Window_length/2 {
-			// arrival_time lies in first half of time_window
-			return WindowIndex(arrival_time)
-		} else {
-			// arrival_time lies in second half of time_window
-			return WindowIndex(arrival_time.Add(Window_length))
-		}
+	baseIndex := WindowIndex(arrival_time)
+	if baseIndex%2 == uint8(parity_bit) {
+		// Either the window matches or clock skew + latency > 1/2 Window_length.
+		// In the latter case this function would return the wrong value.
+		return baseIndex
+	}
+	if (time.Duration(arrival_time.UnixNano()) % Window_length) < Window_length/2 {
+		// arrival_time lies in first half of time_window
+		return (baseIndex - 1 + Num_windows) % Num_windows
 	} else {
-		return WindowIndex(arrival_time)
+		// arrival_time lies in second half of time_window
+		return (baseIndex + 1) % Num_windows
 	}
 }
 
