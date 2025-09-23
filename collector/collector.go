@@ -18,6 +18,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/scionproto/scion/collector/db"
 	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
 	libgrpc "github.com/scionproto/scion/pkg/grpc"
 	"github.com/scionproto/scion/pkg/log"
@@ -28,11 +29,16 @@ import (
 type Collector struct {
 }
 
-func (c *Collector) InitCollector(routers []topology.BRInfo) error {
+func (c *Collector) InitCollector(connectionString string, routers []topology.BRInfo) error {
+	db_inserter, err := db.SetupDataInserter(context.Background(), 1000, 100, connectionString)
+	if err != nil {
+		return err
+	}
 	ticker := time.NewTicker(monitor.Window_length)
 	for {
 		t := <-ticker.C
 		time_window := (monitor.WindowIndex(t) - monitor.Num_windows/2 + monitor.Num_windows) % monitor.Num_windows
+		log.Debug("time window", "window", time_window)
 		ctx, cancelF := context.WithTimeout(context.Background(), time.Second)
 		for _, router := range routers {
 			dialer := libgrpc.TCPDialer{}
@@ -50,8 +56,15 @@ func (c *Collector) InitCollector(routers []topology.BRInfo) error {
 				log.Error("Error dialing monitor", "addr", router.MonitorAddr, "err", err)
 				continue
 			}
+
 			for _, entry := range resp.Entries {
-				log.Debug("ENTRY", "src", router.MonitorAddr, "time_window", time_window, "ingress", entry.Ingress, "egress", entry.Egress, "bucket", entry.Bucket)
+				db_inserter.Data <- &db.Row{
+					Time:       t,
+					TimeWindow: int16(time_window),
+					Ingress:    int16(entry.Ingress),
+					Egress:     int16(entry.Egress),
+					Data:       [32]byte(entry.Bucket),
+				}
 			}
 		}
 		cancelF()

@@ -1,0 +1,12 @@
+load("//tools/lint:go.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = ["inserter.go"],
+    importpath = "github.com/scionproto/scion/collector/db",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/log:go_default_library",
+        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
+    ],
+)

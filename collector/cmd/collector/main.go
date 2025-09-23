@@ -19,6 +19,7 @@ import (
 
 	"github.com/scionproto/scion/collector"
 	"github.com/scionproto/scion/collector/config"
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/private/app"
 	"github.com/scionproto/scion/private/app/launcher"
@@ -50,6 +51,10 @@ func realMain(ctx context.Context) error {
 		return err
 	}
 	collector := collector.Collector{}
-	collector.InitCollector(all_routers)
+	if globalCfg.Collector.DBConnectionString == "" {
+		log.Error("Collector DBConnectionString unset")
+		return nil
+	}
+	collector.InitCollector(globalCfg.Collector.DBConnectionString, all_routers)
 	return nil
 }

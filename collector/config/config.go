@@ -23,8 +23,13 @@ import (
 )
 
 type Config struct {
-	General env.General `toml:"general,omitempty"`
-	Logging log.Config  `toml:"log,omitempty"`
+	General   env.General     `toml:"general,omitempty"`
+	Logging   log.Config      `toml:"log,omitempty"`
+	Collector CollectorConfig `toml:"collector,omitempty"`
+}
+
+type CollectorConfig struct {
+	DBConnectionString string `toml:"db,omitempty"`
 }
 
 func (cfg *Config) InitDefaults() {}
