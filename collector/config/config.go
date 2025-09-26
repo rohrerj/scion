@@ -29,6 +29,8 @@ type Config struct {
 }
 
 type CollectorConfig struct {
+	// The DB connection string, eg:
+	// "postgres://postgres:PASSWORD@localhost:5432/DATABASE"
 	DBConnectionString string `toml:"db,omitempty"`
 }
 

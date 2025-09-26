@@ -39,7 +39,6 @@ type Row struct {
 }
 
 func SetupDataInserter(ctx context.Context, channelSize int, batchSize int, connStr string) (*DataInserter, error) {
-
 	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
 		return nil, err

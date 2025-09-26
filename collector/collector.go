@@ -16,6 +16,7 @@ package collector
 
 import (
 	"context"
+	"net"
 	"time"
 
 	"github.com/scionproto/scion/collector/db"
@@ -29,44 +30,52 @@ import (
 type Collector struct {
 }
 
-func (c *Collector) InitCollector(connectionString string, routers []topology.BRInfo) error {
-	db_inserter, err := db.SetupDataInserter(context.Background(), 1000, 100, connectionString)
+func (c *Collector) InitCollector(errCtx context.Context, connectionString string, routers []topology.BRInfo) error {
+	db_inserter, err := db.SetupDataInserter(errCtx, 1000, 100, connectionString)
 	if err != nil {
 		return err
 	}
 	ticker := time.NewTicker(monitor.Window_length)
+loop:
 	for {
 		t := <-ticker.C
-		time_window := (monitor.WindowIndex(t) - monitor.Num_windows/2 + monitor.Num_windows) % monitor.Num_windows
-		log.Debug("time window", "window", time_window)
-		ctx, cancelF := context.WithTimeout(context.Background(), time.Second)
-		for _, router := range routers {
-			dialer := libgrpc.TCPDialer{}
-			conn, err := dialer.Dial(ctx, router.MonitorAddr)
-			if err != nil {
-				log.Error("Error dialing monitor", "addr", router.MonitorAddr, "err", err)
-				continue
-			}
-			client := proof_of_forwarding.NewMonitorServiceClient(conn)
-			resp, err := client.Collect(ctx, &proof_of_forwarding.CollectRequest{
-				TimeWindow: uint32(time_window),
-			})
-			conn.Close()
-			if err != nil {
-				log.Error("Error dialing monitor", "addr", router.MonitorAddr, "err", err)
-				continue
-			}
-
-			for _, entry := range resp.Entries {
-				db_inserter.Data <- &db.Row{
-					Time:       t,
-					TimeWindow: int16(time_window),
-					Ingress:    int16(entry.Ingress),
-					Egress:     int16(entry.Egress),
-					Data:       [32]byte(entry.Bucket),
-				}
-			}
+		select {
+		case <-errCtx.Done():
+			break loop
+		default:
 		}
-		cancelF()
+		time_window := (monitor.WindowIndex(t) - monitor.Num_windows/2 + monitor.Num_windows) % monitor.Num_windows
+		for _, router := range routers {
+			go func(addr *net.TCPAddr, collectionTime time.Time, time_window uint8) {
+				ctx, cancelF := context.WithTimeout(errCtx, time.Second*2)
+				defer cancelF()
+				dialer := libgrpc.TCPDialer{}
+				conn, err := dialer.Dial(ctx, addr)
+				if err != nil {
+					log.Error("Error dialing monitor", "addr", addr, "err", err)
+					return
+				}
+				defer conn.Close()
+				client := proof_of_forwarding.NewMonitorServiceClient(conn)
+				resp, err := client.Collect(ctx, &proof_of_forwarding.CollectRequest{
+					TimeWindow: uint32(time_window),
+				})
+				if err != nil {
+					log.Error("Error collecting from monitor", "addr", addr, "err", err)
+					return
+				}
+
+				for _, entry := range resp.Entries {
+					db_inserter.Data <- &db.Row{
+						Time:       collectionTime,
+						TimeWindow: int16(time_window),
+						Ingress:    int16(entry.Ingress),
+						Egress:     int16(entry.Egress),
+						Data:       [32]byte(entry.Bucket),
+					}
+				}
+			}(router.MonitorAddr, t, time_window)
+		}
 	}
+	return nil
 }

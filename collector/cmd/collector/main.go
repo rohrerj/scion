@@ -17,6 +17,8 @@ package main
 import (
 	"context"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/scionproto/scion/collector"
 	"github.com/scionproto/scion/collector/config"
 	"github.com/scionproto/scion/pkg/log"
@@ -52,9 +54,20 @@ func realMain(ctx context.Context) error {
 	}
 	collector := collector.Collector{}
 	if globalCfg.Collector.DBConnectionString == "" {
-		log.Error("Collector DBConnectionString unset")
+		log.Error("Connector cannot connect to database without configuring connection string first!")
 		return nil
 	}
-	collector.InitCollector(globalCfg.Collector.DBConnectionString, all_routers)
-	return nil
+	g, errCtx := errgroup.WithContext(ctx)
+	var cleanup app.Cleanup
+	g.Go(func() error {
+		defer log.HandlePanic()
+		<-errCtx.Done()
+		return cleanup.Do()
+	})
+	g.Go(func() error {
+		defer log.HandlePanic()
+		return collector.InitCollector(errCtx, globalCfg.Collector.DBConnectionString, all_routers)
+	})
+
+	return g.Wait()
 }
