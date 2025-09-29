@@ -24,6 +24,7 @@ import (
 const (
 	SvcDS       SVC = 0x0001
 	SvcCS       SVC = 0x0002
+	SvcLP       SVC = 0x0003
 	SvcWildcard SVC = 0x0010
 	SvcNone     SVC = 0xffff
 

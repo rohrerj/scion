@@ -36,3 +36,15 @@ message CollectResponseEntry {
 message CollectResponse {
     repeated CollectResponseEntry entries = 1;
 }
+
+service LostPacketDetector {
+    rpc Query(QueryRequest) returns (QueryResponse) {}
+}
+
+message QueryRequest {
+    string query = 1;
+}
+
+message QueryResponse {
+    uint32 response = 1;
+}

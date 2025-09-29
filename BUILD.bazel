@@ -191,6 +191,7 @@ pkg_tar(
         "//daemon/cmd/daemon",
         "//dispatcher/cmd/dispatcher",
         "//gateway/cmd/gateway",
+        "//lost_packet_detector/cmd/lost_packet_detector",
         "//router/cmd/router",
         "//scion-pki/cmd/scion-pki",
         "//scion/cmd/scion",

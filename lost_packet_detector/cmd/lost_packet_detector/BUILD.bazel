@@ -1,0 +1,27 @@
+load("//tools/lint:go.bzl", "go_library")
+load("//:scion.bzl", "scion_go_binary")
+
+go_library(
+    name = "go_default_library",
+    srcs = ["main.go"],
+    importpath = "github.com/scionproto/scion/lost_packet_detector/cmd/lost_packet_detector",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//lost_packet_detector/config:go_default_library",
+        "//lost_packet_detector/server:go_default_library",
+        "//pkg/addr:go_default_library",
+        "//pkg/log:go_default_library",
+        "//pkg/private/serrors:go_default_library",
+        "//pkg/snet:go_default_library",
+        "//private/app:go_default_library",
+        "//private/app/appnet:go_default_library",
+        "//private/app/launcher:go_default_library",
+        "//private/topology:go_default_library",
+    ],
+)
+
+scion_go_binary(
+    name = "lost_packet_detector",
+    embed = [":go_default_library"],
+    visibility = ["//visibility:public"],
+)
