@@ -186,12 +186,12 @@ config_setting(
 pkg_tar(
     name = "scion",
     srcs = [
+        "//bucket_store/cmd/bucket_store",
         "//collector/cmd/collector",
         "//control/cmd/control",
         "//daemon/cmd/daemon",
         "//dispatcher/cmd/dispatcher",
         "//gateway/cmd/gateway",
-        "//lost_packet_detector/cmd/lost_packet_detector",
         "//router/cmd/router",
         "//scion-pki/cmd/scion-pki",
         "//scion/cmd/scion",

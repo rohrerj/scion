@@ -3,7 +3,7 @@ load("//tools/lint:go.bzl", "go_library")
 go_library(
     name = "go_default_library",
     srcs = ["config.go"],
-    importpath = "github.com/scionproto/scion/lost_packet_detector/config",
+    importpath = "github.com/scionproto/scion/bucket_store/config",
     visibility = ["//visibility:public"],
     deps = [
         "//pkg/log:go_default_library",

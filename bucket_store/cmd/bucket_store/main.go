@@ -19,8 +19,8 @@ import (
 	"net"
 	"net/netip"
 
-	"github.com/scionproto/scion/lost_packet_detector/config"
-	"github.com/scionproto/scion/lost_packet_detector/server"
+	"github.com/scionproto/scion/bucket_store/config"
+	"github.com/scionproto/scion/bucket_store/server"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -36,7 +36,7 @@ var globalCfg config.Config
 func main() {
 	application := launcher.Application{
 		TOMLConfig: &globalCfg,
-		ShortName:  "Lost packet detector",
+		ShortName:  "Bucket Store",
 		Main:       realMain,
 	}
 	application.Run()
@@ -51,7 +51,7 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return serrors.WrapStr("creating topology loader", err)
 	}
-	localAddr, err := topo.Get().Anycast(addr.SvcLP)
+	localAddr, err := topo.Get().Anycast(addr.SvcBS)
 	if err != nil {
 		return err
 	}
