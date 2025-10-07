@@ -235,6 +235,8 @@ func (t *topologyS) topoAddress(svc addr.SVC, name string) *TopoAddr {
 		addresses = t.Topology.DS
 	case addr.SvcCS:
 		addresses = t.Topology.CS
+	case addr.SvcBS:
+		addresses = t.Topology.BS
 	}
 	if addresses == nil {
 		return nil
@@ -351,6 +353,8 @@ func toServiceType(svc addr.SVC) (ServiceType, error) {
 		return Discovery, nil
 	case addr.SvcCS:
 		return Control, nil
+	case addr.SvcBS:
+		return BucketStore, nil
 	default:
 		return 0, serrors.WithCtx(addr.ErrUnsupportedSVCAddress, "svc", svc)
 	}
@@ -367,6 +371,8 @@ func (t *topologyS) SVCNames(svc addr.SVC) ServiceNames {
 		m = t.Topology.DS
 	case addr.SvcCS:
 		m = t.Topology.CS
+	case addr.SvcBS:
+		m = t.Topology.BS
 	}
 
 	var names ServiceNames

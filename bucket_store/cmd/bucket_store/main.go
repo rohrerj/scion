@@ -1,4 +1,4 @@
-// Copyright 2020 Anapaya Systems
+// Copyright 2025 ETH Zurich
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"net"
 	"net/netip"
 
 	"github.com/scionproto/scion/bucket_store/config"
@@ -29,6 +28,7 @@ import (
 	infraenv "github.com/scionproto/scion/private/app/appnet"
 	"github.com/scionproto/scion/private/app/launcher"
 	"github.com/scionproto/scion/private/topology"
+	"golang.org/x/sync/errgroup"
 )
 
 var globalCfg config.Config
@@ -53,13 +53,22 @@ func realMain(ctx context.Context) error {
 	}
 	localAddr, err := topo.Get().Anycast(addr.SvcBS)
 	if err != nil {
+		log.Error("error", "err", err)
 		return err
 	}
-	go func(addr *net.UDPAddr) error {
+	log.Debug("Bucket Store", "localAddr", localAddr, "publicAddr", topo.BucketStoreAddress(globalCfg.General.ID))
+	g, errCtx := errgroup.WithContext(ctx)
+	var cleanup app.Cleanup
+	g.Go(func() error {
+		defer log.HandlePanic()
+		<-errCtx.Done()
+		return cleanup.Do()
+	})
+	g.Go(func() error {
 		defer log.HandlePanic()
 		nc := infraenv.NetworkConfig{
 			IA:          topo.IA(),
-			Public:      topo.ControlServiceAddress(globalCfg.General.ID),
+			Public:      topo.BucketStoreAddress(globalCfg.General.ID),
 			QUIC:        infraenv.QUIC{},
 			SVCResolver: topo,
 			SCMPHandler: snet.DefaultSCMPHandler{},
@@ -70,14 +79,14 @@ func realMain(ctx context.Context) error {
 		if err != nil {
 			return serrors.WrapStr("initializing QUIC stack", err)
 		}
-		s, err := server.NewLostPacketService(addr)
+		s, err := server.NewLostPacketService(localAddr)
 		if err != nil {
 			return err
 		}
 		return s.Serve(quicStack.Listener)
-	}(localAddr)
+	})
 
-	return nil
+	return g.Wait()
 }
 
 type cpInfoProvider struct {

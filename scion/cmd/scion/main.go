@@ -57,6 +57,7 @@ func main() {
 		newAddress(cmd),
 		newGendocs(cmd),
 		newFabrid(cmd),
+		newLocator(cmd),
 	)
 	// This Templatefunc allows use some escape characters for the rst
 	// documentation conversion without compromising the readability of the help

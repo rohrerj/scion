@@ -120,6 +120,25 @@ class GoGenerator(object):
         }
         return raw_entry
 
+    def generate_bucket_store(self):
+         for topo_id, topo in self.args.topo_dicts.items():
+            for elem_id, elem in topo.get("bucket_store", {}).items():
+                print(elem_id)
+                base = topo_id.base_dir(self.args.output_dir)
+                bucket_store_conf = self._build_bucket_store_conf(topo_id, topo["isd_as"], base, elem_id)
+                write_file(os.path.join(base, "%s.toml" % elem_id), toml.dumps(bucket_store_conf))
+
+    def _build_bucket_store_conf(self, topo_id, ia, base, name):
+        config_dir = '/etc/scion' if self.args.docker else base
+        raw_entry = {
+            'general': {
+                'id': name,
+                'config_dir': config_dir,
+            },
+            'log': self._log_entry(name),
+        }
+        return raw_entry   
+
     def generate_control_service(self):
         for topo_id, topo in self.args.topo_dicts.items():
             ca = self.args.config["ASes"][str(topo_id)].get("issuing", False)

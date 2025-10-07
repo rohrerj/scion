@@ -151,6 +151,7 @@ class TopoGenerator(object):
 
     def _register_srv_entries(self, topo_id, as_conf):
         srvs = [("control_servers", DEFAULT_CONTROL_SERVERS, "cs")]
+        srvs.append(("bucket_stores", DEFAULT_CONTROL_SERVERS, "bs"))
         for conf_key, def_num, nick in srvs:
             self._register_srv_entry(topo_id, as_conf, conf_key, def_num, nick)
 
@@ -272,6 +273,7 @@ class TopoGenerator(object):
     def _gen_srv_entries(self, topo_id, as_conf):
         srvs = [("control_servers", DEFAULT_CONTROL_SERVERS, "cs", "control_service")]
         srvs.append(("control_servers", DEFAULT_CONTROL_SERVERS, "cs", "discovery_service"))
+        srvs.append(("bucket_stores", DEFAULT_CONTROL_SERVERS, "bs", "bucket_store"))
         for conf_key, def_num, nick, topo_key in srvs:
             self._gen_srv_entry(topo_id, as_conf, conf_key, def_num, nick, topo_key)
 
@@ -294,12 +296,16 @@ class TopoGenerator(object):
     def _default_ctrl_port(self, nick):
         if nick == "cs":
             return 30252
+        if nick == "bs":
+            return 30253
         print('Invalid nick: %s' % nick)
         sys.exit(1)
 
     def _srv_count(self, as_conf, conf_key, def_num):
         count = as_conf.get(conf_key, def_num)
         if conf_key == "control_servers":
+            count = 1
+        if conf_key == "bucket_stores":
             count = 1
         return count
 

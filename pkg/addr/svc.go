@@ -61,6 +61,8 @@ func ParseSVC(str string) (SVC, error) {
 		return SvcDS | m, nil
 	case "CS":
 		return SvcCS | m, nil
+	case "BS":
+		return SvcBS | m, nil
 	case "Wildcard":
 		return SvcWildcard | m, nil
 	default:
@@ -99,6 +101,8 @@ func (h SVC) BaseString() string {
 		return "DS"
 	case SvcCS:
 		return "CS"
+	case SvcBS:
+		return "BS"
 	case SvcWildcard:
 		return "Wildcard"
 	default:

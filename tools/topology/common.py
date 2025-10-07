@@ -30,6 +30,7 @@ SCION_SERVICE_NAMES = (
     "control_service",
     "discovery_service",
     "border_routers",
+    "bucket_store",
 )
 
 BS_CONFIG_NAME = 'bs.toml'

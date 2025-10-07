@@ -69,6 +69,7 @@ class SupervisorGenerator(object):
         entries.extend(self._control_service_entries(topo, base))
         entries.append(self._sciond_entry(topo_id, base))
         entries.append(self._collector_entry(topo_id, base))
+        entries.extend(self._bucket_store_entries(topo, base))
         return entries
 
     def _br_entries(self, topo, cmd, base):
@@ -106,6 +107,14 @@ class SupervisorGenerator(object):
         ]
         return (col_name, self._common_entry(col_name, cmd_args))
 
+    def _bucket_store_entries(self, topo, base):
+        entries = []
+        for k, v in topo.get("bucket_store", {}).items():
+            conf = os.path.join(base, "%s.toml" % k)
+            cmd_args = self._common_entry(k, ["bin/bucket_store", "--config", conf])
+            entries.append((k, cmd_args))
+        return entries
+        
     def _add_dispatcher(self, config):
         name, entry = self._dispatcher_entry()
         self._add_prog(config, name, entry)

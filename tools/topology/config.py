@@ -138,6 +138,7 @@ class ConfigGenerator(object):
         go_gen = GoGenerator(args)
         go_gen.generate_br()
         go_gen.generate_collector()
+        go_gen.generate_bucket_store()
         if self.args.endhosts:
             go_gen.generate_endhost()
         go_gen.generate_sciond()

@@ -8,6 +8,7 @@ go_library(
         "common.go",
         "fabrid.go",
         "gendocs.go",
+        "locator.go",
         "main.go",
         "observability.go",
         "ping.go",

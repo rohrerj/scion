@@ -167,6 +167,13 @@ func (l *Loader) ControlServiceAddresses() []*net.UDPAddr {
 	return addrs
 }
 
+func (l *Loader) BucketStoreAddress(id string) *net.UDPAddr {
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+
+	return l.topo.PublicAddress(addr.SvcBS, id)
+}
+
 func (l *Loader) ControlServiceAddress(id string) *net.UDPAddr {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()

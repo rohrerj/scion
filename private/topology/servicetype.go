@@ -28,6 +28,7 @@ const (
 	Gateway
 	HiddenSegmentLookup
 	HiddenSegmentRegistration
+	BucketStore
 )
 
 func (t ServiceType) String() string {
@@ -44,6 +45,8 @@ func (t ServiceType) String() string {
 		return "hiddensegmentlookup"
 	case HiddenSegmentRegistration:
 		return "hiddensegmentregistration"
+	case BucketStore:
+		return "bucket_store"
 	default:
 		return "unknown"
 	}
@@ -64,6 +67,8 @@ func ServiceTypeFromString(s string) ServiceType {
 		return HiddenSegmentLookup
 	case "hiddensegmentregistration":
 		return HiddenSegmentRegistration
+	case "bucket_store":
+		return BucketStore
 	default:
 		return Unknown
 	}

@@ -73,6 +73,7 @@ type (
 
 		CS                        IDAddrMap
 		DS                        IDAddrMap
+		BS                        IDAddrMap
 		HiddenSegmentLookup       IDAddrMap
 		HiddenSegmentRegistration IDAddrMap
 		SIG                       map[string]GatewayInfo
@@ -151,6 +152,7 @@ func NewRWTopology() *RWTopology {
 		BR:                        make(map[string]BRInfo),
 		CS:                        make(IDAddrMap),
 		DS:                        make(IDAddrMap),
+		BS:                        make(IDAddrMap),
 		HiddenSegmentLookup:       make(IDAddrMap),
 		HiddenSegmentRegistration: make(IDAddrMap),
 		SIG:                       make(map[string]GatewayInfo),
@@ -351,6 +353,10 @@ func (t *RWTopology) populateServices(raw *jsontopo.Topology) error {
 	if err != nil {
 		return serrors.WrapStr("unable to extract DS address", err)
 	}
+	t.BS, err = svcMapFromRaw(raw.BucketStore)
+	if err != nil {
+		return serrors.WrapStr("unable to extract BS address", err)
+	}
 	t.HiddenSegmentLookup, err = svcMapFromRaw(raw.HiddenSegmentLookup)
 	if err != nil {
 		return serrors.WrapStr("unable to extract hidden segment lookup address", err)
@@ -403,6 +409,8 @@ func (t *RWTopology) getSvcInfo(svc ServiceType) (*svcInfo, error) {
 		return &svcInfo{idTopoAddrMap: t.DS}, nil
 	case Control:
 		return &svcInfo{idTopoAddrMap: t.CS}, nil
+	case BucketStore:
+		return &svcInfo{idTopoAddrMap: t.BS}, nil
 	case HiddenSegmentLookup:
 		return &svcInfo{idTopoAddrMap: t.HiddenSegmentLookup}, nil
 	case HiddenSegmentRegistration:
