@@ -15,15 +15,13 @@
 package monitor
 
 import (
+	"fmt"
 	"hash"
 	"sync"
 	"time"
 
 	"github.com/scionproto/scion/pkg/private/serrors"
 )
-
-const Window_length = 2 * time.Second
-const Num_windows = 4
 
 type Bucket []byte
 
@@ -108,7 +106,7 @@ func GetFlowIDForTime(send_time time.Time) int {
 	return int(WindowIndex(send_time) % 2)
 }
 
-func ComputeTimeWindowIndex(flowID int, arrival_time time.Time) uint8 {
+func ComputeTimeWindowIndex_1bit(flowID int, arrival_time time.Time) uint8 {
 	parity_bit := flowID & 0x1
 	baseIndex := WindowIndex(arrival_time)
 	if baseIndex%2 == uint8(parity_bit) {
@@ -122,6 +120,44 @@ func ComputeTimeWindowIndex(flowID int, arrival_time time.Time) uint8 {
 	} else {
 		// arrival_time lies in second half of time_window
 		return (baseIndex + 1) % Num_windows
+	}
+}
+
+const Window_length = 2 * time.Second
+const Num_Bits = 1
+const Num_windows = Num_Windows_Per_Block * 2
+const Num_Windows_Per_Block = 1 << Num_Bits
+const Mask = (1 << Num_Bits) - 1
+
+func ComputeTimeWindowIndex(window_index int, arrival_time time.Time) uint8 {
+	baseIndex := WindowIndex(arrival_time)
+	targetIndex := uint8(window_index) & Mask
+	if baseIndex%Num_Windows_Per_Block == targetIndex {
+		// the target index matches the computed base index
+		fmt.Println("a")
+		return baseIndex
+	}
+	// distance to the left
+	distance1 := (baseIndex % Num_Windows_Per_Block) - targetIndex
+	// distance to the right
+	distance2 := (baseIndex % Num_Windows_Per_Block) + targetIndex
+	fmt.Println(baseIndex, targetIndex, distance1, distance2)
+	if distance1 < distance2 {
+		fmt.Println("b")
+		return (baseIndex - distance1 + Num_windows) % Num_windows
+	} else if distance2 < distance1 {
+		fmt.Println("c")
+		return (baseIndex + distance2) % Num_windows
+	} else {
+		if (time.Duration(arrival_time.UnixNano()) % Window_length) < Window_length/2 {
+			fmt.Println("d")
+			// arrival_time lies in first half of time_window
+			return (baseIndex - Num_Windows_Per_Block/2 + Num_Windows_Per_Block) % Num_windows
+		} else {
+			fmt.Println("e")
+			// arrival_time lies in second half of time_window
+			return (baseIndex + Num_Windows_Per_Block/2) % Num_windows
+		}
 	}
 }
 
