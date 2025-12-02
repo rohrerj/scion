@@ -23,8 +23,16 @@ import (
 )
 
 type Config struct {
-	General env.General `toml:"general,omitempty"`
-	Logging log.Config  `toml:"log,omitempty"`
+	General     env.General       `toml:"general,omitempty"`
+	Logging     log.Config        `toml:"log,omitempty"`
+	BucketStore BucketStoreConfig `toml:"bucket_store,omitempty"`
+}
+
+type BucketStoreConfig struct {
+	// The DB connection string, eg:
+	// "postgres://postgres:PASSWORD@localhost:5432/DATABASE"
+	//"postgres://postgres:yourpassword@localhost:5432/benchdb"
+	DBConnectionString string `toml:"db,omitempty"`
 }
 
 func (cfg *Config) InitDefaults() {}

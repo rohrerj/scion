@@ -16,11 +16,19 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"math/big"
 	"net/netip"
+	"time"
 
 	"github.com/scionproto/scion/bucket_store/config"
+	"github.com/scionproto/scion/bucket_store/db"
 	"github.com/scionproto/scion/bucket_store/server"
 	"github.com/scionproto/scion/pkg/addr"
+	libgrpc "github.com/scionproto/scion/pkg/grpc"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/snet"
@@ -29,6 +37,7 @@ import (
 	"github.com/scionproto/scion/private/app/launcher"
 	"github.com/scionproto/scion/private/topology"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 )
 
 var globalCfg config.Config
@@ -56,37 +65,101 @@ func realMain(ctx context.Context) error {
 		log.Error("error", "err", err)
 		return err
 	}
+	if globalCfg.BucketStore.DBConnectionString == "" {
+		log.Error("Connector cannot connect to database without configuring connection string first!")
+		return nil
+	}
 	log.Debug("Bucket Store", "localAddr", localAddr, "publicAddr", topo.BucketStoreAddress(globalCfg.General.ID))
 	g, errCtx := errgroup.WithContext(ctx)
+	dataQuerier, err := db.SetupDataQuerier(ctx, globalCfg.BucketStore.DBConnectionString)
+	if err != nil {
+		log.Error("error", "err", err)
+		return err
+	}
 	var cleanup app.Cleanup
 	g.Go(func() error {
 		defer log.HandlePanic()
 		<-errCtx.Done()
 		return cleanup.Do()
 	})
+	cert, err := generateSelfSigned()
+	if err != nil {
+		return err
+	}
+	nc := infraenv.NetworkConfig{
+		IA:     topo.IA(),
+		Public: topo.BucketStoreAddress(globalCfg.General.ID),
+		QUIC: infraenv.QUIC{
+			GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				return cert, nil
+			},
+		},
+		SVCResolver: topo,
+		SCMPHandler: snet.DefaultSCMPHandler{},
+		MTU:         topo.MTU(),
+		Topology:    cpInfoProvider{topo: topo},
+	}
 	g.Go(func() error {
 		defer log.HandlePanic()
-		nc := infraenv.NetworkConfig{
-			IA:          topo.IA(),
-			Public:      topo.BucketStoreAddress(globalCfg.General.ID),
-			QUIC:        infraenv.QUIC{},
-			SVCResolver: topo,
-			SCMPHandler: snet.DefaultSCMPHandler{},
-			MTU:         topo.MTU(),
-			Topology:    cpInfoProvider{topo: topo},
-		}
+
 		quicStack, err := nc.QUICStack()
 		if err != nil {
 			return serrors.WrapStr("initializing QUIC stack", err)
 		}
-		s, err := server.NewLostPacketService(localAddr)
+		grpc_server := grpc.NewServer(
+			grpc.Creds(libgrpc.PassThroughCredentials{}),
+			libgrpc.UnaryServerInterceptor(),
+			libgrpc.DefaultMaxConcurrentStreams(),
+		)
+		s, err := server.NewBucketStoreService(grpc_server, dataQuerier)
 		if err != nil {
 			return err
 		}
 		return s.Serve(quicStack.Listener)
 	})
+	g.Go(func() error {
+		defer log.HandlePanic()
+		grpc_server := grpc.NewServer(
+			libgrpc.UnaryServerInterceptor(),
+			libgrpc.DefaultMaxConcurrentStreams(),
+		)
+		s, err := server.NewBucketStoreService(grpc_server, dataQuerier)
+		if err != nil {
+			return err
+		}
+		tcpStack, err := nc.TCPStack()
+		if err != nil {
+			return err
+		}
+		return s.Serve(tcpStack)
+	})
 
 	return g.Wait()
+}
+
+func generateSelfSigned() (*tls.Certificate, error) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	derBytes, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
+	if err != nil {
+		return nil, err
+	}
+
+	cert := tls.Certificate{
+		Certificate: [][]byte{derBytes},
+		PrivateKey:  priv,
+	}
+
+	return &cert, nil
 }
 
 type cpInfoProvider struct {

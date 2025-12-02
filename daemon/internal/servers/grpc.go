@@ -51,6 +51,7 @@ type Topology interface {
 	InterfaceIDs() []uint16
 	UnderlayNextHop(uint16) *net.UDPAddr
 	ControlServiceAddresses() []*net.UDPAddr
+	BucketStoreAddresses() []*net.UDPAddr
 	PortRange() (uint16, uint16)
 }
 
@@ -325,6 +326,12 @@ func (s *DaemonServer) services(ctx context.Context,
 		list.Services = append(list.Services, &sdpb.Service{Uri: h.String()})
 	}
 	reply.Services[topology.Control.String()] = list
+	list = &sdpb.ListService{}
+	for _, h := range s.Topology.BucketStoreAddresses() {
+		list.Services = append(list.Services, &sdpb.Service{Uri: h.String()})
+	}
+	reply.Services[topology.BucketStore.String()] = list
+	fmt.Println("Reply", reply)
 	return reply, nil
 }
 

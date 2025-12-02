@@ -19,32 +19,58 @@ option go_package = "github.com/scionproto/scion/pkg/proto/proof_of_forwarding";
 
 package proto.proof_of_forwarding.v1;
 
+import "google/protobuf/timestamp.proto";
+
 service MonitorService {
     rpc Collect(CollectRequest) returns (CollectResponse) {}
 }
 
 message CollectRequest {
-    uint32 time_window = 1;
+    uint32 frame_id = 1;
 }
 
 message CollectResponseEntry {
-    uint32 ingress = 1;
-    uint32 egress = 2;
-    bytes bucket = 3;
+    uint32 index = 1;
+    uint32 ingress = 2;
+    optional uint32 egress = 3;
+    bytes bucket = 4;
+    uint32 counter = 5;
+    bool is_ingress = 6;
 }
 
 message CollectResponse {
     repeated CollectResponseEntry entries = 1;
 }
 
-service LostPacketDetector {
+service BucketStore {
     rpc Query(QueryRequest) returns (QueryResponse) {}
+    rpc ReportDrop(DropRequest) returns (DropResponse) {}
+}
+
+message DropRequest {
+    google.protobuf.Timestamp send_time = 1;
+    uint32 ingress = 2;
+    optional uint32 egress = 3;
+    bytes bucket = 4;
+}
+
+message DropResponse {
+    bool success = 1;
 }
 
 message QueryRequest {
-    string query = 1;
+    google.protobuf.Timestamp send_time = 1;
 }
 
 message QueryResponse {
-    uint32 response = 1;
+    uint32 index = 1;
+    repeated QueryResponseEntry entries = 2;
+}
+
+message QueryResponseEntry {
+    uint32 ingress = 1;
+    optional uint32 egress = 2;
+    bytes bucket = 3;
+    uint32 counter = 4;
+    bool is_ingress = 5;
 }

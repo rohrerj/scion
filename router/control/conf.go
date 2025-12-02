@@ -221,6 +221,7 @@ func confExternalInterfaces(dp Dataplane, cfg *Config) error {
 var svcTypes = []addr.SVC{
 	addr.SvcDS,
 	addr.SvcCS,
+	addr.SvcBS,
 }
 
 func confServices(dp Dataplane, cfg *Config) error {

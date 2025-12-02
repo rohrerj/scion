@@ -16,27 +16,54 @@ package server
 
 import (
 	"context"
-	"net"
+	"time"
 
-	libgrpc "github.com/scionproto/scion/pkg/grpc"
+	"github.com/scionproto/scion/bucket_store/db"
+	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
 	"github.com/scionproto/scion/pkg/proto/proof_of_forwarding"
 	"google.golang.org/grpc"
 )
 
-type LostPacketDetectorServer struct {
+type BucketStoreServer struct {
+	DataQuerier *db.DataQuerier
 }
 
-func (l *LostPacketDetectorServer) Query(ctx context.Context, req *proof_of_forwarding.QueryRequest) (*proof_of_forwarding.QueryResponse, error) {
-	res := &proof_of_forwarding.QueryResponse{}
+func (l *BucketStoreServer) Query(ctx context.Context, req *proof_of_forwarding.QueryRequest) (*proof_of_forwarding.QueryResponse, error) {
+	frame_length := monitor.Window_length * time.Duration(monitor.Num_Windows_Per_Frame)
+	window_index := monitor.GetWindowIndexForTime(req.SendTime.AsTime())
+	start := req.SendTime.AsTime().Add(-frame_length)
+	end := req.SendTime.AsTime().Add(frame_length)
+	rows, err := l.DataQuerier.Query(ctx, start, end, window_index)
+	if err != nil {
+		return nil, err
+	}
+	res := &proof_of_forwarding.QueryResponse{
+		Entries: make([]*proof_of_forwarding.QueryResponseEntry, 0, len(rows)),
+		Index:   uint32(window_index),
+	}
+	for _, row := range rows {
+		var egress uint32
+		if row.Egress != nil {
+			egress = uint32(*row.Egress)
+		}
+		res.Entries = append(res.Entries, &proof_of_forwarding.QueryResponseEntry{
+			Ingress:   uint32(row.Ingress),
+			Egress:    &egress,
+			Bucket:    row.Data[:],
+			Counter:   row.Counter,
+			IsIngress: row.IsIngress,
+		})
+	}
 	return res, nil
 }
 
-func NewLostPacketService(addr *net.UDPAddr) (*grpc.Server, error) {
-	server := grpc.NewServer(
-		grpc.Creds(libgrpc.PassThroughCredentials{}),
-		libgrpc.UnaryServerInterceptor(),
-		libgrpc.DefaultMaxConcurrentStreams(),
-	)
-	proof_of_forwarding.RegisterLostPacketDetectorServer(server, &LostPacketDetectorServer{})
+func (l *BucketStoreServer) ReportDrop(ctx context.Context, req *proof_of_forwarding.DropRequest) (*proof_of_forwarding.DropResponse, error) {
+	return nil, nil
+}
+
+func NewBucketStoreService(server *grpc.Server, dataQuerier *db.DataQuerier) (*grpc.Server, error) {
+	proof_of_forwarding.RegisterBucketStoreServer(server, &BucketStoreServer{
+		DataQuerier: dataQuerier,
+	})
 	return server, nil
 }

@@ -89,6 +89,8 @@ func checkSVC(svc addr.SVC) error {
 	switch svc {
 	case addr.SvcCS:
 		return nil
+	case addr.SvcBS:
+		return nil
 	default:
 		return serrors.New("invalid svc type", "svc", svc)
 	}

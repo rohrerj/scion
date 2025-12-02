@@ -167,6 +167,18 @@ func (l *Loader) ControlServiceAddresses() []*net.UDPAddr {
 	return addrs
 }
 
+func (l *Loader) BucketStoreAddresses() []*net.UDPAddr {
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+
+	addrs, err := l.topo.MakeHostInfos(BucketStore)
+	if err != nil {
+		// this should only happen on empty addrs.
+		return nil
+	}
+	return addrs
+}
+
 func (l *Loader) BucketStoreAddress(id string) *net.UDPAddr {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()

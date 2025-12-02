@@ -182,16 +182,40 @@ func TestComputeTimeWindow(t *testing.T) {
 		name           string
 		flowID         uint8
 		arrival_time   time.Time
-		expected_index uint8
+		expected_index int
 	}
 	tests := []Test{
 		{
 			name:           "window_even_first_half",
 			flowID:         0,
-			arrival_time:   time.Unix(int64(monitor.Window_length.Seconds()), 0),
+			arrival_time:   time.Unix(8+int64(monitor.Window_length.Seconds()), 0),
 			expected_index: 0,
 		},
 		{
+			name:           "T1",
+			flowID:         0,
+			arrival_time:   time.Unix(8+int64(monitor.Window_length.Seconds()*2), 0),
+			expected_index: 0,
+		},
+		{
+			name:           "T2",
+			flowID:         0,
+			arrival_time:   time.Unix(8-1+int64(monitor.Window_length.Seconds()*2), 0),
+			expected_index: 0,
+		},
+		{
+			name:           "T3",
+			flowID:         0,
+			arrival_time:   time.Unix(8-2+int64(monitor.Window_length.Seconds()*2), 0),
+			expected_index: 0,
+		},
+		{
+			name:           "T4",
+			flowID:         0,
+			arrival_time:   time.Unix(8-2+int64(monitor.Window_length.Seconds()*2), -1),
+			expected_index: 0,
+		},
+		/*{
 			name:           "window_even_second_half",
 			flowID:         0,
 			arrival_time:   time.Unix(int64(monitor.Window_length.Seconds()), -1),
@@ -214,13 +238,14 @@ func TestComputeTimeWindow(t *testing.T) {
 			flowID:         0,
 			arrival_time:   time.Unix(int64(monitor.Window_length.Seconds()*2), 0),
 			expected_index: 2,
-		},
+		},*/
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			assert.Equal(t, test.expected_index, monitor.ComputeTimeWindowIndex(int(test.flowID), test.arrival_time))
 		})
 	}
+	t.Fail()
 }
 
 func TestComputeTimeWindowIndex(t *testing.T) {
@@ -228,9 +253,9 @@ func TestComputeTimeWindowIndex(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		v := rand.Intn(10000)
 		new_time := now.Add(time.Duration(v) * time.Millisecond)
-		flowID := monitor.GetFlowIDForTime(new_time)
+		flowID := monitor.GetWindowIndexForTime(new_time)
 		targetWindow := monitor.ComputeTimeWindowIndex(flowID, new_time)
-		for i := -10; i < 10; i++ {
+		for i := -30; i < 30; i++ {
 			current_time := new_time.Add(time.Duration(i * int(time.Millisecond*100)))
 			current_index := monitor.ComputeTimeWindowIndex(flowID, current_time)
 			assert.Equal(t, targetWindow, current_index)
@@ -251,11 +276,11 @@ func TestMonitor(t *testing.T) {
 	assert.NoError(t, err)
 	w1 := monitor.NewMonitorWorker()
 	w2 := monitor.NewMonitorWorker()
-	err = w1.ProcessPacket(pkt1, 1, 2)
+	err = w1.ProcessPacket(pkt1, 1, 2, true)
 	assert.NoError(t, err)
-	err = w1.ProcessPacket(pkt2, 1, 2)
+	err = w1.ProcessPacket(pkt2, 1, 2, true)
 	assert.NoError(t, err)
-	err = w2.ProcessPacket(pkt3, 1, 2)
+	err = w2.ProcessPacket(pkt3, 1, 2, true)
 	assert.NoError(t, err)
 	//unit test work in progress
 }

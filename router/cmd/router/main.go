@@ -149,7 +149,7 @@ func realMain(ctx context.Context) error {
 		dp.DataPlane.Monitor = m
 		go func(m *monitor.Monitor) {
 			defer log.HandlePanic()
-			control.StartMonitorService(m, controlConfig.BR.MonitorAddr)
+			control.StartMonitorService(m, controlConfig.BR.MonitorAddr, controlConfig.BR.IFIDs)
 		}(m)
 	}
 	if len(globalCfg.Router.DRKey) != 0 {

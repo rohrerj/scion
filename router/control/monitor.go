@@ -19,15 +19,20 @@ import (
 
 	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
 	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/pkg/private/common"
 )
 
-func StartMonitorService(m *monitor.Monitor, monitorAddr *net.TCPAddr) error {
+func StartMonitorService(m *monitor.Monitor, monitorAddr *net.TCPAddr, localInterfaces []common.IFIDType) error {
 	log.Debug("Starting monitor server", "addr", monitorAddr)
 	lis, err := net.ListenTCP("tcp", monitorAddr)
 	if err != nil {
 		return err
 	}
-	server, err := monitor.NewMonitorService(m, monitorAddr)
+	interfaces := make([]uint16, 0, len(localInterfaces))
+	for _, i := range localInterfaces {
+		interfaces = append(interfaces, uint16(i))
+	}
+	server, err := monitor.NewMonitorService(m, monitorAddr, interfaces)
 	if err != nil {
 		return err
 	}

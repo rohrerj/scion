@@ -336,6 +336,8 @@ func topoServiceTypeToSVCAddr(st topology.ServiceType) addr.SVC {
 	switch st {
 	case topology.Control:
 		return addr.SvcCS
+	case topology.BucketStore:
+		return addr.SvcBS
 	default:
 		return addr.SvcNone
 	}

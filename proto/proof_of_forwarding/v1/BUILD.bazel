@@ -6,4 +6,7 @@ proto_library(
         "proof_of_forwarding.proto",
     ],
     visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_protobuf//:timestamp_proto",
+    ],
 )

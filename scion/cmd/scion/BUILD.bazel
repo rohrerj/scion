@@ -20,6 +20,7 @@ go_library(
     deps = [
         "//pkg/addr:go_default_library",
         "//pkg/daemon:go_default_library",
+        "//pkg/experimental/pot/locator:go_default_library",
         "//pkg/log:go_default_library",
         "//pkg/private/common:go_default_library",
         "//pkg/private/serrors:go_default_library",

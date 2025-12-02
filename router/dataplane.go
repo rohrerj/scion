@@ -732,6 +732,16 @@ func (d *DataPlane) runProcessor(id int, q <-chan packet,
 		metrics.ProcessedPackets.Inc()
 
 		egress := result.EgressID
+		// TODO: use a proper QoS extension and not this invented TrafficClass
+		if monitorWorker != nil && !(processor.hopField.ConsIngress == 0 && processor.hopField.ConsEgress == 0) /*&& processor.scionLayer.TrafficClass == 0xf0*/ {
+			var asIngress, asEgress uint16
+			if processor.infoField.ConsDir {
+				asIngress, asEgress = processor.hopField.ConsIngress, processor.hopField.ConsEgress
+			} else {
+				asIngress, asEgress = processor.hopField.ConsEgress, processor.hopField.ConsIngress
+			}
+			monitorWorker.ProcessPacket(p.rawPacket, asIngress, asEgress, err == nil)
+		}
 		switch {
 		case err == nil:
 		case errors.Is(err, slowPathRequired):
@@ -747,9 +757,6 @@ func (d *DataPlane) runProcessor(id int, q <-chan packet,
 			metrics.DroppedPacketsInvalid.Inc()
 			d.returnPacketToPool(p.rawPacket)
 			continue
-		}
-		if monitorWorker != nil {
-			monitorWorker.ProcessPacket(p.rawPacket, p.ingress, egress)
 		}
 		if result.OutPkt == nil { // e.g. BFD case no message is forwarded
 			d.returnPacketToPool(p.rawPacket)

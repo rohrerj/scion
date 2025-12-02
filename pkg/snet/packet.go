@@ -16,6 +16,7 @@ package snet
 
 import (
 	"math/rand"
+	"time"
 
 	"github.com/google/gopacket"
 
@@ -553,6 +554,26 @@ func (p *Packet) Decode() error {
 	return nil
 }
 
+var FlowID = uint32(1)
+var TrafficClass = uint8(0)
+
+func WindowIndex(t time.Time) int {
+	cycle := Window_length * time.Duration(Num_windows)
+	d := time.Duration(t.UnixNano())
+	offset := d % cycle
+	return int(offset / Window_length)
+}
+
+func GetWindowIndexForTime(send_time time.Time) int {
+	return int(WindowIndex(send_time) % Num_Windows_Per_Frame)
+}
+
+const Window_length = 1 * time.Millisecond
+const Num_Bits = 12
+const Num_Frames = 2
+const Num_windows = Num_Windows_Per_Frame * Num_Frames
+const Num_Windows_Per_Frame = 1 << Num_Bits
+
 // Serialize serializes the PacketInfo into the raw buffer of the packet.
 func (p *Packet) Serialize() error {
 	p.Prepare()
@@ -572,7 +593,8 @@ func (p *Packet) Serialize() error {
 
 	// TODO(lukedirtwalker): Currently just set a pseudo value for the flow ID
 	// until we have a better idea of how to set this correctly.
-	scionLayer.FlowID = 1
+	scionLayer.FlowID = uint32(GetWindowIndexForTime(time.Now())) //FlowID
+	scionLayer.TrafficClass = TrafficClass
 	scionLayer.DstIA = p.Destination.IA
 	scionLayer.SrcIA = p.Source.IA
 	if err := scionLayer.SetDstAddr(p.Destination.Host); err != nil {

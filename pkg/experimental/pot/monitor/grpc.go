@@ -17,46 +17,89 @@ package monitor
 import (
 	"context"
 	"net"
+	"slices"
 
 	"google.golang.org/grpc"
 
 	libgrpc "github.com/scionproto/scion/pkg/grpc"
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/proto/proof_of_forwarding"
 )
 
 type MonitorServer struct {
-	monitor *Monitor
+	monitor         *Monitor
+	localInterfaces []uint16
 }
 
 func (m *MonitorServer) Collect(ctx context.Context, req *proof_of_forwarding.CollectRequest) (*proof_of_forwarding.CollectResponse, error) {
 	m.monitor.mtx.Lock()
 	defer m.monitor.mtx.Unlock()
-	buckets := map[uint32]Bucket{}
-	time_window := req.TimeWindow
-	for _, worker := range m.monitor.workers {
-		for key, bucket := range worker.Buckets[time_window] {
-			current_bucket, ok := buckets[key]
-			if ok {
-				err := worker.Aggregate(current_bucket, bucket)
-				if err != nil {
-					return nil, err
+	buckets := map[uint64]*Bucket{}
+	frame_id := req.FrameId
+	fromTimeWindow := Num_Windows_Per_Frame * frame_id
+	toTimeWindow := Num_Windows_Per_Frame * (frame_id + 1)
+	responseEntries := make([]*proof_of_forwarding.CollectResponseEntry, 0, 128)
+	log.Debug("time window", "from", fromTimeWindow, "to", toTimeWindow, "frameid", frame_id)
+	for time_window := fromTimeWindow; time_window < toTimeWindow; time_window++ {
+		for _, worker := range m.monitor.workers {
+			for key, bucket := range worker.Buckets[time_window] {
+				current_bucket, ok := buckets[key]
+				if ok {
+					err := worker.Aggregate(current_bucket, bucket.Data, bucket.Counter)
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					current_bucket := &Bucket{
+						Data:    make([]byte, len(bucket.Data)),
+						Counter: bucket.Counter,
+					}
+					copy(current_bucket.Data, bucket.Data)
+					buckets[key] = current_bucket
 				}
+			}
+			worker.ClearBuckets(int(time_window))
+		}
+		for key, bucket := range buckets {
+			ingress := uint16(key >> 16)
+			isLocalIngress := slices.Contains(m.localInterfaces, ingress)
+			isErrorBucket := key&0x100000000 > 0
+			egress := uint32(key & 0xffff)
+			var entry *proof_of_forwarding.CollectResponseEntry
+			if isErrorBucket {
+				entry = &proof_of_forwarding.CollectResponseEntry{
+					Ingress:   uint32(ingress),
+					Egress:    nil,
+					Bucket:    bucket.Data,
+					Counter:   bucket.Counter,
+					Index:     time_window,
+					IsIngress: isLocalIngress,
+				}
+				responseEntries = append(responseEntries, entry)
 			} else {
-				new_bucket := make([]byte, len(bucket))
-				copy(new_bucket, bucket)
-				buckets[key] = new_bucket
+				entry = &proof_of_forwarding.CollectResponseEntry{
+					Ingress:   uint32(ingress),
+					Egress:    &egress,
+					Bucket:    bucket.Data,
+					Counter:   bucket.Counter,
+					Index:     time_window,
+					IsIngress: isLocalIngress,
+				}
+				responseEntries = append(responseEntries, entry)
+				if slices.Contains(m.localInterfaces, uint16(egress)) {
+					// in case the current border router is both ingress and egress border router
+					entry2 := &proof_of_forwarding.CollectResponseEntry{
+						Ingress:   uint32(ingress),
+						Egress:    &egress,
+						Bucket:    bucket.Data,
+						Counter:   bucket.Counter,
+						Index:     time_window,
+						IsIngress: !isLocalIngress,
+					}
+					responseEntries = append(responseEntries, entry2)
+				}
 			}
 		}
-	}
-	responseEntries := make([]*proof_of_forwarding.CollectResponseEntry, 0, len(buckets))
-	for key, bucket := range buckets {
-		ingress := uint16(key >> 16)
-		egress := uint16(key)
-		responseEntries = append(responseEntries, &proof_of_forwarding.CollectResponseEntry{
-			Ingress: uint32(ingress),
-			Egress:  uint32(egress),
-			Bucket:  bucket,
-		})
 	}
 	res := &proof_of_forwarding.CollectResponse{
 		Entries: responseEntries,
@@ -64,13 +107,14 @@ func (m *MonitorServer) Collect(ctx context.Context, req *proof_of_forwarding.Co
 	return res, nil
 }
 
-func NewMonitorService(m *Monitor, addr *net.TCPAddr) (*grpc.Server, error) {
+func NewMonitorService(m *Monitor, addr *net.TCPAddr, localInterfaces []uint16) (*grpc.Server, error) {
 	server := grpc.NewServer(
 		libgrpc.UnaryServerInterceptor(),
 		libgrpc.DefaultMaxConcurrentStreams(),
 	)
 	proof_of_forwarding.RegisterMonitorServiceServer(server, &MonitorServer{
-		monitor: m,
+		monitor:         m,
+		localInterfaces: localInterfaces,
 	})
 	return server, nil
 }

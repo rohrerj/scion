@@ -35,7 +35,10 @@ func (c *Collector) InitCollector(errCtx context.Context, connectionString strin
 	if err != nil {
 		return err
 	}
-	ticker := time.NewTicker(monitor.Window_length)
+	frame_length := monitor.Window_length * time.Duration(monitor.Num_Windows_Per_Frame)
+	ticker := time.NewTicker(frame_length)
+	t := <-ticker.C
+	frame_id := (((monitor.WindowIndex(t)+monitor.Num_Windows_Per_Frame)%monitor.Num_windows)/monitor.Num_Windows_Per_Frame + 2) % monitor.Num_Frames
 loop:
 	for {
 		t := <-ticker.C
@@ -44,9 +47,10 @@ loop:
 			break loop
 		default:
 		}
-		time_window := (monitor.WindowIndex(t) - monitor.Num_windows/2 + monitor.Num_windows) % monitor.Num_windows
+		frame_id = (frame_id + 1) % monitor.Num_Frames
+		log.Debug("frame_id", "id", frame_id)
 		for _, router := range routers {
-			go func(addr *net.TCPAddr, collectionTime time.Time, time_window uint8) {
+			go func(addr *net.TCPAddr, collectionTime time.Time, frame_id int) {
 				ctx, cancelF := context.WithTimeout(errCtx, time.Second*2)
 				defer cancelF()
 				dialer := libgrpc.TCPDialer{}
@@ -58,7 +62,7 @@ loop:
 				defer conn.Close()
 				client := proof_of_forwarding.NewMonitorServiceClient(conn)
 				resp, err := client.Collect(ctx, &proof_of_forwarding.CollectRequest{
-					TimeWindow: uint32(time_window),
+					FrameId: uint32(frame_id),
 				})
 				if err != nil {
 					log.Error("Error collecting from monitor", "addr", addr, "err", err)
@@ -66,15 +70,34 @@ loop:
 				}
 
 				for _, entry := range resp.Entries {
-					db_inserter.Data <- &db.Row{
-						Time:       collectionTime,
-						TimeWindow: int16(time_window),
-						Ingress:    int16(entry.Ingress),
-						Egress:     int16(entry.Egress),
-						Data:       [32]byte(entry.Bucket),
+					if entry.Egress == nil {
+						log.Debug("egress is nil")
+						// this is the error bucket for that ingress
+						db_inserter.Data <- &db.Row{
+							Time:       collectionTime.Add(-frame_length),
+							TimeWindow: int16(entry.Index),
+							Ingress:    int16(entry.Ingress),
+							Egress:     nil,
+							Data:       [32]byte(entry.Bucket),
+							Counter:    entry.Counter,
+							IsIngress:  entry.IsIngress,
+						}
+					} else {
+						egress := int16(*entry.Egress)
+						log.Debug("egress not nill", "egress", egress)
+						db_inserter.Data <- &db.Row{
+							Time:       collectionTime.Add(-frame_length),
+							TimeWindow: int16(entry.Index),
+							Ingress:    int16(entry.Ingress),
+							Egress:     &egress,
+							Data:       [32]byte(entry.Bucket),
+							Counter:    entry.Counter,
+							IsIngress:  entry.IsIngress,
+						}
 					}
+
 				}
-			}(router.MonitorAddr, t, time_window)
+			}(router.MonitorAddr, t, frame_id)
 		}
 	}
 	return nil
