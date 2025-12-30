@@ -16,6 +16,7 @@ package monitor
 
 import (
 	"context"
+	"math/big"
 	"net"
 	"slices"
 
@@ -45,14 +46,17 @@ func (m *MonitorServer) Collect(ctx context.Context, req *proof_of_forwarding.Co
 			for key, bucket := range worker.Buckets[time_window] {
 				current_bucket, ok := buckets[key]
 				if ok {
-					err := worker.Aggregate(current_bucket, bucket.Data, bucket.Counter)
+					err := worker.Aggregate(current_bucket, &bucket)
 					if err != nil {
 						return nil, err
 					}
 				} else {
+					var newBigInt big.Int
+					newBigInt.Set(bucket.SourceIAAggregate)
 					current_bucket := &Bucket{
-						Data:    make([]byte, len(bucket.Data)),
-						Counter: bucket.Counter,
+						Data:              make([]byte, len(bucket.Data)),
+						Counter:           bucket.Counter,
+						SourceIAAggregate: &newBigInt,
 					}
 					copy(current_bucket.Data, bucket.Data)
 					buckets[key] = current_bucket
@@ -63,41 +67,30 @@ func (m *MonitorServer) Collect(ctx context.Context, req *proof_of_forwarding.Co
 		for key, bucket := range buckets {
 			ingress := uint16(key >> 16)
 			isLocalIngress := slices.Contains(m.localInterfaces, ingress)
-			isErrorBucket := key&0x100000000 > 0
 			egress := uint32(key & 0xffff)
 			var entry *proof_of_forwarding.CollectResponseEntry
-			if isErrorBucket {
-				entry = &proof_of_forwarding.CollectResponseEntry{
-					Ingress:   uint32(ingress),
-					Egress:    nil,
-					Bucket:    bucket.Data,
-					Counter:   bucket.Counter,
-					Index:     time_window,
-					IsIngress: isLocalIngress,
+			entry = &proof_of_forwarding.CollectResponseEntry{
+				Ingress:           uint32(ingress),
+				Egress:            egress,
+				Bucket:            bucket.Data,
+				Counter:           bucket.Counter,
+				Index:             time_window,
+				IsIngress:         isLocalIngress,
+				SourceIaAggregate: bucket.SourceIAAggregate.String(),
+			}
+			responseEntries = append(responseEntries, entry)
+			if slices.Contains(m.localInterfaces, uint16(egress)) {
+				// in case the current border router is both ingress and egress border router
+				entry2 := &proof_of_forwarding.CollectResponseEntry{
+					Ingress:           uint32(ingress),
+					Egress:            egress,
+					Bucket:            bucket.Data,
+					Counter:           bucket.Counter,
+					Index:             time_window,
+					IsIngress:         !isLocalIngress,
+					SourceIaAggregate: bucket.SourceIAAggregate.String(),
 				}
-				responseEntries = append(responseEntries, entry)
-			} else {
-				entry = &proof_of_forwarding.CollectResponseEntry{
-					Ingress:   uint32(ingress),
-					Egress:    &egress,
-					Bucket:    bucket.Data,
-					Counter:   bucket.Counter,
-					Index:     time_window,
-					IsIngress: isLocalIngress,
-				}
-				responseEntries = append(responseEntries, entry)
-				if slices.Contains(m.localInterfaces, uint16(egress)) {
-					// in case the current border router is both ingress and egress border router
-					entry2 := &proof_of_forwarding.CollectResponseEntry{
-						Ingress:   uint32(ingress),
-						Egress:    &egress,
-						Bucket:    bucket.Data,
-						Counter:   bucket.Counter,
-						Index:     time_window,
-						IsIngress: !isLocalIngress,
-					}
-					responseEntries = append(responseEntries, entry2)
-				}
+				responseEntries = append(responseEntries, entry2)
 			}
 		}
 	}

@@ -5,5 +5,8 @@ go_library(
     srcs = ["querier.go"],
     importpath = "github.com/scionproto/scion/bucket_store/db",
     visibility = ["//visibility:public"],
-    deps = ["@com_github_jackc_pgx_v5//pgxpool:go_default_library"],
+    deps = [
+        "//pkg/log:go_default_library",
+        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
+    ],
 )

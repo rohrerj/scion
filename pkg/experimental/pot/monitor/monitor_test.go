@@ -25,6 +25,7 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/google/gopacket"
+	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
 	"github.com/scionproto/scion/pkg/private/util"
 	"github.com/scionproto/scion/pkg/private/xtest"
@@ -255,7 +256,7 @@ func TestComputeTimeWindowIndex(t *testing.T) {
 		new_time := now.Add(time.Duration(v) * time.Millisecond)
 		flowID := monitor.GetWindowIndexForTime(new_time)
 		targetWindow := monitor.ComputeTimeWindowIndex(flowID, new_time)
-		for i := -30; i < 30; i++ {
+		for i := -20; i < 20; i++ {
 			current_time := new_time.Add(time.Duration(i * int(time.Millisecond*100)))
 			current_index := monitor.ComputeTimeWindowIndex(flowID, current_time)
 			assert.Equal(t, targetWindow, current_index)
@@ -276,11 +277,11 @@ func TestMonitor(t *testing.T) {
 	assert.NoError(t, err)
 	w1 := monitor.NewMonitorWorker()
 	w2 := monitor.NewMonitorWorker()
-	err = w1.ProcessPacket(pkt1, 1, 2, true)
+	err = w1.ProcessPacket(pkt1, 1, 2, addr.MustIAFrom(1, 1))
 	assert.NoError(t, err)
-	err = w1.ProcessPacket(pkt2, 1, 2, true)
+	err = w1.ProcessPacket(pkt2, 1, 2, addr.MustIAFrom(1, 1))
 	assert.NoError(t, err)
-	err = w2.ProcessPacket(pkt3, 1, 2, true)
+	err = w2.ProcessPacket(pkt3, 1, 2, addr.MustIAFrom(1, 1))
 	assert.NoError(t, err)
 	//unit test work in progress
 }

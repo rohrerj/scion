@@ -70,30 +70,15 @@ loop:
 				}
 
 				for _, entry := range resp.Entries {
-					if entry.Egress == nil {
-						log.Debug("egress is nil")
-						// this is the error bucket for that ingress
-						db_inserter.Data <- &db.Row{
-							Time:       collectionTime.Add(-frame_length),
-							TimeWindow: int16(entry.Index),
-							Ingress:    int16(entry.Ingress),
-							Egress:     nil,
-							Data:       [32]byte(entry.Bucket),
-							Counter:    entry.Counter,
-							IsIngress:  entry.IsIngress,
-						}
-					} else {
-						egress := int16(*entry.Egress)
-						log.Debug("egress not nill", "egress", egress)
-						db_inserter.Data <- &db.Row{
-							Time:       collectionTime.Add(-frame_length),
-							TimeWindow: int16(entry.Index),
-							Ingress:    int16(entry.Ingress),
-							Egress:     &egress,
-							Data:       [32]byte(entry.Bucket),
-							Counter:    entry.Counter,
-							IsIngress:  entry.IsIngress,
-						}
+					db_inserter.Data <- &db.Row{
+						Time:              collectionTime.Add(-frame_length),
+						TimeWindow:        int16(entry.Index),
+						Ingress:           int16(entry.Ingress),
+						Egress:            int16(entry.Egress),
+						Data:              [32]byte(entry.Bucket),
+						Counter:           entry.Counter,
+						IsIngress:         entry.IsIngress,
+						SourceIAAggregate: entry.SourceIaAggregate,
 					}
 
 				}

@@ -17,6 +17,7 @@ package locator
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"net"
 	"time"
 
@@ -49,10 +50,12 @@ type fetcher struct {
 	bucketStore map[addr.IA]map[Hop]Bucket
 }
 type Bucket struct {
-	ingress uint32
-	egress  *uint32
-	data    []byte
-	counter uint32
+	ingress           uint32
+	egress            uint32
+	data              []byte
+	counter           uint32
+	isIngress         bool
+	sourceIAAggregate *big.Int
 }
 
 func (l *fetcher) GetBuckets(ctx context.Context, ia addr.IA) (map[Hop]Bucket, error) {
@@ -67,7 +70,7 @@ func (l *fetcher) GetBuckets(ctx context.Context, ia addr.IA) (map[Hop]Bucket, e
 			l.bucketStore[ia][Hop{
 				IA:      ia,
 				Ingress: uint16(bucket.ingress),
-				Egress:  uint16(*bucket.egress),
+				Egress:  uint16(bucket.egress),
 			}] = bucket
 		}
 	}
@@ -201,11 +204,15 @@ func (l *fetcher) fetchBuckets(ctx context.Context, ia addr.IA) ([]Bucket, error
 	}
 	res := make([]Bucket, 0, len(resp.Entries))
 	for _, entry := range resp.Entries {
+		var iaAggr big.Int
+		iaAggr.SetString(entry.SourceIaAggregate, 10)
 		res = append(res, Bucket{
-			ingress: entry.Ingress,
-			egress:  entry.Egress,
-			data:    entry.Bucket,
-			counter: entry.Counter,
+			ingress:           entry.Ingress,
+			egress:            entry.Egress,
+			data:              entry.Bucket,
+			counter:           entry.Counter,
+			isIngress:         entry.IsIngress,
+			sourceIAAggregate: &iaAggr,
 		})
 	}
 	return res, nil

@@ -8,6 +8,7 @@ go_library(
     deps = [
         "//bucket_store/db:go_default_library",
         "//pkg/experimental/pot/monitor:go_default_library",
+        "//pkg/log:go_default_library",
         "//pkg/proto/proof_of_forwarding:go_default_library",
         "@org_golang_google_grpc//:go_default_library",
     ],

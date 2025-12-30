@@ -554,9 +554,6 @@ func (p *Packet) Decode() error {
 	return nil
 }
 
-var FlowID = uint32(1)
-var TrafficClass = uint8(0)
-
 func WindowIndex(t time.Time) int {
 	cycle := Window_length * time.Duration(Num_windows)
 	d := time.Duration(t.UnixNano())
@@ -593,8 +590,15 @@ func (p *Packet) Serialize() error {
 
 	// TODO(lukedirtwalker): Currently just set a pseudo value for the flow ID
 	// until we have a better idea of how to set this correctly.
-	scionLayer.FlowID = uint32(GetWindowIndexForTime(time.Now())) //FlowID
-	scionLayer.TrafficClass = TrafficClass
+	if p.SendTime != nil {
+		scionLayer.FlowID = uint32(GetWindowIndexForTime(*p.SendTime)) //FlowID
+	} else {
+		scionLayer.FlowID = uint32(GetWindowIndexForTime(time.Now())) //FlowID
+	}
+	if p.TrafficClass != nil {
+		scionLayer.TrafficClass = *p.TrafficClass
+	}
+
 	scionLayer.DstIA = p.Destination.IA
 	scionLayer.SrcIA = p.Source.IA
 	if err := scionLayer.SetDstAddr(p.Destination.Host); err != nil {
@@ -677,4 +681,6 @@ type PacketInfo struct {
 	Payload      Payload
 	HbhExtension *slayers.HopByHopExtn
 	E2eExtension *slayers.EndToEndExtn
+	TrafficClass *uint8
+	SendTime     *time.Time
 }

@@ -16,12 +16,13 @@ package locator
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/daemon"
-	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/snet"
 )
 
 type Hop struct {
@@ -32,7 +33,7 @@ type Hop struct {
 
 type PacketDrop struct {
 	SendTime   time.Time
-	Path       []Hop
+	Path       snet.Path
 	PacketHash []byte
 }
 
@@ -52,19 +53,23 @@ func NewLocator(sd daemon.Connector, sendTime time.Time, localIA addr.IA, localA
 }
 
 func (l *Locator) LocatePacketDrop(ctx context.Context, p *PacketDrop) ([]addr.IA, error) {
-
+	fmt.Println("send time", p.SendTime)
+	lastIA := uint64(0)
+	for _, i := range p.Path.Metadata().Interfaces {
+		if uint64(i.IA) == lastIA {
+			continue
+		}
+		lastIA = uint64(i.IA)
+		buckets, err := l.fetcher.fetchBuckets(ctx, i.IA)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println("IA", i.IA)
+		for _, b := range buckets {
+			fmt.Println(b)
+		}
+	}
 	return nil, nil
-}
-
-func aggregate(bucket Bucket, newValue []byte, counter uint32) error {
-	if len(bucket.data) != len(newValue) {
-		return serrors.New("slices need equal length")
-	}
-	for i := 0; i < len(bucket.data); i++ {
-		bucket.data[i] ^= newValue[i]
-	}
-	bucket.counter += counter
-	return nil
 }
 
 func (l *Locator) compareConsecutiveBuckets(ctx context.Context, p *PacketDrop, index int) error {

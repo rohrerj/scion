@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/scionproto/scion/pkg/log"
 )
 
 type DataQuerier struct {
@@ -27,11 +28,12 @@ type DataQuerier struct {
 }
 
 type Row struct {
-	Data      [32]byte
-	Ingress   int16
-	Egress    *int16
-	Counter   uint32
-	IsIngress bool
+	Data              [32]byte
+	Ingress           int16
+	Egress            int16
+	Counter           uint32
+	IsIngress         bool
+	SourceIAAggregate string
 }
 
 func SetupDataQuerier(ctx context.Context, connStr string) (*DataQuerier, error) {
@@ -48,21 +50,21 @@ func SetupDataQuerier(ctx context.Context, connStr string) (*DataQuerier, error)
 func (d *DataQuerier) Query(ctx context.Context, start time.Time, end time.Time, index int) ([]Row, error) {
 	rows, err := d.pool.Query(
 		ctx,
-		`SELECT data, ingress, egress, counter, is_ingress
+		`SELECT data, ingress, egress, counter, is_ingress, source_ia_aggregate
      FROM buckets
-     WHERE time BETWEEN $1 AND $2 AND time_window = $3`,
+     WHERE time_window = $1 and time >= $2 and time < $3`,
+		index,
 		start,
 		end,
-		index,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	result := make([]Row, 0)
-
+	c := 0
 	for rows.Next() {
+		c++
 		var r Row
 		var data []byte
 		err = rows.Scan(
@@ -71,6 +73,7 @@ func (d *DataQuerier) Query(ctx context.Context, start time.Time, end time.Time,
 			&r.Egress,
 			&r.Counter,
 			&r.IsIngress,
+			&r.SourceIAAggregate,
 		)
 		if err != nil {
 			return nil, err
@@ -82,84 +85,6 @@ func (d *DataQuerier) Query(ctx context.Context, start time.Time, end time.Time,
 		copy(r.Data[:], data)
 		result = append(result, r)
 	}
-
+	log.Debug("returned row count", "count", c)
 	return result, rows.Err()
 }
-
-/*
-func (d *DataQuerier) runInserter() error {
-	rows := make([]*Row, d.batchSize)
-	args := make([]interface{}, 0, d.batchSize*5)
-	ctx := context.Background()
-	err := d.ensureTables(ctx)
-	if err != nil {
-		return err
-	}
-	for {
-		row := <-d.Data
-		if row == nil {
-			break
-		}
-		rows[0] = row
-		num_reads := 1
-	loop:
-		for ; num_reads < d.batchSize; num_reads++ {
-			select {
-			case row = <-d.Data:
-				rows[num_reads] = row
-				if row == nil {
-					break loop
-				}
-			default:
-				break loop
-			}
-		}
-		//log.Debug("insert")
-		d.insert(ctx, rows[:num_reads], args[:0])
-	}
-	return nil
-}
-
-func (d *DataInserter) ensureTables(ctx context.Context) error {
-	_, err := d.pool.Exec(ctx, `
-            CREATE TABLE IF NOT EXISTS buckets (
-                time        TIMESTAMPTZ NOT NULL,
-                time_window SMALLINT NOT NULL,
-                data        BYTEA NOT NULL,
-                ingress     SMALLINT NOT NULL,
-                egress      SMALLINT
-				counter		INTEGER
-            );
-        `)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (d *DataInserter) insert(ctx context.Context, rows []*Row, args []interface{}) error {
-	var sb strings.Builder
-	sb.WriteString("INSERT INTO buckets (time, time_window, data, ingress, egress) VALUES")
-
-	for i, r := range rows {
-		if i > 0 {
-			sb.WriteString(",")
-		}
-		sb.WriteString(fmt.Sprintf("($%d,$%d,$%d,$%d,$%d)",
-			i*5+1, i*5+2, i*5+3, i*5+4, i*5+5))
-		args = append(args,
-			r.Time,
-			r.TimeWindow,
-			r.Data[:],
-			r.Ingress,
-			r.Egress,
-		)
-	}
-	_, err := d.pool.Exec(ctx, sb.String(), args...)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-*/

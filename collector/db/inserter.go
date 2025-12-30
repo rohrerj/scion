@@ -31,13 +31,14 @@ type DataInserter struct {
 }
 
 type Row struct {
-	Time       time.Time
-	TimeWindow int16
-	Data       [32]byte
-	Ingress    int16
-	Egress     *int16
-	Counter    uint32
-	IsIngress  bool
+	Time              time.Time
+	TimeWindow        int16
+	Data              [32]byte
+	Ingress           int16
+	Egress            int16
+	Counter           uint32
+	IsIngress         bool
+	SourceIAAggregate string
 }
 
 func SetupDataInserter(ctx context.Context, channelSize int, batchSize int, connStr string) (*DataInserter, error) {
@@ -62,7 +63,7 @@ func SetupDataInserter(ctx context.Context, channelSize int, batchSize int, conn
 
 func (d *DataInserter) runInserter() error {
 	rows := make([]*Row, d.batchSize)
-	args := make([]interface{}, 0, d.batchSize*7)
+	args := make([]interface{}, 0, d.batchSize*8)
 	ctx := context.Background()
 	err := d.ensureTables(ctx)
 	if err != nil {
@@ -95,14 +96,21 @@ func (d *DataInserter) runInserter() error {
 
 func (d *DataInserter) ensureTables(ctx context.Context) error {
 	_, err := d.pool.Exec(ctx, `
+            DROP TABLE IF EXISTS buckets;
+        `)
+	if err != nil {
+		return err
+	}
+	_, err = d.pool.Exec(ctx, `
             CREATE TABLE IF NOT EXISTS buckets (
-                time        TIMESTAMPTZ NOT NULL,
-                time_window SMALLINT NOT NULL,
-                data        BYTEA NOT NULL,
-                ingress     SMALLINT NOT NULL,
-                egress      SMALLINT,
-				counter		INTEGER,
-				is_ingress  BOOLEAN
+                time        			TIMESTAMPTZ NOT NULL,
+                time_window 			SMALLINT NOT NULL,
+                data        			BYTEA NOT NULL,
+                ingress     			SMALLINT NOT NULL,
+                egress      			SMALLINT NOT NULL,
+				counter					INTEGER,
+				is_ingress  			BOOLEAN,
+				source_ia_aggregate 	NUMERIC
             );
         `)
 	if err != nil {
@@ -114,15 +122,14 @@ func (d *DataInserter) ensureTables(ctx context.Context) error {
 
 func (d *DataInserter) insert(ctx context.Context, rows []*Row, args []interface{}) error {
 	var sb strings.Builder
-	sb.WriteString("INSERT INTO buckets (time, time_window, data, ingress, egress, counter, is_ingress) VALUES")
+	sb.WriteString("INSERT INTO buckets (time, time_window, data, ingress, egress, counter, is_ingress, source_ia_aggregate) VALUES")
 
 	for i, r := range rows {
 		if i > 0 {
 			sb.WriteString(",")
 		}
-		sb.WriteString(fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d)",
-			i*7+1, i*7+2, i*7+3, i*7+4, i*7+5, i*7+6, i*7+7))
-		log.Debug("egress", "egress", r.Egress)
+		sb.WriteString(fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			i*8+1, i*8+2, i*8+3, i*8+4, i*8+5, i*8+6, i*8+7, i*8+8))
 		args = append(args,
 			r.Time,
 			r.TimeWindow,
@@ -131,6 +138,7 @@ func (d *DataInserter) insert(ctx context.Context, rows []*Row, args []interface
 			r.Egress,
 			r.Counter,
 			r.IsIngress,
+			r.SourceIAAggregate,
 		)
 	}
 	_, err := d.pool.Exec(ctx, sb.String(), args...)

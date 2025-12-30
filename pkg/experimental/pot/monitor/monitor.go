@@ -17,16 +17,18 @@ package monitor
 import (
 	"encoding/binary"
 	"hash"
+	"math/big"
 	"sync"
 	"time"
 
-	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 )
 
 type Bucket struct {
-	Data    []byte
-	Counter uint32
+	Data              []byte
+	SourceIAAggregate *big.Int
+	Counter           uint32
 }
 
 type Monitor struct {
@@ -63,59 +65,54 @@ func (monitor *Monitor) NewMonitorWorker() *MonitorWorker {
 	return m
 }
 
-func (m *MonitorWorker) ProcessPacket(packet []byte, ingress uint16, egress uint16, no_error bool) error {
+func (m *MonitorWorker) ProcessPacket(packet []byte, ingress uint16, egress uint16, source_ia addr.IA) error {
 	firstLine := binary.BigEndian.Uint32(packet[:4])
 	flowID := firstLine & 0xFFFFF
 	time_window := ComputeTimeWindowIndex(int(flowID), time.Now())
-	log.Debug("Monitor process", "window", time_window)
+	//log.Debug("Monitor process", "window", time_window)
 	err := m.HashPacket(packet)
 	if err != nil {
 		return err
 	}
-	return m.StoreValueInBucket(m.HashBuffer, ingress, egress, time_window, no_error)
+	return m.StoreValueInBucket(m.HashBuffer, ingress, egress, time_window, source_ia)
 }
 
 func (m *MonitorWorker) ClearBuckets(time_window int) {
 	clear(m.Buckets[time_window])
 }
 
-func (m *MonitorWorker) StoreValueInBucket(value []byte, ingress uint16, egress uint16, time_window int, no_error bool) error {
+func (m *MonitorWorker) StoreValueInBucket(value []byte, ingress uint16, egress uint16, time_window int, source_ia addr.IA) error {
 	if int(time_window) > Num_windows {
 		return serrors.New("time_window index out of bounds")
 	}
-	var index uint64
-	if no_error {
-		index = uint64(ingress)<<16 + uint64(egress)
-	} else {
-		//in the error case we don't consider the egress because it might not be known
-		//but the ingress is always known
-		index = uint64(ingress)<<16 + uint64(1)<<32
+	index := uint64(ingress)<<16 + uint64(egress)
+	new_bucket := Bucket{
+		Data:              make([]byte, len(value)),
+		Counter:           1,
+		SourceIAAggregate: big.NewInt(int64(source_ia)),
 	}
+	copy(new_bucket.Data, value)
 
 	item, found := m.Buckets[time_window][index]
 	if !found {
 		// bucket does not exist, create new bucket
-		new_bucket := Bucket{
-			Data:    make([]byte, len(value)),
-			Counter: 1,
-		}
-		copy(new_bucket.Data, value)
 		m.Buckets[time_window][index] = new_bucket
 	} else {
-		m.Aggregate(&item, value, 1)
+		m.Aggregate(&item, &new_bucket)
 	}
 	return nil
 }
 
 // Aggregate aggregates newValue to the bucket and increases the counter inside the bucket by counter
-func (m *MonitorWorker) Aggregate(bucket *Bucket, newValue []byte, counter uint32) error {
-	if len(bucket.Data) != len(newValue) {
+func (m *MonitorWorker) Aggregate(bucket *Bucket, newBucket *Bucket) error {
+	if len(bucket.Data) != len(newBucket.Data) {
 		return serrors.New("slices need equal length")
 	}
 	for i := 0; i < len(bucket.Data); i++ {
-		bucket.Data[i] ^= newValue[i]
+		bucket.Data[i] ^= newBucket.Data[i]
 	}
-	bucket.Counter += counter
+	bucket.Counter += newBucket.Counter
+	bucket.SourceIAAggregate.Add(bucket.SourceIAAggregate, newBucket.SourceIAAggregate)
 	return nil
 }
 

@@ -20,6 +20,7 @@ import (
 
 	"github.com/scionproto/scion/bucket_store/db"
 	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/proto/proof_of_forwarding"
 	"google.golang.org/grpc"
 )
@@ -30,11 +31,13 @@ type BucketStoreServer struct {
 
 func (l *BucketStoreServer) Query(ctx context.Context, req *proof_of_forwarding.QueryRequest) (*proof_of_forwarding.QueryResponse, error) {
 	frame_length := monitor.Window_length * time.Duration(monitor.Num_Windows_Per_Frame)
-	window_index := monitor.GetWindowIndexForTime(req.SendTime.AsTime())
-	start := req.SendTime.AsTime().Add(-frame_length)
-	end := req.SendTime.AsTime().Add(frame_length)
+	window_index := monitor.WindowIndex(req.SendTime.AsTime())
+	start := req.SendTime.AsTime().UTC().Add(-frame_length)
+	end := req.SendTime.AsTime().UTC().Add(frame_length)
+	log.Debug("Query request", "start", start, "end", end, "window_index", window_index)
 	rows, err := l.DataQuerier.Query(ctx, start, end, window_index)
 	if err != nil {
+		log.Error("error", "err", err)
 		return nil, err
 	}
 	res := &proof_of_forwarding.QueryResponse{
@@ -42,23 +45,16 @@ func (l *BucketStoreServer) Query(ctx context.Context, req *proof_of_forwarding.
 		Index:   uint32(window_index),
 	}
 	for _, row := range rows {
-		var egress uint32
-		if row.Egress != nil {
-			egress = uint32(*row.Egress)
-		}
 		res.Entries = append(res.Entries, &proof_of_forwarding.QueryResponseEntry{
-			Ingress:   uint32(row.Ingress),
-			Egress:    &egress,
-			Bucket:    row.Data[:],
-			Counter:   row.Counter,
-			IsIngress: row.IsIngress,
+			Ingress:           uint32(row.Ingress),
+			Egress:            uint32(row.Egress),
+			Bucket:            row.Data[:],
+			Counter:           row.Counter,
+			IsIngress:         row.IsIngress,
+			SourceIaAggregate: row.SourceIAAggregate,
 		})
 	}
 	return res, nil
-}
-
-func (l *BucketStoreServer) ReportDrop(ctx context.Context, req *proof_of_forwarding.DropRequest) (*proof_of_forwarding.DropResponse, error) {
-	return nil, nil
 }
 
 func NewBucketStoreService(server *grpc.Server, dataQuerier *db.DataQuerier) (*grpc.Server, error) {

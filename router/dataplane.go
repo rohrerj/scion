@@ -733,14 +733,25 @@ func (d *DataPlane) runProcessor(id int, q <-chan packet,
 
 		egress := result.EgressID
 		// TODO: use a proper QoS extension and not this invented TrafficClass
-		if monitorWorker != nil && !(processor.hopField.ConsIngress == 0 && processor.hopField.ConsEgress == 0) /*&& processor.scionLayer.TrafficClass == 0xf0*/ {
-			var asIngress, asEgress uint16
-			if processor.infoField.ConsDir {
-				asIngress, asEgress = processor.hopField.ConsIngress, processor.hopField.ConsEgress
-			} else {
-				asIngress, asEgress = processor.hopField.ConsEgress, processor.hopField.ConsIngress
+		if processor.scionLayer.PathType == scion.PathType {
+			if processor.scionLayer.TrafficClass == uint8(d.localIA) {
+				firstLine := binary.BigEndian.Uint32(p.rawPacket[:4])
+				flowID := firstLine & 0xFFFFF
+				time_window := monitor.ComputeTimeWindowIndex(int(flowID), time.Now())
+				log.Debug("dropped test packet", "window", time_window)
+				metrics.DroppedPacketsInvalid.Inc()
+				d.returnPacketToPool(p.rawPacket)
+				continue
 			}
-			monitorWorker.ProcessPacket(p.rawPacket, asIngress, asEgress, err == nil)
+			if monitorWorker != nil && !(processor.hopField.ConsIngress == 0 && processor.hopField.ConsEgress == 0) /*&& processor.scionLayer.TrafficClass == 0xf0*/ {
+				var asIngress, asEgress uint16
+				if processor.infoField.ConsDir {
+					asIngress, asEgress = processor.hopField.ConsIngress, processor.hopField.ConsEgress
+				} else {
+					asIngress, asEgress = processor.hopField.ConsEgress, processor.hopField.ConsIngress
+				}
+				monitorWorker.ProcessPacket(p.rawPacket, asIngress, asEgress, processor.scionLayer.SrcIA)
+			}
 		}
 		switch {
 		case err == nil:

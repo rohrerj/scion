@@ -32,10 +32,11 @@ message CollectRequest {
 message CollectResponseEntry {
     uint32 index = 1;
     uint32 ingress = 2;
-    optional uint32 egress = 3;
+    uint32 egress = 3;
     bytes bucket = 4;
     uint32 counter = 5;
     bool is_ingress = 6;
+    string source_ia_aggregate = 7;
 }
 
 message CollectResponse {
@@ -44,18 +45,6 @@ message CollectResponse {
 
 service BucketStore {
     rpc Query(QueryRequest) returns (QueryResponse) {}
-    rpc ReportDrop(DropRequest) returns (DropResponse) {}
-}
-
-message DropRequest {
-    google.protobuf.Timestamp send_time = 1;
-    uint32 ingress = 2;
-    optional uint32 egress = 3;
-    bytes bucket = 4;
-}
-
-message DropResponse {
-    bool success = 1;
 }
 
 message QueryRequest {
@@ -69,8 +58,9 @@ message QueryResponse {
 
 message QueryResponseEntry {
     uint32 ingress = 1;
-    optional uint32 egress = 2;
+    uint32 egress = 2;
     bytes bucket = 3;
     uint32 counter = 4;
     bool is_ingress = 5;
+    string source_ia_aggregate = 6;
 }
