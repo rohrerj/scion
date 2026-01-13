@@ -154,8 +154,8 @@ func newLocator(pather CommandPather) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// now wait 5 seconds
-			time.Sleep(5 * time.Second)
+			// now wait 10 seconds
+			time.Sleep(10 * time.Second)
 			err = monitor_worker.HashPacket(pkt.Bytes)
 			if err != nil {
 				return err
@@ -163,7 +163,6 @@ func newLocator(pather CommandPather) *cobra.Command {
 			// now try to start the locator workflow
 			l := locator.NewLocator(sd, send_time, localIA, localAddr)
 			dropLocations, err := l.LocatePacketDrop(ctx, &locator.PacketDrop{
-				SendTime:   send_time,
 				Path:       path,
 				PacketHash: monitor_worker.HashBuffer,
 			})

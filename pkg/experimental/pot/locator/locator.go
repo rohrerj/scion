@@ -17,33 +17,56 @@ package locator
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"net"
 	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/daemon"
+	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/snet"
 )
 
 type Hop struct {
-	Ingress uint16
-	Egress  uint16
-	IA      addr.IA
+	Ingress   uint16
+	Egress    uint16
+	IA        addr.IA
+	IsIngress bool
 }
 
 type PacketDrop struct {
-	SendTime   time.Time
 	Path       snet.Path
 	PacketHash []byte
 }
 
+type Bucket struct {
+	Ingress           uint32
+	Egress            uint32
+	Data              []byte
+	Counter           uint32
+	IsIngress         bool
+	SourceIAAggregate *big.Int
+}
+
+type Fetcher interface {
+	FetchBuckets(ctx context.Context, ia addr.IA) ([]Bucket, error)
+	GetBuckets(ctx context.Context, ia addr.IA) (map[Hop]Bucket, error)
+	SourceEndhostHashes(ctx context.Context, ia addr.IA) ([]SourceEndhostHash, error)
+}
+
+type SourceEndhostHash struct {
+	Addr net.Addr
+	Data []byte
+}
+
 type Locator struct {
-	fetcher *fetcher
+	Fetcher Fetcher
 }
 
 func NewLocator(sd daemon.Connector, sendTime time.Time, localIA addr.IA, localAddr *net.UDPAddr) *Locator {
+	fmt.Println("send time", sendTime)
 	return &Locator{
-		fetcher: &fetcher{
+		Fetcher: &fetcher{
 			LocalIA:   localIA,
 			Daemon:    sd,
 			SendTime:  sendTime,
@@ -52,41 +75,85 @@ func NewLocator(sd daemon.Connector, sendTime time.Time, localIA addr.IA, localA
 	}
 }
 
+func aggregate(bucket *Bucket, newBucket *Bucket) error {
+	if len(bucket.Data) != len(newBucket.Data) {
+		return serrors.New("slices need equal length")
+	}
+	for i := 0; i < len(bucket.Data); i++ {
+		bucket.Data[i] ^= newBucket.Data[i]
+	}
+	bucket.Counter += newBucket.Counter
+	bucket.SourceIAAggregate.Add(bucket.SourceIAAggregate, newBucket.SourceIAAggregate)
+	return nil
+}
+
 func (l *Locator) LocatePacketDrop(ctx context.Context, p *PacketDrop) ([]addr.IA, error) {
-	fmt.Println("send time", p.SendTime)
-	lastIA := uint64(0)
-	for _, i := range p.Path.Metadata().Interfaces {
-		if uint64(i.IA) == lastIA {
-			continue
-		}
-		lastIA = uint64(i.IA)
-		buckets, err := l.fetcher.fetchBuckets(ctx, i.IA)
+	fmt.Println("start localization")
+	hops := p.Path.Metadata().Hops()
+	fmt.Println(hops)
+	lastIAEgressBucket := &Bucket{}
+	lastIA := addr.IA(0)
+	for i := 0; i < len(hops); i++ {
+		hop := hops[i]
+		ia := hop.IA
+		//fmt.Println(ia)
+		buckets, err := l.Fetcher.GetBuckets(ctx, ia)
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println("IA", i.IA)
-		for _, b := range buckets {
-			fmt.Println(b)
+		b1 := buckets[Hop{
+			Ingress:   uint16(hop.IgIf),
+			Egress:    uint16(hop.EgIf),
+			IA:        ia,
+			IsIngress: true,
+		}]
+		//fmt.Println(b1.Ingress, b1.Egress, b1.IsIngress, b1.Counter, b1.Data, b1.SourceIAAggregate.String())
+		b2 := buckets[Hop{
+			Ingress:   uint16(hop.IgIf),
+			Egress:    uint16(hop.EgIf),
+			IA:        ia,
+			IsIngress: false,
+		}]
+		//fmt.Println(b2.Ingress, b2.Egress, b2.IsIngress, b2.Counter, b2.Data, b2.SourceIAAggregate.String())
+		// compute the combined buckets for the ingress and egress router's interface
+		fixedIngressBucket := Bucket{
+			Data:              make([]byte, 32),
+			SourceIAAggregate: big.NewInt(0),
 		}
+		fixedEgressBucket := Bucket{
+			Data:              make([]byte, 32),
+			SourceIAAggregate: big.NewInt(0),
+		}
+		for _, bucket := range buckets {
+			if bucket.Ingress == uint32(hop.IgIf) && bucket.IsIngress {
+				err = aggregate(&fixedIngressBucket, &bucket)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if bucket.Egress == uint32(hop.EgIf) && !bucket.IsIngress {
+				err = aggregate(&fixedEgressBucket, &bucket)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+
+		// where can we have now packet drops?
+		// A) inside AS: b1.Counter != b2.Counter
+		// B) between consecutive ASes: lastIA.fixedEgressBucket != currentIA.fixedIngressBucket
+		if i != 0 && i != len(hops)-1 && b1.Counter != b2.Counter {
+			fmt.Println("Inconsistency inside IA:", ia, b1.Counter, b2.Counter)
+		}
+		if i != 0 && lastIAEgressBucket.Counter != fixedIngressBucket.Counter {
+			fmt.Println("Inconsistency between IAs:", lastIA, ia, lastIAEgressBucket.Counter, fixedIngressBucket.Counter)
+		}
+
+		lastIAEgressBucket = &fixedEgressBucket
+		lastIA = ia
+
 	}
+	// We should have found inconsistencies (printed to console), now we have to backtrace
+
 	return nil, nil
-}
-
-func (l *Locator) compareConsecutiveBuckets(ctx context.Context, p *PacketDrop, index int) error {
-	/*ingressASBucket, err := l.fetcher.GetBucket(ctx, p.Path[index].IA, p.Path[index].Ingress, &p.Path[index].Egress)
-	if err != nil {
-		return err
-	}
-	allASBuckets, err := l.fetcher.GetBuckets(ctx, p.Path[index].IA)
-	//aggregate relevant buckets
-	tmpBucket := Bucket{
-		data: make([]byte, 32),
-	}
-	for hop, bucket := range allASBuckets {
-		if hop.Egress == p.Path[index].Egress {
-			aggregate(tmpBucket, bucket.data, bucket.counter)
-		}
-	}*/
-	return nil
-
 }

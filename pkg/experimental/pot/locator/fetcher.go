@@ -49,28 +49,24 @@ type fetcher struct {
 	LocalAddr   *net.UDPAddr
 	bucketStore map[addr.IA]map[Hop]Bucket
 }
-type Bucket struct {
-	ingress           uint32
-	egress            uint32
-	data              []byte
-	counter           uint32
-	isIngress         bool
-	sourceIAAggregate *big.Int
-}
 
 func (l *fetcher) GetBuckets(ctx context.Context, ia addr.IA) (map[Hop]Bucket, error) {
+	if l.bucketStore == nil {
+		l.bucketStore = make(map[addr.IA]map[Hop]Bucket)
+	}
 	v, found := l.bucketStore[ia]
 	if found {
 		return v, nil
 	}
-	b, err := l.fetchBuckets(ctx, ia)
-	if err != nil {
+	b, err := l.FetchBuckets(ctx, ia)
+	if err == nil {
 		l.bucketStore[ia] = make(map[Hop]Bucket)
 		for _, bucket := range b {
 			l.bucketStore[ia][Hop{
-				IA:      ia,
-				Ingress: uint16(bucket.ingress),
-				Egress:  uint16(bucket.egress),
+				IA:        ia,
+				Ingress:   uint16(bucket.Ingress),
+				Egress:    uint16(bucket.Egress),
+				IsIngress: bucket.IsIngress,
 			}] = bucket
 		}
 	}
@@ -78,18 +74,19 @@ func (l *fetcher) GetBuckets(ctx context.Context, ia addr.IA) (map[Hop]Bucket, e
 	if found {
 		return v, nil
 	}
-	return nil, serrors.New("buckets expected but not found")
+	return nil, err
 }
 
-func (l *fetcher) GetBucket(ctx context.Context, ia addr.IA, ingress uint16, egress *uint16) (Bucket, error) {
+func (l *fetcher) GetBucket(ctx context.Context, ia addr.IA, ingress uint16, egress uint16, isIngress bool) (Bucket, error) {
 	buckets, err := l.GetBuckets(ctx, ia)
 	if err != nil {
 		return Bucket{}, err
 	}
 	bucket, found := buckets[Hop{
-		IA:      ia,
-		Ingress: ingress,
-		Egress:  *egress,
+		IA:        ia,
+		Ingress:   ingress,
+		Egress:    egress,
+		IsIngress: isIngress,
 	}]
 	if found {
 		return bucket, nil
@@ -97,7 +94,12 @@ func (l *fetcher) GetBucket(ctx context.Context, ia addr.IA, ingress uint16, egr
 	return Bucket{}, serrors.New("bucket expected but not found")
 }
 
-func (l *fetcher) fetchBuckets(ctx context.Context, ia addr.IA) ([]Bucket, error) {
+func (l *fetcher) SourceEndhostHashes(ctx context.Context, ia addr.IA) ([]SourceEndhostHash, error) {
+	// TODO: implement this
+	return nil, nil
+}
+
+func (l *fetcher) FetchBuckets(ctx context.Context, ia addr.IA) ([]Bucket, error) {
 	var bucket_store_address *snet.SVCAddr
 	var dialer libgrpc.Dialer
 	if ia == l.LocalIA {
@@ -207,12 +209,12 @@ func (l *fetcher) fetchBuckets(ctx context.Context, ia addr.IA) ([]Bucket, error
 		var iaAggr big.Int
 		iaAggr.SetString(entry.SourceIaAggregate, 10)
 		res = append(res, Bucket{
-			ingress:           entry.Ingress,
-			egress:            entry.Egress,
-			data:              entry.Bucket,
-			counter:           entry.Counter,
-			isIngress:         entry.IsIngress,
-			sourceIAAggregate: &iaAggr,
+			Ingress:           entry.Ingress,
+			Egress:            entry.Egress,
+			Data:              entry.Bucket,
+			Counter:           entry.Counter,
+			IsIngress:         entry.IsIngress,
+			SourceIAAggregate: &iaAggr,
 		})
 	}
 	return res, nil

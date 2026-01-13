@@ -45,10 +45,12 @@ func (l *BucketStoreServer) Query(ctx context.Context, req *proof_of_forwarding.
 		Index:   uint32(window_index),
 	}
 	for _, row := range rows {
+		data := make([]byte, 32)
+		copy(data, row.Data[:])
 		res.Entries = append(res.Entries, &proof_of_forwarding.QueryResponseEntry{
 			Ingress:           uint32(row.Ingress),
 			Egress:            uint32(row.Egress),
-			Bucket:            row.Data[:],
+			Bucket:            data,
 			Counter:           row.Counter,
 			IsIngress:         row.IsIngress,
 			SourceIaAggregate: row.SourceIAAggregate,

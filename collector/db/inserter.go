@@ -77,13 +77,14 @@ func (d *DataInserter) runInserter() error {
 		rows[0] = row
 		num_reads := 1
 	loop:
-		for ; num_reads < d.batchSize; num_reads++ {
+		for num_reads < d.batchSize {
 			select {
 			case row = <-d.Data:
 				rows[num_reads] = row
 				if row == nil {
 					break loop
 				}
+				num_reads++
 			default:
 				break loop
 			}
