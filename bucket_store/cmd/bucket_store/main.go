@@ -111,7 +111,7 @@ func realMain(ctx context.Context) error {
 			libgrpc.UnaryServerInterceptor(),
 			libgrpc.DefaultMaxConcurrentStreams(),
 		)
-		s, err := server.NewBucketStoreService(grpc_server, dataQuerier)
+		s, err := server.NewBucketStoreService(grpc_server, dataQuerier, topo.IA(), topo.InterfaceInfoMap())
 		if err != nil {
 			return err
 		}
@@ -123,7 +123,7 @@ func realMain(ctx context.Context) error {
 			libgrpc.UnaryServerInterceptor(),
 			libgrpc.DefaultMaxConcurrentStreams(),
 		)
-		s, err := server.NewBucketStoreService(grpc_server, dataQuerier)
+		s, err := server.NewBucketStoreService(grpc_server, dataQuerier, topo.IA(), topo.InterfaceInfoMap())
 		if err != nil {
 			return err
 		}

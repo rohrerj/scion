@@ -94,7 +94,7 @@ func (l *fetcher) GetBucket(ctx context.Context, ia addr.IA, ingress uint16, egr
 	return Bucket{}, serrors.New("bucket expected but not found")
 }
 
-func (l *fetcher) SourceEndhostHashes(ctx context.Context, ia addr.IA) ([]SourceEndhostHash, error) {
+func (l *fetcher) SourceEndhostHashes(ctx context.Context, ia addr.IA, egress uint32) ([]SourceEndhostHash, error) {
 	// TODO: implement this
 	return nil, nil
 }
@@ -215,6 +215,8 @@ func (l *fetcher) FetchBuckets(ctx context.Context, ia addr.IA) ([]Bucket, error
 			Counter:           entry.Counter,
 			IsIngress:         entry.IsIngress,
 			SourceIAAggregate: &iaAggr,
+			IngressIA:         addr.IA(entry.IngressIA),
+			EgressIA:          addr.IA(entry.EgressIA),
 		})
 	}
 	return res, nil

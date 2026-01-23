@@ -15,15 +15,15 @@
 package locator
 
 func SolveGF2LSE(m [][]uint8, b []uint8) []uint8 {
-	n := len(m) // number of rows
+	n := len(m)
 	if n == 0 {
 		return nil
 	}
-	k := len(m[0]) // number of columns
+	k := len(m[0])
 
 	// Augment matrix with b
 	aug := make([][]uint8, n)
-	for i := range m {
+	for i := 0; i < n; i++ {
 		row := make([]uint8, k+1)
 		copy(row, m[i])
 		row[k] = b[i]
@@ -31,8 +31,8 @@ func SolveGF2LSE(m [][]uint8, b []uint8) []uint8 {
 	}
 
 	// Gaussian elimination (forward)
-	col := 0
-	for row := 0; row < n && col < k; col++ {
+	row := 0
+	for col := 0; col < k && row < n; col++ {
 		// Find pivot
 		pivot := row
 		for pivot < n && aug[pivot][col] == 0 {
@@ -42,10 +42,10 @@ func SolveGF2LSE(m [][]uint8, b []uint8) []uint8 {
 			continue // no pivot in this column
 		}
 
-		// Swap pivot to current row
+		// Swap pivot into place
 		aug[row], aug[pivot] = aug[pivot], aug[row]
 
-		// Eliminate downward
+		// Eliminate below
 		for r := row + 1; r < n; r++ {
 			if aug[r][col] == 1 {
 				for c := col; c <= k; c++ {
@@ -57,25 +57,38 @@ func SolveGF2LSE(m [][]uint8, b []uint8) []uint8 {
 		row++
 	}
 
+	// Check for inconsistency: 0 = 1
+	for i := 0; i < n; i++ {
+		allZero := true
+		for j := 0; j < k; j++ {
+			if aug[i][j] != 0 {
+				allZero = false
+				break
+			}
+		}
+		if allZero && aug[i][k] == 1 {
+			return nil // no solution
+		}
+	}
+
 	// Back substitution
 	x := make([]uint8, k)
-	for row := n - 1; row >= 0; row-- {
-		// Find first 1 (pivot column)
+
+	for i := n - 1; i >= 0; i-- {
 		pivotCol := -1
 		for c := 0; c < k; c++ {
-			if aug[row][c] == 1 {
+			if aug[i][c] == 1 {
 				pivotCol = c
 				break
 			}
 		}
 		if pivotCol == -1 {
-			continue // row is all zeros, skip
+			continue
 		}
 
-		// Compute value for this pivot variable
-		sum := aug[row][k]
+		sum := aug[i][k]
 		for c := pivotCol + 1; c < k; c++ {
-			sum ^= (aug[row][c] & x[c])
+			sum ^= aug[i][c] & x[c]
 		}
 		x[pivotCol] = sum
 	}

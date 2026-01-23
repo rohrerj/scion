@@ -63,4 +63,6 @@ message QueryResponseEntry {
     uint32 counter = 4;
     bool is_ingress = 5;
     string source_ia_aggregate = 6;
+    uint64 ingressIA = 7;
+    uint64 egressIA = 8;
 }

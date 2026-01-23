@@ -19,14 +19,19 @@ import (
 	"time"
 
 	"github.com/scionproto/scion/bucket_store/db"
+	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
 	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/pkg/private/common"
 	"github.com/scionproto/scion/pkg/proto/proof_of_forwarding"
+	"github.com/scionproto/scion/private/topology"
 	"google.golang.org/grpc"
 )
 
 type BucketStoreServer struct {
-	DataQuerier *db.DataQuerier
+	DataQuerier  *db.DataQuerier
+	InterfaceMap map[common.IFIDType]topology.IFInfo
+	LocalIA      addr.IA
 }
 
 func (l *BucketStoreServer) Query(ctx context.Context, req *proof_of_forwarding.QueryRequest) (*proof_of_forwarding.QueryResponse, error) {
@@ -47,6 +52,27 @@ func (l *BucketStoreServer) Query(ctx context.Context, req *proof_of_forwarding.
 	for _, row := range rows {
 		data := make([]byte, 32)
 		copy(data, row.Data[:])
+		var ingressIA addr.IA
+		interfaceInfoIngress, ok := l.InterfaceMap[common.IFIDType(row.Ingress)]
+		if ok {
+			ingressIA = interfaceInfoIngress.IA
+		} else if row.Ingress == 0 {
+			ingressIA = l.LocalIA
+		} else {
+			log.Debug("Interface not part of interface map", "ingress", row.Ingress)
+			continue
+		}
+		var egressIA addr.IA
+		interfaceInfoEgress, ok := l.InterfaceMap[common.IFIDType(row.Egress)]
+		if ok {
+			egressIA = interfaceInfoEgress.IA
+		} else if row.Egress == 0 {
+			egressIA = l.LocalIA
+		} else {
+			log.Debug("Interface not part of interface map", "ingress", row.Ingress)
+			continue
+		}
+
 		res.Entries = append(res.Entries, &proof_of_forwarding.QueryResponseEntry{
 			Ingress:           uint32(row.Ingress),
 			Egress:            uint32(row.Egress),
@@ -54,14 +80,18 @@ func (l *BucketStoreServer) Query(ctx context.Context, req *proof_of_forwarding.
 			Counter:           row.Counter,
 			IsIngress:         row.IsIngress,
 			SourceIaAggregate: row.SourceIAAggregate,
+			IngressIA:         uint64(ingressIA),
+			EgressIA:          uint64(egressIA),
 		})
 	}
 	return res, nil
 }
 
-func NewBucketStoreService(server *grpc.Server, dataQuerier *db.DataQuerier) (*grpc.Server, error) {
+func NewBucketStoreService(server *grpc.Server, dataQuerier *db.DataQuerier, localIA addr.IA, m map[common.IFIDType]topology.IFInfo) (*grpc.Server, error) {
 	proof_of_forwarding.RegisterBucketStoreServer(server, &BucketStoreServer{
-		DataQuerier: dataQuerier,
+		DataQuerier:  dataQuerier,
+		LocalIA:      localIA,
+		InterfaceMap: m,
 	})
 	return server, nil
 }
