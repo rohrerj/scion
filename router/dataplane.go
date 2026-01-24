@@ -735,6 +735,7 @@ func (d *DataPlane) runProcessor(id int, q <-chan packet,
 		// TODO: use a proper QoS extension and not this invented TrafficClass
 		if processor.scionLayer.PathType == scion.PathType {
 			if processor.scionLayer.TrafficClass == uint8(d.localIA) {
+				// here for testing purposes we intentionally drop the packet, remove this later
 				firstLine := binary.BigEndian.Uint32(p.rawPacket[:4])
 				flowID := firstLine & 0xFFFFF
 				time_window := monitor.ComputeTimeWindowIndex(int(flowID), time.Now())
@@ -743,12 +744,55 @@ func (d *DataPlane) runProcessor(id int, q <-chan packet,
 				d.returnPacketToPool(p.rawPacket)
 				continue
 			}
-			if monitorWorker != nil && !(processor.hopField.ConsIngress == 0 && processor.hopField.ConsEgress == 0) /*&& processor.scionLayer.TrafficClass == 0xf0*/ {
+			if monitorWorker != nil {
 				var asIngress, asEgress uint16
 				if processor.infoField.ConsDir {
 					asIngress, asEgress = processor.hopField.ConsIngress, processor.hopField.ConsEgress
 				} else {
 					asIngress, asEgress = processor.hopField.ConsEgress, processor.hopField.ConsIngress
+				}
+				if processor.effectiveXover {
+					infOfLastSegment, err := processor.path.GetInfoField(int(processor.path.PathMeta.CurrINF - 1))
+					if err != nil {
+						log.Debug("Error getting info field of next segment", "err", err)
+					}
+					hfOfLastSegment, err := processor.path.GetHopField(int(processor.path.PathMeta.CurrHF - 1))
+					if err != nil {
+						log.Debug("Error getting hop field of next segment", "err", err)
+					}
+					if infOfLastSegment.ConsDir {
+						asIngress = hfOfLastSegment.ConsIngress
+					} else {
+						asIngress = hfOfLastSegment.ConsEgress
+					}
+				} else if result.TrafficType == ttOutTransit { //AS transit out
+					// packet is not from local IA, but was forwarded by other local IA border router
+					// check whether we are first HF of current segment, which would imply other BR of
+					// local IA processed xover
+					currHF := processor.path.PathMeta.CurrHF
+					log.Debug("ttOutTransit", "currHf", currHF, "seglen", processor.path.PathMeta.SegLen)
+
+					for i := 0; i < processor.path.NumINF; i++ {
+						currHF -= processor.path.PathMeta.SegLen[i]
+						if currHF == 1 { //the first HF of any segment
+							infOfLastSegment, err := processor.path.GetInfoField(i)
+							if err != nil {
+								log.Debug("Error getting info field of last segment", "err", err)
+								break
+							}
+							hfOfLastSegment, err := processor.path.GetHopField(int(processor.path.PathMeta.CurrHF) - 2)
+							if err != nil {
+								log.Debug("Error getting hop field of last segment", "err", err)
+								break
+							}
+							if infOfLastSegment.ConsDir {
+								asIngress = hfOfLastSegment.ConsIngress
+							} else {
+								asIngress = hfOfLastSegment.ConsEgress
+							}
+							break
+						}
+					}
 				}
 				monitorWorker.ProcessPacket(p.rawPacket, asIngress, asEgress, processor.scionLayer.SrcIA)
 			}

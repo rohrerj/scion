@@ -56,6 +56,7 @@ func (p *Parser) Parse(packet []byte) error {
 	if metaHdr.SegLen[2] != 0 {
 		p.numInfs = 3
 	}
+	packet[p.cmnHdrPlusAddrHdrLen] = 0
 	switch p.numInfs {
 	case 1:
 		{
@@ -66,17 +67,17 @@ func (p *Parser) Parse(packet []byte) error {
 		{
 			p.infSegIDs[0] = binary.BigEndian.Uint16(packet[p.cmnHdrPlusAddrHdrLen+6 : p.cmnHdrPlusAddrHdrLen+8])
 			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+6:p.cmnHdrPlusAddrHdrLen+8], 0)
-			p.infSegIDs[1] = binary.BigEndian.Uint16(packet[p.cmnHdrPlusAddrHdrLen+10 : p.cmnHdrPlusAddrHdrLen+12])
-			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+10:p.cmnHdrPlusAddrHdrLen+12], 0)
+			p.infSegIDs[1] = binary.BigEndian.Uint16(packet[p.cmnHdrPlusAddrHdrLen+14 : p.cmnHdrPlusAddrHdrLen+16])
+			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+14:p.cmnHdrPlusAddrHdrLen+16], 0)
 		}
 	case 3:
 		{
 			p.infSegIDs[0] = binary.BigEndian.Uint16(packet[p.cmnHdrPlusAddrHdrLen+6 : p.cmnHdrPlusAddrHdrLen+8])
 			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+6:p.cmnHdrPlusAddrHdrLen+8], 0)
-			p.infSegIDs[1] = binary.BigEndian.Uint16(packet[p.cmnHdrPlusAddrHdrLen+10 : p.cmnHdrPlusAddrHdrLen+12])
-			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+10:p.cmnHdrPlusAddrHdrLen+12], 0)
-			p.infSegIDs[2] = binary.BigEndian.Uint16(packet[p.cmnHdrPlusAddrHdrLen+14 : p.cmnHdrPlusAddrHdrLen+16])
+			p.infSegIDs[1] = binary.BigEndian.Uint16(packet[p.cmnHdrPlusAddrHdrLen+14 : p.cmnHdrPlusAddrHdrLen+16])
 			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+14:p.cmnHdrPlusAddrHdrLen+16], 0)
+			p.infSegIDs[2] = binary.BigEndian.Uint16(packet[p.cmnHdrPlusAddrHdrLen+22 : p.cmnHdrPlusAddrHdrLen+24])
+			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+22:p.cmnHdrPlusAddrHdrLen+24], 0)
 		}
 	}
 
@@ -123,13 +124,13 @@ func (p *Parser) UndoZero(packet []byte) {
 	case 2:
 		{
 			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+6:p.cmnHdrPlusAddrHdrLen+8], p.infSegIDs[0])
-			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+10:p.cmnHdrPlusAddrHdrLen+12], p.infSegIDs[1])
+			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+14:p.cmnHdrPlusAddrHdrLen+16], p.infSegIDs[1])
 		}
 	case 3:
 		{
 			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+6:p.cmnHdrPlusAddrHdrLen+8], p.infSegIDs[0])
-			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+10:p.cmnHdrPlusAddrHdrLen+12], p.infSegIDs[1])
-			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+14:p.cmnHdrPlusAddrHdrLen+16], p.infSegIDs[2])
+			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+14:p.cmnHdrPlusAddrHdrLen+16], p.infSegIDs[1])
+			binary.BigEndian.PutUint16(packet[p.cmnHdrPlusAddrHdrLen+22:p.cmnHdrPlusAddrHdrLen+24], p.infSegIDs[2])
 		}
 	}
 }

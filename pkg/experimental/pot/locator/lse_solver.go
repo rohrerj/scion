@@ -16,7 +16,7 @@ package locator
 
 func SolveGF2LSE(m [][]uint8, b []uint8) []uint8 {
 	n := len(m)
-	if n == 0 {
+	if n == 0 || len(b) == 0 {
 		return nil
 	}
 	k := len(m[0])

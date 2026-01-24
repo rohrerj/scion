@@ -66,28 +66,29 @@ func (m *MonitorServer) Collect(ctx context.Context, req *proof_of_forwarding.Co
 		}
 		for key, bucket := range buckets {
 			ingress := uint16(key >> 16)
-			isLocalIngress := slices.Contains(m.localInterfaces, ingress)
 			egress := uint32(key & 0xffff)
-			var entry *proof_of_forwarding.CollectResponseEntry
-			entry = &proof_of_forwarding.CollectResponseEntry{
-				Ingress:           uint32(ingress),
-				Egress:            egress,
-				Bucket:            bucket.Data,
-				Counter:           bucket.Counter,
-				Index:             time_window,
-				IsIngress:         isLocalIngress,
-				SourceIaAggregate: bucket.SourceIAAggregate.String(),
+
+			if ingress == 0 || slices.Contains(m.localInterfaces, ingress) {
+				var entry *proof_of_forwarding.CollectResponseEntry
+				entry = &proof_of_forwarding.CollectResponseEntry{
+					Ingress:           uint32(ingress),
+					Egress:            egress,
+					Bucket:            bucket.Data,
+					Counter:           bucket.Counter,
+					Index:             time_window,
+					IsIngress:         true,
+					SourceIaAggregate: bucket.SourceIAAggregate.String(),
+				}
+				responseEntries = append(responseEntries, entry)
 			}
-			responseEntries = append(responseEntries, entry)
-			if slices.Contains(m.localInterfaces, uint16(egress)) {
-				// in case the current border router is both ingress and egress border router
+			if egress == 0 || slices.Contains(m.localInterfaces, uint16(egress)) {
 				entry2 := &proof_of_forwarding.CollectResponseEntry{
 					Ingress:           uint32(ingress),
 					Egress:            egress,
 					Bucket:            bucket.Data,
 					Counter:           bucket.Counter,
 					Index:             time_window,
-					IsIngress:         !isLocalIngress,
+					IsIngress:         false,
 					SourceIaAggregate: bucket.SourceIAAggregate.String(),
 				}
 				responseEntries = append(responseEntries, entry2)
