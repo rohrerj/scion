@@ -59,7 +59,6 @@ type Fetcher interface {
 }
 
 type SourceEndhostHash struct {
-	Addr net.Addr
 	IA   addr.IA
 	Data []byte
 }
@@ -193,10 +192,10 @@ func (l *Locator) LocatePacketDrop(ctx context.Context, p *PacketDrop) ([]addr.I
 		//fmt.Println("lostPackets", lostPackets, drop.ResponsibleIAs)
 		for _, pkt := range lostPackets {
 			if slices.Equal(p.PacketHash, pkt.Data) {
-				fmt.Printf("Own packet loss: %s\n", pkt.Addr)
+				fmt.Printf("Own packet loss: %s\n", pkt.Data)
 				return drop.ResponsibleIAs, nil
 			} else {
-				fmt.Printf("External packet loss: %s\n", pkt.Addr)
+				fmt.Printf("External packet loss: %s\n", pkt.Data)
 			}
 		}
 	}

@@ -93,11 +93,6 @@ func TestLocator(t *testing.T) {
 	ia14 := addr.MustIAFrom(1, 14)
 	ia15 := addr.MustIAFrom(1, 15)
 	localAddr, err := net.ResolveUDPAddr("udp", "10.0.0.1:3333")
-	addr2, err := net.ResolveUDPAddr("udp", "10.0.0.2:3333")
-	addr3, err := net.ResolveUDPAddr("udp", "10.0.0.3:3333")
-	addr4, err := net.ResolveUDPAddr("udp", "10.0.0.4:3333")
-	addr5, err := net.ResolveUDPAddr("udp", "10.0.0.5:3333")
-	addr6, err := net.ResolveUDPAddr("udp", "10.0.0.6:3333")
 	assert.NoError(t, err)
 	packet_hash_source := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 	packet_hash_source_ia_different_host := []byte{7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7}
@@ -111,12 +106,10 @@ func TestLocator(t *testing.T) {
 			localIA: {
 				1: {
 					locator.SourceEndhostHash{
-						Addr: localAddr,
 						IA:   localIA,
 						Data: packet_hash_source,
 					},
 					locator.SourceEndhostHash{
-						Addr: addr2,
 						IA:   localIA,
 						Data: packet_hash_source_ia_different_host,
 					},
@@ -125,7 +118,6 @@ func TestLocator(t *testing.T) {
 			ia11: {
 				4: {
 					locator.SourceEndhostHash{
-						Addr: addr3,
 						IA:   ia11,
 						Data: packet_hash_ia11,
 					},
@@ -134,7 +126,6 @@ func TestLocator(t *testing.T) {
 			ia12: {
 				6: {
 					locator.SourceEndhostHash{
-						Addr: addr4,
 						IA:   ia12,
 						Data: packet_hash_ia12,
 					},
@@ -143,7 +134,6 @@ func TestLocator(t *testing.T) {
 			ia13: {
 				9: {
 					locator.SourceEndhostHash{
-						Addr: addr5,
 						IA:   ia13,
 						Data: packet_hash_ia13,
 					},
@@ -152,7 +142,6 @@ func TestLocator(t *testing.T) {
 			ia14: {
 				8: {
 					locator.SourceEndhostHash{
-						Addr: addr6,
 						IA:   ia14,
 						Data: packet_hash_ia14,
 					},
@@ -530,11 +519,6 @@ func TestLocator2(t *testing.T) {
 	ia14 := addr.MustIAFrom(1, 14)
 	ia15 := addr.MustIAFrom(1, 15)
 	localAddr, err := net.ResolveUDPAddr("udp", "10.0.0.1:3333")
-	addr2, err := net.ResolveUDPAddr("udp", "10.0.0.2:3333")
-	addr3, err := net.ResolveUDPAddr("udp", "10.0.0.3:3333")
-	addr4, err := net.ResolveUDPAddr("udp", "10.0.0.4:3333")
-	addr5, err := net.ResolveUDPAddr("udp", "10.0.0.5:3333")
-	addr6, err := net.ResolveUDPAddr("udp", "10.0.0.6:3333")
 	assert.NoError(t, err)
 	packet_hash_source := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 	packet_hash_source_2 := []byte{2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64}
@@ -550,19 +534,16 @@ func TestLocator2(t *testing.T) {
 			localIA: {
 				1: {
 					locator.SourceEndhostHash{
-						Addr: localAddr,
 						IA:   localIA,
 						Data: packet_hash_source,
 					},
 					locator.SourceEndhostHash{
-						Addr: addr2,
 						IA:   localIA,
 						Data: packet_hash_source_ia_different_host,
 					},
 				},
 				2: {
 					locator.SourceEndhostHash{
-						Addr: localAddr,
 						IA:   localIA,
 						Data: packet_hash_source_2,
 					},
@@ -571,7 +552,6 @@ func TestLocator2(t *testing.T) {
 			ia11: {
 				2: {
 					locator.SourceEndhostHash{
-						Addr: addr3,
 						IA:   ia11,
 						Data: packet_hash_ia11,
 					},
@@ -580,7 +560,6 @@ func TestLocator2(t *testing.T) {
 			ia12: {
 				1: {
 					locator.SourceEndhostHash{
-						Addr: addr4,
 						IA:   ia12,
 						Data: packet_hash_ia12,
 					},
@@ -589,14 +568,12 @@ func TestLocator2(t *testing.T) {
 			ia13: {
 				1: {
 					locator.SourceEndhostHash{
-						Addr: addr5,
 						IA:   ia13,
 						Data: packet_hash_ia13,
 					},
 				},
 				3: {
 					locator.SourceEndhostHash{
-						Addr: addr5,
 						IA:   ia13,
 						Data: packet_hash_ia13_2,
 					},
@@ -605,7 +582,6 @@ func TestLocator2(t *testing.T) {
 			ia14: {
 				1: {
 					locator.SourceEndhostHash{
-						Addr: addr6,
 						IA:   ia14,
 						Data: packet_hash_ia14,
 					},
