@@ -68,11 +68,11 @@ type Locator struct {
 	Fetcher Fetcher
 }
 
-type dropLocation struct {
+type DropLocation struct {
 	Hashes         []SourceEndhostHash
 	Aggregate1     []byte
 	Aggregate2     []byte
-	RespondingASes []addr.IA
+	ResponsibleIAs []addr.IA
 }
 
 func NewLocator(sd daemon.Connector, sendTime time.Time, localIA addr.IA, localAddr *net.UDPAddr) *Locator {
@@ -100,12 +100,10 @@ func aggregate(bucket *Bucket, newBucket *Bucket) error {
 }
 
 func (l *Locator) LocatePacketDrop(ctx context.Context, p *PacketDrop) ([]addr.IA, error) {
-	fmt.Println("start localization")
 	hops := p.Path.Metadata().Hops()
-	fmt.Println(hops)
 	lastIAEgressBucket := &Bucket{}
 	lastIA := addr.IA(0)
-	dropLocations := make([]dropLocation, 0, 10)
+	dropLocations := make([]DropLocation, 0, 10)
 	for i := 0; i < len(hops); i++ {
 		hop := hops[i]
 		ia := hop.IA
@@ -158,31 +156,30 @@ func (l *Locator) LocatePacketDrop(ctx context.Context, p *PacketDrop) ([]addr.I
 		// where can we have now packet drops?
 		// A) inside AS: b1.Counter != b2.Counter
 		if i != 0 && i != len(hops)-1 && (b1.Counter != b2.Counter || !bytes.Equal(b1.Data, b2.Data)) {
-			fmt.Println("Inconsistency inside IA:", ia, b1.Counter, b2.Counter)
-			// TODO: write unit test to test this case
+			//fmt.Println("Inconsistency inside IA:", ia, b1.Counter, b2.Counter)
 			h, err := l.recursiveFind(ctx, lastIA, uint32(hops[i-1].EgIf))
 			if err != nil {
 				return nil, err
 			}
-			dropLocations = append(dropLocations, dropLocation{
+			dropLocations = append(dropLocations, DropLocation{
 				Hashes:         h,
 				Aggregate1:     b1.Data,
 				Aggregate2:     b2.Data,
-				RespondingASes: []addr.IA{hop.IA},
+				ResponsibleIAs: []addr.IA{hop.IA},
 			})
 		}
 		// B) between consecutive ASes: lastIA.fixedEgressBucket != currentIA.fixedIngressBucket
 		if i != 0 && (lastIAEgressBucket.Counter != fixedIngressBucket.Counter || !bytes.Equal(lastIAEgressBucket.Data, fixedIngressBucket.Data)) {
-			fmt.Println("Inconsistency between IAs:", lastIA, ia, lastIAEgressBucket.Counter, fixedIngressBucket.Counter)
+			//fmt.Println("Inconsistency between IAs:", lastIA, ia, lastIAEgressBucket.Counter, fixedIngressBucket.Counter)
 			h, err := l.recursiveFind(ctx, lastIA, uint32(hops[i-1].EgIf))
 			if err != nil {
 				return nil, err
 			}
-			dropLocations = append(dropLocations, dropLocation{
+			dropLocations = append(dropLocations, DropLocation{
 				Hashes:         h,
 				Aggregate1:     lastIAEgressBucket.Data,
 				Aggregate2:     fixedIngressBucket.Data,
-				RespondingASes: []addr.IA{lastIA, hop.IA},
+				ResponsibleIAs: []addr.IA{lastIA, hop.IA},
 			})
 		}
 
@@ -192,12 +189,12 @@ func (l *Locator) LocatePacketDrop(ctx context.Context, p *PacketDrop) ([]addr.I
 	}
 	// We should have found inconsistencies (printed to console), now we have to backtrace
 	for _, drop := range dropLocations {
-		lostPackets := l.solveLSE(drop)
-		fmt.Println("lostPackets", lostPackets, drop.RespondingASes)
+		lostPackets := l.SolveLSE(drop)
+		//fmt.Println("lostPackets", lostPackets, drop.ResponsibleIAs)
 		for _, pkt := range lostPackets {
 			if slices.Equal(p.PacketHash, pkt.Data) {
 				fmt.Printf("Own packet loss: %s\n", pkt.Addr)
-				return drop.RespondingASes, nil
+				return drop.ResponsibleIAs, nil
 			} else {
 				fmt.Printf("External packet loss: %s\n", pkt.Addr)
 			}
@@ -216,7 +213,7 @@ func bytesToBitsMSB(data []byte) []uint8 {
 	return bits
 }
 
-func xor(agg1 []byte, agg2 []byte) []byte {
+func Xor(agg1 []byte, agg2 []byte) []byte {
 	if len(agg1) != len(agg2) {
 		return nil
 	}
@@ -227,7 +224,23 @@ func xor(agg1 []byte, agg2 []byte) []byte {
 	return res
 }
 
-func (l *Locator) solveLSE(d dropLocation) []SourceEndhostHash {
+func (l *Locator) PrepareSolve(d DropLocation) ([][]uint8, []uint8) {
+	bitstrings := make([][]uint8, len(d.Hashes))
+	for i := 0; i < len(d.Hashes); i++ {
+		bitstrings[i] = bytesToBitsMSB(d.Hashes[i].Data)
+	}
+	A := make([][]uint8, 256)
+	for i := 0; i < 256; i++ {
+		A[i] = make([]uint8, len(bitstrings))
+		for j := 0; j < len(bitstrings); j++ {
+			A[i][j] = bitstrings[j][i]
+		}
+	}
+	b := bytesToBitsMSB(Xor(d.Aggregate1, d.Aggregate2))
+	return A, b
+}
+
+func (l *Locator) SolveLSE(d DropLocation) []SourceEndhostHash {
 	/*fmt.Println("solveLSE")
 	fmt.Println(d.Aggregate1)
 	fmt.Println(d.Aggregate2)
@@ -247,7 +260,7 @@ func (l *Locator) solveLSE(d dropLocation) []SourceEndhostHash {
 	}
 	//fmt.Println("A=")
 	//fmt.Println(A)
-	b := bytesToBitsMSB(xor(d.Aggregate1, d.Aggregate2))
+	b := bytesToBitsMSB(Xor(d.Aggregate1, d.Aggregate2))
 	//fmt.Println("b=")
 	//fmt.Println(b)
 	//solve lse*x=b
@@ -271,7 +284,7 @@ func (l *Locator) findEgressOfIngressIA(ctx context.Context, ia addr.IA, egressI
 	}
 	// WARNING: this code only works under the assumption that the 'ia' and 'egressIA' are directly connected only over a single link
 	for k, v := range buckets {
-		fmt.Println(v.IngressIA, v.EgressIA)
+		//fmt.Println(v.IngressIA, v.EgressIA)
 		if v.EgressIA == ia {
 			return uint32(k.Egress), nil
 		}

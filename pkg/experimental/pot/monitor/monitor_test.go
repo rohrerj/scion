@@ -37,7 +37,7 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
-func generatePacket(numHops uint8, payloadSize uint16, useHbhExtension bool) ([]byte, *slayers.SCION, error) {
+func generatePacket(segLen [3]uint8, payloadSize uint16, useHbhExtension bool) ([]byte, *slayers.SCION, error) {
 	buffer := gopacket.NewSerializeBuffer()
 	s := &slayers.SCION{
 		Version:      0,
@@ -50,20 +50,32 @@ func generatePacket(numHops uint8, payloadSize uint16, useHbhExtension bool) ([]
 		Path:         &scion.Raw{},
 		PayloadLen:   payloadSize,
 	}
+	numInfs := 1
+	numHops := segLen[0]
+	if segLen[1] > 0 {
+		numInfs++
+		numHops += segLen[1]
+	}
+	if segLen[2] > 0 {
+		numInfs++
+		numHops += segLen[2]
+	}
 	scionpath := &scion.Decoded{
 		Base: scion.Base{
 			PathMeta: scion.MetaHdr{
 				CurrHF: 0,
-				SegLen: [3]uint8{numHops, 0, 0},
+				SegLen: segLen,
 			},
-			NumINF:  1,
+			NumINF:  numInfs,
 			NumHops: int(numHops),
 		},
-		InfoFields: []path.InfoField{
-			{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(time.Now())},
-		},
-
-		HopFields: []path.HopField{},
+		InfoFields: []path.InfoField{},
+		HopFields:  []path.HopField{},
+	}
+	for i := 0; i < numInfs; i++ {
+		scionpath.InfoFields = append(scionpath.InfoFields, path.InfoField{
+			SegID: 0x111 + uint16(i), ConsDir: true, Timestamp: util.TimeToSecs(time.Now().Add(-time.Duration(i) * time.Minute)),
+		})
 	}
 	for i := 0; i < int(numHops); i += 2 {
 		scionpath.HopFields = append(scionpath.HopFields, path.HopField{
@@ -114,6 +126,11 @@ func generatePacket(numHops uint8, payloadSize uint16, useHbhExtension bool) ([]
 	return buffer.Bytes(), s, nil
 }
 
+func BenchmarkMonitor(b *testing.B) {
+	//payloadSizes := []int{130, 380, 880, 4880}
+	//TODO
+}
+
 func BenchmarkHash(b *testing.B) {
 	// first generate a packet
 	blake, _ := blake2b.New256(nil)
@@ -131,7 +148,7 @@ func BenchmarkHash(b *testing.B) {
 	for _, payloadSize := range payloadSizes {
 		for _, h := range hashFunctions {
 			b.Run(fmt.Sprintf("%s_no_hbh_%d", h.name, payloadSize), func(b *testing.B) {
-				pkt, _, err := generatePacket(6, uint16(payloadSize), false)
+				pkt, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(payloadSize), false)
 				assert.NoError(b, err)
 				monitor := monitor.Monitor{
 					NewHasher:  sha256.New,
@@ -153,7 +170,7 @@ func BenchmarkHash(b *testing.B) {
 				}
 			})
 			b.Run(fmt.Sprintf("%s_with_hbh_%d", h.name, payloadSize), func(b *testing.B) {
-				pkt, _, err := generatePacket(6, uint16(payloadSize), true)
+				pkt, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(payloadSize), true)
 				assert.NoError(b, err)
 				monitor := monitor.Monitor{
 					NewHasher:  sha256.New,
@@ -269,11 +286,11 @@ func TestMonitor(t *testing.T) {
 		NewHasher:  sha256.New,
 		NewSampler: func() monitor.Sampler { return &monitor.FirstAndLastSampler{} },
 	}
-	pkt1, _, err := generatePacket(6, uint16(250), false)
+	pkt1, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(250), false)
 	assert.NoError(t, err)
-	pkt2, _, err := generatePacket(6, uint16(350), false)
+	pkt2, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(350), false)
 	assert.NoError(t, err)
-	pkt3, _, err := generatePacket(6, uint16(450), false)
+	pkt3, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(450), false)
 	assert.NoError(t, err)
 	w1 := monitor.NewMonitorWorker()
 	w2 := monitor.NewMonitorWorker()

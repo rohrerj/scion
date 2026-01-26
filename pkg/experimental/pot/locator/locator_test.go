@@ -16,7 +16,9 @@ package locator_test
 
 import (
 	"context"
+	"fmt"
 	"math/big"
+	"math/rand"
 	"net"
 	"testing"
 	"time"
@@ -1180,4 +1182,39 @@ func TestLocator2(t *testing.T) {
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []addr.IA{ia11, ia13}, foundASes)
 	t.Log(foundASes)
+}
+
+func BenchmarkSolveLSE(b *testing.B) {
+	sizes := []int{10, 100, 1_000, 10_000, 100_000, 500_000, 1_000_000}
+	for _, n := range sizes {
+		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
+			agg1 := make([]byte, 32)
+			_, err := rand.Read(agg1)
+			assert.NoError(b, err)
+			agg2 := make([]byte, 32)
+			_, err = rand.Read(agg2)
+			assert.NoError(b, err)
+			d := locator.DropLocation{
+				Hashes:         make([]locator.SourceEndhostHash, 0, n),
+				ResponsibleIAs: []addr.IA{addr.MustIAFrom(1, 10)},
+				Aggregate1:     agg1,
+				Aggregate2:     agg2,
+			}
+
+			for i := 0; i < n; i++ {
+				hash := make([]byte, 32)
+				_, err := rand.Read(hash)
+				assert.NoError(b, err)
+				d.Hashes = append(d.Hashes, locator.SourceEndhostHash{
+					Data: hash,
+				})
+			}
+
+			l := locator.Locator{}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				l.SolveLSE(d)
+			}
+		})
+	}
 }

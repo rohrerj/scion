@@ -18,7 +18,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/google/gopacket"
 	"github.com/scionproto/scion/pkg/experimental/pot/monitor"
+	"github.com/scionproto/scion/pkg/slayers/path/scion"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -26,7 +28,7 @@ func BenchmarkParser(b *testing.B) {
 	payloadSizes := []int{130, 380, 880, 4880}
 	for _, payloadSize := range payloadSizes {
 		b.Run(fmt.Sprintf("Parsing_no_hbh_%d", payloadSize), func(b *testing.B) {
-			pkt, _, err := generatePacket(6, uint16(payloadSize), false)
+			pkt, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(payloadSize), false)
 			assert.NoError(b, err)
 			parser := monitor.Parser{}
 			b.ResetTimer()
@@ -37,7 +39,7 @@ func BenchmarkParser(b *testing.B) {
 			}
 		})
 		b.Run(fmt.Sprintf("Parsing_with_hbh_%d", payloadSize), func(b *testing.B) {
-			pkt, _, err := generatePacket(6, uint16(payloadSize), true)
+			pkt, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(payloadSize), true)
 			assert.NoError(b, err)
 			parser := monitor.Parser{}
 			b.ResetTimer()
@@ -51,5 +53,30 @@ func BenchmarkParser(b *testing.B) {
 }
 
 func TestParser(t *testing.T) {
+	pkt, s, err := generatePacket([3]uint8{6, 2, 2}, uint16(120), false)
+	pktCopy := make([]byte, len(pkt))
+	copy(pktCopy, pkt)
+	assert.NoError(t, err)
+	parser := monitor.Parser{}
+	err = parser.Parse(pkt)
+	assert.NoError(t, err)
+	parser.UndoZero(pkt)
+	hCopy := [2]monitor.HashRegion{}
 
+	copy(hCopy[:], parser.HashRegions[:])
+	t.Log(parser.HashRegions)
+	t.Log(hCopy)
+	d := s.Path.(*scion.Decoded)
+	buf := gopacket.NewSerializeBuffer()
+	for i := 0; i < 9; i++ {
+		err = d.IncPath()
+		s.SerializeTo(buf, gopacket.SerializeOptions{})
+		assert.NoError(t, err)
+		copy(pkt, buf.Bytes())
+		parser = monitor.Parser{}
+		err = parser.Parse(pkt)
+		assert.NoError(t, err)
+		parser.UndoZero(pkt)
+		assert.Equal(t, hCopy, parser.HashRegions)
+	}
 }
