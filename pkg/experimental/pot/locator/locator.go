@@ -99,10 +99,21 @@ func aggregate(bucket *Bucket, newBucket *Bucket) error {
 }
 
 func (l *Locator) LocatePacketDrop(ctx context.Context, p *PacketDrop) ([]addr.IA, error) {
+	handleDropLocation := func(drop DropLocation) ([]addr.IA, bool) {
+		lostPackets := l.SolveLSE(drop)
+		for _, pkt := range lostPackets {
+			if slices.Equal(p.PacketHash, pkt.Data) {
+				fmt.Printf("Own packet loss: %v\n", pkt.Data)
+				return drop.ResponsibleIAs, true
+			} else {
+				fmt.Printf("External packet loss: %v\n", pkt.Data)
+			}
+		}
+		return nil, false
+	}
 	hops := p.Path.Metadata().Hops()
 	lastIAEgressBucket := &Bucket{}
 	lastIA := addr.IA(0)
-	dropLocations := make([]DropLocation, 0, 10)
 	for i := 0; i < len(hops); i++ {
 		hop := hops[i]
 		ia := hop.IA
@@ -160,12 +171,16 @@ func (l *Locator) LocatePacketDrop(ctx context.Context, p *PacketDrop) ([]addr.I
 			if err != nil {
 				return nil, err
 			}
-			dropLocations = append(dropLocations, DropLocation{
+			drop := DropLocation{
 				Hashes:         h,
 				Aggregate1:     b1.Data,
 				Aggregate2:     b2.Data,
 				ResponsibleIAs: []addr.IA{hop.IA},
-			})
+			}
+			res, found := handleDropLocation(drop)
+			if found {
+				return res, nil
+			}
 		}
 		// B) between consecutive ASes: lastIA.fixedEgressBucket != currentIA.fixedIngressBucket
 		if i != 0 && (lastIAEgressBucket.Counter != fixedIngressBucket.Counter || !bytes.Equal(lastIAEgressBucket.Data, fixedIngressBucket.Data)) {
@@ -174,30 +189,21 @@ func (l *Locator) LocatePacketDrop(ctx context.Context, p *PacketDrop) ([]addr.I
 			if err != nil {
 				return nil, err
 			}
-			dropLocations = append(dropLocations, DropLocation{
+			drop := DropLocation{
 				Hashes:         h,
 				Aggregate1:     lastIAEgressBucket.Data,
 				Aggregate2:     fixedIngressBucket.Data,
 				ResponsibleIAs: []addr.IA{lastIA, hop.IA},
-			})
+			}
+			res, found := handleDropLocation(drop)
+			if found {
+				return res, nil
+			}
 		}
 
 		lastIAEgressBucket = &fixedEgressBucket
 		lastIA = ia
 
-	}
-	// We should have found inconsistencies (printed to console), now we have to backtrace
-	for _, drop := range dropLocations {
-		lostPackets := l.SolveLSE(drop)
-		//fmt.Println("lostPackets", lostPackets, drop.ResponsibleIAs)
-		for _, pkt := range lostPackets {
-			if slices.Equal(p.PacketHash, pkt.Data) {
-				fmt.Printf("Own packet loss: %s\n", pkt.Data)
-				return drop.ResponsibleIAs, nil
-			} else {
-				fmt.Printf("External packet loss: %s\n", pkt.Data)
-			}
-		}
 	}
 	return nil, serrors.New("Drop location not found")
 }
@@ -223,7 +229,7 @@ func Xor(agg1 []byte, agg2 []byte) []byte {
 	return res
 }
 
-func (l *Locator) PrepareSolve(d DropLocation) ([][]uint8, []uint8) {
+/*func (l *Locator) PrepareSolve(d DropLocation) ([][]uint8, []uint8) {
 	bitstrings := make([][]uint8, len(d.Hashes))
 	for i := 0; i < len(d.Hashes); i++ {
 		bitstrings[i] = bytesToBitsMSB(d.Hashes[i].Data)
@@ -237,9 +243,10 @@ func (l *Locator) PrepareSolve(d DropLocation) ([][]uint8, []uint8) {
 	}
 	b := bytesToBitsMSB(Xor(d.Aggregate1, d.Aggregate2))
 	return A, b
-}
+}*/
 
 func (l *Locator) SolveLSE(d DropLocation) []SourceEndhostHash {
+	fmt.Printf("Solve LSE with %d columns\n", len(d.Hashes))
 	/*fmt.Println("solveLSE")
 	fmt.Println(d.Aggregate1)
 	fmt.Println(d.Aggregate2)
@@ -259,7 +266,7 @@ func (l *Locator) SolveLSE(d DropLocation) []SourceEndhostHash {
 	}
 	//fmt.Println("A=")
 	//fmt.Println(A)
-	b := bytesToBitsMSB(Xor(d.Aggregate1, d.Aggregate2))
+	b := bytesToBitsMSB(d.Aggregate2)
 	//fmt.Println("b=")
 	//fmt.Println(b)
 	//solve lse*x=b
@@ -268,7 +275,7 @@ func (l *Locator) SolveLSE(d DropLocation) []SourceEndhostHash {
 	//fmt.Println(x)
 	sol := make([]SourceEndhostHash, 0, 1)
 	for i, index := range x {
-		if index == 1 {
+		if index == 0 {
 			sol = append(sol, d.Hashes[i])
 		}
 	}

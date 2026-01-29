@@ -1160,6 +1160,190 @@ func TestLocator2(t *testing.T) {
 	t.Log(foundASes)
 }
 
+func TestLocator3(t *testing.T) {
+	// The problem that this test illustrates is that sometimes it might blame the wrong ASes if the LSE has multiple solutions.
+	// Here we have the solution vectors x1=[0 1 1 0] and x2=[1 0 0 1], where it finds x1, but the correct solution is x2.
+	// We would have to compute multiple solutions, not just the first one, and we could use the counters to filter out some solutions,
+	// which reduces the risk of wrongfull attribution by a lot if the packet losses are assumed to be small
+	//
+	//	10	->	11	->	12
+	//
+	send_time := time.Now().Add(-time.Second * 10)
+	localIA := addr.MustIAFrom(1, 10)
+	ia11 := addr.MustIAFrom(1, 11)
+	ia12 := addr.MustIAFrom(1, 12)
+	localAddr, err := net.ResolveUDPAddr("udp", "10.0.0.1:3333")
+	assert.NoError(t, err)
+	packet_hash_1 := []byte{128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	packet_hash_2 := []byte{64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	packet_hash_3 := []byte{32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	packet_hash_4 := []byte{224, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+
+	l := locator.NewLocator(nil, send_time, localIA, localAddr)
+	l.Fetcher = &fetcherMock{
+		sourceEndhostHashes: map[addr.IA]map[uint32][]locator.SourceEndhostHash{
+			localIA: {
+				1: []locator.SourceEndhostHash{
+					{
+						IA:   localIA,
+						Data: packet_hash_1,
+					},
+					{
+						IA:   localIA,
+						Data: packet_hash_2,
+					},
+					{
+						IA:   localIA,
+						Data: packet_hash_3,
+					},
+					{
+						IA:   localIA,
+						Data: packet_hash_4,
+					},
+				},
+			},
+		},
+		buckets: map[addr.IA][]locator.Bucket{
+			localIA: {
+				{
+					Ingress: 0,
+					Egress:  1,
+					Data: DataAggregate(
+						packet_hash_1,
+						packet_hash_2,
+						packet_hash_3,
+						packet_hash_4,
+					),
+					Counter: 4,
+					SourceIAAggregate: SourceIAAggregate(
+						localIA,
+						localIA,
+						localIA,
+						localIA,
+					),
+					IngressIA: localIA,
+					EgressIA:  ia11,
+					IsIngress: false,
+				},
+				{
+					Ingress: 0,
+					Egress:  1,
+					Data: DataAggregate(
+						packet_hash_1,
+						packet_hash_2,
+						packet_hash_3,
+						packet_hash_4,
+					),
+					Counter: 4,
+					SourceIAAggregate: SourceIAAggregate(
+						localIA,
+						localIA,
+						localIA,
+						localIA,
+					),
+					IngressIA: localIA,
+					EgressIA:  ia11,
+					IsIngress: true,
+				},
+			},
+			ia11: {
+				{
+					Ingress: 2,
+					Egress:  3,
+					Data: DataAggregate(
+						packet_hash_1,
+						packet_hash_4,
+					),
+					Counter: 2,
+					SourceIAAggregate: SourceIAAggregate(
+						localIA,
+						localIA,
+					),
+					IngressIA: localIA,
+					EgressIA:  ia11,
+					IsIngress: false,
+				},
+				{
+					Ingress: 2,
+					Egress:  3,
+					Data: DataAggregate(
+						packet_hash_1,
+						packet_hash_4,
+					),
+					Counter: 2,
+					SourceIAAggregate: SourceIAAggregate(
+						localIA,
+						localIA,
+					),
+					IngressIA: localIA,
+					EgressIA:  ia11,
+					IsIngress: true,
+				},
+			},
+			ia12: {
+				{
+					Ingress: 4,
+					Egress:  0,
+					Data: DataAggregate(
+						packet_hash_4,
+					),
+					Counter: 1,
+					SourceIAAggregate: SourceIAAggregate(
+						localIA,
+					),
+					IngressIA: ia11,
+					EgressIA:  ia12,
+					IsIngress: false,
+				},
+				{
+					Ingress: 4,
+					Egress:  0,
+					Data: DataAggregate(
+						packet_hash_4,
+					),
+					Counter: 1,
+					SourceIAAggregate: SourceIAAggregate(
+						localIA,
+					),
+					IngressIA: ia11,
+					EgressIA:  ia12,
+					IsIngress: true,
+				},
+			},
+		},
+	}
+	p := path.Path{
+		Meta: snet.PathMetadata{
+			FabridInfo: make([]snet.FabridInfo, 3),
+			Interfaces: []snet.PathInterface{
+				{
+					ID: 1,
+					IA: localIA,
+				},
+				{
+					ID: 2,
+					IA: ia11,
+				},
+				{
+					ID: 3,
+					IA: ia11,
+				},
+				{
+					ID: 4,
+					IA: ia12,
+				},
+			},
+		},
+	}
+	foundASes, err := l.LocatePacketDrop(context.Background(), &locator.PacketDrop{
+		Path:       p,
+		PacketHash: packet_hash_1,
+	})
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []addr.IA{ia11, ia12}, foundASes)
+	t.Log(foundASes)
+}
+
 func BenchmarkSolveLSE(b *testing.B) {
 	sizes := []int{10, 100, 1_000, 10_000, 100_000, 500_000, 1_000_000}
 	for _, n := range sizes {
