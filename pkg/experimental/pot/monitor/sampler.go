@@ -23,6 +23,10 @@ type Sampler interface {
 type StrideSampler struct{}
 
 func (s *StrideSampler) Sample(data []byte, out []byte) {
+	if len(data) < len(out) {
+		copy(out, data)
+		return
+	}
 	num_samples := len(out)
 	dataLen := len(data)
 	stride := dataLen / num_samples
@@ -38,6 +42,10 @@ func (s *StrideSampler) Sample(data []byte, out []byte) {
 type FirstAndLastSampler struct{}
 
 func (s *FirstAndLastSampler) Sample(data []byte, out []byte) {
+	if len(data) < len(out) {
+		copy(out, data)
+		return
+	}
 	halfSampleLen := len(out) >> 2
 	dataLen := len(data)
 	copy(out[:halfSampleLen], data[:halfSampleLen])

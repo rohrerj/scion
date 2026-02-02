@@ -22,7 +22,8 @@ import (
 )
 
 func BenchmarkSamplers(b *testing.B) {
-	sizes := []int{250, 1000, 5000}
+	sizes := []int{100, 500, 1000, 5000}
+	out_sizes := []int{32, 64, 128, 256}
 	samplers := []struct {
 		name    string
 		sampler monitor.Sampler
@@ -36,20 +37,21 @@ func BenchmarkSamplers(b *testing.B) {
 			sampler: &monitor.FirstAndLastSampler{},
 		},
 	}
-	out := make([]byte, 128)
 	data := make([]byte, 5000)
 	for i := 0; i < 5000; i++ {
 		data[i] = byte(i)
 	}
-	for _, sampler := range samplers {
-		for _, size := range sizes {
-			b.Run(fmt.Sprintf("%s_size_%d", sampler.name, size), func(b *testing.B) {
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					sampler.sampler.Sample(data[:size], out)
-				}
-			})
+	for _, out_size := range out_sizes {
+		out := make([]byte, out_size)
+		for _, sampler := range samplers {
+			for _, size := range sizes {
+				b.Run(fmt.Sprintf("%s_payload_size_%d_out_size_%d", sampler.name, size, out_size), func(b *testing.B) {
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						sampler.sampler.Sample(data[:size], out)
+					}
+				})
+			}
 		}
 	}
-
 }

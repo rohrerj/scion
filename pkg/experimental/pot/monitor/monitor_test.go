@@ -15,11 +15,17 @@
 package monitor_test
 
 import (
+	"bufio"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"hash"
 	"hash/crc64"
 	"math/rand"
+	"os"
+	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +53,10 @@ func generatePacket(segLen [3]uint8, payloadSize uint16, useHbhExtension bool) (
 		PathType:     scion.PathType,
 		DstIA:        xtest.MustParseIA("1-ff00:0:110"),
 		SrcIA:        xtest.MustParseIA("1-ff00:0:111"),
+		DstAddrType:  slayers.T4Ip,
+		SrcAddrType:  slayers.T4Ip,
+		RawDstAddr:   []byte{1, 1, 1, 1},
+		RawSrcAddr:   []byte{2, 2, 2, 2},
 		Path:         &scion.Raw{},
 		PayloadLen:   payloadSize,
 	}
@@ -127,8 +137,192 @@ func generatePacket(segLen [3]uint8, payloadSize uint16, useHbhExtension bool) (
 }
 
 func BenchmarkMonitor(b *testing.B) {
-	//payloadSizes := []int{130, 380, 880, 4880}
-	//TODO
+	// now we benchmark the monitor with fixed parameters
+	// hasher = sha256, sampler = firstAndLastSampler, no hbh
+	runtime.GOMAXPROCS(1)
+	payloadSizes := []int{100, 500, 1000, 5000}
+	segments := [][3]uint8{
+		{6, 0, 0},
+		{4, 2, 0},
+		{2, 2, 2},
+	}
+	m := monitor.Monitor{
+		NewHasher:  sha256.New,
+		NewSampler: func() monitor.Sampler { return &monitor.FirstAndLastSampler{} },
+	}
+	sourceIA := xtest.MustParseIA("1-ff00:0:111")
+	for segIndex, segment := range segments {
+		for _, payloadSize := range payloadSizes {
+			b.Run(fmt.Sprintf("Monitoring_%d_num_infs_%d", payloadSize, 1+segIndex), func(b *testing.B) {
+				pkt, _, err := generatePacket(segment, uint16(payloadSize), false)
+				assert.NoError(b, err)
+				monitorWorker := m.NewMonitorWorker()
+				for i := 0; i < b.N; i++ {
+					monitorWorker.ProcessPacket(pkt, 1, 2, sourceIA)
+				}
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					monitorWorker.ProcessPacket(pkt, 1, 2, sourceIA)
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkMonitorBatches(b *testing.B) {
+	// now we benchmark the monitor with fixed parameters
+	// hasher = sha256, sampler = firstAndLastSampler, no hbh
+	saveSamples := func(filename string, samples []int64) {
+		f, err := os.Create(filename)
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close()
+
+		w := bufio.NewWriter(f)
+		for _, s := range samples {
+			w.WriteString(strconv.FormatInt(s, 10))
+			w.WriteByte('\n')
+		}
+		w.Flush()
+	}
+	runtime.GOMAXPROCS(1)
+	segments := [][3]uint8{
+		{3, 0, 0},
+		{2, 1, 0},
+		{1, 1, 1},
+
+		{4, 0, 0},
+		{3, 1, 0},
+		{2, 1, 1},
+
+		{5, 0, 0},
+		{4, 1, 0},
+		{3, 1, 1},
+
+		{6, 0, 0},
+		{5, 1, 0},
+		{4, 1, 1},
+
+		{7, 0, 0},
+		{6, 1, 0},
+		{5, 1, 1},
+
+		{8, 0, 0},
+		{7, 1, 0},
+		{6, 1, 1},
+
+		{9, 0, 0},
+		{8, 1, 0},
+		{7, 1, 1},
+
+		{10, 0, 0},
+		{9, 1, 0},
+		{8, 1, 1},
+	}
+	m := monitor.Monitor{
+		NewHasher:  sha256.New,
+		NewSampler: func() monitor.Sampler { return &monitor.FirstAndLastSampler{} },
+	}
+	sourceIA := xtest.MustParseIA("1-ff00:0:111")
+	for _, segment := range segments {
+		numHops := segment[0] + segment[1] + segment[2]
+		numInfs := 1
+		if segment[1] != 0 {
+			numInfs = 2
+		}
+		if segment[2] != 0 {
+			numInfs = 3
+		}
+		//for _, payloadSize := range payloadSizes {
+		b.Run(fmt.Sprintf("Monitoring_%d_hops_over_%d_infs", numHops, numInfs), func(b *testing.B) {
+			pkt, _, err := generatePacket(segment, uint16(128), false)
+			assert.NoError(b, err)
+			monitorWorker := m.NewMonitorWorker()
+			const batchSize = 4096
+			samples := make([]int64, 0, b.N/batchSize)
+			for j := 0; j < batchSize; j++ {
+				monitorWorker.ProcessPacket(pkt, 1, 2, sourceIA)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i += batchSize {
+				start := time.Now()
+				for j := 0; j < batchSize; j++ {
+					monitorWorker.ProcessPacket(pkt, 1, 2, sourceIA)
+				}
+				elapsed := time.Since(start).Nanoseconds()
+				samples = append(samples, elapsed/int64(batchSize))
+			}
+			b.StopTimer()
+			saveSamples(fmt.Sprintf("%s.txt", strings.Split(b.Name(), "/")[1]), samples)
+		})
+		//}
+	}
+}
+
+func BenchmarkAggregate(b *testing.B) {
+	payloadSizes := []int{100, 500, 1000, 5000}
+	for _, payloadSize := range payloadSizes {
+		pkt, _, err := generatePacket([3]uint8{6, 2, 2}, uint16(payloadSize), false)
+		assert.NoError(b, err)
+		m := monitor.Monitor{
+			NewHasher:  sha256.New,
+			NewSampler: func() monitor.Sampler { return &monitor.StrideSampler{} },
+		}
+		monitorWorker := m.NewMonitorWorker()
+		monitorWorker.HashBuffer = make([]byte, 32)
+		for i := 0; i < 32; i++ {
+			monitorWorker.HashBuffer[i] = byte(i)
+		}
+		sourceIA := addr.MustIAFrom(1, 2)
+		b.Run(fmt.Sprintf("aggregate_%d", payloadSize), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				firstLine := binary.BigEndian.Uint32(pkt[:4])
+				flowID := firstLine & 0xFFFFF
+				time_window := monitor.ComputeTimeWindowIndex(int(flowID), time.Now())
+				/*err := m.HashPacket(packet) //we dont measure packet hashing so this is excluded
+				if err != nil {
+					return err
+				}*/
+				monitorWorker.StoreValueInBucket(monitorWorker.HashBuffer, 1, 2, time_window, sourceIA)
+			}
+		})
+	}
+}
+
+func BenchmarkOnlyHash(b *testing.B) {
+	//blake, _ := blake2b.New256(nil)
+
+	hashFunctions := []struct {
+		name   string
+		hasher func() hash.Hash
+	}{
+		{"sha256", sha256.New},
+		/*{"blake2b 256bit", func() hash.Hash { return blake }},
+		{"xxhash 64bit", func() hash.Hash { return xxhash.New() }},
+		{"crc 64bit", func() hash.Hash { return crc64.New(crc64.MakeTable(crc64.ISO)) }},*/
+	}
+	//payloadSizes := []int{128, 256, 512, 1024, 2048, 4096}
+	for payloadSize := 4; payloadSize <= 256; payloadSize += 4 {
+		payload := make([]byte, payloadSize)
+		for i := 0; i < int(payloadSize); i++ {
+			payload[i] = byte(i)
+		}
+		for _, h := range hashFunctions {
+			hasher := h.hasher()
+			out := make([]byte, hasher.Size())
+			b.Run(fmt.Sprintf("%s_%d", h.name, payloadSize), func(b *testing.B) {
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					hasher.Reset()
+					_, err := hasher.Write(payload)
+					assert.NoError(b, err)
+					hasher.Sum(out)
+				}
+			})
+		}
+	}
 }
 
 func BenchmarkHash(b *testing.B) {
@@ -137,21 +331,21 @@ func BenchmarkHash(b *testing.B) {
 
 	hashFunctions := []struct {
 		name   string
-		hasher hash.Hash
+		hasher func() hash.Hash
 	}{
-		{"sha256", sha256.New()},
-		{"blake2b 256bit", blake},
-		{"xxhash 64bit", xxhash.New()},
-		{"crc 64bit", crc64.New(crc64.MakeTable(crc64.ISO))},
+		{"sha256", sha256.New},
+		{"blake2b 256bit", func() hash.Hash { return blake }},
+		{"xxhash 64bit", func() hash.Hash { return xxhash.New() }},
+		{"crc 64bit", func() hash.Hash { return crc64.New(crc64.MakeTable(crc64.ISO)) }},
 	}
-	payloadSizes := []int{130, 380, 880, 4880}
+	payloadSizes := []int{100, 500, 1000, 5000}
 	for _, payloadSize := range payloadSizes {
 		for _, h := range hashFunctions {
 			b.Run(fmt.Sprintf("%s_no_hbh_%d", h.name, payloadSize), func(b *testing.B) {
 				pkt, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(payloadSize), false)
 				assert.NoError(b, err)
 				monitor := monitor.Monitor{
-					NewHasher:  sha256.New,
+					NewHasher:  h.hasher,
 					NewSampler: func() monitor.Sampler { return &monitor.StrideSampler{} },
 				}
 				monitorWorker := monitor.NewMonitorWorker()
@@ -160,8 +354,6 @@ func BenchmarkHash(b *testing.B) {
 				err = monitorWorker.HashPacket(pkt)
 				assert.NoError(b, err)
 				assert.Equal(b, pkt, pktCopy)
-
-				assert.NoError(b, err)
 				b.ResetTimer()
 
 				for i := 0; i < b.N; i++ {
@@ -173,7 +365,7 @@ func BenchmarkHash(b *testing.B) {
 				pkt, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(payloadSize), true)
 				assert.NoError(b, err)
 				monitor := monitor.Monitor{
-					NewHasher:  sha256.New,
+					NewHasher:  h.hasher,
 					NewSampler: func() monitor.Sampler { return &monitor.StrideSampler{} },
 				}
 				monitorWorker := monitor.NewMonitorWorker()
@@ -183,9 +375,7 @@ func BenchmarkHash(b *testing.B) {
 				assert.NoError(b, err)
 				assert.Equal(b, pkt, pktCopy)
 
-				assert.NoError(b, err)
 				b.ResetTimer()
-
 				for i := 0; i < b.N; i++ {
 					err := monitorWorker.HashPacket(pkt)
 					assert.NoError(b, err)

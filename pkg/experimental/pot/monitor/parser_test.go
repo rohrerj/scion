@@ -25,30 +25,37 @@ import (
 )
 
 func BenchmarkParser(b *testing.B) {
-	payloadSizes := []int{130, 380, 880, 4880}
-	for _, payloadSize := range payloadSizes {
-		b.Run(fmt.Sprintf("Parsing_no_hbh_%d", payloadSize), func(b *testing.B) {
-			pkt, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(payloadSize), false)
-			assert.NoError(b, err)
-			parser := monitor.Parser{}
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				err := parser.Parse(pkt)
+	payloadSizes := []int{100, 500, 1000, 5000}
+	segments := [][3]uint8{
+		{2, 0, 0},
+		{2, 2, 0},
+		{2, 2, 2},
+	}
+	for segIndex, segment := range segments {
+		for _, payloadSize := range payloadSizes {
+			b.Run(fmt.Sprintf("Parsing_no_hbh_%d_num_infs_%d", payloadSize, 1+segIndex), func(b *testing.B) {
+				pkt, _, err := generatePacket(segment, uint16(payloadSize), false)
 				assert.NoError(b, err)
-				parser.UndoZero(pkt)
-			}
-		})
-		b.Run(fmt.Sprintf("Parsing_with_hbh_%d", payloadSize), func(b *testing.B) {
-			pkt, _, err := generatePacket([3]uint8{6, 0, 0}, uint16(payloadSize), true)
-			assert.NoError(b, err)
-			parser := monitor.Parser{}
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				err := parser.Parse(pkt)
+				parser := monitor.Parser{}
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					err := parser.Parse(pkt)
+					assert.NoError(b, err)
+					parser.UndoZero(pkt)
+				}
+			})
+			b.Run(fmt.Sprintf("Parsing_with_hbh_%d_num_infs_%d", payloadSize, 1+segIndex), func(b *testing.B) {
+				pkt, _, err := generatePacket(segment, uint16(payloadSize), true)
 				assert.NoError(b, err)
-				parser.UndoZero(pkt)
-			}
-		})
+				parser := monitor.Parser{}
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					err := parser.Parse(pkt)
+					assert.NoError(b, err)
+					parser.UndoZero(pkt)
+				}
+			})
+		}
 	}
 }
 
@@ -69,6 +76,7 @@ func TestParser(t *testing.T) {
 	d := s.Path.(*scion.Decoded)
 	buf := gopacket.NewSerializeBuffer()
 	for i := 0; i < 9; i++ {
+		d.InfoFields[d.PathMeta.CurrINF].SegID++ //some random modification to the SegID
 		err = d.IncPath()
 		s.SerializeTo(buf, gopacket.SerializeOptions{})
 		assert.NoError(t, err)

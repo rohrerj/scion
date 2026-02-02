@@ -41,7 +41,7 @@ type Monitor struct {
 type MonitorWorker struct {
 	hasher          hash.Hash
 	Parser          Parser
-	hashSampleSlice [64]byte
+	HashSampleSlice [64]byte
 	Sampler         Sampler
 	Buckets         [Num_windows]map[uint64]Bucket
 	HashBuffer      []byte
@@ -86,19 +86,18 @@ func (m *MonitorWorker) StoreValueInBucket(value []byte, ingress uint16, egress 
 		return serrors.New("time_window index out of bounds")
 	}
 	index := uint64(ingress)<<16 + uint64(egress)
-	new_bucket := Bucket{
-		Data:              make([]byte, len(value)),
-		Counter:           1,
-		SourceIAAggregate: big.NewInt(int64(source_ia)),
-	}
-	copy(new_bucket.Data, value)
-
 	item, found := m.Buckets[time_window][index]
 	if !found {
 		// bucket does not exist, create new bucket
+		new_bucket := Bucket{
+			Data:              make([]byte, len(value)),
+			Counter:           1,
+			SourceIAAggregate: big.NewInt(int64(source_ia)),
+		}
+		copy(new_bucket.Data, value)
 		m.Buckets[time_window][index] = new_bucket
 	} else {
-		m.Aggregate(&item, &new_bucket)
+		m.Aggregate2(&item, value, 1, big.NewInt(int64(source_ia)))
 	}
 	return nil
 }
@@ -113,6 +112,19 @@ func (m *MonitorWorker) Aggregate(bucket *Bucket, newBucket *Bucket) error {
 	}
 	bucket.Counter += newBucket.Counter
 	bucket.SourceIAAggregate.Add(bucket.SourceIAAggregate, newBucket.SourceIAAggregate)
+	return nil
+}
+
+// Same as Aggregate but with different parameters
+func (m *MonitorWorker) Aggregate2(bucket *Bucket, data []byte, counter uint32, sourceIAAgg *big.Int) error {
+	if len(bucket.Data) != len(data) {
+		return serrors.New("slices need equal length")
+	}
+	for i := 0; i < len(bucket.Data); i++ {
+		bucket.Data[i] ^= data[i]
+	}
+	bucket.Counter += counter
+	bucket.SourceIAAggregate.Add(bucket.SourceIAAggregate, sourceIAAgg)
 	return nil
 }
 
@@ -214,14 +226,14 @@ func (m *MonitorWorker) HashPacket(packet []byte) error {
 		return err
 	}
 	n := len(m.Parser.HashRegions[1])
-	if m.Sampler == nil || n <= len(m.hashSampleSlice) {
+	if m.Sampler == nil || n <= len(m.HashSampleSlice) {
 		_, err = m.hasher.Write(m.Parser.HashRegions[1])
 		if err != nil {
 			return err
 		}
 	} else {
-		m.Sampler.Sample(m.Parser.HashRegions[1], m.hashSampleSlice[:])
-		_, err = m.hasher.Write(m.hashSampleSlice[:])
+		m.Sampler.Sample(m.Parser.HashRegions[1], m.HashSampleSlice[:])
+		_, err = m.hasher.Write(m.HashSampleSlice[:])
 		if err != nil {
 			return err
 		}

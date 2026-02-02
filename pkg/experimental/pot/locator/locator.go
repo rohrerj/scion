@@ -246,7 +246,7 @@ func Xor(agg1 []byte, agg2 []byte) []byte {
 }*/
 
 func (l *Locator) SolveLSE(d DropLocation) []SourceEndhostHash {
-	fmt.Printf("Solve LSE with %d columns\n", len(d.Hashes))
+	//fmt.Printf("Solve LSE with %d columns\n", len(d.Hashes))
 	/*fmt.Println("solveLSE")
 	fmt.Println(d.Aggregate1)
 	fmt.Println(d.Aggregate2)
