@@ -193,6 +193,7 @@ write_source_files(
         "//pkg/proto/discovery/v1/discoveryconnect:write_files",
         "//pkg/proto/gateway/v1/gatewayconnect:write_files",
         "//pkg/proto/hidden_segment/v1/hidden_segmentconnect:write_files",
+        "//pkg/proto/endhost/v1/endhostconnect:write_files",
         "//private/ca/api:write_files",
         "//private/mgmtapi/cppki/api:write_files",
         "//private/mgmtapi/health/api:write_files",
