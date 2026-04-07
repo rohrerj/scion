@@ -46,6 +46,7 @@ go_library(
         "//pkg/private/serrors:go_default_library",
         "//pkg/proto/control_plane:go_default_library",
         "//pkg/proto/discovery:go_default_library",
+        "//pkg/proto/endhost/v1/endhostconnect:go_default_library",
         "//pkg/scrypto:go_default_library",
         "//pkg/scrypto/cppki:go_default_library",
         "//pkg/segment:go_default_library",

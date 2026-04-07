@@ -77,6 +77,7 @@ import (
 	cpconnect "github.com/scionproto/scion/pkg/proto/control_plane/v1/control_planeconnect"
 	dpb "github.com/scionproto/scion/pkg/proto/discovery"
 	dconnect "github.com/scionproto/scion/pkg/proto/discovery/v1/discoveryconnect"
+	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	discoveryext "github.com/scionproto/scion/pkg/segment/extensions/discovery"
@@ -431,10 +432,33 @@ func realMain(ctx context.Context) error {
 		Requests:     libmetrics.NewPromCounter(metrics.SegmentLookupRequestsTotal),
 		SegmentsSent: libmetrics.NewPromCounter(metrics.SegmentLookupSegmentsSentTotal),
 	}
+	forwardingEndhostServer := &segreqgrpc.EndhostServer{
+		Lookuper: segreq.ForwardingLookup{
+			LocalIA:     topo.IA(),
+			CoreChecker: segreq.CoreChecker{Inspector: inspector},
+			Fetcher:     segreq.NewFetcher(fetcherCfg),
+			Expander: segreq.WildcardExpander{
+				LocalIA:   topo.IA(),
+				Core:      topo.Core(),
+				Inspector: inspector,
+				PathDB:    pathDB,
+			},
+		},
+		RevCache:     revCache,
+		Requests:     libmetrics.NewPromCounter(metrics.SegmentLookupRequestsTotal),
+		SegmentsSent: libmetrics.NewPromCounter(metrics.SegmentLookupSegmentsSentTotal),
+		LocalIA:      topo.IA(),
+		IsCore:       topo.Core(),
+		Inspector:    inspector,
+		PathDB:       pathDB,
+	}
 
 	// Always register a forwarding lookup for AS internal requests.
 	connectIntra.Handle(cpconnect.NewSegmentLookupServiceHandler(segreqconnect.LookupServer{
 		LookupServer: forwardingLookupServer,
+	}))
+	connectIntra.Handle(endhostconnect.NewPathServiceHandler(segreqconnect.EndhostServer{
+		EndhostServer: forwardingEndhostServer,
 	}))
 	if topo.Core() {
 		cppb.RegisterSegmentLookupServiceServer(quicServer, authLookupServer)
