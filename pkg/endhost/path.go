@@ -29,7 +29,9 @@ import (
 )
 
 type PathService struct {
-	url string
+	url       string
+	PageSize  int32
+	PageToken string
 }
 
 func NewPathService(url string) *PathService {
@@ -40,6 +42,9 @@ func NewPathService(url string) *PathService {
 }
 
 func (s *PathService) Paths(ctx context.Context, dst, src addr.IA) ([]snet.Path, error) {
+	if s.PageSize == 0 {
+		s.PageSize = 64
+	}
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -50,9 +55,10 @@ func (s *PathService) Paths(ctx context.Context, dst, src addr.IA) ([]snet.Path,
 	client := endhostconnect.NewPathServiceClient(httpClient, s.url)
 	res, err := client.ListSegments(ctx, &connect.Request[endhost.ListSegmentsRequest]{
 		Msg: &endhost.ListSegmentsRequest{
-			SrcIsdAs: uint64(src),
-			DstIsdAs: uint64(dst),
-			PageSize: 64,
+			SrcIsdAs:  uint64(src),
+			DstIsdAs:  uint64(dst),
+			PageSize:  s.PageSize,
+			PageToken: s.PageToken,
 		},
 	})
 	if err != nil {
@@ -64,7 +70,10 @@ func (s *PathService) Paths(ctx context.Context, dst, src addr.IA) ([]snet.Path,
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println(ps.ASEntries)
+		for _, entry := range ps.ASEntries {
+			fmt.Printf("%s, ", entry.Local)
+		}
+		fmt.Println()
 	}
 	fmt.Println("core segments")
 	for _, pb := range res.Msg.CoreSegments {
@@ -72,7 +81,10 @@ func (s *PathService) Paths(ctx context.Context, dst, src addr.IA) ([]snet.Path,
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println(ps.ASEntries)
+		for _, entry := range ps.ASEntries {
+			fmt.Printf("%s, ", entry.Local)
+		}
+		fmt.Println()
 	}
 	fmt.Println("down segments")
 	for _, pb := range res.Msg.DownSegments {
@@ -80,7 +92,10 @@ func (s *PathService) Paths(ctx context.Context, dst, src addr.IA) ([]snet.Path,
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println(ps.ASEntries)
+		for _, entry := range ps.ASEntries {
+			fmt.Printf("%s, ", entry.Local)
+		}
+		fmt.Println()
 	}
 	return nil, nil
 }

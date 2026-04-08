@@ -26,12 +26,17 @@ import (
 
 func TestPath(t *testing.T) {
 	p := endhost.NewPathService("http://[fd00:f00d:cafe::7f00:1c]:31022")
+	p.PageSize = 16
+	p.PageToken = "0"
 	ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancelF()
 	src, err := addr.ParseIA("1-ff00:0:111")
 	assert.NoError(t, err)
 	dst, err := addr.ParseIA("2-ff00:0:222")
 	assert.NoError(t, err)
+	_, err = p.Paths(ctx, dst, src)
+	assert.NoError(t, err)
+	p.PageToken = "1"
 	_, err = p.Paths(ctx, dst, src)
 	assert.NoError(t, err)
 	t.Fail()
