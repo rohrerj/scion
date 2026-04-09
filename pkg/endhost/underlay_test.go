@@ -16,28 +16,23 @@ package endhost_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
-	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPath(t *testing.T) {
-	p := endhost.NewPathService("http://[fd00:f00d:cafe::7f00:1c]:31022")
-	p.PageSize = 16
-	p.PageToken = "0"
+func TestUnderlay(t *testing.T) {
+	u := endhost.NewUnderlayService("http://[fd00:f00d:cafe::7f00:1c]:31022")
 	ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancelF()
-	src, err := addr.ParseIA("1-ff00:0:111")
+	res, err := u.ListUnderlays(ctx, nil)
 	assert.NoError(t, err)
-	dst, err := addr.ParseIA("1-ff00:0:120")
-	assert.NoError(t, err)
-	_, err = p.Paths(ctx, dst, src)
-	assert.NoError(t, err)
-	p.PageToken = "1"
-	_, err = p.Paths(ctx, dst, src)
-	assert.NoError(t, err)
+	assert.NotNil(t, res.Udp)
+	for _, router := range res.Udp.Routers {
+		fmt.Println(router.Address, router.IsdAs, router.Interfaces)
+	}
 	t.Fail()
 }

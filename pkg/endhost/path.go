@@ -29,14 +29,22 @@ import (
 )
 
 type PathService struct {
-	url       string
-	PageSize  int32
-	PageToken string
+	url        string
+	httpClient *http.Client
+	PageSize   int32
+	PageToken  string
 }
 
 func NewPathService(url string) *PathService {
 	p := &PathService{
 		url: url,
+		httpClient: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			},
+		},
 	}
 	return p
 }
@@ -45,14 +53,8 @@ func (s *PathService) Paths(ctx context.Context, dst, src addr.IA) ([]snet.Path,
 	if s.PageSize == 0 {
 		s.PageSize = 64
 	}
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-	}
-	client := endhostconnect.NewPathServiceClient(httpClient, s.url)
+
+	client := endhostconnect.NewPathServiceClient(s.httpClient, s.url)
 	res, err := client.ListSegments(ctx, &connect.Request[endhost.ListSegmentsRequest]{
 		Msg: &endhost.ListSegmentsRequest{
 			SrcIsdAs:  uint64(src),

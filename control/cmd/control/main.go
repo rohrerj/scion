@@ -64,6 +64,7 @@ import (
 	cstrustconnect "github.com/scionproto/scion/control/trust/connect"
 	cstrustgrpc "github.com/scionproto/scion/control/trust/grpc"
 	cstrustmetrics "github.com/scionproto/scion/control/trust/metrics"
+	underlayconnect "github.com/scionproto/scion/control/underlay/connect"
 	"github.com/scionproto/scion/pkg/addr"
 	libconnect "github.com/scionproto/scion/pkg/connect"
 	"github.com/scionproto/scion/pkg/connect/happy"
@@ -456,6 +457,9 @@ func realMain(ctx context.Context) error {
 	}))
 	connectIntra.Handle(endhostconnect.NewPathServiceHandler(segreqconnect.EndhostServer{
 		EndhostServer: forwardingEndhostServer,
+	}))
+	connectIntra.Handle(endhostconnect.NewUnderlayServiceHandler(underlayconnect.UnderlayServer{
+		Topology: topo,
 	}))
 	if topo.Core() {
 		cppb.RegisterSegmentLookupServiceServer(quicServer, authLookupServer)

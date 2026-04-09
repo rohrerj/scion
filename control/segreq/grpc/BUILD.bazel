@@ -17,7 +17,6 @@ go_library(
         "//pkg/proto/control_plane:go_default_library",
         "//pkg/proto/endhost:go_default_library",
         "//pkg/segment:go_default_library",
-        "//private/path/combinator:go_default_library",
         "//private/pathdb:go_default_library",
         "//private/revcache:go_default_library",
         "//private/segment/segfetcher:go_default_library",

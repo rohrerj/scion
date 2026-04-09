@@ -67,6 +67,8 @@ type Topology interface {
 	// Gateways returns an array of all gateways.
 	Gateways() ([]GatewayInfo, error)
 
+	BorderRouters() ([]BRInfo, error)
+
 	// BR returns information for a specific border router
 	//
 	// FIXME(scrye): Simplify return type and make it topology format agnostic.
@@ -192,6 +194,15 @@ func (t *topologyS) Gateways() ([]GatewayInfo, error) {
 
 	for _, k := range keys {
 		v := t.Topology.SIG[k]
+		ret = append(ret, v)
+	}
+
+	return ret, nil
+}
+
+func (t *topologyS) BorderRouters() ([]BRInfo, error) {
+	ret := []BRInfo{}
+	for _, v := range t.Topology.BR {
 		ret = append(ret, v)
 	}
 

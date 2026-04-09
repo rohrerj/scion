@@ -174,6 +174,13 @@ func (l *Loader) ControlServiceAddress(id string) *net.UDPAddr {
 	return l.topo.PublicAddress(addr.SvcCS, id)
 }
 
+func (l *Loader) BorderRouters() ([]BRInfo, error) {
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+
+	return l.topo.BorderRouters()
+}
+
 // TODO(lukedirtwalker): remove error and simplify struct in the return type.
 func (l *Loader) Gateways() ([]GatewayInfo, error) {
 	l.mtx.Lock()
