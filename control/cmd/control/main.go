@@ -444,13 +444,10 @@ func realMain(ctx context.Context) error {
 				PathDB:    pathDB,
 			},
 		},
-		RevCache:     revCache,
-		Requests:     libmetrics.NewPromCounter(metrics.SegmentLookupRequestsTotal),
-		SegmentsSent: libmetrics.NewPromCounter(metrics.SegmentLookupSegmentsSentTotal),
-		LocalIA:      topo.IA(),
-		IsCore:       topo.Core(),
-		Inspector:    inspector,
-		PathDB:       pathDB,
+		LocalIA:   topo.IA(),
+		IsCore:    topo.Core(),
+		Inspector: inspector,
+		PathDB:    pathDB,
 	}
 
 	// Always register a forwarding lookup for AS internal requests.

@@ -19,34 +19,27 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/opentracing/opentracing-go"
 	"github.com/scionproto/scion/control/segreq"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/log"
-	"github.com/scionproto/scion/pkg/metrics"
 	ehpb "github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/segment"
 	seg "github.com/scionproto/scion/pkg/segment"
 	"github.com/scionproto/scion/private/pathdb"
-	"github.com/scionproto/scion/private/revcache"
 	"github.com/scionproto/scion/private/trust"
 )
 
 // LookupServer handles path segment lookups.
 type EndhostServer struct {
 	Lookuper Lookuper
-	RevCache revcache.RevCache
-
-	// Requests aggregates all the incoming requests received by the handler.
-	// If it is not initialized, nothing is reported.
-	Requests metrics.Counter
-	// SegmentsSent aggregates the number of segments that were transmitted in
-	// response to a segment request.
-	SegmentsSent metrics.Counter
-	LocalIA      addr.IA
-	IsCore       bool
-	Inspector    trust.Inspector
-	PathDB       pathdb.DB
+	//Requests         metrics.Counter
+	//UpSegmentsSent   metrics.Counter
+	//CoreSegmentsSent metrics.Counter
+	//DownSegmentsSent metrics.Counter
+	LocalIA   addr.IA
+	IsCore    bool
+	Inspector trust.Inspector
+	PathDB    pathdb.DB
 }
 type combinedPath struct {
 	UpSegment   *seg.PathSegment
@@ -73,8 +66,6 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 
 	src, dst := addr.IA(req.SrcIsdAs), addr.IA(req.DstIsdAs)
 	logger := log.FromCtx(ctx)
-	span := opentracing.SpanFromContext(ctx)
-	setQueryTags(span, src, dst)
 	logger.Debug("Received ListSegments request", "src", src, "dst", dst)
 	res := &ehpb.ListSegmentsResponse{}
 	if src == dst {
@@ -98,7 +89,6 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 	upSegments := make(seg.Segments, 0, 1)
 	coreSegments := make(seg.Segments, 0, 1)
 	downSegments := make(seg.Segments, 0, 1)
-	log.Debug("ListSegments", "reqs srcIAs", reqs.SrcIAs(), "reqs dstIAs", reqs.DstIAs())
 	for i := 0; i < len(reqs); i++ {
 		segs, err := s.Lookuper.LookupSegments(ctx, reqs[i].Src, reqs[i].Dst)
 		if err != nil {
@@ -139,14 +129,10 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 			// we have up + core + down, up + core, or up + down paths
 			for _, upSegment := range upSegments {
 				for _, coreSegment := range coreSegments {
-					log.Debug("compare", "upFirstIA", upSegment.FirstIA(), "upLastIA", upSegment.LastIA(), "coreFirstIA", coreSegment.FirstIA(), "coreLastIA", coreSegment.LastIA())
-
 					if upSegment.FirstIA() == coreSegment.FirstIA() || upSegment.FirstIA() == coreSegment.LastIA() {
 						if len(downSegments) != 0 {
 							// we have up segment, core segment and down segment
 							for _, downSegment := range downSegments {
-								log.Debug("compare2", "coreFirstIA", coreSegment.FirstIA(), "coreLastIA", coreSegment.LastIA(), "downFirstIA", downSegment.FirstIA(), "downLastIA", downSegment.LastIA())
-
 								if coreSegment.FirstIA() == downSegment.FirstIA() || coreSegment.LastIA() == downSegment.FirstIA() {
 									allPaths = append(allPaths, combinedPath{
 										UpSegment:   upSegment,
@@ -165,8 +151,6 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 					}
 				}
 				for _, downSegment := range downSegments {
-					log.Debug("compare3", "upFirstIA", upSegment.FirstIA(), "upLastIA", upSegment.LastIA(), "downFirstIA", downSegment.FirstIA(), "downLastIA", downSegment.LastIA())
-
 					if upSegment.FirstIA() == downSegment.FirstIA() {
 						// we have up segment and down segment, without a core segment
 						allPaths = append(allPaths, combinedPath{
@@ -180,8 +164,6 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 			// we have only core + down paths
 			for _, coreSegment := range coreSegments {
 				for _, downSegment := range downSegments {
-					log.Debug("compare4", "coreFirstIA", coreSegment.FirstIA(), "coreLastIA", coreSegment.LastIA(), "downFirstIA", downSegment.FirstIA(), "downLastIA", downSegment.LastIA())
-
 					if coreSegment.FirstIA() == downSegment.FirstIA() || coreSegment.LastIA() == downSegment.FirstIA() {
 						allPaths = append(allPaths, combinedPath{
 							CoreSegment: coreSegment,
@@ -192,7 +174,6 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 			}
 		}
 	}
-	log.Debug("allPaths", "len", len(allPaths), "uplen", len(upSegments), "corelen", len(coreSegments), "downlen", len(downSegments))
 	sort.Slice(allPaths, func(i, j int) bool {
 		return allPaths[i].Length() < allPaths[j].Length()
 	})
@@ -208,12 +189,8 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 		res.DownSegments = append(res.DownSegments, seg.PathSegmentToPB(segment))
 	}
 
-	logger.Debug("Replied with segments", "core", len(res.CoreSegments), "up", len(res.UpSegments), "down", len(res.DownSegments))
+	logger.Debug("Replied with segments", "up", len(res.UpSegments), "core", len(res.CoreSegments), "down", len(res.DownSegments))
 	return res, nil
-}
-
-type Page struct {
-	Segments []*seg.PathSegment
 }
 
 func selectSegments(paths []combinedPath, pageSize int, pagination int) ([]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, int) {
