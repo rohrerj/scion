@@ -388,6 +388,13 @@ func realMain(ctx context.Context) error {
 	connectIntra.Handle(cpconnect.NewTrustMaterialServiceHandler(cstrustconnect.MaterialServer{
 		MaterialServer: trustServer,
 	}))
+	endhostTrustServer := &cstrustgrpc.EndhostServer{
+		Provider: provider,
+		IA:       topo.IA(),
+	}
+	connectIntra.Handle(endhostconnect.NewTrustServiceHandler(cstrustconnect.EndhostServer{
+		EndhostServer: endhostTrustServer,
+	}))
 
 	// Handle beaconing.
 	segmentCreationServer := &beaconinggrpc.SegmentCreationServer{
@@ -778,6 +785,9 @@ func realMain(ctx context.Context) error {
 			Server: drkeyService,
 		}))
 		connectIntra.Handle(cpconnect.NewDRKeyIntraServiceHandler(drkeyconnect.Server{
+			Server: drkeyService,
+		}))
+		connectIntra.Handle(endhostconnect.NewDRKeyServiceHandler(drkeyconnect.EndhostDRKeyServer{
 			Server: drkeyService,
 		}))
 		log.Info("DRKey is enabled")

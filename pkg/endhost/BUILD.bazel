@@ -4,30 +4,38 @@ load("//tools:go.bzl", "go_test")
 go_library(
     name = "go_default_library",
     srcs = [
+        "drkey.go",
+        "http_client.go",
         "path.go",
+        "trust.go",
         "underlay.go",
     ],
     importpath = "github.com/scionproto/scion/pkg/endhost",
     visibility = ["//visibility:public"],
     deps = [
         "//pkg/addr:go_default_library",
+        "//pkg/drkey:go_default_library",
+        "//pkg/proto/drkey:go_default_library",
         "//pkg/proto/endhost:go_default_library",
         "//pkg/proto/endhost/v1/endhostconnect:go_default_library",
         "//pkg/segment:go_default_library",
-        "//pkg/snet:go_default_library",
         "@com_connectrpc_connect//:go_default_library",
+        "@org_golang_google_protobuf//types/known/timestamppb:go_default_library",
     ],
 )
 
 go_test(
     name = "go_default_test",
     srcs = [
+        "drkey_test.go",
+        "endhost_test.go",
         "path_test.go",
         "underlay_test.go",
     ],
     deps = [
         ":go_default_library",
         "//pkg/addr:go_default_library",
+        "//pkg/drkey:go_default_library",
         "@com_github_stretchr_testify//assert:go_default_library",
     ],
 )

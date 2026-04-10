@@ -17,7 +17,6 @@ package endhost
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net/http"
 
 	"connectrpc.com/connect"
@@ -25,7 +24,6 @@ import (
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	seg "github.com/scionproto/scion/pkg/segment"
-	"github.com/scionproto/scion/pkg/snet"
 )
 
 type PathService struct {
@@ -49,7 +47,7 @@ func NewPathService(url string) *PathService {
 	return p
 }
 
-func (s *PathService) Paths(ctx context.Context, dst, src addr.IA) ([]snet.Path, error) {
+func (s *PathService) Paths(ctx context.Context, dst, src addr.IA) ([]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
 	if s.PageSize == 0 {
 		s.PageSize = 64
 	}
@@ -64,40 +62,31 @@ func (s *PathService) Paths(ctx context.Context, dst, src addr.IA) ([]snet.Path,
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	fmt.Println("up segments")
+	upSegments := make([]*seg.PathSegment, 0, len(res.Msg.UpSegments))
+	coreSegments := make([]*seg.PathSegment, 0, len(res.Msg.CoreSegments))
+	downSegments := make([]*seg.PathSegment, 0, len(res.Msg.DownSegments))
 	for _, pb := range res.Msg.UpSegments {
 		ps, err := seg.SegmentFromPB(pb)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
-		for _, entry := range ps.ASEntries {
-			fmt.Printf("%s, ", entry.Local)
-		}
-		fmt.Println()
+		upSegments = append(upSegments, ps)
 	}
-	fmt.Println("core segments")
 	for _, pb := range res.Msg.CoreSegments {
 		ps, err := seg.SegmentFromPB(pb)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
-		for _, entry := range ps.ASEntries {
-			fmt.Printf("%s, ", entry.Local)
-		}
-		fmt.Println()
+		coreSegments = append(coreSegments, ps)
 	}
-	fmt.Println("down segments")
 	for _, pb := range res.Msg.DownSegments {
 		ps, err := seg.SegmentFromPB(pb)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
-		for _, entry := range ps.ASEntries {
-			fmt.Printf("%s, ", entry.Local)
-		}
-		fmt.Println()
+		downSegments = append(downSegments, ps)
 	}
-	return nil, nil
+	return upSegments, coreSegments, downSegments, nil
 }

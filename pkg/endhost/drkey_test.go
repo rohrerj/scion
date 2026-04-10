@@ -16,28 +16,38 @@ package endhost_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/drkey"
 	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPath(t *testing.T) {
-	p := endhost.NewPathService("http://[fd00:f00d:cafe::7f00:1c]:31022")
-	p.PageSize = 16
-	p.PageToken = "0"
+func TestDRKey(t *testing.T) {
+	src := "fd00:f00d:cafe::7f00:1d"
+	//dst := "fd00:f00d:cafe::7f00:3b"
+	service := endhost.NewDRKeyService("http://[fd00:f00d:cafe::7f00:1c]:31022", src)
 	ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancelF()
-	src, err := addr.ParseIA("1-ff00:0:111")
+	srcIA, err := addr.ParseIA("1-ff00:0:111")
 	assert.NoError(t, err)
-	dst, err := addr.ParseIA("1-ff00:0:120")
+	dstIA, err := addr.ParseIA("2-ff00:0:211")
 	assert.NoError(t, err)
-	_, _, _, err = p.Paths(ctx, dst, src)
+
+	meta := drkey.ASHostMeta{
+		Validity: time.Now().Add(time.Minute),
+		ProtoId:  drkey.SCMP,
+		SrcIA:    dstIA,
+		DstIA:    srcIA,
+		DstHost:  src,
+	}
+	key, err := service.ASHostKey(ctx, meta)
 	assert.NoError(t, err)
-	p.PageToken = "1"
-	_, _, _, err = p.Paths(ctx, dst, src)
-	assert.NoError(t, err)
+	fmt.Println("begin key")
+	fmt.Println(key)
+	fmt.Println("end key")
 	t.Fail()
 }

@@ -15,18 +15,12 @@
 package endhost_test
 
 import (
-	"context"
 	"testing"
-	"time"
-
-	"github.com/scionproto/scion/pkg/addr"
-	"github.com/scionproto/scion/pkg/endhost"
-	"github.com/stretchr/testify/assert"
 )
 
-func TestPath(t *testing.T) {
-	p := endhost.NewPathService("http://[fd00:f00d:cafe::7f00:1c]:31022")
-	p.PageSize = 16
+func TestEndhost(t *testing.T) {
+	/*p := endhost.NewPathService("http://[fd00:f00d:cafe::7f00:1c]:31022")
+	p.PageSize = 3
 	p.PageToken = "0"
 	ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancelF()
@@ -34,10 +28,11 @@ func TestPath(t *testing.T) {
 	assert.NoError(t, err)
 	dst, err := addr.ParseIA("1-ff00:0:120")
 	assert.NoError(t, err)
-	_, _, _, err = p.Paths(ctx, dst, src)
+	upSegments, coreSegments, downSegments, err := p.Paths(ctx, dst, src)
 	assert.NoError(t, err)
-	p.PageToken = "1"
-	_, _, _, err = p.Paths(ctx, dst, src)
-	assert.NoError(t, err)
-	t.Fail()
+	assert.NotEmpty(t, upSegments)
+	tr := endhost.NewTrustService("http://[fd00:f00d:cafe::7f00:1c]:31022")
+	// verify up segment:
+	for _, asEntry := range upSegments[0].ASEntries {
+	}*/
 }
