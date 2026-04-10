@@ -385,34 +385,34 @@ var File_proto_endhost_v1_underlay_proto protoreflect.FileDescriptor
 
 const file_proto_endhost_v1_underlay_proto_rawDesc = "" +
 	"\n" +
-	"\x1fproto/endhost/v1/underlay.proto\x12\x10proto.endhost.v1\"=\n" +
+	"\x1fproto/endhost/v1/underlay.proto\x12\x10scion.endhost.v1\"=\n" +
 	"\x14ListUnderlaysRequest\x12\x1a\n" +
 	"\x06isd_as\x18\x01 \x01(\x04H\x00R\x05isdAs\x88\x01\x01B\t\n" +
 	"\a_isd_as\"\x97\x01\n" +
 	"\x15ListUnderlaysResponse\x124\n" +
-	"\x03udp\x18\x01 \x01(\v2\x1d.proto.endhost.v1.UdpUnderlayH\x00R\x03udp\x88\x01\x01\x127\n" +
-	"\x04snap\x18\x02 \x01(\v2\x1e.proto.endhost.v1.SnapUnderlayH\x01R\x04snap\x88\x01\x01B\x06\n" +
+	"\x03udp\x18\x01 \x01(\v2\x1d.scion.endhost.v1.UdpUnderlayH\x00R\x03udp\x88\x01\x01\x127\n" +
+	"\x04snap\x18\x02 \x01(\v2\x1e.scion.endhost.v1.SnapUnderlayH\x01R\x04snap\x88\x01\x01B\x06\n" +
 	"\x04_udpB\a\n" +
 	"\x05_snap\"A\n" +
 	"\vUdpUnderlay\x122\n" +
-	"\arouters\x18\x01 \x03(\v2\x18.proto.endhost.v1.RouterR\arouters\"\x99\x02\n" +
+	"\arouters\x18\x01 \x03(\v2\x18.scion.endhost.v1.RouterR\arouters\"\x99\x02\n" +
 	"\x06Router\x12\x15\n" +
 	"\x06isd_as\x18\x01 \x01(\x04R\x05isdAs\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1e\n" +
 	"\n" +
 	"interfaces\x18\x03 \x03(\rR\n" +
 	"interfaces\x12M\n" +
-	"\x10dispatched_range\x18\x04 \x01(\v2\".proto.endhost.v1.Router.PortRangeR\x0fdispatchedRange\x1ao\n" +
+	"\x10dispatched_range\x18\x04 \x01(\v2\".scion.endhost.v1.Router.PortRangeR\x0fdispatchedRange\x1ao\n" +
 	"\tPortRange\x122\n" +
 	"\x15dispatched_port_start\x18\x01 \x01(\rR\x13dispatchedPortStart\x12.\n" +
 	"\x13dispatched_port_end\x18\x02 \x01(\rR\x11dispatchedPortEnd\"<\n" +
 	"\fSnapUnderlay\x12,\n" +
-	"\x05snaps\x18\x01 \x03(\v2\x16.proto.endhost.v1.SnapR\x05snaps\";\n" +
+	"\x05snaps\x18\x01 \x03(\v2\x16.scion.endhost.v1.SnapR\x05snaps\";\n" +
 	"\x04Snap\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x19\n" +
 	"\bisd_ases\x18\x02 \x03(\x04R\aisdAses2u\n" +
 	"\x0fUnderlayService\x12b\n" +
-	"\rListUnderlays\x12&.proto.endhost.v1.ListUnderlaysRequest\x1a'.proto.endhost.v1.ListUnderlaysResponse\"\x00B/Z-github.com/scionproto/scion/pkg/proto/endhostb\x06proto3"
+	"\rListUnderlays\x12&.scion.endhost.v1.ListUnderlaysRequest\x1a'.scion.endhost.v1.ListUnderlaysResponse\"\x00B/Z-github.com/scionproto/scion/pkg/proto/endhostb\x06proto3"
 
 var (
 	file_proto_endhost_v1_underlay_proto_rawDescOnce sync.Once
@@ -428,22 +428,22 @@ func file_proto_endhost_v1_underlay_proto_rawDescGZIP() []byte {
 
 var file_proto_endhost_v1_underlay_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_proto_endhost_v1_underlay_proto_goTypes = []any{
-	(*ListUnderlaysRequest)(nil),  // 0: proto.endhost.v1.ListUnderlaysRequest
-	(*ListUnderlaysResponse)(nil), // 1: proto.endhost.v1.ListUnderlaysResponse
-	(*UdpUnderlay)(nil),           // 2: proto.endhost.v1.UdpUnderlay
-	(*Router)(nil),                // 3: proto.endhost.v1.Router
-	(*SnapUnderlay)(nil),          // 4: proto.endhost.v1.SnapUnderlay
-	(*Snap)(nil),                  // 5: proto.endhost.v1.Snap
-	(*Router_PortRange)(nil),      // 6: proto.endhost.v1.Router.PortRange
+	(*ListUnderlaysRequest)(nil),  // 0: scion.endhost.v1.ListUnderlaysRequest
+	(*ListUnderlaysResponse)(nil), // 1: scion.endhost.v1.ListUnderlaysResponse
+	(*UdpUnderlay)(nil),           // 2: scion.endhost.v1.UdpUnderlay
+	(*Router)(nil),                // 3: scion.endhost.v1.Router
+	(*SnapUnderlay)(nil),          // 4: scion.endhost.v1.SnapUnderlay
+	(*Snap)(nil),                  // 5: scion.endhost.v1.Snap
+	(*Router_PortRange)(nil),      // 6: scion.endhost.v1.Router.PortRange
 }
 var file_proto_endhost_v1_underlay_proto_depIdxs = []int32{
-	2, // 0: proto.endhost.v1.ListUnderlaysResponse.udp:type_name -> proto.endhost.v1.UdpUnderlay
-	4, // 1: proto.endhost.v1.ListUnderlaysResponse.snap:type_name -> proto.endhost.v1.SnapUnderlay
-	3, // 2: proto.endhost.v1.UdpUnderlay.routers:type_name -> proto.endhost.v1.Router
-	6, // 3: proto.endhost.v1.Router.dispatched_range:type_name -> proto.endhost.v1.Router.PortRange
-	5, // 4: proto.endhost.v1.SnapUnderlay.snaps:type_name -> proto.endhost.v1.Snap
-	0, // 5: proto.endhost.v1.UnderlayService.ListUnderlays:input_type -> proto.endhost.v1.ListUnderlaysRequest
-	1, // 6: proto.endhost.v1.UnderlayService.ListUnderlays:output_type -> proto.endhost.v1.ListUnderlaysResponse
+	2, // 0: scion.endhost.v1.ListUnderlaysResponse.udp:type_name -> scion.endhost.v1.UdpUnderlay
+	4, // 1: scion.endhost.v1.ListUnderlaysResponse.snap:type_name -> scion.endhost.v1.SnapUnderlay
+	3, // 2: scion.endhost.v1.UdpUnderlay.routers:type_name -> scion.endhost.v1.Router
+	6, // 3: scion.endhost.v1.Router.dispatched_range:type_name -> scion.endhost.v1.Router.PortRange
+	5, // 4: scion.endhost.v1.SnapUnderlay.snaps:type_name -> scion.endhost.v1.Snap
+	0, // 5: scion.endhost.v1.UnderlayService.ListUnderlays:input_type -> scion.endhost.v1.ListUnderlaysRequest
+	1, // 6: scion.endhost.v1.UnderlayService.ListUnderlays:output_type -> scion.endhost.v1.ListUnderlaysResponse
 	6, // [6:7] is the sub-list for method output_type
 	5, // [5:6] is the sub-list for method input_type
 	5, // [5:5] is the sub-list for extension type_name
@@ -502,7 +502,7 @@ func NewUnderlayServiceClient(cc grpc.ClientConnInterface) UnderlayServiceClient
 
 func (c *underlayServiceClient) ListUnderlays(ctx context.Context, in *ListUnderlaysRequest, opts ...grpc.CallOption) (*ListUnderlaysResponse, error) {
 	out := new(ListUnderlaysResponse)
-	err := c.cc.Invoke(ctx, "/proto.endhost.v1.UnderlayService/ListUnderlays", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/scion.endhost.v1.UnderlayService/ListUnderlays", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +536,7 @@ func _UnderlayService_ListUnderlays_Handler(srv interface{}, ctx context.Context
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.endhost.v1.UnderlayService/ListUnderlays",
+		FullMethod: "/scion.endhost.v1.UnderlayService/ListUnderlays",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UnderlayServiceServer).ListUnderlays(ctx, req.(*ListUnderlaysRequest))
@@ -545,7 +545,7 @@ func _UnderlayService_ListUnderlays_Handler(srv interface{}, ctx context.Context
 }
 
 var _UnderlayService_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "proto.endhost.v1.UnderlayService",
+	ServiceName: "scion.endhost.v1.UnderlayService",
 	HandlerType: (*UnderlayServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

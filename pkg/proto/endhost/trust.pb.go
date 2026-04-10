@@ -385,9 +385,9 @@ var File_proto_endhost_v1_trust_proto protoreflect.FileDescriptor
 
 const file_proto_endhost_v1_trust_proto_rawDesc = "" +
 	"\n" +
-	"\x1cproto/endhost/v1/trust.proto\x12\x10proto.endhost.v1\"\xac\x01\n" +
+	"\x1cproto/endhost/v1/trust.proto\x12\x10scion.endhost.v1\"\xac\x01\n" +
 	"\x11ListChainsRequest\x125\n" +
-	"\bsubjects\x18\x01 \x03(\v2\x19.proto.endhost.v1.SubjectR\bsubjects\x12/\n" +
+	"\bsubjects\x18\x01 \x03(\v2\x19.scion.endhost.v1.SubjectR\bsubjects\x12/\n" +
 	"\x14at_least_valid_until\x18\x02 \x01(\rR\x11atLeastValidUntil\x12/\n" +
 	"\x14at_least_valid_since\x18\x03 \x01(\rR\x11atLeastValidSince\"F\n" +
 	"\aSubject\x12\x15\n" +
@@ -395,9 +395,9 @@ const file_proto_endhost_v1_trust_proto_rawDesc = "" +
 	"\x0esubject_key_id\x18\x02 \x01(\fR\fsubjectKeyId\"T\n" +
 	"\x11ListChainResponse\x12?\n" +
 	"\n" +
-	"list_chain\x18\x01 \x03(\v2 .proto.endhost.v1.ChainsResponseR\tlistChain\"A\n" +
+	"list_chain\x18\x01 \x03(\v2 .scion.endhost.v1.ChainsResponseR\tlistChain\"A\n" +
 	"\x0eChainsResponse\x12/\n" +
-	"\x06chains\x18\x01 \x03(\v2\x17.proto.endhost.v1.ChainR\x06chains\"9\n" +
+	"\x06chains\x18\x01 \x03(\v2\x17.scion.endhost.v1.ChainR\x06chains\"9\n" +
 	"\x05Chain\x12\x17\n" +
 	"\aas_cert\x18\x01 \x01(\fR\x06asCert\x12\x17\n" +
 	"\aca_cert\x18\x02 \x01(\fR\x06caCert\"J\n" +
@@ -410,8 +410,8 @@ const file_proto_endhost_v1_trust_proto_rawDesc = "" +
 	"\x03trc\x18\x01 \x01(\fR\x03trc2\xb1\x01\n" +
 	"\fTrustService\x12X\n" +
 	"\n" +
-	"ListChains\x12#.proto.endhost.v1.ListChainsRequest\x1a#.proto.endhost.v1.ListChainResponse\"\x00\x12G\n" +
-	"\x06GetTrc\x12\x1c.proto.endhost.v1.TRCRequest\x1a\x1d.proto.endhost.v1.TRCResponse\"\x00B/Z-github.com/scionproto/scion/pkg/proto/endhostb\x06proto3"
+	"ListChains\x12#.scion.endhost.v1.ListChainsRequest\x1a#.scion.endhost.v1.ListChainResponse\"\x00\x12G\n" +
+	"\x06GetTrc\x12\x1c.scion.endhost.v1.TRCRequest\x1a\x1d.scion.endhost.v1.TRCResponse\"\x00B/Z-github.com/scionproto/scion/pkg/proto/endhostb\x06proto3"
 
 var (
 	file_proto_endhost_v1_trust_proto_rawDescOnce sync.Once
@@ -427,22 +427,22 @@ func file_proto_endhost_v1_trust_proto_rawDescGZIP() []byte {
 
 var file_proto_endhost_v1_trust_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_proto_endhost_v1_trust_proto_goTypes = []any{
-	(*ListChainsRequest)(nil), // 0: proto.endhost.v1.ListChainsRequest
-	(*Subject)(nil),           // 1: proto.endhost.v1.Subject
-	(*ListChainResponse)(nil), // 2: proto.endhost.v1.ListChainResponse
-	(*ChainsResponse)(nil),    // 3: proto.endhost.v1.ChainsResponse
-	(*Chain)(nil),             // 4: proto.endhost.v1.Chain
-	(*TRCRequest)(nil),        // 5: proto.endhost.v1.TRCRequest
-	(*TRCResponse)(nil),       // 6: proto.endhost.v1.TRCResponse
+	(*ListChainsRequest)(nil), // 0: scion.endhost.v1.ListChainsRequest
+	(*Subject)(nil),           // 1: scion.endhost.v1.Subject
+	(*ListChainResponse)(nil), // 2: scion.endhost.v1.ListChainResponse
+	(*ChainsResponse)(nil),    // 3: scion.endhost.v1.ChainsResponse
+	(*Chain)(nil),             // 4: scion.endhost.v1.Chain
+	(*TRCRequest)(nil),        // 5: scion.endhost.v1.TRCRequest
+	(*TRCResponse)(nil),       // 6: scion.endhost.v1.TRCResponse
 }
 var file_proto_endhost_v1_trust_proto_depIdxs = []int32{
-	1, // 0: proto.endhost.v1.ListChainsRequest.subjects:type_name -> proto.endhost.v1.Subject
-	3, // 1: proto.endhost.v1.ListChainResponse.list_chain:type_name -> proto.endhost.v1.ChainsResponse
-	4, // 2: proto.endhost.v1.ChainsResponse.chains:type_name -> proto.endhost.v1.Chain
-	0, // 3: proto.endhost.v1.TrustService.ListChains:input_type -> proto.endhost.v1.ListChainsRequest
-	5, // 4: proto.endhost.v1.TrustService.GetTrc:input_type -> proto.endhost.v1.TRCRequest
-	2, // 5: proto.endhost.v1.TrustService.ListChains:output_type -> proto.endhost.v1.ListChainResponse
-	6, // 6: proto.endhost.v1.TrustService.GetTrc:output_type -> proto.endhost.v1.TRCResponse
+	1, // 0: scion.endhost.v1.ListChainsRequest.subjects:type_name -> scion.endhost.v1.Subject
+	3, // 1: scion.endhost.v1.ListChainResponse.list_chain:type_name -> scion.endhost.v1.ChainsResponse
+	4, // 2: scion.endhost.v1.ChainsResponse.chains:type_name -> scion.endhost.v1.Chain
+	0, // 3: scion.endhost.v1.TrustService.ListChains:input_type -> scion.endhost.v1.ListChainsRequest
+	5, // 4: scion.endhost.v1.TrustService.GetTrc:input_type -> scion.endhost.v1.TRCRequest
+	2, // 5: scion.endhost.v1.TrustService.ListChains:output_type -> scion.endhost.v1.ListChainResponse
+	6, // 6: scion.endhost.v1.TrustService.GetTrc:output_type -> scion.endhost.v1.TRCResponse
 	5, // [5:7] is the sub-list for method output_type
 	3, // [3:5] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
@@ -500,7 +500,7 @@ func NewTrustServiceClient(cc grpc.ClientConnInterface) TrustServiceClient {
 
 func (c *trustServiceClient) ListChains(ctx context.Context, in *ListChainsRequest, opts ...grpc.CallOption) (*ListChainResponse, error) {
 	out := new(ListChainResponse)
-	err := c.cc.Invoke(ctx, "/proto.endhost.v1.TrustService/ListChains", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/scion.endhost.v1.TrustService/ListChains", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +509,7 @@ func (c *trustServiceClient) ListChains(ctx context.Context, in *ListChainsReque
 
 func (c *trustServiceClient) GetTrc(ctx context.Context, in *TRCRequest, opts ...grpc.CallOption) (*TRCResponse, error) {
 	out := new(TRCResponse)
-	err := c.cc.Invoke(ctx, "/proto.endhost.v1.TrustService/GetTrc", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/scion.endhost.v1.TrustService/GetTrc", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +547,7 @@ func _TrustService_ListChains_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.endhost.v1.TrustService/ListChains",
+		FullMethod: "/scion.endhost.v1.TrustService/ListChains",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TrustServiceServer).ListChains(ctx, req.(*ListChainsRequest))
@@ -565,7 +565,7 @@ func _TrustService_GetTrc_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.endhost.v1.TrustService/GetTrc",
+		FullMethod: "/scion.endhost.v1.TrustService/GetTrc",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TrustServiceServer).GetTrc(ctx, req.(*TRCRequest))
@@ -574,7 +574,7 @@ func _TrustService_GetTrc_Handler(srv interface{}, ctx context.Context, dec func
 }
 
 var _TrustService_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "proto.endhost.v1.TrustService",
+	ServiceName: "scion.endhost.v1.TrustService",
 	HandlerType: (*TrustServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

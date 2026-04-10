@@ -166,7 +166,7 @@ var File_proto_endhost_v1_path_proto protoreflect.FileDescriptor
 
 const file_proto_endhost_v1_path_proto_rawDesc = "" +
 	"\n" +
-	"\x1bproto/endhost/v1/path.proto\x12\x10proto.endhost.v1\x1a proto/control_plane/v1/seg.proto\"\x8d\x01\n" +
+	"\x1bproto/endhost/v1/path.proto\x12\x10scion.endhost.v1\x1a proto/control_plane/v1/seg.proto\"\x8d\x01\n" +
 	"\x13ListSegmentsRequest\x12\x1c\n" +
 	"\n" +
 	"src_isd_as\x18\x01 \x01(\x04R\bsrcIsdAs\x12\x1c\n" +
@@ -182,7 +182,7 @@ const file_proto_endhost_v1_path_proto_rawDesc = "" +
 	"\rcore_segments\x18\x03 \x03(\v2#.proto.control_plane.v1.PathSegmentR\fcoreSegments\x12&\n" +
 	"\x0fnext_page_token\x18\x04 \x01(\tR\rnextPageToken2n\n" +
 	"\vPathService\x12_\n" +
-	"\fListSegments\x12%.proto.endhost.v1.ListSegmentsRequest\x1a&.proto.endhost.v1.ListSegmentsResponse\"\x00B/Z-github.com/scionproto/scion/pkg/proto/endhostb\x06proto3"
+	"\fListSegments\x12%.scion.endhost.v1.ListSegmentsRequest\x1a&.scion.endhost.v1.ListSegmentsResponse\"\x00B/Z-github.com/scionproto/scion/pkg/proto/endhostb\x06proto3"
 
 var (
 	file_proto_endhost_v1_path_proto_rawDescOnce sync.Once
@@ -198,16 +198,16 @@ func file_proto_endhost_v1_path_proto_rawDescGZIP() []byte {
 
 var file_proto_endhost_v1_path_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_proto_endhost_v1_path_proto_goTypes = []any{
-	(*ListSegmentsRequest)(nil),       // 0: proto.endhost.v1.ListSegmentsRequest
-	(*ListSegmentsResponse)(nil),      // 1: proto.endhost.v1.ListSegmentsResponse
+	(*ListSegmentsRequest)(nil),       // 0: scion.endhost.v1.ListSegmentsRequest
+	(*ListSegmentsResponse)(nil),      // 1: scion.endhost.v1.ListSegmentsResponse
 	(*control_plane.PathSegment)(nil), // 2: proto.control_plane.v1.PathSegment
 }
 var file_proto_endhost_v1_path_proto_depIdxs = []int32{
-	2, // 0: proto.endhost.v1.ListSegmentsResponse.up_segments:type_name -> proto.control_plane.v1.PathSegment
-	2, // 1: proto.endhost.v1.ListSegmentsResponse.down_segments:type_name -> proto.control_plane.v1.PathSegment
-	2, // 2: proto.endhost.v1.ListSegmentsResponse.core_segments:type_name -> proto.control_plane.v1.PathSegment
-	0, // 3: proto.endhost.v1.PathService.ListSegments:input_type -> proto.endhost.v1.ListSegmentsRequest
-	1, // 4: proto.endhost.v1.PathService.ListSegments:output_type -> proto.endhost.v1.ListSegmentsResponse
+	2, // 0: scion.endhost.v1.ListSegmentsResponse.up_segments:type_name -> proto.control_plane.v1.PathSegment
+	2, // 1: scion.endhost.v1.ListSegmentsResponse.down_segments:type_name -> proto.control_plane.v1.PathSegment
+	2, // 2: scion.endhost.v1.ListSegmentsResponse.core_segments:type_name -> proto.control_plane.v1.PathSegment
+	0, // 3: scion.endhost.v1.PathService.ListSegments:input_type -> scion.endhost.v1.ListSegmentsRequest
+	1, // 4: scion.endhost.v1.PathService.ListSegments:output_type -> scion.endhost.v1.ListSegmentsResponse
 	4, // [4:5] is the sub-list for method output_type
 	3, // [3:4] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
@@ -264,7 +264,7 @@ func NewPathServiceClient(cc grpc.ClientConnInterface) PathServiceClient {
 
 func (c *pathServiceClient) ListSegments(ctx context.Context, in *ListSegmentsRequest, opts ...grpc.CallOption) (*ListSegmentsResponse, error) {
 	out := new(ListSegmentsResponse)
-	err := c.cc.Invoke(ctx, "/proto.endhost.v1.PathService/ListSegments", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/scion.endhost.v1.PathService/ListSegments", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +298,7 @@ func _PathService_ListSegments_Handler(srv interface{}, ctx context.Context, dec
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.endhost.v1.PathService/ListSegments",
+		FullMethod: "/scion.endhost.v1.PathService/ListSegments",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PathServiceServer).ListSegments(ctx, req.(*ListSegmentsRequest))
@@ -307,7 +307,7 @@ func _PathService_ListSegments_Handler(srv interface{}, ctx context.Context, dec
 }
 
 var _PathService_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "proto.endhost.v1.PathService",
+	ServiceName: "scion.endhost.v1.PathService",
 	HandlerType: (*PathServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

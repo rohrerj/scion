@@ -15,7 +15,7 @@
 syntax = "proto3";
 
 option go_package = "github.com/scionproto/scion/pkg/proto/endhost";
-package proto.endhost.v1;
+package scion.endhost.v1;
 
 import "google/protobuf/timestamp.proto";
 import "proto/drkey/v1/drkey.proto";

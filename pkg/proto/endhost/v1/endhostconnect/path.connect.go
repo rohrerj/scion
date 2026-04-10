@@ -22,7 +22,7 @@ const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// PathServiceName is the fully-qualified name of the PathService service.
-	PathServiceName = "proto.endhost.v1.PathService"
+	PathServiceName = "scion.endhost.v1.PathService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -35,15 +35,15 @@ const (
 const (
 	// PathServiceListSegmentsProcedure is the fully-qualified name of the PathService's ListSegments
 	// RPC.
-	PathServiceListSegmentsProcedure = "/proto.endhost.v1.PathService/ListSegments"
+	PathServiceListSegmentsProcedure = "/scion.endhost.v1.PathService/ListSegments"
 )
 
-// PathServiceClient is a client for the proto.endhost.v1.PathService service.
+// PathServiceClient is a client for the scion.endhost.v1.PathService service.
 type PathServiceClient interface {
 	ListSegments(context.Context, *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error)
 }
 
-// NewPathServiceClient constructs a client for the proto.endhost.v1.PathService service. By
+// NewPathServiceClient constructs a client for the scion.endhost.v1.PathService service. By
 // default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
 // and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
 // connect.WithGRPC() or connect.WithGRPCWeb() options.
@@ -68,12 +68,12 @@ type pathServiceClient struct {
 	listSegments *connect.Client[endhost.ListSegmentsRequest, endhost.ListSegmentsResponse]
 }
 
-// ListSegments calls proto.endhost.v1.PathService.ListSegments.
+// ListSegments calls scion.endhost.v1.PathService.ListSegments.
 func (c *pathServiceClient) ListSegments(ctx context.Context, req *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error) {
 	return c.listSegments.CallUnary(ctx, req)
 }
 
-// PathServiceHandler is an implementation of the proto.endhost.v1.PathService service.
+// PathServiceHandler is an implementation of the scion.endhost.v1.PathService service.
 type PathServiceHandler interface {
 	ListSegments(context.Context, *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error)
 }
@@ -91,7 +91,7 @@ func NewPathServiceHandler(svc PathServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(pathServiceMethods.ByName("ListSegments")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/proto.endhost.v1.PathService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/scion.endhost.v1.PathService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case PathServiceListSegmentsProcedure:
 			pathServiceListSegmentsHandler.ServeHTTP(w, r)
@@ -105,5 +105,5 @@ func NewPathServiceHandler(svc PathServiceHandler, opts ...connect.HandlerOption
 type UnimplementedPathServiceHandler struct{}
 
 func (UnimplementedPathServiceHandler) ListSegments(context.Context, *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.endhost.v1.PathService.ListSegments is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("scion.endhost.v1.PathService.ListSegments is not implemented"))
 }

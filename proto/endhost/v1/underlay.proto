@@ -15,7 +15,7 @@
 syntax = "proto3";
 
 option go_package = "github.com/scionproto/scion/pkg/proto/endhost";
-package proto.endhost.v1;
+package scion.endhost.v1;
 
 service UnderlayService {
     rpc ListUnderlays(ListUnderlaysRequest) returns (ListUnderlaysResponse) {}

@@ -22,7 +22,7 @@ const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// DRKeyServiceName is the fully-qualified name of the DRKeyService service.
-	DRKeyServiceName = "proto.endhost.v1.DRKeyService"
+	DRKeyServiceName = "scion.endhost.v1.DRKeyService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -35,23 +35,23 @@ const (
 const (
 	// DRKeyServiceDRKeyASHostProcedure is the fully-qualified name of the DRKeyService's DRKeyASHost
 	// RPC.
-	DRKeyServiceDRKeyASHostProcedure = "/proto.endhost.v1.DRKeyService/DRKeyASHost"
+	DRKeyServiceDRKeyASHostProcedure = "/scion.endhost.v1.DRKeyService/DRKeyASHost"
 	// DRKeyServiceDRKeyHostASProcedure is the fully-qualified name of the DRKeyService's DRKeyHostAS
 	// RPC.
-	DRKeyServiceDRKeyHostASProcedure = "/proto.endhost.v1.DRKeyService/DRKeyHostAS"
+	DRKeyServiceDRKeyHostASProcedure = "/scion.endhost.v1.DRKeyService/DRKeyHostAS"
 	// DRKeyServiceDRKeyHostHostProcedure is the fully-qualified name of the DRKeyService's
 	// DRKeyHostHost RPC.
-	DRKeyServiceDRKeyHostHostProcedure = "/proto.endhost.v1.DRKeyService/DRKeyHostHost"
+	DRKeyServiceDRKeyHostHostProcedure = "/scion.endhost.v1.DRKeyService/DRKeyHostHost"
 )
 
-// DRKeyServiceClient is a client for the proto.endhost.v1.DRKeyService service.
+// DRKeyServiceClient is a client for the scion.endhost.v1.DRKeyService service.
 type DRKeyServiceClient interface {
 	DRKeyASHost(context.Context, *connect.Request[endhost.DRKeyASHostRequest]) (*connect.Response[endhost.DRKeyASHostResponse], error)
 	DRKeyHostAS(context.Context, *connect.Request[endhost.DRKeyHostASRequest]) (*connect.Response[endhost.DRKeyHostASResponse], error)
 	DRKeyHostHost(context.Context, *connect.Request[endhost.DRKeyHostHostRequest]) (*connect.Response[endhost.DRKeyHostHostResponse], error)
 }
 
-// NewDRKeyServiceClient constructs a client for the proto.endhost.v1.DRKeyService service. By
+// NewDRKeyServiceClient constructs a client for the scion.endhost.v1.DRKeyService service. By
 // default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
 // and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
 // connect.WithGRPC() or connect.WithGRPCWeb() options.
@@ -90,22 +90,22 @@ type dRKeyServiceClient struct {
 	dRKeyHostHost *connect.Client[endhost.DRKeyHostHostRequest, endhost.DRKeyHostHostResponse]
 }
 
-// DRKeyASHost calls proto.endhost.v1.DRKeyService.DRKeyASHost.
+// DRKeyASHost calls scion.endhost.v1.DRKeyService.DRKeyASHost.
 func (c *dRKeyServiceClient) DRKeyASHost(ctx context.Context, req *connect.Request[endhost.DRKeyASHostRequest]) (*connect.Response[endhost.DRKeyASHostResponse], error) {
 	return c.dRKeyASHost.CallUnary(ctx, req)
 }
 
-// DRKeyHostAS calls proto.endhost.v1.DRKeyService.DRKeyHostAS.
+// DRKeyHostAS calls scion.endhost.v1.DRKeyService.DRKeyHostAS.
 func (c *dRKeyServiceClient) DRKeyHostAS(ctx context.Context, req *connect.Request[endhost.DRKeyHostASRequest]) (*connect.Response[endhost.DRKeyHostASResponse], error) {
 	return c.dRKeyHostAS.CallUnary(ctx, req)
 }
 
-// DRKeyHostHost calls proto.endhost.v1.DRKeyService.DRKeyHostHost.
+// DRKeyHostHost calls scion.endhost.v1.DRKeyService.DRKeyHostHost.
 func (c *dRKeyServiceClient) DRKeyHostHost(ctx context.Context, req *connect.Request[endhost.DRKeyHostHostRequest]) (*connect.Response[endhost.DRKeyHostHostResponse], error) {
 	return c.dRKeyHostHost.CallUnary(ctx, req)
 }
 
-// DRKeyServiceHandler is an implementation of the proto.endhost.v1.DRKeyService service.
+// DRKeyServiceHandler is an implementation of the scion.endhost.v1.DRKeyService service.
 type DRKeyServiceHandler interface {
 	DRKeyASHost(context.Context, *connect.Request[endhost.DRKeyASHostRequest]) (*connect.Response[endhost.DRKeyASHostResponse], error)
 	DRKeyHostAS(context.Context, *connect.Request[endhost.DRKeyHostASRequest]) (*connect.Response[endhost.DRKeyHostASResponse], error)
@@ -137,7 +137,7 @@ func NewDRKeyServiceHandler(svc DRKeyServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(dRKeyServiceMethods.ByName("DRKeyHostHost")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/proto.endhost.v1.DRKeyService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/scion.endhost.v1.DRKeyService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case DRKeyServiceDRKeyASHostProcedure:
 			dRKeyServiceDRKeyASHostHandler.ServeHTTP(w, r)
@@ -155,13 +155,13 @@ func NewDRKeyServiceHandler(svc DRKeyServiceHandler, opts ...connect.HandlerOpti
 type UnimplementedDRKeyServiceHandler struct{}
 
 func (UnimplementedDRKeyServiceHandler) DRKeyASHost(context.Context, *connect.Request[endhost.DRKeyASHostRequest]) (*connect.Response[endhost.DRKeyASHostResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.endhost.v1.DRKeyService.DRKeyASHost is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("scion.endhost.v1.DRKeyService.DRKeyASHost is not implemented"))
 }
 
 func (UnimplementedDRKeyServiceHandler) DRKeyHostAS(context.Context, *connect.Request[endhost.DRKeyHostASRequest]) (*connect.Response[endhost.DRKeyHostASResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.endhost.v1.DRKeyService.DRKeyHostAS is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("scion.endhost.v1.DRKeyService.DRKeyHostAS is not implemented"))
 }
 
 func (UnimplementedDRKeyServiceHandler) DRKeyHostHost(context.Context, *connect.Request[endhost.DRKeyHostHostRequest]) (*connect.Response[endhost.DRKeyHostHostResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.endhost.v1.DRKeyService.DRKeyHostHost is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("scion.endhost.v1.DRKeyService.DRKeyHostHost is not implemented"))
 }

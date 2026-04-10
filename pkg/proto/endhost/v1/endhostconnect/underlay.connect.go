@@ -22,7 +22,7 @@ const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// UnderlayServiceName is the fully-qualified name of the UnderlayService service.
-	UnderlayServiceName = "proto.endhost.v1.UnderlayService"
+	UnderlayServiceName = "scion.endhost.v1.UnderlayService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -35,15 +35,15 @@ const (
 const (
 	// UnderlayServiceListUnderlaysProcedure is the fully-qualified name of the UnderlayService's
 	// ListUnderlays RPC.
-	UnderlayServiceListUnderlaysProcedure = "/proto.endhost.v1.UnderlayService/ListUnderlays"
+	UnderlayServiceListUnderlaysProcedure = "/scion.endhost.v1.UnderlayService/ListUnderlays"
 )
 
-// UnderlayServiceClient is a client for the proto.endhost.v1.UnderlayService service.
+// UnderlayServiceClient is a client for the scion.endhost.v1.UnderlayService service.
 type UnderlayServiceClient interface {
 	ListUnderlays(context.Context, *connect.Request[endhost.ListUnderlaysRequest]) (*connect.Response[endhost.ListUnderlaysResponse], error)
 }
 
-// NewUnderlayServiceClient constructs a client for the proto.endhost.v1.UnderlayService service. By
+// NewUnderlayServiceClient constructs a client for the scion.endhost.v1.UnderlayService service. By
 // default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
 // and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
 // connect.WithGRPC() or connect.WithGRPCWeb() options.
@@ -68,12 +68,12 @@ type underlayServiceClient struct {
 	listUnderlays *connect.Client[endhost.ListUnderlaysRequest, endhost.ListUnderlaysResponse]
 }
 
-// ListUnderlays calls proto.endhost.v1.UnderlayService.ListUnderlays.
+// ListUnderlays calls scion.endhost.v1.UnderlayService.ListUnderlays.
 func (c *underlayServiceClient) ListUnderlays(ctx context.Context, req *connect.Request[endhost.ListUnderlaysRequest]) (*connect.Response[endhost.ListUnderlaysResponse], error) {
 	return c.listUnderlays.CallUnary(ctx, req)
 }
 
-// UnderlayServiceHandler is an implementation of the proto.endhost.v1.UnderlayService service.
+// UnderlayServiceHandler is an implementation of the scion.endhost.v1.UnderlayService service.
 type UnderlayServiceHandler interface {
 	ListUnderlays(context.Context, *connect.Request[endhost.ListUnderlaysRequest]) (*connect.Response[endhost.ListUnderlaysResponse], error)
 }
@@ -91,7 +91,7 @@ func NewUnderlayServiceHandler(svc UnderlayServiceHandler, opts ...connect.Handl
 		connect.WithSchema(underlayServiceMethods.ByName("ListUnderlays")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/proto.endhost.v1.UnderlayService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/scion.endhost.v1.UnderlayService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case UnderlayServiceListUnderlaysProcedure:
 			underlayServiceListUnderlaysHandler.ServeHTTP(w, r)
@@ -105,5 +105,5 @@ func NewUnderlayServiceHandler(svc UnderlayServiceHandler, opts ...connect.Handl
 type UnimplementedUnderlayServiceHandler struct{}
 
 func (UnimplementedUnderlayServiceHandler) ListUnderlays(context.Context, *connect.Request[endhost.ListUnderlaysRequest]) (*connect.Response[endhost.ListUnderlaysResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.endhost.v1.UnderlayService.ListUnderlays is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("scion.endhost.v1.UnderlayService.ListUnderlays is not implemented"))
 }

@@ -22,7 +22,7 @@ const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// TrustServiceName is the fully-qualified name of the TrustService service.
-	TrustServiceName = "proto.endhost.v1.TrustService"
+	TrustServiceName = "scion.endhost.v1.TrustService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -34,18 +34,18 @@ const (
 // period.
 const (
 	// TrustServiceListChainsProcedure is the fully-qualified name of the TrustService's ListChains RPC.
-	TrustServiceListChainsProcedure = "/proto.endhost.v1.TrustService/ListChains"
+	TrustServiceListChainsProcedure = "/scion.endhost.v1.TrustService/ListChains"
 	// TrustServiceGetTrcProcedure is the fully-qualified name of the TrustService's GetTrc RPC.
-	TrustServiceGetTrcProcedure = "/proto.endhost.v1.TrustService/GetTrc"
+	TrustServiceGetTrcProcedure = "/scion.endhost.v1.TrustService/GetTrc"
 )
 
-// TrustServiceClient is a client for the proto.endhost.v1.TrustService service.
+// TrustServiceClient is a client for the scion.endhost.v1.TrustService service.
 type TrustServiceClient interface {
 	ListChains(context.Context, *connect.Request[endhost.ListChainsRequest]) (*connect.Response[endhost.ListChainResponse], error)
 	GetTrc(context.Context, *connect.Request[endhost.TRCRequest]) (*connect.Response[endhost.TRCResponse], error)
 }
 
-// NewTrustServiceClient constructs a client for the proto.endhost.v1.TrustService service. By
+// NewTrustServiceClient constructs a client for the scion.endhost.v1.TrustService service. By
 // default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
 // and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
 // connect.WithGRPC() or connect.WithGRPCWeb() options.
@@ -77,17 +77,17 @@ type trustServiceClient struct {
 	getTrc     *connect.Client[endhost.TRCRequest, endhost.TRCResponse]
 }
 
-// ListChains calls proto.endhost.v1.TrustService.ListChains.
+// ListChains calls scion.endhost.v1.TrustService.ListChains.
 func (c *trustServiceClient) ListChains(ctx context.Context, req *connect.Request[endhost.ListChainsRequest]) (*connect.Response[endhost.ListChainResponse], error) {
 	return c.listChains.CallUnary(ctx, req)
 }
 
-// GetTrc calls proto.endhost.v1.TrustService.GetTrc.
+// GetTrc calls scion.endhost.v1.TrustService.GetTrc.
 func (c *trustServiceClient) GetTrc(ctx context.Context, req *connect.Request[endhost.TRCRequest]) (*connect.Response[endhost.TRCResponse], error) {
 	return c.getTrc.CallUnary(ctx, req)
 }
 
-// TrustServiceHandler is an implementation of the proto.endhost.v1.TrustService service.
+// TrustServiceHandler is an implementation of the scion.endhost.v1.TrustService service.
 type TrustServiceHandler interface {
 	ListChains(context.Context, *connect.Request[endhost.ListChainsRequest]) (*connect.Response[endhost.ListChainResponse], error)
 	GetTrc(context.Context, *connect.Request[endhost.TRCRequest]) (*connect.Response[endhost.TRCResponse], error)
@@ -112,7 +112,7 @@ func NewTrustServiceHandler(svc TrustServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(trustServiceMethods.ByName("GetTrc")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/proto.endhost.v1.TrustService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/scion.endhost.v1.TrustService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TrustServiceListChainsProcedure:
 			trustServiceListChainsHandler.ServeHTTP(w, r)
@@ -128,9 +128,9 @@ func NewTrustServiceHandler(svc TrustServiceHandler, opts ...connect.HandlerOpti
 type UnimplementedTrustServiceHandler struct{}
 
 func (UnimplementedTrustServiceHandler) ListChains(context.Context, *connect.Request[endhost.ListChainsRequest]) (*connect.Response[endhost.ListChainResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.endhost.v1.TrustService.ListChains is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("scion.endhost.v1.TrustService.ListChains is not implemented"))
 }
 
 func (UnimplementedTrustServiceHandler) GetTrc(context.Context, *connect.Request[endhost.TRCRequest]) (*connect.Response[endhost.TRCResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.endhost.v1.TrustService.GetTrc is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("scion.endhost.v1.TrustService.GetTrc is not implemented"))
 }

@@ -447,7 +447,7 @@ var File_proto_endhost_v1_drkey_proto protoreflect.FileDescriptor
 
 const file_proto_endhost_v1_drkey_proto_rawDesc = "" +
 	"\n" +
-	"\x1cproto/endhost/v1/drkey.proto\x12\x10proto.endhost.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aproto/drkey/v1/drkey.proto\"\xcf\x01\n" +
+	"\x1cproto/endhost/v1/drkey.proto\x12\x10scion.endhost.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aproto/drkey/v1/drkey.proto\"\xcf\x01\n" +
 	"\x12DRKeyHostASRequest\x125\n" +
 	"\bval_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\avalTime\x129\n" +
 	"\vprotocol_id\x18\x02 \x01(\x0e2\x18.proto.drkey.v1.ProtocolR\n" +
@@ -486,9 +486,9 @@ const file_proto_endhost_v1_drkey_proto_rawDesc = "" +
 	"\tepoch_end\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\bepochEnd\x12\x10\n" +
 	"\x03key\x18\x03 \x01(\fR\x03key2\xae\x02\n" +
 	"\fDRKeyService\x12\\\n" +
-	"\vDRKeyASHost\x12$.proto.endhost.v1.DRKeyASHostRequest\x1a%.proto.endhost.v1.DRKeyASHostResponse\"\x00\x12\\\n" +
-	"\vDRKeyHostAS\x12$.proto.endhost.v1.DRKeyHostASRequest\x1a%.proto.endhost.v1.DRKeyHostASResponse\"\x00\x12b\n" +
-	"\rDRKeyHostHost\x12&.proto.endhost.v1.DRKeyHostHostRequest\x1a'.proto.endhost.v1.DRKeyHostHostResponse\"\x00B/Z-github.com/scionproto/scion/pkg/proto/endhostb\x06proto3"
+	"\vDRKeyASHost\x12$.scion.endhost.v1.DRKeyASHostRequest\x1a%.scion.endhost.v1.DRKeyASHostResponse\"\x00\x12\\\n" +
+	"\vDRKeyHostAS\x12$.scion.endhost.v1.DRKeyHostASRequest\x1a%.scion.endhost.v1.DRKeyHostASResponse\"\x00\x12b\n" +
+	"\rDRKeyHostHost\x12&.scion.endhost.v1.DRKeyHostHostRequest\x1a'.scion.endhost.v1.DRKeyHostHostResponse\"\x00B/Z-github.com/scionproto/scion/pkg/proto/endhostb\x06proto3"
 
 var (
 	file_proto_endhost_v1_drkey_proto_rawDescOnce sync.Once
@@ -504,34 +504,34 @@ func file_proto_endhost_v1_drkey_proto_rawDescGZIP() []byte {
 
 var file_proto_endhost_v1_drkey_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_proto_endhost_v1_drkey_proto_goTypes = []any{
-	(*DRKeyHostASRequest)(nil),    // 0: proto.endhost.v1.DRKeyHostASRequest
-	(*DRKeyHostASResponse)(nil),   // 1: proto.endhost.v1.DRKeyHostASResponse
-	(*DRKeyASHostRequest)(nil),    // 2: proto.endhost.v1.DRKeyASHostRequest
-	(*DRKeyASHostResponse)(nil),   // 3: proto.endhost.v1.DRKeyASHostResponse
-	(*DRKeyHostHostRequest)(nil),  // 4: proto.endhost.v1.DRKeyHostHostRequest
-	(*DRKeyHostHostResponse)(nil), // 5: proto.endhost.v1.DRKeyHostHostResponse
+	(*DRKeyHostASRequest)(nil),    // 0: scion.endhost.v1.DRKeyHostASRequest
+	(*DRKeyHostASResponse)(nil),   // 1: scion.endhost.v1.DRKeyHostASResponse
+	(*DRKeyASHostRequest)(nil),    // 2: scion.endhost.v1.DRKeyASHostRequest
+	(*DRKeyASHostResponse)(nil),   // 3: scion.endhost.v1.DRKeyASHostResponse
+	(*DRKeyHostHostRequest)(nil),  // 4: scion.endhost.v1.DRKeyHostHostRequest
+	(*DRKeyHostHostResponse)(nil), // 5: scion.endhost.v1.DRKeyHostHostResponse
 	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
 	(drkey.Protocol)(0),           // 7: proto.drkey.v1.Protocol
 }
 var file_proto_endhost_v1_drkey_proto_depIdxs = []int32{
-	6,  // 0: proto.endhost.v1.DRKeyHostASRequest.val_time:type_name -> google.protobuf.Timestamp
-	7,  // 1: proto.endhost.v1.DRKeyHostASRequest.protocol_id:type_name -> proto.drkey.v1.Protocol
-	6,  // 2: proto.endhost.v1.DRKeyHostASResponse.epoch_begin:type_name -> google.protobuf.Timestamp
-	6,  // 3: proto.endhost.v1.DRKeyHostASResponse.epoch_end:type_name -> google.protobuf.Timestamp
-	6,  // 4: proto.endhost.v1.DRKeyASHostRequest.val_time:type_name -> google.protobuf.Timestamp
-	7,  // 5: proto.endhost.v1.DRKeyASHostRequest.protocol_id:type_name -> proto.drkey.v1.Protocol
-	6,  // 6: proto.endhost.v1.DRKeyASHostResponse.epoch_begin:type_name -> google.protobuf.Timestamp
-	6,  // 7: proto.endhost.v1.DRKeyASHostResponse.epoch_end:type_name -> google.protobuf.Timestamp
-	6,  // 8: proto.endhost.v1.DRKeyHostHostRequest.val_time:type_name -> google.protobuf.Timestamp
-	7,  // 9: proto.endhost.v1.DRKeyHostHostRequest.protocol_id:type_name -> proto.drkey.v1.Protocol
-	6,  // 10: proto.endhost.v1.DRKeyHostHostResponse.epoch_begin:type_name -> google.protobuf.Timestamp
-	6,  // 11: proto.endhost.v1.DRKeyHostHostResponse.epoch_end:type_name -> google.protobuf.Timestamp
-	2,  // 12: proto.endhost.v1.DRKeyService.DRKeyASHost:input_type -> proto.endhost.v1.DRKeyASHostRequest
-	0,  // 13: proto.endhost.v1.DRKeyService.DRKeyHostAS:input_type -> proto.endhost.v1.DRKeyHostASRequest
-	4,  // 14: proto.endhost.v1.DRKeyService.DRKeyHostHost:input_type -> proto.endhost.v1.DRKeyHostHostRequest
-	3,  // 15: proto.endhost.v1.DRKeyService.DRKeyASHost:output_type -> proto.endhost.v1.DRKeyASHostResponse
-	1,  // 16: proto.endhost.v1.DRKeyService.DRKeyHostAS:output_type -> proto.endhost.v1.DRKeyHostASResponse
-	5,  // 17: proto.endhost.v1.DRKeyService.DRKeyHostHost:output_type -> proto.endhost.v1.DRKeyHostHostResponse
+	6,  // 0: scion.endhost.v1.DRKeyHostASRequest.val_time:type_name -> google.protobuf.Timestamp
+	7,  // 1: scion.endhost.v1.DRKeyHostASRequest.protocol_id:type_name -> proto.drkey.v1.Protocol
+	6,  // 2: scion.endhost.v1.DRKeyHostASResponse.epoch_begin:type_name -> google.protobuf.Timestamp
+	6,  // 3: scion.endhost.v1.DRKeyHostASResponse.epoch_end:type_name -> google.protobuf.Timestamp
+	6,  // 4: scion.endhost.v1.DRKeyASHostRequest.val_time:type_name -> google.protobuf.Timestamp
+	7,  // 5: scion.endhost.v1.DRKeyASHostRequest.protocol_id:type_name -> proto.drkey.v1.Protocol
+	6,  // 6: scion.endhost.v1.DRKeyASHostResponse.epoch_begin:type_name -> google.protobuf.Timestamp
+	6,  // 7: scion.endhost.v1.DRKeyASHostResponse.epoch_end:type_name -> google.protobuf.Timestamp
+	6,  // 8: scion.endhost.v1.DRKeyHostHostRequest.val_time:type_name -> google.protobuf.Timestamp
+	7,  // 9: scion.endhost.v1.DRKeyHostHostRequest.protocol_id:type_name -> proto.drkey.v1.Protocol
+	6,  // 10: scion.endhost.v1.DRKeyHostHostResponse.epoch_begin:type_name -> google.protobuf.Timestamp
+	6,  // 11: scion.endhost.v1.DRKeyHostHostResponse.epoch_end:type_name -> google.protobuf.Timestamp
+	2,  // 12: scion.endhost.v1.DRKeyService.DRKeyASHost:input_type -> scion.endhost.v1.DRKeyASHostRequest
+	0,  // 13: scion.endhost.v1.DRKeyService.DRKeyHostAS:input_type -> scion.endhost.v1.DRKeyHostASRequest
+	4,  // 14: scion.endhost.v1.DRKeyService.DRKeyHostHost:input_type -> scion.endhost.v1.DRKeyHostHostRequest
+	3,  // 15: scion.endhost.v1.DRKeyService.DRKeyASHost:output_type -> scion.endhost.v1.DRKeyASHostResponse
+	1,  // 16: scion.endhost.v1.DRKeyService.DRKeyHostAS:output_type -> scion.endhost.v1.DRKeyHostASResponse
+	5,  // 17: scion.endhost.v1.DRKeyService.DRKeyHostHost:output_type -> scion.endhost.v1.DRKeyHostHostResponse
 	15, // [15:18] is the sub-list for method output_type
 	12, // [12:15] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name
@@ -590,7 +590,7 @@ func NewDRKeyServiceClient(cc grpc.ClientConnInterface) DRKeyServiceClient {
 
 func (c *dRKeyServiceClient) DRKeyASHost(ctx context.Context, in *DRKeyASHostRequest, opts ...grpc.CallOption) (*DRKeyASHostResponse, error) {
 	out := new(DRKeyASHostResponse)
-	err := c.cc.Invoke(ctx, "/proto.endhost.v1.DRKeyService/DRKeyASHost", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/scion.endhost.v1.DRKeyService/DRKeyASHost", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -599,7 +599,7 @@ func (c *dRKeyServiceClient) DRKeyASHost(ctx context.Context, in *DRKeyASHostReq
 
 func (c *dRKeyServiceClient) DRKeyHostAS(ctx context.Context, in *DRKeyHostASRequest, opts ...grpc.CallOption) (*DRKeyHostASResponse, error) {
 	out := new(DRKeyHostASResponse)
-	err := c.cc.Invoke(ctx, "/proto.endhost.v1.DRKeyService/DRKeyHostAS", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/scion.endhost.v1.DRKeyService/DRKeyHostAS", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -608,7 +608,7 @@ func (c *dRKeyServiceClient) DRKeyHostAS(ctx context.Context, in *DRKeyHostASReq
 
 func (c *dRKeyServiceClient) DRKeyHostHost(ctx context.Context, in *DRKeyHostHostRequest, opts ...grpc.CallOption) (*DRKeyHostHostResponse, error) {
 	out := new(DRKeyHostHostResponse)
-	err := c.cc.Invoke(ctx, "/proto.endhost.v1.DRKeyService/DRKeyHostHost", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/scion.endhost.v1.DRKeyService/DRKeyHostHost", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -650,7 +650,7 @@ func _DRKeyService_DRKeyASHost_Handler(srv interface{}, ctx context.Context, dec
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.endhost.v1.DRKeyService/DRKeyASHost",
+		FullMethod: "/scion.endhost.v1.DRKeyService/DRKeyASHost",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DRKeyServiceServer).DRKeyASHost(ctx, req.(*DRKeyASHostRequest))
@@ -668,7 +668,7 @@ func _DRKeyService_DRKeyHostAS_Handler(srv interface{}, ctx context.Context, dec
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.endhost.v1.DRKeyService/DRKeyHostAS",
+		FullMethod: "/scion.endhost.v1.DRKeyService/DRKeyHostAS",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DRKeyServiceServer).DRKeyHostAS(ctx, req.(*DRKeyHostASRequest))
@@ -686,7 +686,7 @@ func _DRKeyService_DRKeyHostHost_Handler(srv interface{}, ctx context.Context, d
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.endhost.v1.DRKeyService/DRKeyHostHost",
+		FullMethod: "/scion.endhost.v1.DRKeyService/DRKeyHostHost",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DRKeyServiceServer).DRKeyHostHost(ctx, req.(*DRKeyHostHostRequest))
@@ -695,7 +695,7 @@ func _DRKeyService_DRKeyHostHost_Handler(srv interface{}, ctx context.Context, d
 }
 
 var _DRKeyService_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "proto.endhost.v1.DRKeyService",
+	ServiceName: "scion.endhost.v1.DRKeyService",
 	HandlerType: (*DRKeyServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

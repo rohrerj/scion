@@ -1,17 +1,12 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("//tools/proto:connect.bzl", "go_connect_library")
 
-go_library(
+go_connect_library(
     name = "go_default_library",
-    srcs = [
+    files = [
         "drkey.connect.go",
         "path.connect.go",
         "trust.connect.go",
         "underlay.connect.go",
     ],
-    importpath = "github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect",
-    visibility = ["//visibility:public"],
-    deps = [
-        "//pkg/proto/endhost:go_default_library",
-        "@com_connectrpc_connect//:go_default_library",
-    ],
+    proto = "endhost",
 )
