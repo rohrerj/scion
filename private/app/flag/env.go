@@ -91,6 +91,7 @@ type SCIONEnvironment struct {
 	configDirFlag *pflag.Flag
 	file          env.SCION
 	filepath      string
+	endhostApi    *pflag.Flag
 
 	mtx sync.Mutex
 }
@@ -114,6 +115,10 @@ func (e *SCIONEnvironment) Register(flagSet *pflag.FlagSet) {
 the local topology.json (IP:Port or "default" for `+defaultDaemon+`).
 If both --sciond and --config-dir are set, --sciond takes priority.`,
 	)
+	endhostApi := ""
+	e.endhostApi = flagSet.VarPF((*stringVal)(&endhostApi),
+		"endhost", "",
+		`Connect to the endhost API at the specified endpoint ([scheme]://[host]:[port]/[PathPrefix])`)
 
 	configDirHelp := `Directory containing topology.json and certs/ for standalone mode.
 If both --sciond and --config-dir are set, --sciond takes priority.
@@ -243,6 +248,17 @@ func (e *SCIONEnvironment) Daemon() string {
 	}
 	if as, ok := e.file.ASes[ia]; ok && as.DaemonAddress != "" {
 		return as.DaemonAddress
+	}
+	return ""
+}
+
+func (e *SCIONEnvironment) EndhostApi() string {
+	e.mtx.Lock()
+	defer e.mtx.Unlock()
+
+	if e.endhostApi != nil && e.endhostApi.Changed {
+		value := e.endhostApi.Value.String()
+		return value
 	}
 	return ""
 }

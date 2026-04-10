@@ -138,12 +138,13 @@ On other errors, traceroute will exit with code 2.
 				return serrors.Wrap("loading topology", err)
 			}
 			span.SetTag("src.isd_as", topo.LocalIA)
-			path, err := path.Choose(traceCtx, sd, remote.IA,
+			path, err := path.Choose(traceCtx, remote.IA,
 				path.WithInteractive(flags.interactive),
 				path.WithRefresh(flags.refresh),
 				path.WithSequence(flags.sequence),
 				path.WithColorScheme(path.DefaultColorScheme(flags.noColor)),
 				path.WithEPIC(flags.epic),
+				path.WithDaemonConnector(sd),
 			)
 			if err != nil {
 				return err

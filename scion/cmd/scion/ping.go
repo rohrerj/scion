@@ -31,6 +31,7 @@ import (
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/daemon"
+	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/snet"
@@ -142,28 +143,14 @@ On other errors, ping will exit with code 2.
 			span.SetTag("dst.host", remote.Host.IP())
 			defer span.Finish()
 
-			sd, err := daemon.NewAutoConnector(traceCtx,
-				daemon.WithDaemon(envFlags.Daemon()),
-				daemon.WithConfigDir(envFlags.ConfigDir()),
-			)
-			if err != nil {
-				return serrors.Wrap("getting daemon connector", err)
-			}
-
-			defer func(sd daemon.Connector) {
-				err := sd.Close()
-				if err != nil {
-					log.Error("Closing SCION Daemon connection", "err", err)
-				}
-			}(sd)
-
 			localIP := net.IP(envFlags.Local().AsSlice())
 			log.Debug("Using local IP", "local", localIP)
+			var topo snet.Topology
 
-			topo, err := daemon.LoadTopology(traceCtx, sd)
+			/*topo, err := daemon.LoadTopology(traceCtx, sd)
 			if err != nil {
 				return serrors.Wrap("loading topology", err)
-			}
+			}*/
 
 			span.SetTag("src.isd_as", topo.LocalIA)
 
@@ -174,6 +161,37 @@ On other errors, ping will exit with code 2.
 				path.WithColorScheme(path.DefaultColorScheme(flags.noColor)),
 				path.WithEPIC(flags.epic),
 			}
+			if envFlags.EndhostApi() != "" {
+				connector := endhost.NewConnector(envFlags.EndhostApi())
+				topo, err = connector.LoadTopology(traceCtx)
+				if err != nil {
+					return serrors.Wrap("loading topology from endhost api", err)
+				}
+				opts = append(opts, path.WithEndhostConnector(connector))
+			} else if envFlags.Daemon() != "" || envFlags.ConfigDir() != "" {
+				sd, err := daemon.NewAutoConnector(traceCtx,
+					daemon.WithDaemon(envFlags.Daemon()),
+					daemon.WithConfigDir(envFlags.ConfigDir()),
+				)
+				if err != nil {
+					return serrors.Wrap("getting daemon connector", err)
+				}
+				topo, err = daemon.LoadTopology(traceCtx, sd)
+				if err != nil {
+					return serrors.Wrap("loading topology from daemon", err)
+				}
+				opts = append(opts, path.WithDaemonConnector(sd))
+
+				defer func(sd daemon.Connector) {
+					err := sd.Close()
+					if err != nil {
+						log.Error("Closing SCION Daemon connection", "err", err)
+					}
+				}(sd)
+			} else {
+				return serrors.New("Neither endhost API address nor SCION daemon address specified")
+			}
+
 			if flags.healthyOnly {
 				opts = append(opts, path.WithProbing(&path.ProbeConfig{
 					LocalIA: topo.LocalIA,
@@ -181,7 +199,7 @@ On other errors, ping will exit with code 2.
 				}))
 			}
 
-			path, err := path.Choose(traceCtx, sd, remote.IA, opts...)
+			path, err := path.Choose(traceCtx, remote.IA, opts...)
 			if err != nil {
 				return err
 			}
