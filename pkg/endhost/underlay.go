@@ -21,6 +21,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 )
@@ -79,7 +80,7 @@ func (u *UnderlayService) ListUnderlays(ctx context.Context, isdAs *addr.IA) (*U
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, serrors.Wrap("on ListUnderlays", err)
 	}
 	underlays := &Underlays{}
 	if res.Msg.Udp != nil {

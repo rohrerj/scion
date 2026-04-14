@@ -18,6 +18,7 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"strings"
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -41,8 +42,63 @@ type Connector struct {
 	interfaces map[uint16]netip.AddrPort
 }
 
+func (c *Connector) AllPaths(ctx context.Context, dst addr.IA, src addr.IA) ([]snet.Path, error) {
+	interfacesToString := func(elems []snet.PathInterface) string {
+		parts := make([]string, len(elems))
+		for i, e := range elems {
+			parts[i] = e.String()
+		}
+		return strings.Join(parts, "|")
+	}
+
+	paginator := c.pathService.NewPaginator(dst, src)
+	paginator.pageSize = 6
+	allPaths := make([]snet.Path, 0, 1)
+	seen := make(map[string]struct{})
+	for {
+		up, core, down, err := paginator.NextPage(ctx)
+		if err != nil {
+			return allPaths, err
+		}
+		combinedPaths := combinator.Combine(src, dst, up, core, down, false)
+		anyNewPaths := false
+		for _, p := range combinedPaths {
+			mapKey := interfacesToString(p.Metadata.Interfaces)
+			if _, isSeen := seen[mapKey]; !isSeen {
+				nextHopNetIpPort, ok := c.interfaces[uint16(p.Metadata.Interfaces[0].ID)]
+				if !ok {
+					return nil, serrors.New("nexthop cannot be determined")
+				}
+				addr := nextHopNetIpPort.Addr()
+				nextHop := &net.UDPAddr{
+					IP:   addr.AsSlice(),
+					Port: int(nextHopNetIpPort.Port()),
+					Zone: addr.Zone(),
+				}
+				path := snetpath.Path{
+					Src:           p.Metadata.Interfaces[0].IA,
+					Dst:           p.Metadata.Interfaces[len(p.Metadata.Interfaces)-1].IA,
+					DataplanePath: p.SCIONPath,
+					Meta:          p.Metadata,
+					NextHop:       nextHop,
+				}
+				allPaths = append(allPaths, path)
+				seen[mapKey] = struct{}{}
+				anyNewPaths = true
+			}
+		}
+		if !anyNewPaths {
+			// this page only contains paths we already knew, so we probably collected all paths already
+			break
+		}
+	}
+
+	return allPaths, nil
+}
+
 func (c *Connector) Paths(ctx context.Context, dst addr.IA, src addr.IA) ([]snet.Path, error) {
-	up, core, down, err := c.pathService.Paths(ctx, dst, src)
+	paginator := c.pathService.NewPaginator(dst, src)
+	up, core, down, err := paginator.NextPage(ctx)
 	if err != nil {
 		return nil, err
 	}

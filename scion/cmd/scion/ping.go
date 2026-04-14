@@ -147,11 +147,6 @@ On other errors, ping will exit with code 2.
 			log.Debug("Using local IP", "local", localIP)
 			var topo snet.Topology
 
-			/*topo, err := daemon.LoadTopology(traceCtx, sd)
-			if err != nil {
-				return serrors.Wrap("loading topology", err)
-			}*/
-
 			span.SetTag("src.isd_as", topo.LocalIA)
 
 			opts := []path.Option{

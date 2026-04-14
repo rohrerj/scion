@@ -20,6 +20,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/drkey"
+	"github.com/scionproto/scion/pkg/private/serrors"
 	drpb "github.com/scionproto/scion/pkg/proto/drkey"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
@@ -51,7 +52,7 @@ func (d *DRKeyService) ASHostKey(ctx context.Context, req drkey.ASHostMeta) (*dr
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, serrors.Wrap("on ASHostKey", err)
 	}
 	return &drkey.ASHostKey{
 		ProtoId: req.ProtoId,
@@ -75,7 +76,7 @@ func (d *DRKeyService) HostASKey(ctx context.Context, req drkey.HostASMeta) (*dr
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, serrors.Wrap("on HostASKey", err)
 	}
 	return &drkey.HostASKey{
 		ProtoId: req.ProtoId,
@@ -100,7 +101,7 @@ func (d *DRKeyService) HostHostKey(ctx context.Context, req drkey.HostHostMeta) 
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, serrors.Wrap("on HostHostKey", err)
 	}
 	return &drkey.HostHostKey{
 		ProtoId: req.ProtoId,

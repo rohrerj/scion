@@ -21,6 +21,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 )
@@ -74,7 +75,7 @@ func (t *TrustService) ListChains(ctx context.Context, subjects []Subject) ([]Ch
 	}
 	repChains, err := client.ListChains(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, serrors.Wrap("on ListChains", err)
 	}
 	rep := make([]Chains, 0, len(repChains.Msg.ListChain))
 	for _, chains := range repChains.Msg.ListChain {
@@ -102,7 +103,7 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, serrors.Wrap("on TRC", err)
 	}
 	return rep.Msg.Trc, nil
 }

@@ -331,12 +331,30 @@ func (r Result) Alive() int {
 
 // Run lists the paths to the specified ISD-AS to stdout.
 func Run(ctx context.Context, dst addr.IA, cfg Config) (*Result, error) {
-	sdConn := cfg.Connector
+	var allPaths []snet.Path
+	var topo snet.Topology
+	var err error
+	if cfg.EndhostConnector != nil {
+		connector := cfg.EndhostConnector
+		topo, err = connector.LoadTopology(ctx)
+		allPaths, err = connector.AllPaths(ctx, dst, topo.LocalIA)
+		if err != nil {
+			return nil, serrors.Wrap("retrieving paths from endhost API", err)
+		}
+	} else if cfg.DaemonConnector != nil {
+		sdConn := cfg.DaemonConnector
 
-	topo, err := daemon.LoadTopology(ctx, sdConn)
-	if err != nil {
-		return nil, serrors.Wrap("loading topology", err)
+		topo, err = daemon.LoadTopology(ctx, sdConn)
+		if err != nil {
+			return nil, serrors.Wrap("loading topology", err)
+		}
+		allPaths, err = sdConn.Paths(ctx, dst, 0,
+			daemontypes.PathReqFlags{Refresh: cfg.Refresh})
+		if err != nil {
+			return nil, serrors.Wrap("retrieving paths from the SCION Daemon", err)
+		}
 	}
+
 	localIA := topo.LocalIA
 	if dst == localIA {
 		return &Result{
@@ -348,11 +366,7 @@ func Run(ctx context.Context, dst addr.IA, cfg Config) (*Result, error) {
 	// TODO(lukedirtwalker): Replace this with snet.Router once we have the
 	// possibility to have the same functionality, i.e. refresh, fetch all paths.
 	// https://github.com/scionproto/scion/issues/3348
-	allPaths, err := sdConn.Paths(ctx, dst, 0,
-		daemontypes.PathReqFlags{Refresh: cfg.Refresh})
-	if err != nil {
-		return nil, serrors.Wrap("retrieving paths from the SCION Daemon", err)
-	}
+
 	paths, err := path.Filter(cfg.Sequence, allPaths)
 	if err != nil {
 		return nil, err

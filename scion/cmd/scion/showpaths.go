@@ -27,6 +27,7 @@ import (
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/daemon"
+	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/private/app"
@@ -109,21 +110,26 @@ On other errors, showpaths will exit with code 2.
 			ctx, cancel := context.WithTimeout(traceCtx, flags.timeout)
 			defer cancel()
 
-			sd, err := daemon.NewAutoConnector(ctx,
-				daemon.WithDaemon(envFlags.Daemon()),
-				daemon.WithConfigDir(envFlags.ConfigDir()),
-			)
-			if err != nil {
-				return serrors.Wrap("getting daemon connector", err)
-			}
-			flags.cfg.Connector = sd
-
-			defer func(sd daemon.Connector) {
-				err := sd.Close()
+			if envFlags.EndhostApi() != "" {
+				connector := endhost.NewConnector(envFlags.EndhostApi())
+				flags.cfg.EndhostConnector = connector
+			} else if envFlags.Daemon() != "" || envFlags.ConfigDir() != "" {
+				sd, err := daemon.NewAutoConnector(ctx,
+					daemon.WithDaemon(envFlags.Daemon()),
+					daemon.WithConfigDir(envFlags.ConfigDir()),
+				)
 				if err != nil {
-					log.Error("Closing SCION Daemon connection", "err", err)
+					return serrors.Wrap("getting daemon connector", err)
 				}
-			}(flags.cfg.Connector)
+				flags.cfg.DaemonConnector = sd
+
+				defer func(sd daemon.Connector) {
+					err := sd.Close()
+					if err != nil {
+						log.Error("Closing SCION Daemon connection", "err", err)
+					}
+				}(flags.cfg.DaemonConnector)
+			}
 
 			flags.cfg.Local = net.IP(envFlags.Local().AsSlice())
 			log.Debug("Using local IP", "local", flags.cfg.Local)

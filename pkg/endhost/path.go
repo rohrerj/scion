@@ -21,6 +21,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	seg "github.com/scionproto/scion/pkg/segment"
@@ -30,7 +31,6 @@ type PathService struct {
 	url        string
 	httpClient *http.Client
 	PageSize   int32
-	PageToken  string
 }
 
 func NewPathService(url string) *PathService {
@@ -47,23 +47,41 @@ func NewPathService(url string) *PathService {
 	return p
 }
 
-func (s *PathService) Paths(ctx context.Context, dst, src addr.IA) ([]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
-	if s.PageSize == 0 {
-		s.PageSize = 64
-	}
+type Paginator struct {
+	url        string
+	httpClient *http.Client
+	pageSize   int32
+	pageToken  string
+	src        addr.IA
+	dst        addr.IA
+}
 
+func (s *PathService) NewPaginator(dst, src addr.IA) *Paginator {
+	return &Paginator{
+		url:        s.url,
+		httpClient: s.httpClient,
+		pageSize:   s.PageSize,
+		pageToken:  "",
+		src:        src,
+		dst:        dst,
+	}
+}
+
+func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
 	client := endhostconnect.NewPathServiceClient(s.httpClient, s.url)
 	res, err := client.ListSegments(ctx, &connect.Request[endhost.ListSegmentsRequest]{
 		Msg: &endhost.ListSegmentsRequest{
-			SrcIsdAs:  uint64(src),
-			DstIsdAs:  uint64(dst),
-			PageSize:  s.PageSize,
-			PageToken: s.PageToken,
+			SrcIsdAs:  uint64(s.src),
+			DstIsdAs:  uint64(s.dst),
+			PageSize:  s.pageSize,
+			PageToken: s.pageToken,
 		},
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, serrors.Wrap("on ListSegments", err)
 	}
+	s.pageToken = res.Msg.NextPageToken
+
 	upSegments := make([]*seg.PathSegment, 0, len(res.Msg.UpSegments))
 	coreSegments := make([]*seg.PathSegment, 0, len(res.Msg.CoreSegments))
 	downSegments := make([]*seg.PathSegment, 0, len(res.Msg.DownSegments))
