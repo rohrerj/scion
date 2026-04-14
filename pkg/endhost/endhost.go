@@ -28,15 +28,18 @@ import (
 )
 
 func NewConnector(api string) *Connector {
+	trustService := NewTrustService(api)
 	return &Connector{
 		underlayService: NewUnderlayService(api),
-		pathService:     NewPathService(api),
+		pathService:     NewPathService(api, trustService),
+		trustService:    trustService,
 	}
 }
 
 type Connector struct {
 	underlayService *UnderlayService
 	pathService     *PathService
+	trustService    *TrustService
 	// cached values
 	underlays  *Underlays
 	interfaces map[uint16]netip.AddrPort

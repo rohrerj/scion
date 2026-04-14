@@ -17,6 +17,7 @@ package endhost
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net/http"
 
 	"connectrpc.com/connect"
@@ -28,12 +29,13 @@ import (
 )
 
 type PathService struct {
-	url        string
-	httpClient *http.Client
-	PageSize   int32
+	url          string
+	httpClient   *http.Client
+	PageSize     int32
+	trustService *TrustService
 }
 
-func NewPathService(url string) *PathService {
+func NewPathService(url string, trustService *TrustService) *PathService {
 	p := &PathService{
 		url: url,
 		httpClient: &http.Client{
@@ -43,27 +45,30 @@ func NewPathService(url string) *PathService {
 				},
 			},
 		},
+		trustService: trustService,
 	}
 	return p
 }
 
 type Paginator struct {
-	url        string
-	httpClient *http.Client
-	pageSize   int32
-	pageToken  string
-	src        addr.IA
-	dst        addr.IA
+	url          string
+	httpClient   *http.Client
+	pageSize     int32
+	pageToken    string
+	src          addr.IA
+	dst          addr.IA
+	trustService *TrustService
 }
 
 func (s *PathService) NewPaginator(dst, src addr.IA) *Paginator {
 	return &Paginator{
-		url:        s.url,
-		httpClient: s.httpClient,
-		pageSize:   s.PageSize,
-		pageToken:  "",
-		src:        src,
-		dst:        dst,
+		url:          s.url,
+		httpClient:   s.httpClient,
+		pageSize:     s.PageSize,
+		pageToken:    "",
+		src:          src,
+		dst:          dst,
+		trustService: s.trustService,
 	}
 }
 
@@ -90,6 +95,12 @@ func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.Pa
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		err = s.trustService.VerifyPathSegment(ctx, ps)
+		if err != nil {
+			fmt.Println("1verification failed")
+			return nil, nil, nil, err
+		}
+		fmt.Println("verification passed")
 		upSegments = append(upSegments, ps)
 	}
 	for _, pb := range res.Msg.CoreSegments {
@@ -97,6 +108,12 @@ func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.Pa
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		err = s.trustService.VerifyPathSegment(ctx, ps)
+		if err != nil {
+			fmt.Println("2verification failed")
+			return nil, nil, nil, err
+		}
+		fmt.Println("verification passed")
 		coreSegments = append(coreSegments, ps)
 	}
 	for _, pb := range res.Msg.DownSegments {
@@ -104,6 +121,12 @@ func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.Pa
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		err = s.trustService.VerifyPathSegment(ctx, ps)
+		if err != nil {
+			fmt.Println("3verification failed")
+			return nil, nil, nil, err
+		}
+		fmt.Println("verification passed")
 		downSegments = append(downSegments, ps)
 	}
 	return upSegments, coreSegments, downSegments, nil

@@ -17,14 +17,61 @@ package endhost
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"net/http"
 
 	"connectrpc.com/connect"
+
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
+	"github.com/scionproto/scion/pkg/scrypto/cppki"
+	seg "github.com/scionproto/scion/pkg/segment"
+	"github.com/scionproto/scion/private/trust"
 )
+
+type trustServiceProvider struct {
+	ts *TrustService
+}
+
+func (p *trustServiceProvider) NotifyTRC(ctx context.Context, id cppki.TRCID, opts ...trust.Option) error {
+	// For simplicity, do nothing as the endhost provides verified chains
+	return nil
+}
+
+func (p *trustServiceProvider) GetChains(ctx context.Context, query trust.ChainQuery, opts ...trust.Option) ([][]*x509.Certificate, error) {
+	subjects := []Subject{{IA: query.IA, SubjectKeyId: query.SubjectKeyID}}
+	chains, err := p.ts.ListChains(ctx, subjects)
+	if err != nil {
+		return nil, err
+	}
+	var result [][]*x509.Certificate
+	for _, ch := range chains {
+		var chain []*x509.Certificate
+		for _, c := range ch.Chains {
+			asCert, err := x509.ParseCertificate(c.AsCert)
+			if err != nil {
+				return nil, serrors.Wrap("parsing AS certificate", err)
+			}
+			caCert, err := x509.ParseCertificate(c.CaCert)
+			if err != nil {
+				return nil, serrors.Wrap("parsing CA certificate", err)
+			}
+			chain = append(chain, asCert, caCert)
+		}
+		result = append(result, chain)
+	}
+	return result, nil
+}
+
+func (p *trustServiceProvider) GetSignedTRC(ctx context.Context, id cppki.TRCID, opts ...trust.Option) (cppki.SignedTRC, error) {
+	trcBytes, err := p.ts.TRC(ctx, uint32(id.ISD), uint64(id.Base), uint64(id.Serial))
+	if err != nil {
+		return cppki.SignedTRC{}, err
+	}
+	return cppki.DecodeSignedTRC(trcBytes)
+}
 
 type TrustService struct {
 	url        string
@@ -106,4 +153,12 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 		return nil, serrors.Wrap("on TRC", err)
 	}
 	return rep.Msg.Trc, nil
+}
+
+func (t *TrustService) VerifyPathSegment(ctx context.Context, segment *seg.PathSegment) error {
+	provider := &trustServiceProvider{ts: t}
+	verifier := trust.Verifier{
+		Engine: provider,
+	}
+	return segment.Verify(ctx, &verifier)
 }
