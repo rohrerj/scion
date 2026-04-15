@@ -38,9 +38,10 @@ func (s EndhostServer) Chains(ctx context.Context,
 	req *ehpb.ListChainsRequest) (*ehpb.ListChainResponse, error) {
 
 	peer, _ := peer.FromContext(ctx)
-	validity := cppki.Validity{
-		NotAfter:  time.Unix(int64(req.AtLeastValidUntil), 0),
-		NotBefore: time.Unix(int64(req.AtLeastValidSince), 0),
+	var validity cppki.Validity
+	if !(req.AtLeastValidSince == 0 && req.AtLeastValidUntil == 0) {
+		validity.NotAfter = time.Unix(int64(req.AtLeastValidUntil), 0)
+		validity.NotBefore = time.Unix(int64(req.AtLeastValidSince), 0)
 	}
 	rep := &ehpb.ListChainResponse{}
 	for _, subject := range req.Subjects {
