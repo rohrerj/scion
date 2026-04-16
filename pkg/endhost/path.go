@@ -17,7 +17,6 @@ package endhost
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net/http"
 
 	"connectrpc.com/connect"
@@ -95,12 +94,6 @@ func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.Pa
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		err = s.trustService.VerifyPathSegment(ctx, ps)
-		if err != nil {
-			fmt.Println("1verification failed")
-			return nil, nil, nil, err
-		}
-		fmt.Println("verification passed")
 		upSegments = append(upSegments, ps)
 	}
 	for _, pb := range res.Msg.CoreSegments {
@@ -108,12 +101,6 @@ func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.Pa
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		err = s.trustService.VerifyPathSegment(ctx, ps)
-		if err != nil {
-			fmt.Println("2verification failed")
-			return nil, nil, nil, err
-		}
-		fmt.Println("verification passed")
 		coreSegments = append(coreSegments, ps)
 	}
 	for _, pb := range res.Msg.DownSegments {
@@ -121,13 +108,48 @@ func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.Pa
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		err = s.trustService.VerifyPathSegment(ctx, ps)
-		if err != nil {
-			fmt.Println("3verification failed")
-			return nil, nil, nil, err
-		}
-		fmt.Println("verification passed")
 		downSegments = append(downSegments, ps)
 	}
-	return upSegments, coreSegments, downSegments, nil
+	verifySegments := true
+	if !verifySegments {
+		return upSegments, coreSegments, downSegments, nil
+	}
+
+	verifiedUpSegments := make([]*seg.PathSegment, 0, len(upSegments))
+	verifiedCoreSegments := make([]*seg.PathSegment, 0, len(coreSegments))
+	verifiedDownSegments := make([]*seg.PathSegment, 0, len(downSegments))
+	if len(upSegments) != 0 {
+		verificationErrors, err := s.trustService.VerifyPathSegments(ctx, upSegments)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		for i := range verificationErrors {
+			if verificationErrors[i] == nil {
+				verifiedUpSegments = append(verifiedUpSegments, upSegments[i])
+			}
+		}
+	}
+	if len(coreSegments) != 0 {
+		verificationErrors, err := s.trustService.VerifyPathSegments(ctx, coreSegments)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		for i := range verificationErrors {
+			if verificationErrors[i] == nil {
+				verifiedCoreSegments = append(verifiedCoreSegments, coreSegments[i])
+			}
+		}
+	}
+	if len(downSegments) != 0 {
+		verificationErrors, err := s.trustService.VerifyPathSegments(ctx, downSegments)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		for i := range verificationErrors {
+			if verificationErrors[i] == nil {
+				verifiedDownSegments = append(verifiedDownSegments, downSegments[i])
+			}
+		}
+	}
+	return verifiedUpSegments, verifiedCoreSegments, verifiedDownSegments, nil
 }

@@ -21,18 +21,26 @@ import (
 	"net/http"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
+	cppb "github.com/scionproto/scion/pkg/proto/control_plane"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
+	"github.com/scionproto/scion/pkg/scrypto/signed"
 	seg "github.com/scionproto/scion/pkg/segment"
 	"github.com/scionproto/scion/private/trust"
 )
 
 type trustServiceProvider struct {
-	ts *TrustService
+	ts            *TrustService
+	fetchedChains map[subject2]Chains
+}
+type subject2 struct {
+	kedId string
+	ia    addr.IA
 }
 
 func (p *trustServiceProvider) NotifyTRC(ctx context.Context, id cppki.TRCID, opts ...trust.Option) error {
@@ -41,27 +49,25 @@ func (p *trustServiceProvider) NotifyTRC(ctx context.Context, id cppki.TRCID, op
 }
 
 func (p *trustServiceProvider) GetChains(ctx context.Context, query trust.ChainQuery, opts ...trust.Option) ([][]*x509.Certificate, error) {
-	subjects := []Subject{{IA: query.IA, SubjectKeyId: query.SubjectKeyID}}
-	chains, err := p.ts.ListChains(ctx, subjects)
-	if err != nil {
-		return nil, err
+	subject := subject2{ia: query.IA, kedId: string(query.SubjectKeyID)}
+	chains, found := p.fetchedChains[subject]
+	if !found {
+		return nil, serrors.New("no chains found for subject")
 	}
 	var result [][]*x509.Certificate
-	for _, ch := range chains {
-		var chain []*x509.Certificate
-		for _, c := range ch.Chains {
-			asCert, err := x509.ParseCertificate(c.AsCert)
-			if err != nil {
-				return nil, serrors.Wrap("parsing AS certificate", err)
-			}
-			caCert, err := x509.ParseCertificate(c.CaCert)
-			if err != nil {
-				return nil, serrors.Wrap("parsing CA certificate", err)
-			}
-			chain = append(chain, asCert, caCert)
+	var chain []*x509.Certificate
+	for _, c := range chains.Chains {
+		asCert, err := x509.ParseCertificate(c.AsCert)
+		if err != nil {
+			return nil, serrors.Wrap("parsing AS certificate", err)
 		}
-		result = append(result, chain)
+		caCert, err := x509.ParseCertificate(c.CaCert)
+		if err != nil {
+			return nil, serrors.Wrap("parsing CA certificate", err)
+		}
+		chain = append(chain, asCert, caCert)
 	}
+	result = append(result, chain)
 	return result, nil
 }
 
@@ -102,7 +108,8 @@ type Chain struct {
 	CaCert []byte
 }
 type Chains struct {
-	Chains []Chain
+	Chains  []Chain
+	Subject Subject
 }
 
 func (t *TrustService) ListChains(ctx context.Context, subjects []Subject) ([]Chains, error) {
@@ -128,6 +135,10 @@ func (t *TrustService) ListChains(ctx context.Context, subjects []Subject) ([]Ch
 	for _, chains := range repChains.Msg.ListChain {
 		rep_chains := Chains{
 			Chains: make([]Chain, 0, len(chains.Chains)),
+			Subject: Subject{
+				IA:           addr.IA(chains.Subject.IsdAs),
+				SubjectKeyId: chains.Subject.SubjectKeyId,
+			},
 		}
 		for _, chain := range chains.Chains {
 			rep_chains.Chains = append(rep_chains.Chains, Chain{
@@ -155,10 +166,62 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 	return rep.Msg.Trc, nil
 }
 
-func (t *TrustService) VerifyPathSegment(ctx context.Context, segment *seg.PathSegment) error {
-	provider := &trustServiceProvider{ts: t}
+func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.PathSegment) ([]error, error) {
+	provider := &trustServiceProvider{
+		ts:            t,
+		fetchedChains: map[subject2]Chains{},
+	}
 	verifier := trust.Verifier{
 		Engine: provider,
 	}
-	return segment.Verify(ctx, &verifier)
+	addedSubjects := make(map[subject2]struct{})
+	subjects := make([]Subject, 0, 1)
+	for _, segment := range segments {
+		for _, asEntry := range segment.ASEntries {
+			hdr, err := signed.ExtractUnverifiedHeader(asEntry.Signed)
+			if err != nil {
+				return nil, serrors.Wrap("extracting unverified header", err)
+			}
+			var keyID cppb.VerificationKeyID
+			if err := proto.Unmarshal(hdr.VerificationKeyID, &keyID); err != nil {
+				return nil, serrors.Wrap("parsing verification key ID", err)
+			}
+			if len(keyID.SubjectKeyId) == 0 {
+				return nil, serrors.Wrap("subject key ID must be set", err)
+			}
+			ia := addr.IA(keyID.IsdAs)
+			if ia.IsWildcard() {
+				return nil, serrors.New("ISD-AS must not contain wildcard", "isd_as", ia)
+			}
+			s := string(keyID.SubjectKeyId)
+			key := subject2{
+				kedId: s,
+				ia:    ia,
+			}
+			if _, found := addedSubjects[key]; !found {
+				subjects = append(subjects, Subject{
+					IA:           ia,
+					SubjectKeyId: keyID.SubjectKeyId,
+				})
+				addedSubjects[key] = struct{}{}
+			}
+		}
+	}
+	listChains, err := t.ListChains(ctx, subjects)
+	if err != nil {
+		return nil, serrors.Wrap("on list chains", err)
+	}
+	for _, chains := range listChains {
+		provider.fetchedChains[subject2{
+			kedId: string(chains.Subject.SubjectKeyId),
+			ia:    chains.Subject.IA,
+		}] = chains
+	}
+	verificationErrors := make([]error, len(segments))
+	for i, segment := range segments {
+		if err := segment.Verify(ctx, &verifier); err != nil {
+			verificationErrors[i] = err
+		}
+	}
+	return verificationErrors, nil
 }

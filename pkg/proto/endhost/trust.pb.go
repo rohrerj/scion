@@ -139,7 +139,7 @@ func (x *Subject) GetSubjectKeyId() []byte {
 
 type ListChainResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ListChain     []*ChainsResponse      `protobuf:"bytes,1,rep,name=list_chain,json=listChain,proto3" json:"list_chain,omitempty"`
+	ListChain     []*Chains              `protobuf:"bytes,1,rep,name=list_chain,json=listChain,proto3" json:"list_chain,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -174,34 +174,35 @@ func (*ListChainResponse) Descriptor() ([]byte, []int) {
 	return file_proto_endhost_v1_trust_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ListChainResponse) GetListChain() []*ChainsResponse {
+func (x *ListChainResponse) GetListChain() []*Chains {
 	if x != nil {
 		return x.ListChain
 	}
 	return nil
 }
 
-type ChainsResponse struct {
+type Chains struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Chains        []*Chain               `protobuf:"bytes,1,rep,name=chains,proto3" json:"chains,omitempty"`
+	Subject       *Subject               `protobuf:"bytes,2,opt,name=subject,proto3" json:"subject,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ChainsResponse) Reset() {
-	*x = ChainsResponse{}
+func (x *Chains) Reset() {
+	*x = Chains{}
 	mi := &file_proto_endhost_v1_trust_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ChainsResponse) String() string {
+func (x *Chains) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ChainsResponse) ProtoMessage() {}
+func (*Chains) ProtoMessage() {}
 
-func (x *ChainsResponse) ProtoReflect() protoreflect.Message {
+func (x *Chains) ProtoReflect() protoreflect.Message {
 	mi := &file_proto_endhost_v1_trust_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -213,14 +214,21 @@ func (x *ChainsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ChainsResponse.ProtoReflect.Descriptor instead.
-func (*ChainsResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use Chains.ProtoReflect.Descriptor instead.
+func (*Chains) Descriptor() ([]byte, []int) {
 	return file_proto_endhost_v1_trust_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *ChainsResponse) GetChains() []*Chain {
+func (x *Chains) GetChains() []*Chain {
 	if x != nil {
 		return x.Chains
+	}
+	return nil
+}
+
+func (x *Chains) GetSubject() *Subject {
+	if x != nil {
+		return x.Subject
 	}
 	return nil
 }
@@ -392,12 +400,13 @@ const file_proto_endhost_v1_trust_proto_rawDesc = "" +
 	"\x14at_least_valid_since\x18\x03 \x01(\rR\x11atLeastValidSince\"F\n" +
 	"\aSubject\x12\x15\n" +
 	"\x06isd_as\x18\x01 \x01(\x04R\x05isdAs\x12$\n" +
-	"\x0esubject_key_id\x18\x02 \x01(\fR\fsubjectKeyId\"T\n" +
-	"\x11ListChainResponse\x12?\n" +
+	"\x0esubject_key_id\x18\x02 \x01(\fR\fsubjectKeyId\"L\n" +
+	"\x11ListChainResponse\x127\n" +
 	"\n" +
-	"list_chain\x18\x01 \x03(\v2 .scion.endhost.v1.ChainsResponseR\tlistChain\"A\n" +
-	"\x0eChainsResponse\x12/\n" +
-	"\x06chains\x18\x01 \x03(\v2\x17.scion.endhost.v1.ChainR\x06chains\"9\n" +
+	"list_chain\x18\x01 \x03(\v2\x18.scion.endhost.v1.ChainsR\tlistChain\"n\n" +
+	"\x06Chains\x12/\n" +
+	"\x06chains\x18\x01 \x03(\v2\x17.scion.endhost.v1.ChainR\x06chains\x123\n" +
+	"\asubject\x18\x02 \x01(\v2\x19.scion.endhost.v1.SubjectR\asubject\"9\n" +
 	"\x05Chain\x12\x17\n" +
 	"\aas_cert\x18\x01 \x01(\fR\x06asCert\x12\x17\n" +
 	"\aca_cert\x18\x02 \x01(\fR\x06caCert\"J\n" +
@@ -430,24 +439,25 @@ var file_proto_endhost_v1_trust_proto_goTypes = []any{
 	(*ListChainsRequest)(nil), // 0: scion.endhost.v1.ListChainsRequest
 	(*Subject)(nil),           // 1: scion.endhost.v1.Subject
 	(*ListChainResponse)(nil), // 2: scion.endhost.v1.ListChainResponse
-	(*ChainsResponse)(nil),    // 3: scion.endhost.v1.ChainsResponse
+	(*Chains)(nil),            // 3: scion.endhost.v1.Chains
 	(*Chain)(nil),             // 4: scion.endhost.v1.Chain
 	(*TRCRequest)(nil),        // 5: scion.endhost.v1.TRCRequest
 	(*TRCResponse)(nil),       // 6: scion.endhost.v1.TRCResponse
 }
 var file_proto_endhost_v1_trust_proto_depIdxs = []int32{
 	1, // 0: scion.endhost.v1.ListChainsRequest.subjects:type_name -> scion.endhost.v1.Subject
-	3, // 1: scion.endhost.v1.ListChainResponse.list_chain:type_name -> scion.endhost.v1.ChainsResponse
-	4, // 2: scion.endhost.v1.ChainsResponse.chains:type_name -> scion.endhost.v1.Chain
-	0, // 3: scion.endhost.v1.TrustService.ListChains:input_type -> scion.endhost.v1.ListChainsRequest
-	5, // 4: scion.endhost.v1.TrustService.GetTrc:input_type -> scion.endhost.v1.TRCRequest
-	2, // 5: scion.endhost.v1.TrustService.ListChains:output_type -> scion.endhost.v1.ListChainResponse
-	6, // 6: scion.endhost.v1.TrustService.GetTrc:output_type -> scion.endhost.v1.TRCResponse
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	3, // 1: scion.endhost.v1.ListChainResponse.list_chain:type_name -> scion.endhost.v1.Chains
+	4, // 2: scion.endhost.v1.Chains.chains:type_name -> scion.endhost.v1.Chain
+	1, // 3: scion.endhost.v1.Chains.subject:type_name -> scion.endhost.v1.Subject
+	0, // 4: scion.endhost.v1.TrustService.ListChains:input_type -> scion.endhost.v1.ListChainsRequest
+	5, // 5: scion.endhost.v1.TrustService.GetTrc:input_type -> scion.endhost.v1.TRCRequest
+	2, // 6: scion.endhost.v1.TrustService.ListChains:output_type -> scion.endhost.v1.ListChainResponse
+	6, // 7: scion.endhost.v1.TrustService.GetTrc:output_type -> scion.endhost.v1.TRCResponse
+	6, // [6:8] is the sub-list for method output_type
+	4, // [4:6] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_proto_endhost_v1_trust_proto_init() }

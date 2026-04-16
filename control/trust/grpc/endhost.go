@@ -54,8 +54,9 @@ func (s EndhostServer) Chains(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		chainRep := &ehpb.ChainsResponse{
-			Chains: make([]*ehpb.Chain, 0, len(chains)),
+		chainRep := &ehpb.Chains{
+			Chains:  make([]*ehpb.Chain, 0, len(chains)),
+			Subject: subject,
 		}
 		for _, chain := range chains {
 			chainRep.Chains = append(chainRep.Chains, &ehpb.Chain{

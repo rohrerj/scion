@@ -45,13 +45,14 @@ message Subject {
 }
 
 message ListChainResponse {
-    // TODO -> this is my guess, this was not defined in design document
-    repeated ChainsResponse list_chain = 1;
+    repeated Chains list_chain = 1;
 }
 
-message ChainsResponse {
-    // List of chains that match the request.
+message Chains {
+    // List of chains that match the subject.
     repeated Chain chains = 1;
+    // The corresponding subject.
+    Subject subject = 2;
 }
 
 message Chain {
