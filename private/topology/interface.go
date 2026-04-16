@@ -69,6 +69,8 @@ type Topology interface {
 
 	BorderRouters() ([]BRInfo, error)
 
+	EndhostAPI() map[string]EndhostAPIInfo
+
 	// BR returns information for a specific border router
 	//
 	// FIXME(scrye): Simplify return type and make it topology format agnostic.
@@ -198,6 +200,10 @@ func (t *topologyS) Gateways() ([]GatewayInfo, error) {
 	}
 
 	return ret, nil
+}
+
+func (t *topologyS) EndhostAPI() map[string]EndhostAPIInfo {
+	return t.Topology.EndhostAPI
 }
 
 func (t *topologyS) BorderRouters() ([]BRInfo, error) {

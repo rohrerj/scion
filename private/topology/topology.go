@@ -69,8 +69,9 @@ type (
 		DispatchedPortStart uint16
 		DispatchedPortEnd   uint16
 
-		BR        map[string]BRInfo
-		IFInfoMap IfInfoMap
+		BR         map[string]BRInfo
+		IFInfoMap  IfInfoMap
+		EndhostAPI map[string]EndhostAPIInfo
 
 		CS                        IDAddrMap
 		DS                        IDAddrMap
@@ -99,6 +100,12 @@ type (
 		IfIDs []iface.ID
 		// IFs is a map of interface IDs.
 		IFs map[iface.ID]*IFInfo
+	}
+
+	EndhostAPIInfo struct {
+		Name string
+		// Endhost API URL consisting of scheme, host, port, and path prefix if present
+		Url string
 	}
 
 	// IfInfoMap maps interface ids to the interface information.
@@ -358,6 +365,7 @@ func (t *RWTopology) populateServices(raw *jsontopo.Topology) error {
 	if err != nil {
 		return serrors.Wrap("unable to extract hidden segment registration address", err)
 	}
+	t.EndhostAPI = endhostAPIMapFromRaw(raw.EndhostAPI)
 	return nil
 }
 
@@ -531,6 +539,17 @@ func svcMapFromRaw(ras map[string]*jsontopo.ServerInfo) (IDAddrMap, error) {
 		svcMap[name] = *svcTopoAddr
 	}
 	return svcMap, nil
+}
+
+func endhostAPIMapFromRaw(ras map[string]*jsontopo.EndhostAPIInfo) map[string]EndhostAPIInfo {
+	endhostAPI := make(map[string]EndhostAPIInfo)
+	for name, svc := range ras {
+		endhostAPI[name] = EndhostAPIInfo{
+			Name: name,
+			Url:  svc.Url,
+		}
+	}
+	return endhostAPI
 }
 
 func gatewayMapFromRaw(ras map[string]*jsontopo.GatewayInfo) (map[string]GatewayInfo, error) {

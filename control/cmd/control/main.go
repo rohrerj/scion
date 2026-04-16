@@ -20,9 +20,11 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"net/netip"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -374,6 +376,7 @@ func realMain(ctx context.Context) error {
 	)
 	connectInter := http.NewServeMux()
 	connectIntra := http.NewServeMux()
+	connectEndhost := http.NewServeMux()
 
 	// Register trust material related handlers.
 	trustServer := &cstrustgrpc.MaterialServer{
@@ -392,7 +395,7 @@ func realMain(ctx context.Context) error {
 		Provider: provider,
 		IA:       topo.IA(),
 	}
-	connectIntra.Handle(endhostconnect.NewTrustServiceHandler(cstrustconnect.EndhostServer{
+	connectEndhost.Handle(endhostconnect.NewTrustServiceHandler(cstrustconnect.EndhostServer{
 		EndhostServer: endhostTrustServer,
 	}))
 
@@ -462,10 +465,10 @@ func realMain(ctx context.Context) error {
 	connectIntra.Handle(cpconnect.NewSegmentLookupServiceHandler(segreqconnect.LookupServer{
 		LookupServer: forwardingLookupServer,
 	}))
-	connectIntra.Handle(endhostconnect.NewPathServiceHandler(segreqconnect.EndhostServer{
+	connectEndhost.Handle(endhostconnect.NewPathServiceHandler(segreqconnect.EndhostServer{
 		EndhostServer: forwardingEndhostServer,
 	}))
-	connectIntra.Handle(endhostconnect.NewUnderlayServiceHandler(underlayconnect.UnderlayServer{
+	connectEndhost.Handle(endhostconnect.NewUnderlayServiceHandler(underlayconnect.UnderlayServer{
 		Topology: topo,
 	}))
 	if topo.Core() {
@@ -787,7 +790,7 @@ func realMain(ctx context.Context) error {
 		connectIntra.Handle(cpconnect.NewDRKeyIntraServiceHandler(drkeyconnect.Server{
 			Server: drkeyService,
 		}))
-		connectIntra.Handle(endhostconnect.NewDRKeyServiceHandler(drkeyconnect.EndhostDRKeyServer{
+		connectEndhost.Handle(endhostconnect.NewDRKeyServiceHandler(drkeyconnect.EndhostDRKeyServer{
 			Server: drkeyService,
 		}))
 		log.Info("DRKey is enabled")
@@ -841,6 +844,50 @@ func realMain(ctx context.Context) error {
 		cleanup.Add(func() error { quicServer.GracefulStop(); return nil })
 	}
 
+	endhostTLSConfig := &tls.Config{
+		GetCertificate: cs.NewTLSCertificateLoader(
+			topo.IA(),
+			x509.ExtKeyUsageServerAuth,
+			trustDB,
+			globalCfg.General.ConfigDir,
+		).GetCertificate,
+	}
+	endhostServer := http.Server{
+		Handler:   libconnect.AttachPeer(connectEndhost),
+		TLSConfig: endhostTLSConfig,
+	}
+	endhost_api, found := topo.EndhostAPI()[globalCfg.General.ID]
+	if !found {
+		return serrors.New("endhost api endpoint not found in topology")
+	}
+	g.Go(func() error {
+		defer log.HandlePanic()
+		u, err := url.Parse(endhost_api.Url)
+		if err != nil {
+			return err
+		}
+		addr, err := net.ResolveTCPAddr("tcp", u.Host)
+		if err != nil {
+			return err
+		}
+		tcpListener, err := net.ListenTCP("tcp", addr)
+		if err != nil {
+			return err
+		}
+		switch u.Scheme {
+		case "https":
+			if err = endhostServer.ServeTLS(tcpListener, "", ""); err != nil {
+				return err
+			}
+		case "http":
+			if err = endhostServer.Serve(tcpListener); err != nil {
+				return err
+			}
+		default:
+			return serrors.New("unkown scheme", "scheme", u.Scheme)
+		}
+		return nil
+	})
 	intraServer := http.Server{
 		Handler: h2c.NewHandler(libconnect.AttachPeer(connectIntra), &http2.Server{}),
 	}

@@ -174,6 +174,13 @@ func (l *Loader) ControlServiceAddress(id string) *net.UDPAddr {
 	return l.topo.PublicAddress(addr.SvcCS, id)
 }
 
+func (l *Loader) EndhostAPI() map[string]EndhostAPIInfo {
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+
+	return l.topo.EndhostAPI()
+}
+
 func (l *Loader) BorderRouters() ([]BRInfo, error) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
