@@ -35,7 +35,7 @@ type EndhostServer struct {
 }
 
 func (s EndhostServer) Chains(ctx context.Context,
-	req *ehpb.ListChainsRequest) (*ehpb.ListChainResponse, error) {
+	req *ehpb.ListChainsRequest) (*ehpb.ListChainsResponse, error) {
 
 	peer, _ := peer.FromContext(ctx)
 	var validity cppki.Validity
@@ -43,7 +43,9 @@ func (s EndhostServer) Chains(ctx context.Context,
 		validity.NotAfter = time.Unix(int64(req.AtLeastValidUntil), 0)
 		validity.NotBefore = time.Unix(int64(req.AtLeastValidSince), 0)
 	}
-	rep := &ehpb.ListChainResponse{}
+	rep := &ehpb.ListChainsResponse{
+		Chains: make([]*ehpb.Chain, 0, len(req.Subjects)),
+	}
 	for _, subject := range req.Subjects {
 		query := trust.ChainQuery{
 			IA:           addr.IA(subject.IsdAs),
@@ -54,17 +56,13 @@ func (s EndhostServer) Chains(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		chainRep := &ehpb.Chains{
-			Chains:  make([]*ehpb.Chain, 0, len(chains)),
-			Subject: subject,
-		}
 		for _, chain := range chains {
-			chainRep.Chains = append(chainRep.Chains, &ehpb.Chain{
-				AsCert: chain[0].Raw,
-				CaCert: chain[1].Raw,
+			rep.Chains = append(rep.Chains, &ehpb.Chain{
+				Subject: subject,
+				AsCert:  chain[0].Raw,
+				CaCert:  chain[1].Raw,
 			})
 		}
-		rep.ListChain = append(rep.ListChain, chainRep)
 	}
 	return rep, nil
 }

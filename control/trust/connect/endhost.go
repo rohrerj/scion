@@ -26,7 +26,7 @@ type EndhostServer struct {
 	*grpc.EndhostServer
 }
 
-func (e EndhostServer) ListChains(ctx context.Context, req *connect.Request[endhost.ListChainsRequest]) (*connect.Response[endhost.ListChainResponse], error) {
+func (e EndhostServer) ListChains(ctx context.Context, req *connect.Request[endhost.ListChainsRequest]) (*connect.Response[endhost.ListChainsResponse], error) {
 	rep, err := e.EndhostServer.Chains(ctx, req.Msg)
 	if err != nil {
 		return nil, err

@@ -36,7 +36,7 @@ import (
 
 type trustServiceProvider struct {
 	ts            *TrustService
-	fetchedChains map[subject2]Chains
+	fetchedChains map[subject2][]Chain
 }
 type subject2 struct {
 	kedId string
@@ -56,7 +56,7 @@ func (p *trustServiceProvider) GetChains(ctx context.Context, query trust.ChainQ
 	}
 	var result [][]*x509.Certificate
 	var chain []*x509.Certificate
-	for _, c := range chains.Chains {
+	for _, c := range chains {
 		asCert, err := x509.ParseCertificate(c.AsCert)
 		if err != nil {
 			return nil, serrors.Wrap("parsing AS certificate", err)
@@ -103,16 +103,17 @@ type Subject struct {
 	SubjectKeyId []byte
 }
 
-type Chain struct {
-	AsCert []byte
-	CaCert []byte
-}
 type Chains struct {
-	Chains  []Chain
+	Chains []Chain
+}
+
+type Chain struct {
+	AsCert  []byte
+	CaCert  []byte
 	Subject Subject
 }
 
-func (t *TrustService) ListChains(ctx context.Context, subjects []Subject) ([]Chains, error) {
+func (t *TrustService) ListChains(ctx context.Context, subjects []Subject) (*Chains, error) {
 	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url)
 	req := &connect.Request[endhost.ListChainsRequest]{
 		Msg: &endhost.ListChainsRequest{
@@ -131,24 +132,20 @@ func (t *TrustService) ListChains(ctx context.Context, subjects []Subject) ([]Ch
 	if err != nil {
 		return nil, serrors.Wrap("on ListChains", err)
 	}
-	rep := make([]Chains, 0, len(repChains.Msg.ListChain))
-	for _, chains := range repChains.Msg.ListChain {
-		rep_chains := Chains{
-			Chains: make([]Chain, 0, len(chains.Chains)),
-			Subject: Subject{
-				IA:           addr.IA(chains.Subject.IsdAs),
-				SubjectKeyId: chains.Subject.SubjectKeyId,
-			},
-		}
-		for _, chain := range chains.Chains {
-			rep_chains.Chains = append(rep_chains.Chains, Chain{
-				AsCert: chain.AsCert,
-				CaCert: chain.CaCert,
-			})
-		}
-		rep = append(rep, rep_chains)
+	chains := &Chains{
+		Chains: make([]Chain, 0, len(repChains.Msg.Chains)),
 	}
-	return rep, nil
+	for _, chain := range repChains.Msg.Chains {
+		chains.Chains = append(chains.Chains, Chain{
+			Subject: Subject{
+				IA:           addr.IA(chain.Subject.IsdAs),
+				SubjectKeyId: chain.Subject.SubjectKeyId,
+			},
+			AsCert: chain.AsCert,
+			CaCert: chain.CaCert,
+		})
+	}
+	return chains, nil
 }
 
 func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial uint64) ([]byte, error) {
@@ -169,7 +166,7 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.PathSegment) ([]error, error) {
 	provider := &trustServiceProvider{
 		ts:            t,
-		fetchedChains: map[subject2]Chains{},
+		fetchedChains: map[subject2][]Chain{},
 	}
 	verifier := trust.Verifier{
 		Engine: provider,
@@ -211,11 +208,17 @@ func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.P
 	if err != nil {
 		return nil, serrors.Wrap("on list chains", err)
 	}
-	for _, chains := range listChains {
-		provider.fetchedChains[subject2{
-			kedId: string(chains.Subject.SubjectKeyId),
-			ia:    chains.Subject.IA,
-		}] = chains
+	for _, chain := range listChains.Chains {
+		subjectKey := subject2{
+			kedId: string(chain.Subject.SubjectKeyId),
+			ia:    chain.Subject.IA,
+		}
+		currentSlice, found := provider.fetchedChains[subjectKey]
+		if found {
+			currentSlice = append(currentSlice, chain)
+		} else {
+			provider.fetchedChains[subjectKey] = []Chain{chain}
+		}
 	}
 	verificationErrors := make([]error, len(segments))
 	for i, segment := range segments {

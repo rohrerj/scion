@@ -137,27 +137,27 @@ func (x *Subject) GetSubjectKeyId() []byte {
 	return nil
 }
 
-type ListChainResponse struct {
+type ListChainsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ListChain     []*Chains              `protobuf:"bytes,1,rep,name=list_chain,json=listChain,proto3" json:"list_chain,omitempty"`
+	Chains        []*Chain               `protobuf:"bytes,1,rep,name=chains,proto3" json:"chains,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListChainResponse) Reset() {
-	*x = ListChainResponse{}
+func (x *ListChainsResponse) Reset() {
+	*x = ListChainsResponse{}
 	mi := &file_proto_endhost_v1_trust_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListChainResponse) String() string {
+func (x *ListChainsResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListChainResponse) ProtoMessage() {}
+func (*ListChainsResponse) ProtoMessage() {}
 
-func (x *ListChainResponse) ProtoReflect() protoreflect.Message {
+func (x *ListChainsResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_proto_endhost_v1_trust_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -169,81 +169,30 @@ func (x *ListChainResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListChainResponse.ProtoReflect.Descriptor instead.
-func (*ListChainResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ListChainsResponse.ProtoReflect.Descriptor instead.
+func (*ListChainsResponse) Descriptor() ([]byte, []int) {
 	return file_proto_endhost_v1_trust_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ListChainResponse) GetListChain() []*Chains {
-	if x != nil {
-		return x.ListChain
-	}
-	return nil
-}
-
-type Chains struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Chains        []*Chain               `protobuf:"bytes,1,rep,name=chains,proto3" json:"chains,omitempty"`
-	Subject       *Subject               `protobuf:"bytes,2,opt,name=subject,proto3" json:"subject,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Chains) Reset() {
-	*x = Chains{}
-	mi := &file_proto_endhost_v1_trust_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Chains) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Chains) ProtoMessage() {}
-
-func (x *Chains) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_endhost_v1_trust_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Chains.ProtoReflect.Descriptor instead.
-func (*Chains) Descriptor() ([]byte, []int) {
-	return file_proto_endhost_v1_trust_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *Chains) GetChains() []*Chain {
+func (x *ListChainsResponse) GetChains() []*Chain {
 	if x != nil {
 		return x.Chains
 	}
 	return nil
 }
 
-func (x *Chains) GetSubject() *Subject {
-	if x != nil {
-		return x.Subject
-	}
-	return nil
-}
-
 type Chain struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AsCert        []byte                 `protobuf:"bytes,1,opt,name=as_cert,json=asCert,proto3" json:"as_cert,omitempty"`
-	CaCert        []byte                 `protobuf:"bytes,2,opt,name=ca_cert,json=caCert,proto3" json:"ca_cert,omitempty"`
+	Subject       *Subject               `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
+	AsCert        []byte                 `protobuf:"bytes,2,opt,name=as_cert,json=asCert,proto3" json:"as_cert,omitempty"`
+	CaCert        []byte                 `protobuf:"bytes,3,opt,name=ca_cert,json=caCert,proto3" json:"ca_cert,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Chain) Reset() {
 	*x = Chain{}
-	mi := &file_proto_endhost_v1_trust_proto_msgTypes[4]
+	mi := &file_proto_endhost_v1_trust_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -255,7 +204,7 @@ func (x *Chain) String() string {
 func (*Chain) ProtoMessage() {}
 
 func (x *Chain) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_endhost_v1_trust_proto_msgTypes[4]
+	mi := &file_proto_endhost_v1_trust_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -268,7 +217,14 @@ func (x *Chain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Chain.ProtoReflect.Descriptor instead.
 func (*Chain) Descriptor() ([]byte, []int) {
-	return file_proto_endhost_v1_trust_proto_rawDescGZIP(), []int{4}
+	return file_proto_endhost_v1_trust_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Chain) GetSubject() *Subject {
+	if x != nil {
+		return x.Subject
+	}
+	return nil
 }
 
 func (x *Chain) GetAsCert() []byte {
@@ -296,7 +252,7 @@ type TRCRequest struct {
 
 func (x *TRCRequest) Reset() {
 	*x = TRCRequest{}
-	mi := &file_proto_endhost_v1_trust_proto_msgTypes[5]
+	mi := &file_proto_endhost_v1_trust_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -308,7 +264,7 @@ func (x *TRCRequest) String() string {
 func (*TRCRequest) ProtoMessage() {}
 
 func (x *TRCRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_endhost_v1_trust_proto_msgTypes[5]
+	mi := &file_proto_endhost_v1_trust_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -321,7 +277,7 @@ func (x *TRCRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TRCRequest.ProtoReflect.Descriptor instead.
 func (*TRCRequest) Descriptor() ([]byte, []int) {
-	return file_proto_endhost_v1_trust_proto_rawDescGZIP(), []int{5}
+	return file_proto_endhost_v1_trust_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *TRCRequest) GetIsd() uint32 {
@@ -354,7 +310,7 @@ type TRCResponse struct {
 
 func (x *TRCResponse) Reset() {
 	*x = TRCResponse{}
-	mi := &file_proto_endhost_v1_trust_proto_msgTypes[6]
+	mi := &file_proto_endhost_v1_trust_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -366,7 +322,7 @@ func (x *TRCResponse) String() string {
 func (*TRCResponse) ProtoMessage() {}
 
 func (x *TRCResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_endhost_v1_trust_proto_msgTypes[6]
+	mi := &file_proto_endhost_v1_trust_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -379,7 +335,7 @@ func (x *TRCResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TRCResponse.ProtoReflect.Descriptor instead.
 func (*TRCResponse) Descriptor() ([]byte, []int) {
-	return file_proto_endhost_v1_trust_proto_rawDescGZIP(), []int{6}
+	return file_proto_endhost_v1_trust_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *TRCResponse) GetTrc() []byte {
@@ -400,26 +356,23 @@ const file_proto_endhost_v1_trust_proto_rawDesc = "" +
 	"\x14at_least_valid_since\x18\x03 \x01(\rR\x11atLeastValidSince\"F\n" +
 	"\aSubject\x12\x15\n" +
 	"\x06isd_as\x18\x01 \x01(\x04R\x05isdAs\x12$\n" +
-	"\x0esubject_key_id\x18\x02 \x01(\fR\fsubjectKeyId\"L\n" +
-	"\x11ListChainResponse\x127\n" +
-	"\n" +
-	"list_chain\x18\x01 \x03(\v2\x18.scion.endhost.v1.ChainsR\tlistChain\"n\n" +
-	"\x06Chains\x12/\n" +
-	"\x06chains\x18\x01 \x03(\v2\x17.scion.endhost.v1.ChainR\x06chains\x123\n" +
-	"\asubject\x18\x02 \x01(\v2\x19.scion.endhost.v1.SubjectR\asubject\"9\n" +
-	"\x05Chain\x12\x17\n" +
-	"\aas_cert\x18\x01 \x01(\fR\x06asCert\x12\x17\n" +
-	"\aca_cert\x18\x02 \x01(\fR\x06caCert\"J\n" +
+	"\x0esubject_key_id\x18\x02 \x01(\fR\fsubjectKeyId\"E\n" +
+	"\x12ListChainsResponse\x12/\n" +
+	"\x06chains\x18\x01 \x03(\v2\x17.scion.endhost.v1.ChainR\x06chains\"n\n" +
+	"\x05Chain\x123\n" +
+	"\asubject\x18\x01 \x01(\v2\x19.scion.endhost.v1.SubjectR\asubject\x12\x17\n" +
+	"\aas_cert\x18\x02 \x01(\fR\x06asCert\x12\x17\n" +
+	"\aca_cert\x18\x03 \x01(\fR\x06caCert\"J\n" +
 	"\n" +
 	"TRCRequest\x12\x10\n" +
 	"\x03isd\x18\x01 \x01(\rR\x03isd\x12\x12\n" +
 	"\x04base\x18\x02 \x01(\x04R\x04base\x12\x16\n" +
 	"\x06serial\x18\x03 \x01(\x04R\x06serial\"\x1f\n" +
 	"\vTRCResponse\x12\x10\n" +
-	"\x03trc\x18\x01 \x01(\fR\x03trc2\xb1\x01\n" +
-	"\fTrustService\x12X\n" +
+	"\x03trc\x18\x01 \x01(\fR\x03trc2\xb2\x01\n" +
+	"\fTrustService\x12Y\n" +
 	"\n" +
-	"ListChains\x12#.scion.endhost.v1.ListChainsRequest\x1a#.scion.endhost.v1.ListChainResponse\"\x00\x12G\n" +
+	"ListChains\x12#.scion.endhost.v1.ListChainsRequest\x1a$.scion.endhost.v1.ListChainsResponse\"\x00\x12G\n" +
 	"\x06GetTrc\x12\x1c.scion.endhost.v1.TRCRequest\x1a\x1d.scion.endhost.v1.TRCResponse\"\x00B/Z-github.com/scionproto/scion/pkg/proto/endhostb\x06proto3"
 
 var (
@@ -434,30 +387,28 @@ func file_proto_endhost_v1_trust_proto_rawDescGZIP() []byte {
 	return file_proto_endhost_v1_trust_proto_rawDescData
 }
 
-var file_proto_endhost_v1_trust_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_proto_endhost_v1_trust_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_proto_endhost_v1_trust_proto_goTypes = []any{
-	(*ListChainsRequest)(nil), // 0: scion.endhost.v1.ListChainsRequest
-	(*Subject)(nil),           // 1: scion.endhost.v1.Subject
-	(*ListChainResponse)(nil), // 2: scion.endhost.v1.ListChainResponse
-	(*Chains)(nil),            // 3: scion.endhost.v1.Chains
-	(*Chain)(nil),             // 4: scion.endhost.v1.Chain
-	(*TRCRequest)(nil),        // 5: scion.endhost.v1.TRCRequest
-	(*TRCResponse)(nil),       // 6: scion.endhost.v1.TRCResponse
+	(*ListChainsRequest)(nil),  // 0: scion.endhost.v1.ListChainsRequest
+	(*Subject)(nil),            // 1: scion.endhost.v1.Subject
+	(*ListChainsResponse)(nil), // 2: scion.endhost.v1.ListChainsResponse
+	(*Chain)(nil),              // 3: scion.endhost.v1.Chain
+	(*TRCRequest)(nil),         // 4: scion.endhost.v1.TRCRequest
+	(*TRCResponse)(nil),        // 5: scion.endhost.v1.TRCResponse
 }
 var file_proto_endhost_v1_trust_proto_depIdxs = []int32{
 	1, // 0: scion.endhost.v1.ListChainsRequest.subjects:type_name -> scion.endhost.v1.Subject
-	3, // 1: scion.endhost.v1.ListChainResponse.list_chain:type_name -> scion.endhost.v1.Chains
-	4, // 2: scion.endhost.v1.Chains.chains:type_name -> scion.endhost.v1.Chain
-	1, // 3: scion.endhost.v1.Chains.subject:type_name -> scion.endhost.v1.Subject
-	0, // 4: scion.endhost.v1.TrustService.ListChains:input_type -> scion.endhost.v1.ListChainsRequest
-	5, // 5: scion.endhost.v1.TrustService.GetTrc:input_type -> scion.endhost.v1.TRCRequest
-	2, // 6: scion.endhost.v1.TrustService.ListChains:output_type -> scion.endhost.v1.ListChainResponse
-	6, // 7: scion.endhost.v1.TrustService.GetTrc:output_type -> scion.endhost.v1.TRCResponse
-	6, // [6:8] is the sub-list for method output_type
-	4, // [4:6] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	3, // 1: scion.endhost.v1.ListChainsResponse.chains:type_name -> scion.endhost.v1.Chain
+	1, // 2: scion.endhost.v1.Chain.subject:type_name -> scion.endhost.v1.Subject
+	0, // 3: scion.endhost.v1.TrustService.ListChains:input_type -> scion.endhost.v1.ListChainsRequest
+	4, // 4: scion.endhost.v1.TrustService.GetTrc:input_type -> scion.endhost.v1.TRCRequest
+	2, // 5: scion.endhost.v1.TrustService.ListChains:output_type -> scion.endhost.v1.ListChainsResponse
+	5, // 6: scion.endhost.v1.TrustService.GetTrc:output_type -> scion.endhost.v1.TRCResponse
+	5, // [5:7] is the sub-list for method output_type
+	3, // [3:5] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_proto_endhost_v1_trust_proto_init() }
@@ -471,7 +422,7 @@ func file_proto_endhost_v1_trust_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_endhost_v1_trust_proto_rawDesc), len(file_proto_endhost_v1_trust_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
@@ -496,7 +447,7 @@ const _ = grpc.SupportPackageIsVersion6
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
 type TrustServiceClient interface {
-	ListChains(ctx context.Context, in *ListChainsRequest, opts ...grpc.CallOption) (*ListChainResponse, error)
+	ListChains(ctx context.Context, in *ListChainsRequest, opts ...grpc.CallOption) (*ListChainsResponse, error)
 	GetTrc(ctx context.Context, in *TRCRequest, opts ...grpc.CallOption) (*TRCResponse, error)
 }
 
@@ -508,8 +459,8 @@ func NewTrustServiceClient(cc grpc.ClientConnInterface) TrustServiceClient {
 	return &trustServiceClient{cc}
 }
 
-func (c *trustServiceClient) ListChains(ctx context.Context, in *ListChainsRequest, opts ...grpc.CallOption) (*ListChainResponse, error) {
-	out := new(ListChainResponse)
+func (c *trustServiceClient) ListChains(ctx context.Context, in *ListChainsRequest, opts ...grpc.CallOption) (*ListChainsResponse, error) {
+	out := new(ListChainsResponse)
 	err := c.cc.Invoke(ctx, "/scion.endhost.v1.TrustService/ListChains", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -528,7 +479,7 @@ func (c *trustServiceClient) GetTrc(ctx context.Context, in *TRCRequest, opts ..
 
 // TrustServiceServer is the server API for TrustService service.
 type TrustServiceServer interface {
-	ListChains(context.Context, *ListChainsRequest) (*ListChainResponse, error)
+	ListChains(context.Context, *ListChainsRequest) (*ListChainsResponse, error)
 	GetTrc(context.Context, *TRCRequest) (*TRCResponse, error)
 }
 
@@ -536,7 +487,7 @@ type TrustServiceServer interface {
 type UnimplementedTrustServiceServer struct {
 }
 
-func (*UnimplementedTrustServiceServer) ListChains(context.Context, *ListChainsRequest) (*ListChainResponse, error) {
+func (*UnimplementedTrustServiceServer) ListChains(context.Context, *ListChainsRequest) (*ListChainsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListChains not implemented")
 }
 func (*UnimplementedTrustServiceServer) GetTrc(context.Context, *TRCRequest) (*TRCResponse, error) {

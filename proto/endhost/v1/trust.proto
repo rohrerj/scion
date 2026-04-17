@@ -18,7 +18,7 @@ option go_package = "github.com/scionproto/scion/pkg/proto/endhost";
 package scion.endhost.v1;
 
 service TrustService {
-    rpc ListChains(ListChainsRequest) returns (ListChainResponse) {}
+    rpc ListChains(ListChainsRequest) returns (ListChainsResponse) {}
     rpc GetTrc(TRCRequest) returns (TRCResponse) {}
 }
 
@@ -44,22 +44,20 @@ message Subject {
     bytes subject_key_id = 2;
 }
 
-message ListChainResponse {
-    repeated Chains list_chain = 1;
-}
-
-message Chains {
-    // List of chains that match the subject.
-    repeated Chain chains = 1;
-    // The corresponding subject.
-    Subject subject = 2;
+message ListChainsResponse {
+  // List of chains that match the request.
+  repeated Chain chains = 1;
 }
 
 message Chain {
-    // AS certificate in the chain.
-    bytes as_cert = 1;
-    // CA certificate in the chain.
-    bytes ca_cert = 2;
+  // The subject corresponding to this chain.
+  Subject subject = 1;
+
+  // AS certificate in the chain.
+  bytes as_cert = 2;
+
+  // CA certificate in the chain.
+  bytes ca_cert = 3;
 }
 
 // Request to fetch the TRC for a given ISD.
