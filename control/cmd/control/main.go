@@ -459,6 +459,8 @@ func realMain(ctx context.Context) error {
 		IsCore:    topo.Core(),
 		Inspector: inspector,
 		PathDB:    pathDB,
+		PathStore: segreq.NewStore(),
+		Paginator: segreq.NewPaginator(),
 	}
 
 	// Always register a forwarding lookup for AS internal requests.

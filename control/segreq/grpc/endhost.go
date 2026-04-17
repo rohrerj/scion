@@ -17,7 +17,6 @@ package grpc
 import (
 	"context"
 	"sort"
-	"strconv"
 
 	"github.com/scionproto/scion/control/segreq"
 	"github.com/scionproto/scion/pkg/addr"
@@ -40,25 +39,8 @@ type EndhostServer struct {
 	IsCore    bool
 	Inspector trust.Inspector
 	PathDB    pathdb.DB
-}
-type combinedPath struct {
-	UpSegment   *seg.PathSegment
-	CoreSegment *seg.PathSegment
-	DownSegment *seg.PathSegment
-}
-
-func (c *combinedPath) Length() int {
-	l := 0
-	if c.UpSegment != nil {
-		l += len(c.UpSegment.ASEntries)
-	}
-	if c.CoreSegment != nil {
-		l += len(c.CoreSegment.ASEntries)
-	}
-	if c.DownSegment != nil {
-		l += len(c.DownSegment.ASEntries)
-	}
-	return l
+	PathStore *segreq.Store
+	Paginator *segreq.Paginator
 }
 
 func (s EndhostServer) ListSegments(ctx context.Context,
@@ -72,13 +54,40 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 		// local AS path, no segments are returned
 		return res, nil
 	}
-	pagination, err := strconv.Atoi(req.PageToken)
-	if err != nil {
-		pagination = 0
-	}
+
 	pageSize := req.PageSize
 	if req.PageSize == 0 {
 		pageSize = 64
+	}
+	allPaths, err := s.getPaths(ctx, src, dst)
+	if err != nil {
+		return nil, err
+	}
+
+	resUp, resCore, resDown, nextPage := s.Paginator.GetPage(allPaths, int(pageSize), req.PageToken)
+	res.NextPageToken = nextPage
+	for _, segment := range resUp {
+		res.UpSegments = append(res.UpSegments, seg.PathSegmentToPB(segment))
+	}
+	for _, segment := range resCore {
+		res.CoreSegments = append(res.CoreSegments, seg.PathSegmentToPB(segment))
+	}
+	for _, segment := range resDown {
+		res.DownSegments = append(res.DownSegments, seg.PathSegmentToPB(segment))
+	}
+
+	logger.Debug("Replied with segments", "up", len(res.UpSegments), "core", len(res.CoreSegments), "down", len(res.DownSegments))
+	return res, nil
+}
+
+// getPaths asks the PathStore whether paths from src IA to dst IA are cached, if yes
+// it returns those, otherwise it performs the expensive operation of looking up
+// all path segments relevant for connection between the src IA and dst IA
+// (they might be cached in the path DB) and check whether they can be stitched together.
+// In that case, the newely combined paths will be cached in the store.
+func (s EndhostServer) getPaths(ctx context.Context, src, dst addr.IA) ([]segreq.CombinedPath, error) {
+	if paths, found := s.PathStore.Get(src, dst); found {
+		return paths, nil
 	}
 	splitter := segreq.NewSplitter(s.LocalIA, s.IsCore, s.Inspector, s.PathDB)
 	reqs, err := splitter.Split(ctx, dst)
@@ -105,23 +114,23 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 			}
 		}
 	}
-	allPaths := make([]combinedPath, 0, 1)
+	allPaths := make([]segreq.CombinedPath, 0, 1)
 	// check for single segment paths:
 	isSingleSegment := false
 	if len(upSegments) == 0 && len(coreSegments) == 0 {
 		isSingleSegment = true
 		for _, downSegment := range downSegments {
-			allPaths = append(allPaths, combinedPath{DownSegment: downSegment})
+			allPaths = append(allPaths, segreq.CombinedPath{DownSegment: downSegment})
 		}
 	} else if len(upSegments) == 0 && len(downSegments) == 0 {
 		isSingleSegment = true
 		for _, coreSegment := range coreSegments {
-			allPaths = append(allPaths, combinedPath{CoreSegment: coreSegment})
+			allPaths = append(allPaths, segreq.CombinedPath{CoreSegment: coreSegment})
 		}
 	} else if len(coreSegments) == 0 && len(downSegments) == 0 {
 		isSingleSegment = true
 		for _, upSegment := range upSegments {
-			allPaths = append(allPaths, combinedPath{UpSegment: upSegment})
+			allPaths = append(allPaths, segreq.CombinedPath{UpSegment: upSegment})
 		}
 	}
 	if !isSingleSegment {
@@ -134,7 +143,7 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 							// we have up segment, core segment and down segment
 							for _, downSegment := range downSegments {
 								if coreSegment.FirstIA() == downSegment.FirstIA() || coreSegment.LastIA() == downSegment.FirstIA() {
-									allPaths = append(allPaths, combinedPath{
+									allPaths = append(allPaths, segreq.CombinedPath{
 										UpSegment:   upSegment,
 										CoreSegment: coreSegment,
 										DownSegment: downSegment,
@@ -143,7 +152,7 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 							}
 						} else {
 							// we have up segment and core segment, but no down segment
-							allPaths = append(allPaths, combinedPath{
+							allPaths = append(allPaths, segreq.CombinedPath{
 								UpSegment:   upSegment,
 								CoreSegment: coreSegment,
 							})
@@ -153,7 +162,7 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 				for _, downSegment := range downSegments {
 					if upSegment.FirstIA() == downSegment.FirstIA() {
 						// we have up segment and down segment, without a core segment
-						allPaths = append(allPaths, combinedPath{
+						allPaths = append(allPaths, segreq.CombinedPath{
 							UpSegment:   upSegment,
 							DownSegment: downSegment,
 						})
@@ -165,7 +174,7 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 			for _, coreSegment := range coreSegments {
 				for _, downSegment := range downSegments {
 					if coreSegment.FirstIA() == downSegment.FirstIA() || coreSegment.LastIA() == downSegment.FirstIA() {
-						allPaths = append(allPaths, combinedPath{
+						allPaths = append(allPaths, segreq.CombinedPath{
 							CoreSegment: coreSegment,
 							DownSegment: downSegment,
 						})
@@ -177,151 +186,6 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 	sort.Slice(allPaths, func(i, j int) bool {
 		return allPaths[i].Length() < allPaths[j].Length()
 	})
-	resUp, resCore, resDown, nextPage := selectSegments(allPaths, int(pageSize), pagination)
-	res.NextPageToken = strconv.Itoa(nextPage)
-	for _, segment := range resUp {
-		res.UpSegments = append(res.UpSegments, seg.PathSegmentToPB(segment))
-	}
-	for _, segment := range resCore {
-		res.CoreSegments = append(res.CoreSegments, seg.PathSegmentToPB(segment))
-	}
-	for _, segment := range resDown {
-		res.DownSegments = append(res.DownSegments, seg.PathSegmentToPB(segment))
-	}
-
-	logger.Debug("Replied with segments", "up", len(res.UpSegments), "core", len(res.CoreSegments), "down", len(res.DownSegments))
-	return res, nil
-}
-
-func selectSegments(paths []combinedPath, pageSize int, pagination int) ([]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, int) {
-	up := []*seg.PathSegment{}
-	core := []*seg.PathSegment{}
-	down := []*seg.PathSegment{}
-
-	target := pageSize / 3
-	upCount, coreCount, downCount := 0, 0, 0
-	used := make(map[*seg.PathSegment]struct{})
-
-	start := (pagination * (pageSize + 1)) % len(paths)
-	for i := 0; i < len(paths); i++ {
-		idx := (start + i) % len(paths)
-		p := paths[idx]
-		if upCount+coreCount+downCount >= pageSize {
-			break
-		}
-
-		score := 0
-
-		if p.UpSegment != nil {
-			if _, ok := used[p.UpSegment]; !ok {
-				if upCount < target {
-					score++
-				}
-			}
-		}
-		if p.CoreSegment != nil {
-			if _, ok := used[p.CoreSegment]; !ok {
-				if coreCount < target {
-					score++
-				}
-			}
-		}
-		if p.DownSegment != nil {
-			if _, ok := used[p.DownSegment]; !ok {
-				if downCount < target {
-					score++
-				}
-			}
-		}
-
-		// Skip path if it cannot contribute new path segments for each types target amount
-		if score == 0 {
-			continue
-		}
-
-		add := func(s *seg.PathSegment, typ int) {
-			if s == nil {
-				return
-			}
-			if _, ok := used[s]; ok {
-				return
-			}
-
-			used[s] = struct{}{}
-
-			switch typ {
-			case 0:
-				up = append(up, s)
-				upCount++
-			case 1:
-				core = append(core, s)
-				coreCount++
-			case 2:
-				down = append(down, s)
-				downCount++
-			}
-		}
-
-		// Prefer adding segments that help balance first
-		if p.UpSegment != nil && upCount < target {
-			add(p.UpSegment, 0)
-		}
-		if p.CoreSegment != nil && coreCount < target {
-			add(p.CoreSegment, 1)
-		}
-		if p.DownSegment != nil && downCount < target {
-			add(p.DownSegment, 2)
-		}
-	}
-	// now some segment types may have reached their target amount, but we might not have
-	// reached the page size -> fill up with additional segments (if available)
-	for i := 0; i < len(paths); i++ {
-		idx := (start + i) % len(paths)
-		p := paths[idx]
-		if upCount+coreCount+downCount >= pageSize {
-			break
-		}
-
-		tryAdd := func(s *seg.PathSegment, typ int) {
-			if s == nil {
-				return
-			}
-			if _, ok := used[s]; ok {
-				return
-			}
-
-			used[s] = struct{}{}
-
-			switch typ {
-			case 0:
-				up = append(up, s)
-				upCount++
-			case 1:
-				core = append(core, s)
-				coreCount++
-			case 2:
-				down = append(down, s)
-				downCount++
-			}
-		}
-
-		if p.UpSegment != nil {
-			tryAdd(p.UpSegment, 0)
-		}
-		if upCount+coreCount+downCount >= pageSize {
-			break
-		}
-
-		if p.CoreSegment != nil {
-			tryAdd(p.CoreSegment, 1)
-		}
-		if upCount+coreCount+downCount >= pageSize {
-			break
-		}
-
-		if p.DownSegment != nil {
-			tryAdd(p.DownSegment, 2)
-		}
-	}
-	return up, core, down, pagination + 1
+	s.PathStore.Set(src, dst, allPaths)
+	return allPaths, nil
 }
