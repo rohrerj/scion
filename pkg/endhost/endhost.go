@@ -55,16 +55,15 @@ func (c *Connector) AllPaths(ctx context.Context, dst addr.IA, src addr.IA) ([]s
 	}
 
 	paginator := c.pathService.NewPaginator(dst, src)
-	paginator.pageSize = 6
+	paginator.pageSize = 64
 	allPaths := make([]snet.Path, 0, 1)
 	seen := make(map[string]struct{})
-	for {
+	for paginator.HasNext() {
 		up, core, down, err := paginator.NextPage(ctx)
 		if err != nil {
 			return allPaths, err
 		}
 		combinedPaths := combinator.Combine(src, dst, up, core, down, false)
-		anyNewPaths := false
 		for _, p := range combinedPaths {
 			mapKey := interfacesToString(p.Metadata.Interfaces)
 			if _, isSeen := seen[mapKey]; !isSeen {
@@ -87,12 +86,7 @@ func (c *Connector) AllPaths(ctx context.Context, dst addr.IA, src addr.IA) ([]s
 				}
 				allPaths = append(allPaths, path)
 				seen[mapKey] = struct{}{}
-				anyNewPaths = true
 			}
-		}
-		if !anyNewPaths {
-			// this page only contains paths we already knew, so we probably collected all paths already
-			break
 		}
 	}
 

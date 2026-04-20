@@ -54,6 +54,7 @@ type Paginator struct {
 	httpClient   *http.Client
 	pageSize     int32
 	pageToken    string
+	hasNext      bool
 	src          addr.IA
 	dst          addr.IA
 	trustService *TrustService
@@ -65,10 +66,15 @@ func (s *PathService) NewPaginator(dst, src addr.IA) *Paginator {
 		httpClient:   s.httpClient,
 		pageSize:     s.PageSize,
 		pageToken:    "",
+		hasNext:      true,
 		src:          src,
 		dst:          dst,
 		trustService: s.trustService,
 	}
+}
+
+func (s *Paginator) HasNext() bool {
+	return s.hasNext
 }
 
 func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
@@ -85,6 +91,7 @@ func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.Pa
 		return nil, nil, nil, serrors.Wrap("on ListSegments", err)
 	}
 	s.pageToken = res.Msg.NextPageToken
+	s.hasNext = s.pageToken != ""
 
 	upSegments := make([]*seg.PathSegment, 0, len(res.Msg.UpSegments))
 	coreSegments := make([]*seg.PathSegment, 0, len(res.Msg.CoreSegments))
