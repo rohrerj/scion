@@ -161,7 +161,7 @@ On other errors, ping will exit with code 2.
 				if err != nil {
 					return serrors.Wrap("init endhost api connector", err)
 				}
-				topo = connector.GetTopology()
+				topo = connector.Topology
 				opts = append(opts, path.WithEndhostConnector(connector))
 			} else if envFlags.Daemon() != "" || envFlags.ConfigDir() != "" {
 				sd, err := daemon.NewAutoConnector(traceCtx,

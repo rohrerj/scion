@@ -16,7 +16,6 @@ package endhost
 
 import (
 	"context"
-	"crypto/tls"
 	"net/http"
 
 	"connectrpc.com/connect"
@@ -31,16 +30,10 @@ type UnderlayService struct {
 	httpClient *http.Client
 }
 
-func NewUnderlayService(url string) *UnderlayService {
+func (c *Connector) NewUnderlayService() *UnderlayService {
 	u := &UnderlayService{
-		url: url,
-		httpClient: &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true,
-				},
-			},
-		},
+		url:        c.api,
+		httpClient: c.httpClient,
 	}
 	return u
 }

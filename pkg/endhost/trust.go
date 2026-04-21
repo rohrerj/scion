@@ -16,7 +16,6 @@ package endhost
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"net/http"
@@ -88,20 +87,14 @@ type TrustService struct {
 	provider   *trustServiceProvider
 }
 
-func NewTrustService(url string) *TrustService {
+func (c *Connector) NewTrustService() *TrustService {
 	provider := &trustServiceProvider{
 		fetchedChains: make(map[string][]Chain),
 	}
 	t := &TrustService{
-		url: url,
-		httpClient: &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true,
-				},
-			},
-		},
-		provider: provider,
+		url:        c.api,
+		httpClient: c.httpClient,
+		provider:   provider,
 		verifier: trust.Verifier{
 			Engine: provider,
 			Cache:  cache.New(time.Minute, time.Minute),

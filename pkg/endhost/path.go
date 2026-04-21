@@ -16,7 +16,6 @@ package endhost
 
 import (
 	"context"
-	"crypto/tls"
 	"net"
 	"net/http"
 	"strings"
@@ -40,18 +39,12 @@ type PathService struct {
 	topo         snet.Topology
 }
 
-func NewPathService(url string, topo snet.Topology, trustService *TrustService) *PathService {
+func (c *Connector) NewPathService() *PathService {
 	p := &PathService{
-		url:  url,
-		topo: topo,
-		httpClient: &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true,
-				},
-			},
-		},
-		trustService: trustService,
+		url:          c.api,
+		topo:         c.Topology,
+		httpClient:   c.httpClient,
+		trustService: c.TrustService,
 	}
 	return p
 }

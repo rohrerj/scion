@@ -15,6 +15,7 @@
 package endhost
 
 import (
+	"crypto/tls"
 	"net"
 	"net/http"
 	"time"
@@ -30,6 +31,9 @@ func newHTTPClientWithSourceIP(localIP string) *http.Client {
 	}
 	transport := &http.Transport{
 		DialContext: dialer.DialContext,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
 	}
 	return &http.Client{
 		Transport: transport,

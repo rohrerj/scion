@@ -88,7 +88,7 @@ func Choose(
 		if err != nil {
 			return nil, serrors.Wrap("fetching paths", err)
 		}
-		topo = o.endhostConnector.GetTopology()
+		topo = o.endhostConnector.Topology
 	} else if o.daemonConnector != nil {
 		paths, err = fetchPathsFromDaemon(ctx, o.daemonConnector, remote, o.refresh, o.seq)
 		if err != nil {
@@ -209,7 +209,7 @@ func fetchPathsFromEndhostApi(
 	remote addr.IA,
 	seq string,
 ) ([]snet.Path, error) {
-	topo := conn.GetTopology()
+	topo := conn.Topology
 	paths, err := conn.PathService.Paths(ctx, remote, topo.LocalIA,
 		endhost.WithVerifyPathSegments())
 	if err != nil {

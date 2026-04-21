@@ -16,30 +16,157 @@ package endhost
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
+	"net"
+	"net/http"
 	"net/netip"
+	"net/url"
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	"github.com/scionproto/scion/pkg/snet"
+	"github.com/scionproto/scion/private/storage"
+	"github.com/scionproto/scion/private/trust"
 )
 
-func NewConnector(ctx context.Context, api string) (*Connector, error) {
-	trustService := NewTrustService(api)
-	c := &Connector{
-		api:             api,
-		UnderlayService: NewUnderlayService(api),
-		TrustService:    trustService,
+type ConnectOptions func(*connectOptions)
+type connectOptions struct {
+	// disable tls for all requests
+	insecure bool
+	// loads trcs from provided folder
+	trcDir string
+}
+
+func WithInsecureConnection() ConnectOptions {
+	return func(o *connectOptions) {
+		o.insecure = true
 	}
-	topo, err := c.loadTopology(ctx)
+}
+
+func WithTrcDir(dir string) ConnectOptions {
+	return func(o *connectOptions) {
+		o.trcDir = dir
+	}
+}
+
+// NewConnector initializes the endhost API connector using the provided api URL.
+func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Connector, error) {
+	options := &connectOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	u, err := url.Parse(api)
 	if err != nil {
 		return nil, err
 	}
-	c.PathService = NewPathService(api, topo, trustService)
+	endhostAddr, err := net.ResolveTCPAddr("tcp", u.Host)
+	if err != nil {
+		return nil, err
+	}
+	c := &Connector{
+		api: api,
+	}
+	if options.insecure {
+		// accept any TLS certificate or non-tls connection
+		c.httpClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			},
+		}
+		c.UnderlayService = c.NewUnderlayService()
+		c.Topology, err = c.loadTopology(ctx)
+		if err != nil {
+			return nil, err
+		}
+		c.PathService = c.NewPathService()
+		c.TrustService = c.NewTrustService()
+		return c, nil
+	}
+
+	trustDB, err := storage.NewInMemoryTrustStorage()
+	if err != nil {
+		return nil, err
+	}
+	if options.trcDir != "" {
+		// Load TRC from local folder
+		trcLoader := trust.TRCLoader{
+			Dir: options.trcDir,
+			DB:  trustDB,
+		}
+		_, err = trcLoader.Load(ctx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// We want to use tls but have no local trust root configuration
+		// so we can try to retrieve the local ISD TRC from the endhost api.
+		// But since we cannot use a TRC to verify the connection to retrieve the TRC,
+		// we cannot ensure that a valid TRC is returned.
+		c.httpClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			},
+		}
+		c.UnderlayService = c.NewUnderlayService()
+		c.Topology, err = c.loadTopology(ctx)
+		if err != nil {
+			return nil, err
+		}
+		c.TrustService = c.NewTrustService()
+		rawTrc, err := c.TrustService.TRC(ctx, uint32(c.Topology.LocalIA.ISD()), 0, 0)
+		if err != nil {
+			return nil, err
+		}
+		trc, err := cppki.DecodeSignedTRC(rawTrc)
+		if err != nil {
+			return nil, serrors.WrapNoStack("parsing TRC", err)
+		}
+		_, err = trustDB.InsertTRC(ctx, trc)
+		if err != nil {
+			return nil, serrors.WrapNoStack("inserting TRC", err)
+		}
+	}
+	// Now we should have a TRC for the local ISD in the trust store and can
+	// initialize the connector properly.
+	tlsVerifier := trust.NewTLSCryptoVerifier(trustDB)
+	c.httpClient = &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+				// VerifyConnection requires knowledge of the local IA, which is only available after loading the topology.
+				//VerifyConnection:      tlsVerifier.VerifyConnection,
+				VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
+			},
+		},
+	}
+	c.UnderlayService = c.NewUnderlayService()
+	c.Topology, err = c.loadTopology(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.httpClient.Transport = &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify:    true,
+			VerifyConnection:      tlsVerifier.VerifyConnection,
+			VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
+			ServerName:            fmt.Sprintf("%s,%s", c.Topology.LocalIA, endhostAddr.IP.String()),
+		},
+	}
+	c.TrustService = c.NewTrustService()
+	c.PathService = c.NewPathService()
 	return c, nil
 }
 
 type Connector struct {
 	api             string
+	httpClient      *http.Client
+	Topology        snet.Topology
 	UnderlayService *UnderlayService
 	PathService     *PathService
 	TrustService    *TrustService
@@ -52,11 +179,7 @@ type Connector struct {
 // InitDRKey initializes the DRKey service.
 // The local IP is needed to set the source IP for DRKey requests.
 func (c *Connector) InitDRKey(localIP string) {
-	c.DRKeyService = NewDRKeyService(c.api, localIP)
-}
-
-func (c *Connector) GetTopology() snet.Topology {
-	return c.PathService.topo
+	c.DRKeyService = c.NewDRKeyService(localIP)
 }
 
 // loadTopology is called from NewConnector and uses the underlay service to determine the

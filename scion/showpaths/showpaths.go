@@ -337,7 +337,7 @@ func Run(ctx context.Context, dst addr.IA, cfg Config) (*Result, error) {
 	var err error
 	if cfg.EndhostConnector != nil {
 		connector := cfg.EndhostConnector
-		topo = connector.GetTopology()
+		topo = connector.Topology
 		allPaths, err = connector.PathService.Paths(ctx, dst, topo.LocalIA,
 			endhost.WithNumberOfPaths(math.MaxUint32))
 		if err != nil {
