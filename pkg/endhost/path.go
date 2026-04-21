@@ -17,26 +17,33 @@ package endhost
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	seg "github.com/scionproto/scion/pkg/segment"
+	"github.com/scionproto/scion/pkg/snet"
+	snetpath "github.com/scionproto/scion/pkg/snet/path"
+	"github.com/scionproto/scion/private/path/combinator"
 )
 
 type PathService struct {
 	url          string
 	httpClient   *http.Client
-	PageSize     int32
 	trustService *TrustService
+	topo         snet.Topology
 }
 
-func NewPathService(url string, trustService *TrustService) *PathService {
+func NewPathService(url string, topo snet.Topology, trustService *TrustService) *PathService {
 	p := &PathService{
-		url: url,
+		url:  url,
+		topo: topo,
 		httpClient: &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
@@ -47,6 +54,119 @@ func NewPathService(url string, trustService *TrustService) *PathService {
 		trustService: trustService,
 	}
 	return p
+}
+
+type PathReqOption func(*pathReqOptions)
+type pathReqOptions struct {
+	verifyPathSegments bool
+	numPaths           *uint32
+}
+
+// WithVerifyPathSegments filters out all path segments for which
+// verification fails.
+func WithVerifyPathSegments() PathReqOption {
+	return func(o *pathReqOptions) {
+		o.verifyPathSegments = true
+	}
+}
+
+// WithNumberOfPaths sets the maximum number of paths to return.
+// If the limit is not reached after requesting a page, further
+// pages are requested. Setting this option to math.MaxUint32 ensures
+// that all paths are returned.
+func WithNumberOfPaths(n uint32) PathReqOption {
+	return func(o *pathReqOptions) {
+		o.numPaths = &n
+	}
+}
+
+func (s *PathService) filterVerifiedSegments(ctx context.Context, segments []*seg.PathSegment) ([]*seg.PathSegment, error) {
+	verifiedSegments := make([]*seg.PathSegment, 0, len(segments))
+	verificationErrors, err := s.trustService.VerifyPathSegments(ctx, segments)
+	if err != nil {
+		return nil, err
+	}
+	for i := range verificationErrors {
+		if verificationErrors[i] != nil {
+			log.Debug("Path segment filtered", "firstIA", segments[i].FirstIA(),
+				"lastIA", segments[i].LastIA(), "err", verificationErrors[i])
+		} else {
+			verifiedSegments = append(verifiedSegments, segments[i])
+		}
+	}
+	return verifiedSegments, nil
+}
+
+func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts ...PathReqOption) ([]snet.Path, error) {
+	interfacesToString := func(elems []snet.PathInterface) string {
+		parts := make([]string, len(elems))
+		for i, e := range elems {
+			parts[i] = e.String()
+		}
+		return strings.Join(parts, "|")
+	}
+	options := &pathReqOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	maxRequestedPaths := uint32(1)
+	if options.numPaths != nil {
+		maxRequestedPaths = *options.numPaths
+	}
+	paginator := s.NewPaginator(dst, src, 64)
+	paths := make([]snet.Path, 0, 64)
+	seen := make(map[string]struct{})
+
+	for len(paths) < int(maxRequestedPaths) && paginator.HasNext() {
+		up, core, down, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if options.verifyPathSegments {
+			up, err = s.filterVerifiedSegments(ctx, up)
+			if err != nil {
+				return nil, err
+			}
+			core, err = s.filterVerifiedSegments(ctx, core)
+			if err != nil {
+				return nil, err
+			}
+			down, err = s.filterVerifiedSegments(ctx, down)
+			if err != nil {
+				return nil, err
+			}
+		}
+		combinedPaths := combinator.Combine(src, dst, up, core, down, false)
+		for _, p := range combinedPaths {
+			mapKey := interfacesToString(p.Metadata.Interfaces)
+			if _, isSeen := seen[mapKey]; isSeen {
+				continue
+			}
+			nextHopNetIpPort, ok := s.topo.Interface(uint16(p.Metadata.Interfaces[0].ID))
+			if !ok {
+				return nil, serrors.New("nexthop cannot be determined")
+			}
+			addr := nextHopNetIpPort.Addr()
+			nextHop := &net.UDPAddr{
+				IP:   addr.AsSlice(),
+				Port: int(nextHopNetIpPort.Port()),
+				Zone: addr.Zone(),
+			}
+			path := snetpath.Path{
+				Src:           src,
+				Dst:           dst,
+				DataplanePath: p.SCIONPath,
+				Meta:          p.Metadata,
+				NextHop:       nextHop,
+			}
+			paths = append(paths, path)
+			seen[mapKey] = struct{}{}
+		}
+	}
+	if options.numPaths != nil && len(paths) > int(*options.numPaths) {
+		return paths[:*options.numPaths], nil
+	}
+	return paths, nil
 }
 
 type Paginator struct {
@@ -60,11 +180,11 @@ type Paginator struct {
 	trustService *TrustService
 }
 
-func (s *PathService) NewPaginator(dst, src addr.IA) *Paginator {
+func (s *PathService) NewPaginator(dst, src addr.IA, pageSize int32) *Paginator {
 	return &Paginator{
 		url:          s.url,
 		httpClient:   s.httpClient,
-		pageSize:     s.PageSize,
+		pageSize:     pageSize,
 		pageToken:    "",
 		hasNext:      true,
 		src:          src,
@@ -117,46 +237,5 @@ func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.Pa
 		}
 		downSegments = append(downSegments, ps)
 	}
-	verifySegments := true
-	if !verifySegments {
-		return upSegments, coreSegments, downSegments, nil
-	}
-
-	verifiedUpSegments := make([]*seg.PathSegment, 0, len(upSegments))
-	verifiedCoreSegments := make([]*seg.PathSegment, 0, len(coreSegments))
-	verifiedDownSegments := make([]*seg.PathSegment, 0, len(downSegments))
-	if len(upSegments) != 0 {
-		verificationErrors, err := s.trustService.VerifyPathSegments(ctx, upSegments)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		for i := range verificationErrors {
-			if verificationErrors[i] == nil {
-				verifiedUpSegments = append(verifiedUpSegments, upSegments[i])
-			}
-		}
-	}
-	if len(coreSegments) != 0 {
-		verificationErrors, err := s.trustService.VerifyPathSegments(ctx, coreSegments)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		for i := range verificationErrors {
-			if verificationErrors[i] == nil {
-				verifiedCoreSegments = append(verifiedCoreSegments, coreSegments[i])
-			}
-		}
-	}
-	if len(downSegments) != 0 {
-		verificationErrors, err := s.trustService.VerifyPathSegments(ctx, downSegments)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		for i := range verificationErrors {
-			if verificationErrors[i] == nil {
-				verifiedDownSegments = append(verifiedDownSegments, downSegments[i])
-			}
-		}
-	}
-	return verifiedUpSegments, verifiedCoreSegments, verifiedDownSegments, nil
+	return upSegments, coreSegments, downSegments, nil
 }

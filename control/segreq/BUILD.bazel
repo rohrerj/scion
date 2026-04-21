@@ -40,6 +40,7 @@ go_test(
         "authoritative_test.go",
         "forwarder_test.go",
         "helpers_test.go",
+        "pagination_test.go",
     ],
     embed = [":go_default_library"],
     deps = [

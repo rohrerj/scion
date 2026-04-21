@@ -27,6 +27,7 @@ import (
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/daemon"
 	daemontypes "github.com/scionproto/scion/pkg/daemon/types"
+	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/segment/iface"
 	"github.com/scionproto/scion/pkg/slices"
@@ -336,8 +337,9 @@ func Run(ctx context.Context, dst addr.IA, cfg Config) (*Result, error) {
 	var err error
 	if cfg.EndhostConnector != nil {
 		connector := cfg.EndhostConnector
-		topo, err = connector.LoadTopology(ctx)
-		allPaths, err = connector.AllPaths(ctx, dst, topo.LocalIA)
+		topo = connector.GetTopology()
+		allPaths, err = connector.PathService.Paths(ctx, dst, topo.LocalIA,
+			endhost.WithNumberOfPaths(math.MaxUint32))
 		if err != nil {
 			return nil, serrors.Wrap("retrieving paths from endhost API", err)
 		}

@@ -111,7 +111,10 @@ On other errors, showpaths will exit with code 2.
 			defer cancel()
 
 			if envFlags.EndhostApi() != "" {
-				connector := endhost.NewConnector(envFlags.EndhostApi())
+				connector, err := endhost.NewConnector(traceCtx, envFlags.EndhostApi())
+				if err != nil {
+					return serrors.Wrap("init endhost api connector", err)
+				}
 				flags.cfg.EndhostConnector = connector
 			} else if envFlags.Daemon() != "" || envFlags.ConfigDir() != "" {
 				sd, err := daemon.NewAutoConnector(ctx,

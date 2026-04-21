@@ -125,11 +125,11 @@ On other errors, traceroute will exit with code 2.
 				path.WithEPIC(flags.epic),
 			}
 			if envFlags.EndhostApi() != "" {
-				connector := endhost.NewConnector(envFlags.EndhostApi())
-				topo, err = connector.LoadTopology(traceCtx)
+				connector, err := endhost.NewConnector(traceCtx, envFlags.EndhostApi())
 				if err != nil {
-					return serrors.Wrap("loading topology from endhost api", err)
+					return serrors.Wrap("init endhost api connector", err)
 				}
+				topo = connector.GetTopology()
 				opts = append(opts, path.WithEndhostConnector(connector))
 			} else if envFlags.Daemon() != "" || envFlags.ConfigDir() != "" {
 				sd, err := daemon.NewAutoConnector(traceCtx,
