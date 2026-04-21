@@ -26,6 +26,7 @@ import (
 func NewConnector(ctx context.Context, api string) (*Connector, error) {
 	trustService := NewTrustService(api)
 	c := &Connector{
+		api:             api,
 		UnderlayService: NewUnderlayService(api),
 		TrustService:    trustService,
 	}
@@ -38,18 +39,29 @@ func NewConnector(ctx context.Context, api string) (*Connector, error) {
 }
 
 type Connector struct {
+	api             string
 	UnderlayService *UnderlayService
 	PathService     *PathService
 	TrustService    *TrustService
+	DRKeyService    *DRKeyService
 	// cached values
 	underlays  *Underlays
 	interfaces map[uint16]netip.AddrPort
+}
+
+// InitDRKey initializes the DRKey service.
+// The local IP is needed to set the source IP for DRKey requests.
+func (c *Connector) InitDRKey(localIP string) {
+	c.DRKeyService = NewDRKeyService(c.api, localIP)
 }
 
 func (c *Connector) GetTopology() snet.Topology {
 	return c.PathService.topo
 }
 
+// loadTopology is called from NewConnector and uses the underlay service to determine the
+// available underlays, the local IA and its interfaces and populates a snet.Topology struct
+// which can afterwards be obtained using the GetTopology function.
 func (c *Connector) loadTopology(ctx context.Context) (snet.Topology, error) {
 	topo := snet.Topology{}
 	allUnderlays, err := c.UnderlayService.ListUnderlays(ctx, nil)

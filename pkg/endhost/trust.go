@@ -18,11 +18,15 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"net/http"
+	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	cppb "github.com/scionproto/scion/pkg/proto/control_plane"
@@ -36,11 +40,8 @@ import (
 
 type trustServiceProvider struct {
 	ts            *TrustService
-	fetchedChains map[subject2][]Chain
-}
-type subject2 struct {
-	kedId string
-	ia    addr.IA
+	fetchedChains map[string][]Chain
+	mtx           sync.Mutex
 }
 
 func (p *trustServiceProvider) NotifyTRC(ctx context.Context, id cppki.TRCID, opts ...trust.Option) error {
@@ -49,8 +50,8 @@ func (p *trustServiceProvider) NotifyTRC(ctx context.Context, id cppki.TRCID, op
 }
 
 func (p *trustServiceProvider) GetChains(ctx context.Context, query trust.ChainQuery, opts ...trust.Option) ([][]*x509.Certificate, error) {
-	subject := subject2{ia: query.IA, kedId: string(query.SubjectKeyID)}
-	chains, found := p.fetchedChains[subject]
+	subjectKey := fmt.Sprintf("chain-%s-%x", query.IA, query.SubjectKeyID)
+	chains, found := p.fetchedChains[subjectKey]
 	if !found {
 		return nil, serrors.New("no chains found for subject")
 	}
@@ -82,9 +83,15 @@ func (p *trustServiceProvider) GetSignedTRC(ctx context.Context, id cppki.TRCID,
 type TrustService struct {
 	url        string
 	httpClient *http.Client
+	verifier   trust.Verifier
+	cache      *cache.Cache
+	provider   *trustServiceProvider
 }
 
 func NewTrustService(url string) *TrustService {
+	provider := &trustServiceProvider{
+		fetchedChains: make(map[string][]Chain),
+	}
 	t := &TrustService{
 		url: url,
 		httpClient: &http.Client{
@@ -94,7 +101,13 @@ func NewTrustService(url string) *TrustService {
 				},
 			},
 		},
+		provider: provider,
+		verifier: trust.Verifier{
+			Engine: provider,
+			Cache:  cache.New(time.Minute, time.Minute),
+		},
 	}
+	provider.ts = t
 	return t
 }
 
@@ -163,15 +176,16 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 	return rep.Msg.Trc, nil
 }
 
+// VerifyPathSegments extracts the subjects from all AS entries in all provided path segments,
+// performs a ListChains request to obtain the corresponding chains and stores them in memory.
+// It then uses the verifer to perform the segment verification where it will use chains either
+// from the verifier cache or the fetched chains.
+// An error slice of length equal to the number of segments is returned where each entry is nil
+// if the corresponding segment is valid or contains the verification error if it is not valid.
 func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.PathSegment) ([]error, error) {
-	provider := &trustServiceProvider{
-		ts:            t,
-		fetchedChains: map[subject2][]Chain{},
-	}
-	verifier := trust.Verifier{
-		Engine: provider,
-	}
-	addedSubjects := make(map[subject2]struct{})
+	t.provider.mtx.Lock()
+	defer t.provider.mtx.Unlock()
+	addedSubjects := make(map[string]struct{})
 	subjects := make([]Subject, 0, 1)
 	for _, segment := range segments {
 		for _, asEntry := range segment.ASEntries {
@@ -190,17 +204,13 @@ func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.P
 			if ia.IsWildcard() {
 				return nil, serrors.New("ISD-AS must not contain wildcard", "isd_as", ia)
 			}
-			s := string(keyID.SubjectKeyId)
-			key := subject2{
-				kedId: s,
-				ia:    ia,
-			}
-			if _, found := addedSubjects[key]; !found {
+			subjectKey := fmt.Sprintf("chain-%s-%x", ia, keyID.SubjectKeyId)
+			if _, found := addedSubjects[subjectKey]; !found {
 				subjects = append(subjects, Subject{
 					IA:           ia,
 					SubjectKeyId: keyID.SubjectKeyId,
 				})
-				addedSubjects[key] = struct{}{}
+				addedSubjects[subjectKey] = struct{}{}
 			}
 		}
 	}
@@ -208,21 +218,19 @@ func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.P
 	if err != nil {
 		return nil, serrors.Wrap("on list chains", err)
 	}
+	clear(t.provider.fetchedChains)
 	for _, chain := range listChains.Chains {
-		subjectKey := subject2{
-			kedId: string(chain.Subject.SubjectKeyId),
-			ia:    chain.Subject.IA,
-		}
-		currentSlice, found := provider.fetchedChains[subjectKey]
+		subjectKey := fmt.Sprintf("chain-%s-%x", chain.Subject.IA, chain.Subject.SubjectKeyId)
+		currentSlice, found := t.provider.fetchedChains[subjectKey]
 		if found {
 			currentSlice = append(currentSlice, chain)
 		} else {
-			provider.fetchedChains[subjectKey] = []Chain{chain}
+			t.provider.fetchedChains[subjectKey] = []Chain{chain}
 		}
 	}
 	verificationErrors := make([]error, len(segments))
 	for i, segment := range segments {
-		if err := segment.Verify(ctx, &verifier); err != nil {
+		if err := segment.Verify(ctx, t.verifier); err != nil {
 			verificationErrors[i] = err
 		}
 	}

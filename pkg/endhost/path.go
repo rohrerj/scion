@@ -97,6 +97,10 @@ func (s *PathService) filterVerifiedSegments(ctx context.Context, segments []*se
 	return verifiedSegments, nil
 }
 
+// Paths returns all paths from the src IA to the dst IA.
+// It asks for the corresponding path segments from the endhost API endpoint and combines them into
+// end to end paths. The maximum number of paths returned can be configured via the WithNumberOfPaths options.
+// Additionally, the VerifyPathSegments option can be used to filter out all path segments that fail verification.
 func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts ...PathReqOption) ([]snet.Path, error) {
 	interfacesToString := func(elems []snet.PathInterface) string {
 		parts := make([]string, len(elems))
