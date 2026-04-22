@@ -17,7 +17,6 @@ package endhost
 import (
 	"context"
 	"crypto/x509"
-	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -31,16 +30,18 @@ import (
 	cppb "github.com/scionproto/scion/pkg/proto/control_plane"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
+	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	"github.com/scionproto/scion/pkg/scrypto/signed"
 	seg "github.com/scionproto/scion/pkg/segment"
+	"github.com/scionproto/scion/pkg/slayers/path"
+	"github.com/scionproto/scion/private/storage"
 	"github.com/scionproto/scion/private/trust"
 )
 
 type trustServiceProvider struct {
-	ts            *TrustService
-	fetchedChains map[string][]Chain
-	mtx           sync.Mutex
+	ts  *TrustService
+	mtx sync.Mutex
 }
 
 func (p *trustServiceProvider) NotifyTRC(ctx context.Context, id cppki.TRCID, opts ...trust.Option) error {
@@ -48,27 +49,44 @@ func (p *trustServiceProvider) NotifyTRC(ctx context.Context, id cppki.TRCID, op
 	return nil
 }
 
-func (p *trustServiceProvider) GetChains(ctx context.Context, query trust.ChainQuery, opts ...trust.Option) ([][]*x509.Certificate, error) {
-	subjectKey := fmt.Sprintf("chain-%s-%x", query.IA, query.SubjectKeyID)
-	chains, found := p.fetchedChains[subjectKey]
-	if !found {
-		return nil, serrors.New("no chains found for subject")
-	}
-	var result [][]*x509.Certificate
+func chainToCerts(c *Chain) ([]*x509.Certificate, error) {
 	var chain []*x509.Certificate
-	for _, c := range chains {
-		asCert, err := x509.ParseCertificate(c.AsCert)
-		if err != nil {
-			return nil, serrors.Wrap("parsing AS certificate", err)
-		}
-		caCert, err := x509.ParseCertificate(c.CaCert)
-		if err != nil {
-			return nil, serrors.Wrap("parsing CA certificate", err)
-		}
-		chain = append(chain, asCert, caCert)
+	asCert, err := x509.ParseCertificate(c.AsCert)
+	if err != nil {
+		return nil, serrors.Wrap("parsing AS certificate", err)
 	}
-	result = append(result, chain)
-	return result, nil
+	caCert, err := x509.ParseCertificate(c.CaCert)
+	if err != nil {
+		return nil, serrors.Wrap("parsing CA certificate", err)
+	}
+	chain = append(chain, asCert, caCert)
+	return chain, nil
+}
+
+func (p *trustServiceProvider) GetChains(ctx context.Context, query trust.ChainQuery, opts ...trust.Option) ([][]*x509.Certificate, error) {
+	var certs [][]*x509.Certificate
+	chains, err := p.ts.ListChains(ctx, []Subject{
+		Subject{
+			IA:           query.IA,
+			SubjectKeyId: query.SubjectKeyID,
+		},
+	}, query.Validity)
+	if err != nil {
+		return nil, err
+	}
+	for _, chain := range chains.Chains {
+		cert, err := chainToCerts(&Chain{
+			AsCert:  chain.AsCert,
+			CaCert:  chain.CaCert,
+			Subject: chain.Subject,
+		})
+		if err != nil {
+			return nil, err
+		}
+		certs = append(certs, cert)
+	}
+
+	return certs, nil
 }
 
 func (p *trustServiceProvider) GetSignedTRC(ctx context.Context, id cppki.TRCID, opts ...trust.Option) (cppki.SignedTRC, error) {
@@ -83,14 +101,12 @@ type TrustService struct {
 	url        string
 	httpClient *http.Client
 	verifier   trust.Verifier
-	cache      *cache.Cache
 	provider   *trustServiceProvider
+	trustDB    storage.TrustDB
 }
 
 func (c *Connector) NewTrustService() *TrustService {
-	provider := &trustServiceProvider{
-		fetchedChains: make(map[string][]Chain),
-	}
+	provider := &trustServiceProvider{}
 	t := &TrustService{
 		url:        c.api,
 		httpClient: c.httpClient,
@@ -99,6 +115,7 @@ func (c *Connector) NewTrustService() *TrustService {
 			Engine: provider,
 			Cache:  cache.New(time.Minute, time.Minute),
 		},
+		trustDB: c.trustDB,
 	}
 	provider.ts = t
 	return t
@@ -119,42 +136,86 @@ type Chain struct {
 	Subject Subject
 }
 
-func (t *TrustService) ListChains(ctx context.Context, subjects []Subject) (*Chains, error) {
+func (t *TrustService) ListChains(ctx context.Context, subjects []Subject, validity cppki.Validity) (*Chains, error) {
 	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url)
 	req := &connect.Request[endhost.ListChainsRequest]{
 		Msg: &endhost.ListChainsRequest{
 			Subjects:          make([]*endhost.Subject, 0, len(subjects)),
-			AtLeastValidUntil: 0,
-			AtLeastValidSince: 0,
+			AtLeastValidUntil: uint32(validity.NotBefore.Unix()),
+			AtLeastValidSince: uint32(validity.NotAfter.Unix()),
 		},
 	}
+	chains := &Chains{
+		Chains: make([]Chain, 0, len(req.Msg.Subjects)),
+	}
 	for _, subject := range subjects {
-		req.Msg.Subjects = append(req.Msg.Subjects, &endhost.Subject{
-			IsdAs:        uint64(subject.IA),
-			SubjectKeyId: subject.SubjectKeyId,
-		})
+		query := trust.ChainQuery{
+			IA:           subject.IA,
+			SubjectKeyID: subject.SubjectKeyId,
+			Validity:     validity,
+		}
+		certs, err := t.trustDB.Chains(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		if len(certs) != 0 {
+			for _, chain := range certs {
+				chains.Chains = append(chains.Chains, Chain{
+					Subject: Subject{
+						IA:           subject.IA,
+						SubjectKeyId: subject.SubjectKeyId,
+					},
+					AsCert: chain[0].Raw,
+					CaCert: chain[1].Raw,
+				})
+			}
+		} else {
+			req.Msg.Subjects = append(req.Msg.Subjects, &endhost.Subject{
+				IsdAs:        uint64(subject.IA),
+				SubjectKeyId: subject.SubjectKeyId,
+			})
+		}
 	}
 	repChains, err := client.ListChains(ctx, req)
 	if err != nil {
 		return nil, serrors.Wrap("on ListChains", err)
 	}
-	chains := &Chains{
-		Chains: make([]Chain, 0, len(repChains.Msg.Chains)),
-	}
+
 	for _, chain := range repChains.Msg.Chains {
-		chains.Chains = append(chains.Chains, Chain{
+		c := Chain{
 			Subject: Subject{
 				IA:           addr.IA(chain.Subject.IsdAs),
 				SubjectKeyId: chain.Subject.SubjectKeyId,
 			},
 			AsCert: chain.AsCert,
 			CaCert: chain.CaCert,
-		})
+		}
+		certs, err := chainToCerts(&c)
+		if err != nil {
+			return nil, err
+		}
+		_, err = t.trustDB.InsertChain(ctx, certs)
+		if err != nil {
+			return nil, err
+		}
+		chains.Chains = append(chains.Chains, c)
 	}
 	return chains, nil
 }
 
 func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial uint64) ([]byte, error) {
+	trcID := cppki.TRCID{
+		ISD:    addr.ISD(isd),
+		Base:   scrypto.Version(base),
+		Serial: scrypto.Version(serial),
+	}
+	trc, err := t.trustDB.SignedTRC(ctx, trcID)
+	if err != nil {
+		return nil, err
+	}
+	if !trc.IsZero() {
+		return trc.Raw, nil
+	}
 	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url)
 	rep, err := client.GetTrc(ctx, &connect.Request[endhost.TRCRequest]{
 		Msg: &endhost.TRCRequest{
@@ -165,6 +226,14 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 	})
 	if err != nil {
 		return nil, serrors.Wrap("on TRC", err)
+	}
+	trc, err = cppki.DecodeSignedTRC(rep.Msg.Trc)
+	if err != nil {
+		return nil, serrors.WrapNoStack("parsing TRC", err)
+	}
+	_, err = t.trustDB.InsertTRC(ctx, trc)
+	if err != nil {
+		return nil, serrors.WrapNoStack("inserting TRC", err)
 	}
 	return rep.Msg.Trc, nil
 }
@@ -178,8 +247,33 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.PathSegment) ([]error, error) {
 	t.provider.mtx.Lock()
 	defer t.provider.mtx.Unlock()
-	addedSubjects := make(map[string]struct{})
 	subjects := make([]Subject, 0, 1)
+	var globalNotBefore time.Time
+	var globalNotAfter time.Time
+	first := true
+	for _, segment := range segments {
+		for _, asEntry := range segment.ASEntries {
+			notBefore := segment.Info.Timestamp
+			notAfter := segment.Info.Timestamp.Add(
+				path.ExpTimeToDuration(asEntry.HopEntry.HopField.ExpTime),
+			)
+			if first {
+				globalNotBefore = notBefore
+				globalNotAfter = notAfter
+			} else {
+				if notBefore.Before(globalNotBefore) {
+					globalNotBefore = notBefore
+				}
+				if notAfter.After(globalNotAfter) {
+					globalNotAfter = notAfter
+				}
+			}
+		}
+	}
+	validity := cppki.Validity{
+		NotBefore: globalNotBefore,
+		NotAfter:  globalNotAfter,
+	}
 	for _, segment := range segments {
 		for _, asEntry := range segment.ASEntries {
 			hdr, err := signed.ExtractUnverifiedHeader(asEntry.Signed)
@@ -197,29 +291,15 @@ func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.P
 			if ia.IsWildcard() {
 				return nil, serrors.New("ISD-AS must not contain wildcard", "isd_as", ia)
 			}
-			subjectKey := fmt.Sprintf("chain-%s-%x", ia, keyID.SubjectKeyId)
-			if _, found := addedSubjects[subjectKey]; !found {
-				subjects = append(subjects, Subject{
-					IA:           ia,
-					SubjectKeyId: keyID.SubjectKeyId,
-				})
-				addedSubjects[subjectKey] = struct{}{}
-			}
+			subjects = append(subjects, Subject{
+				IA:           ia,
+				SubjectKeyId: keyID.SubjectKeyId,
+			})
 		}
 	}
-	listChains, err := t.ListChains(ctx, subjects)
+	_, err := t.ListChains(ctx, subjects, validity)
 	if err != nil {
 		return nil, serrors.Wrap("on list chains", err)
-	}
-	clear(t.provider.fetchedChains)
-	for _, chain := range listChains.Chains {
-		subjectKey := fmt.Sprintf("chain-%s-%x", chain.Subject.IA, chain.Subject.SubjectKeyId)
-		currentSlice, found := t.provider.fetchedChains[subjectKey]
-		if found {
-			currentSlice = append(currentSlice, chain)
-		} else {
-			t.provider.fetchedChains[subjectKey] = []Chain{chain}
-		}
 	}
 	verificationErrors := make([]error, len(segments))
 	for i, segment := range segments {

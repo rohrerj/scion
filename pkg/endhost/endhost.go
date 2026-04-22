@@ -25,7 +25,6 @@ import (
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
-	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/private/storage"
 	"github.com/scionproto/scion/private/trust"
@@ -68,6 +67,11 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 	c := &Connector{
 		api: api,
 	}
+	trustDB, err := storage.NewInMemoryTrustStorage()
+	if err != nil {
+		return nil, err
+	}
+	c.trustDB = trustDB
 	if options.insecure {
 		// accept any TLS certificate or non-tls connection
 		c.httpClient = &http.Client{
@@ -86,16 +90,11 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 		c.TrustService = c.NewTrustService()
 		return c, nil
 	}
-
-	trustDB, err := storage.NewInMemoryTrustStorage()
-	if err != nil {
-		return nil, err
-	}
 	if options.trcDir != "" {
 		// Load TRC from local folder
 		trcLoader := trust.TRCLoader{
 			Dir: options.trcDir,
-			DB:  trustDB,
+			DB:  c.trustDB,
 		}
 		_, err = trcLoader.Load(ctx)
 		if err != nil {
@@ -119,22 +118,14 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 			return nil, err
 		}
 		c.TrustService = c.NewTrustService()
-		rawTrc, err := c.TrustService.TRC(ctx, uint32(c.Topology.LocalIA.ISD()), 0, 0)
+		_, err := c.TrustService.TRC(ctx, uint32(c.Topology.LocalIA.ISD()), 0, 0)
 		if err != nil {
 			return nil, err
-		}
-		trc, err := cppki.DecodeSignedTRC(rawTrc)
-		if err != nil {
-			return nil, serrors.WrapNoStack("parsing TRC", err)
-		}
-		_, err = trustDB.InsertTRC(ctx, trc)
-		if err != nil {
-			return nil, serrors.WrapNoStack("inserting TRC", err)
 		}
 	}
 	// Now we should have a TRC for the local ISD in the trust store and can
 	// initialize the connector properly.
-	tlsVerifier := trust.NewTLSCryptoVerifier(trustDB)
+	tlsVerifier := trust.NewTLSCryptoVerifier(c.trustDB)
 	c.httpClient = &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -166,6 +157,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 type Connector struct {
 	api             string
 	httpClient      *http.Client
+	trustDB         storage.TrustDB
 	Topology        snet.Topology
 	UnderlayService *UnderlayService
 	PathService     *PathService
