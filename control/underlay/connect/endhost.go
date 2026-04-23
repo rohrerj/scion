@@ -18,20 +18,28 @@ import (
 	"context"
 
 	"connectrpc.com/connect"
+
+	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/pkg/metrics"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/private/topology"
 )
 
 type UnderlayServer struct {
 	Topology *topology.Loader
+	Requests metrics.Counter
 }
 
 func (u UnderlayServer) ListUnderlays(ctx context.Context, req *connect.Request[endhost.ListUnderlaysRequest]) (*connect.Response[endhost.ListUnderlaysResponse], error) {
 	// TODO: Parameter IsdAs is currently ignored since only a single IsdAS is supported
 	// TODO: Currently only the UDP Underlay is returned, add support for snap later
+	logger := log.FromCtx(ctx)
+	logger.Debug("Received ListUnderlays request")
+
 	res := &endhost.ListUnderlaysResponse{
 		Udp: &endhost.UdpUnderlay{},
 	}
+
 	ia := u.Topology.IA()
 	portStart, portEnd := u.Topology.PortRange()
 	routers, _ := u.Topology.BorderRouters()
@@ -50,6 +58,9 @@ func (u UnderlayServer) ListUnderlays(ctx context.Context, req *connect.Request[
 			},
 		})
 	}
-
+	logger.Debug("Replied with", "udp underlay routers", len(routers))
+	if u.Requests != nil {
+		u.Requests.Add(1)
+	}
 	return connect.NewResponse(res), nil
 }

@@ -17,9 +17,10 @@ package segreq
 import (
 	"time"
 
+	cache "zgo.at/zcache/v2"
+
 	"github.com/scionproto/scion/pkg/addr"
 	seg "github.com/scionproto/scion/pkg/segment"
-	cache "zgo.at/zcache/v2"
 )
 
 type Key struct {
@@ -53,7 +54,7 @@ func (c *CombinedPath) Length() int {
 
 func NewStore() *Store {
 	return &Store{
-		c: cache.New[Key, []CombinedPath](time.Minute*10, time.Minute),
+		c: cache.New[Key, []CombinedPath](time.Minute, time.Minute),
 	}
 }
 

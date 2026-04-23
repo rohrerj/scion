@@ -21,9 +21,9 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/patrickmn/go-cache"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/patrickmn/go-cache"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	cppb "github.com/scionproto/scion/pkg/proto/control_plane"

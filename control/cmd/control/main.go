@@ -394,6 +394,7 @@ func realMain(ctx context.Context) error {
 	endhostTrustServer := &cstrustgrpc.EndhostServer{
 		Provider: provider,
 		IA:       topo.IA(),
+		Requests: libmetrics.NewPromCounter(cstrustmetrics.Handler.EndhostRequests),
 	}
 	connectEndhost.Handle(endhostconnect.NewTrustServiceHandler(cstrustconnect.EndhostServer{
 		EndhostServer: endhostTrustServer,
@@ -443,7 +444,7 @@ func realMain(ctx context.Context) error {
 		Requests:     libmetrics.NewPromCounter(metrics.SegmentLookupRequestsTotal),
 		SegmentsSent: libmetrics.NewPromCounter(metrics.SegmentLookupSegmentsSentTotal),
 	}
-	forwardingEndhostServer := &segreqgrpc.EndhostServer{
+	segmentEndhostServer := &segreqgrpc.EndhostServer{
 		Lookuper: segreq.ForwardingLookup{
 			LocalIA:     topo.IA(),
 			CoreChecker: segreq.CoreChecker{Inspector: inspector},
@@ -455,12 +456,14 @@ func realMain(ctx context.Context) error {
 				PathDB:    pathDB,
 			},
 		},
-		LocalIA:   topo.IA(),
-		IsCore:    topo.Core(),
-		Inspector: inspector,
-		PathDB:    pathDB,
-		PathStore: segreq.NewStore(),
-		Paginator: segreq.NewPaginator(),
+		LocalIA:      topo.IA(),
+		IsCore:       topo.Core(),
+		Inspector:    inspector,
+		PathDB:       pathDB,
+		PathStore:    segreq.NewStore(),
+		Paginator:    segreq.NewPaginator(),
+		Requests:     libmetrics.NewPromCounter(metrics.ListSegmentsRequestsTotal),
+		SegmentsSent: libmetrics.NewPromCounter(metrics.ListSegmentsSentSegments),
 	}
 
 	// Always register a forwarding lookup for AS internal requests.
@@ -468,10 +471,11 @@ func realMain(ctx context.Context) error {
 		LookupServer: forwardingLookupServer,
 	}))
 	connectEndhost.Handle(endhostconnect.NewPathServiceHandler(segreqconnect.EndhostServer{
-		EndhostServer: forwardingEndhostServer,
+		EndhostServer: segmentEndhostServer,
 	}))
 	connectEndhost.Handle(endhostconnect.NewUnderlayServiceHandler(underlayconnect.UnderlayServer{
 		Topology: topo,
+		Requests: libmetrics.NewPromCounter(metrics.UnderlaysRequestsTotal),
 	}))
 	if topo.Core() {
 		cppb.RegisterSegmentLookupServiceServer(quicServer, authLookupServer)

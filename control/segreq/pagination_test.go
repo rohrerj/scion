@@ -17,9 +17,10 @@ package segreq_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/scionproto/scion/control/segreq"
 	seg "github.com/scionproto/scion/pkg/segment"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestPagination(t *testing.T) {

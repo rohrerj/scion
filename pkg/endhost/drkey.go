@@ -19,12 +19,13 @@ import (
 	"net/http"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/scionproto/scion/pkg/drkey"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	drpb "github.com/scionproto/scion/pkg/proto/drkey"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type DRKeyService struct {
@@ -34,7 +35,8 @@ type DRKeyService struct {
 
 func (c *Connector) NewDRKeyService() *DRKeyService {
 	d := &DRKeyService{
-		url: c.api,
+		url:        c.api,
+		httpClient: c.httpClient,
 	}
 	return d
 }

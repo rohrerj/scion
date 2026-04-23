@@ -18,29 +18,33 @@ import (
 	"context"
 	"sort"
 
+	"github.com/opentracing/opentracing-go"
+
 	"github.com/scionproto/scion/control/segreq"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/pkg/metrics"
+	"github.com/scionproto/scion/pkg/private/prom"
 	ehpb "github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/segment"
 	seg "github.com/scionproto/scion/pkg/segment"
 	"github.com/scionproto/scion/private/pathdb"
+	"github.com/scionproto/scion/private/segment/segfetcher"
+	"github.com/scionproto/scion/private/tracing"
 	"github.com/scionproto/scion/private/trust"
 )
 
 // LookupServer handles path segment lookups.
 type EndhostServer struct {
-	Lookuper Lookuper
-	//Requests         metrics.Counter
-	//UpSegmentsSent   metrics.Counter
-	//CoreSegmentsSent metrics.Counter
-	//DownSegmentsSent metrics.Counter
-	LocalIA   addr.IA
-	IsCore    bool
-	Inspector trust.Inspector
-	PathDB    pathdb.DB
-	PathStore *segreq.Store
-	Paginator *segreq.Paginator
+	Lookuper     Lookuper
+	Requests     metrics.Counter
+	SegmentsSent metrics.Counter
+	LocalIA      addr.IA
+	IsCore       bool
+	Inspector    trust.Inspector
+	PathDB       pathdb.DB
+	PathStore    *segreq.Store
+	Paginator    *segreq.Paginator
 }
 
 func (s EndhostServer) ListSegments(ctx context.Context,
@@ -48,10 +52,13 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 
 	src, dst := addr.IA(req.SrcIsdAs), addr.IA(req.DstIsdAs)
 	logger := log.FromCtx(ctx)
+	span := opentracing.SpanFromContext(ctx)
+	setQueryTags(span, src, dst)
 	logger.Debug("Received ListSegments request", "src", src, "dst", dst)
 	res := &ehpb.ListSegmentsResponse{}
 	if src == dst {
-		// local AS path, no segments are returned
+		// intra AS path, no segments are returned
+		s.updateMetric(span, prom.Success, nil)
 		return res, nil
 	}
 
@@ -61,6 +68,8 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 	}
 	allPaths, err := s.getPaths(ctx, src, dst)
 	if err != nil {
+		logger.Debug("Failed to lookup path segments", "err", err)
+		s.updateMetric(span, segfetcher.ErrToMetricsLabel(err), err)
 		return nil, err
 	}
 
@@ -77,7 +86,24 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 	}
 
 	logger.Debug("Replied with segments", "up", len(res.UpSegments), "core", len(res.CoreSegments), "down", len(res.DownSegments))
+	s.updateMetric(span, prom.Success, nil)
+	s.incSegmentsSent(len(resUp) + len(resCore) + len(resDown))
 	return res, nil
+}
+
+func (s EndhostServer) updateMetric(span opentracing.Span, result string, err error) {
+	if s.Requests != nil {
+		s.Requests.Add(1)
+	}
+	if span != nil {
+		tracing.ResultLabel(span, result)
+		tracing.Error(span, err)
+	}
+}
+func (s EndhostServer) incSegmentsSent(segments int) {
+	if s.SegmentsSent != nil {
+		s.SegmentsSent.Add(float64(segments))
+	}
 }
 
 // getPaths asks the PathStore whether paths from src IA to dst IA are cached, if yes

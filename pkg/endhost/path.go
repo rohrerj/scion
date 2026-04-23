@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
+
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -52,7 +53,7 @@ func (c *Connector) NewPathService() *PathService {
 type PathReqOption func(*pathReqOptions)
 type pathReqOptions struct {
 	verifyPathSegments bool
-	numPaths           *uint32
+	numPaths           uint32
 }
 
 // WithVerifyPathSegments filters out all path segments for which
@@ -65,11 +66,11 @@ func WithVerifyPathSegments() PathReqOption {
 
 // WithNumberOfPaths sets the maximum number of paths to return.
 // If the limit is not reached after requesting a page, further
-// pages are requested. Setting this option to math.MaxUint32 ensures
+// pages are requested. Setting this option to 0 ensures
 // that all paths are returned.
 func WithNumberOfPaths(n uint32) PathReqOption {
 	return func(o *pathReqOptions) {
-		o.numPaths = &n
+		o.numPaths = n
 	}
 }
 
@@ -107,8 +108,8 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts 
 		opt(options)
 	}
 	maxRequestedPaths := uint32(1)
-	if options.numPaths != nil {
-		maxRequestedPaths = *options.numPaths
+	if options.numPaths != 0 {
+		maxRequestedPaths = options.numPaths
 	}
 	paginator := s.NewPaginator(dst, src, 64)
 	paths := make([]snet.Path, 0, 64)
@@ -160,8 +161,8 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts 
 			seen[mapKey] = struct{}{}
 		}
 	}
-	if options.numPaths != nil && len(paths) > int(*options.numPaths) {
-		return paths[:*options.numPaths], nil
+	if options.numPaths != 0 && len(paths) > int(options.numPaths) {
+		return paths[:options.numPaths], nil
 	}
 	return paths, nil
 }

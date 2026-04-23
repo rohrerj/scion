@@ -19,6 +19,7 @@ import (
 	"net/http"
 
 	"connectrpc.com/connect"
+
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/endhost"

@@ -18,6 +18,7 @@ import (
 	"context"
 
 	"connectrpc.com/connect"
+
 	"github.com/scionproto/scion/control/trust/grpc"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 )
