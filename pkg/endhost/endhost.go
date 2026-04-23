@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -36,21 +37,35 @@ type connectOptions struct {
 	insecure bool
 	// loads trcs from provided folder
 	trcDir string
+	// the src IP that should be used in the rpc calls
+	localIP string
 }
 
+// Disables all TLS verifications.
 func WithInsecureConnection() ConnectOptions {
 	return func(o *connectOptions) {
 		o.insecure = true
 	}
 }
 
+// Loads all TRCs from the provided folder.
 func WithTrcDir(dir string) ConnectOptions {
 	return func(o *connectOptions) {
 		o.trcDir = dir
 	}
 }
 
+// Uses specified IP when dialing
+func WithIP(localIP string) ConnectOptions {
+	return func(o *connectOptions) {
+		o.localIP = localIP
+	}
+}
+
 // NewConnector initializes the endhost API connector using the provided api URL.
+// When no TRCs are provided, the connector will try to fetch the local ISD TRC from the
+// endhost API. However, since the client does not have the trust material to verify the connection
+// to the endhost-api server, a man-in-the-middle attacks could theoretically happen.
 func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Connector, error) {
 	options := &connectOptions{}
 	for _, opt := range opts {
@@ -65,21 +80,32 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 		return nil, err
 	}
 	c := &Connector{
-		api: api,
+		api:        api,
+		httpClient: &http.Client{},
 	}
 	trustDB, err := storage.NewInMemoryTrustStorage()
 	if err != nil {
 		return nil, err
 	}
 	c.trustDB = trustDB
+	var dialContext func(ctx context.Context, network string, address string) (net.Conn, error)
+	if options.localIP != "" {
+		dialer := &net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 5 * time.Second,
+			LocalAddr: &net.TCPAddr{
+				IP: net.ParseIP(options.localIP),
+			},
+		}
+		dialContext = dialer.DialContext
+	}
 	if options.insecure {
 		// accept any TLS certificate or non-tls connection
-		c.httpClient = &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true,
-				},
+		c.httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
 			},
+			DialContext: dialContext,
 		}
 		c.UnderlayService = c.NewUnderlayService()
 		c.Topology, err = c.loadTopology(ctx)
@@ -88,6 +114,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 		}
 		c.PathService = c.NewPathService()
 		c.TrustService = c.NewTrustService()
+		c.DRKeyService = c.NewDRKeyService()
 		return c, nil
 	}
 	if options.trcDir != "" {
@@ -105,12 +132,11 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 		// so we can try to retrieve the local ISD TRC from the endhost api.
 		// But since we cannot use a TRC to verify the connection to retrieve the TRC,
 		// we cannot ensure that a valid TRC is returned.
-		c.httpClient = &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true,
-				},
+		c.httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
 			},
+			DialContext: dialContext,
 		}
 		c.UnderlayService = c.NewUnderlayService()
 		c.Topology, err = c.loadTopology(ctx)
@@ -126,15 +152,14 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 	// Now we should have a TRC for the local ISD in the trust store and can
 	// initialize the connector properly.
 	tlsVerifier := trust.NewTLSCryptoVerifier(c.trustDB)
-	c.httpClient = &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-				// VerifyConnection requires knowledge of the local IA, which is only available after loading the topology.
-				//VerifyConnection:      tlsVerifier.VerifyConnection,
-				VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
-			},
+	c.httpClient.Transport = &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+			// VerifyConnection requires knowledge of the local IA, which is only available after loading the topology.
+			//VerifyConnection:      tlsVerifier.VerifyConnection,
+			VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
 		},
+		DialContext: dialContext,
 	}
 	c.UnderlayService = c.NewUnderlayService()
 	c.Topology, err = c.loadTopology(ctx)
@@ -148,9 +173,11 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 			VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
 			ServerName:            fmt.Sprintf("%s,%s", c.Topology.LocalIA, endhostAddr.IP.String()),
 		},
+		DialContext: dialContext,
 	}
 	c.TrustService = c.NewTrustService()
 	c.PathService = c.NewPathService()
+	c.DRKeyService = c.NewDRKeyService()
 	return c, nil
 }
 
@@ -168,15 +195,8 @@ type Connector struct {
 	interfaces map[uint16]netip.AddrPort
 }
 
-// InitDRKey initializes the DRKey service.
-// The local IP is needed to set the source IP for DRKey requests.
-func (c *Connector) InitDRKey(localIP string) {
-	c.DRKeyService = c.NewDRKeyService(localIP)
-}
-
 // loadTopology is called from NewConnector and uses the underlay service to determine the
-// available underlays, the local IA and its interfaces and populates a snet.Topology struct
-// which can afterwards be obtained using the GetTopology function.
+// available underlays, the local IA and its interfaces and populates a snet.Topology struct.
 func (c *Connector) loadTopology(ctx context.Context) (snet.Topology, error) {
 	topo := snet.Topology{}
 	allUnderlays, err := c.UnderlayService.ListUnderlays(ctx, nil)

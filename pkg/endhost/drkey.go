@@ -32,10 +32,9 @@ type DRKeyService struct {
 	httpClient *http.Client
 }
 
-func (c *Connector) NewDRKeyService(localIP string) *DRKeyService {
+func (c *Connector) NewDRKeyService() *DRKeyService {
 	d := &DRKeyService{
-		url:        c.api,
-		httpClient: newHTTPClientWithSourceIP(localIP),
+		url: c.api,
 	}
 	return d
 }

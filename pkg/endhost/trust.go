@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/x509"
 	"net/http"
-	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -40,12 +39,10 @@ import (
 )
 
 type trustServiceProvider struct {
-	ts  *TrustService
-	mtx sync.Mutex
+	ts *TrustService
 }
 
 func (p *trustServiceProvider) NotifyTRC(ctx context.Context, id cppki.TRCID, opts ...trust.Option) error {
-	// For simplicity, do nothing as the endhost provides verified chains
 	return nil
 }
 
@@ -66,7 +63,7 @@ func chainToCerts(c *Chain) ([]*x509.Certificate, error) {
 func (p *trustServiceProvider) GetChains(ctx context.Context, query trust.ChainQuery, opts ...trust.Option) ([][]*x509.Certificate, error) {
 	var certs [][]*x509.Certificate
 	chains, err := p.ts.ListChains(ctx, []Subject{
-		Subject{
+		{
 			IA:           query.IA,
 			SubjectKeyId: query.SubjectKeyID,
 		},
@@ -136,6 +133,9 @@ type Chain struct {
 	Subject Subject
 }
 
+// ListChains checks for all subjects whether the turstDB already contains a valid chain, then it creates
+// a list of subjects for which no valid chain is found and performs a ListChains request for these subjects.
+// The returned chains are stored in the trustDB and the function returns the chains for all requested subjects.
 func (t *TrustService) ListChains(ctx context.Context, subjects []Subject, validity cppki.Validity) (*Chains, error) {
 	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url)
 	req := &connect.Request[endhost.ListChainsRequest]{
@@ -176,6 +176,9 @@ func (t *TrustService) ListChains(ctx context.Context, subjects []Subject, valid
 			})
 		}
 	}
+	if len(req.Msg.Subjects) == 0 {
+		return chains, nil
+	}
 	repChains, err := client.ListChains(ctx, req)
 	if err != nil {
 		return nil, serrors.Wrap("on ListChains", err)
@@ -203,6 +206,8 @@ func (t *TrustService) ListChains(ctx context.Context, subjects []Subject, valid
 	return chains, nil
 }
 
+// TRC checks whether the requested TRC is already stored in the trustDB and returns it if found.
+// Otherwise it performs a TRC request, stores the returned TRC in the trustDB and returns it.
 func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial uint64) ([]byte, error) {
 	trcID := cppki.TRCID{
 		ISD:    addr.ISD(isd),
@@ -239,14 +244,11 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 }
 
 // VerifyPathSegments extracts the subjects from all AS entries in all provided path segments,
-// performs a ListChains request to obtain the corresponding chains and stores them in memory.
-// It then uses the verifer to perform the segment verification where it will use chains either
-// from the verifier cache or the fetched chains.
+// performs a ListChains request to obtain the corresponding chains and stores them in the pathdb.
+// It then uses the verifer to perform the segment verification.
 // An error slice of length equal to the number of segments is returned where each entry is nil
 // if the corresponding segment is valid or contains the verification error if it is not valid.
 func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.PathSegment) ([]error, error) {
-	t.provider.mtx.Lock()
-	defer t.provider.mtx.Unlock()
 	subjects := make([]Subject, 0, 1)
 	var globalNotBefore time.Time
 	var globalNotAfter time.Time
