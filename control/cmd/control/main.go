@@ -470,7 +470,7 @@ func realMain(ctx context.Context) error {
 	connectIntra.Handle(cpconnect.NewSegmentLookupServiceHandler(segreqconnect.LookupServer{
 		LookupServer: forwardingLookupServer,
 	}))
-	connectEndhost.Handle(endhostconnect.NewPathServiceHandler(segreqconnect.EndhostServer{
+	connectEndhost.Handle(endhostconnect.NewSegmentsServiceHandler(segreqconnect.EndhostServer{
 		EndhostServer: segmentEndhostServer,
 	}))
 	connectEndhost.Handle(endhostconnect.NewUnderlayServiceHandler(underlayconnect.UnderlayServer{

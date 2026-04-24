@@ -125,7 +125,7 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts 
 		if err != nil {
 			return nil, err
 		}
-		if options.verifyPathSegments {
+		/*if options.verifyPathSegments {
 			up, err = s.filterVerifiedSegments(ctx, up)
 			if err != nil {
 				return nil, err
@@ -138,7 +138,7 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts 
 			if err != nil {
 				return nil, err
 			}
-		}
+		}*/
 		combinedPaths := combinator.Combine(src, dst, up, core, down, false)
 		for _, p := range combinedPaths {
 			mapKey := interfacesToString(p.Metadata.Interfaces)
@@ -203,7 +203,7 @@ func (s *Paginator) HasNext() bool {
 func (s *Paginator) NextPage(ctx context.Context) (
 	[]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
 
-	client := endhostconnect.NewPathServiceClient(s.httpClient, s.url)
+	client := endhostconnect.NewSegmentsServiceClient(s.httpClient, s.url)
 	res, err := client.ListSegments(ctx, &connect.Request[endhost.ListSegmentsRequest]{
 		Msg: &endhost.ListSegmentsRequest{
 			SrcIsdAs:  uint64(s.src),

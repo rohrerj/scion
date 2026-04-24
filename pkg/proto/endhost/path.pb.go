@@ -180,8 +180,8 @@ const file_proto_endhost_v1_path_proto_rawDesc = "" +
 	"upSegments\x12H\n" +
 	"\rdown_segments\x18\x02 \x03(\v2#.proto.control_plane.v1.PathSegmentR\fdownSegments\x12H\n" +
 	"\rcore_segments\x18\x03 \x03(\v2#.proto.control_plane.v1.PathSegmentR\fcoreSegments\x12&\n" +
-	"\x0fnext_page_token\x18\x04 \x01(\tR\rnextPageToken2n\n" +
-	"\vPathService\x12_\n" +
+	"\x0fnext_page_token\x18\x04 \x01(\tR\rnextPageToken2r\n" +
+	"\x0fSegmentsService\x12_\n" +
 	"\fListSegments\x12%.scion.endhost.v1.ListSegmentsRequest\x1a&.scion.endhost.v1.ListSegmentsResponse\"\x00B/Z-github.com/scionproto/scion/pkg/proto/endhostb\x06proto3"
 
 var (
@@ -206,8 +206,8 @@ var file_proto_endhost_v1_path_proto_depIdxs = []int32{
 	2, // 0: scion.endhost.v1.ListSegmentsResponse.up_segments:type_name -> proto.control_plane.v1.PathSegment
 	2, // 1: scion.endhost.v1.ListSegmentsResponse.down_segments:type_name -> proto.control_plane.v1.PathSegment
 	2, // 2: scion.endhost.v1.ListSegmentsResponse.core_segments:type_name -> proto.control_plane.v1.PathSegment
-	0, // 3: scion.endhost.v1.PathService.ListSegments:input_type -> scion.endhost.v1.ListSegmentsRequest
-	1, // 4: scion.endhost.v1.PathService.ListSegments:output_type -> scion.endhost.v1.ListSegmentsResponse
+	0, // 3: scion.endhost.v1.SegmentsService.ListSegments:input_type -> scion.endhost.v1.ListSegmentsRequest
+	1, // 4: scion.endhost.v1.SegmentsService.ListSegments:output_type -> scion.endhost.v1.ListSegmentsResponse
 	4, // [4:5] is the sub-list for method output_type
 	3, // [3:4] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
@@ -247,72 +247,72 @@ var _ grpc.ClientConnInterface
 // is compatible with the grpc package it is being compiled against.
 const _ = grpc.SupportPackageIsVersion6
 
-// PathServiceClient is the client API for PathService service.
+// SegmentsServiceClient is the client API for SegmentsService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
-type PathServiceClient interface {
+type SegmentsServiceClient interface {
 	ListSegments(ctx context.Context, in *ListSegmentsRequest, opts ...grpc.CallOption) (*ListSegmentsResponse, error)
 }
 
-type pathServiceClient struct {
+type segmentsServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewPathServiceClient(cc grpc.ClientConnInterface) PathServiceClient {
-	return &pathServiceClient{cc}
+func NewSegmentsServiceClient(cc grpc.ClientConnInterface) SegmentsServiceClient {
+	return &segmentsServiceClient{cc}
 }
 
-func (c *pathServiceClient) ListSegments(ctx context.Context, in *ListSegmentsRequest, opts ...grpc.CallOption) (*ListSegmentsResponse, error) {
+func (c *segmentsServiceClient) ListSegments(ctx context.Context, in *ListSegmentsRequest, opts ...grpc.CallOption) (*ListSegmentsResponse, error) {
 	out := new(ListSegmentsResponse)
-	err := c.cc.Invoke(ctx, "/scion.endhost.v1.PathService/ListSegments", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/scion.endhost.v1.SegmentsService/ListSegments", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// PathServiceServer is the server API for PathService service.
-type PathServiceServer interface {
+// SegmentsServiceServer is the server API for SegmentsService service.
+type SegmentsServiceServer interface {
 	ListSegments(context.Context, *ListSegmentsRequest) (*ListSegmentsResponse, error)
 }
 
-// UnimplementedPathServiceServer can be embedded to have forward compatible implementations.
-type UnimplementedPathServiceServer struct {
+// UnimplementedSegmentsServiceServer can be embedded to have forward compatible implementations.
+type UnimplementedSegmentsServiceServer struct {
 }
 
-func (*UnimplementedPathServiceServer) ListSegments(context.Context, *ListSegmentsRequest) (*ListSegmentsResponse, error) {
+func (*UnimplementedSegmentsServiceServer) ListSegments(context.Context, *ListSegmentsRequest) (*ListSegmentsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSegments not implemented")
 }
 
-func RegisterPathServiceServer(s *grpc.Server, srv PathServiceServer) {
-	s.RegisterService(&_PathService_serviceDesc, srv)
+func RegisterSegmentsServiceServer(s *grpc.Server, srv SegmentsServiceServer) {
+	s.RegisterService(&_SegmentsService_serviceDesc, srv)
 }
 
-func _PathService_ListSegments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _SegmentsService_ListSegments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListSegmentsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PathServiceServer).ListSegments(ctx, in)
+		return srv.(SegmentsServiceServer).ListSegments(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/scion.endhost.v1.PathService/ListSegments",
+		FullMethod: "/scion.endhost.v1.SegmentsService/ListSegments",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PathServiceServer).ListSegments(ctx, req.(*ListSegmentsRequest))
+		return srv.(SegmentsServiceServer).ListSegments(ctx, req.(*ListSegmentsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-var _PathService_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "scion.endhost.v1.PathService",
-	HandlerType: (*PathServiceServer)(nil),
+var _SegmentsService_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "scion.endhost.v1.SegmentsService",
+	HandlerType: (*SegmentsServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "ListSegments",
-			Handler:    _PathService_ListSegments_Handler,
+			Handler:    _SegmentsService_ListSegments_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

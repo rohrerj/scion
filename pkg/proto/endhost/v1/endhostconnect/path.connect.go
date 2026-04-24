@@ -21,8 +21,8 @@ import (
 const _ = connect.IsAtLeastVersion1_13_0
 
 const (
-	// PathServiceName is the fully-qualified name of the PathService service.
-	PathServiceName = "scion.endhost.v1.PathService"
+	// SegmentsServiceName is the fully-qualified name of the SegmentsService service.
+	SegmentsServiceName = "scion.endhost.v1.SegmentsService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -33,77 +33,77 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
-	// PathServiceListSegmentsProcedure is the fully-qualified name of the PathService's ListSegments
-	// RPC.
-	PathServiceListSegmentsProcedure = "/scion.endhost.v1.PathService/ListSegments"
+	// SegmentsServiceListSegmentsProcedure is the fully-qualified name of the SegmentsService's
+	// ListSegments RPC.
+	SegmentsServiceListSegmentsProcedure = "/scion.endhost.v1.SegmentsService/ListSegments"
 )
 
-// PathServiceClient is a client for the scion.endhost.v1.PathService service.
-type PathServiceClient interface {
+// SegmentsServiceClient is a client for the scion.endhost.v1.SegmentsService service.
+type SegmentsServiceClient interface {
 	ListSegments(context.Context, *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error)
 }
 
-// NewPathServiceClient constructs a client for the scion.endhost.v1.PathService service. By
+// NewSegmentsServiceClient constructs a client for the scion.endhost.v1.SegmentsService service. By
 // default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
 // and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
 // connect.WithGRPC() or connect.WithGRPCWeb() options.
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewPathServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) PathServiceClient {
+func NewSegmentsServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) SegmentsServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
-	pathServiceMethods := endhost.File_proto_endhost_v1_path_proto.Services().ByName("PathService").Methods()
-	return &pathServiceClient{
+	segmentsServiceMethods := endhost.File_proto_endhost_v1_path_proto.Services().ByName("SegmentsService").Methods()
+	return &segmentsServiceClient{
 		listSegments: connect.NewClient[endhost.ListSegmentsRequest, endhost.ListSegmentsResponse](
 			httpClient,
-			baseURL+PathServiceListSegmentsProcedure,
-			connect.WithSchema(pathServiceMethods.ByName("ListSegments")),
+			baseURL+SegmentsServiceListSegmentsProcedure,
+			connect.WithSchema(segmentsServiceMethods.ByName("ListSegments")),
 			connect.WithClientOptions(opts...),
 		),
 	}
 }
 
-// pathServiceClient implements PathServiceClient.
-type pathServiceClient struct {
+// segmentsServiceClient implements SegmentsServiceClient.
+type segmentsServiceClient struct {
 	listSegments *connect.Client[endhost.ListSegmentsRequest, endhost.ListSegmentsResponse]
 }
 
-// ListSegments calls scion.endhost.v1.PathService.ListSegments.
-func (c *pathServiceClient) ListSegments(ctx context.Context, req *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error) {
+// ListSegments calls scion.endhost.v1.SegmentsService.ListSegments.
+func (c *segmentsServiceClient) ListSegments(ctx context.Context, req *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error) {
 	return c.listSegments.CallUnary(ctx, req)
 }
 
-// PathServiceHandler is an implementation of the scion.endhost.v1.PathService service.
-type PathServiceHandler interface {
+// SegmentsServiceHandler is an implementation of the scion.endhost.v1.SegmentsService service.
+type SegmentsServiceHandler interface {
 	ListSegments(context.Context, *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error)
 }
 
-// NewPathServiceHandler builds an HTTP handler from the service implementation. It returns the path
-// on which to mount the handler and the handler itself.
+// NewSegmentsServiceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
-func NewPathServiceHandler(svc PathServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	pathServiceMethods := endhost.File_proto_endhost_v1_path_proto.Services().ByName("PathService").Methods()
-	pathServiceListSegmentsHandler := connect.NewUnaryHandler(
-		PathServiceListSegmentsProcedure,
+func NewSegmentsServiceHandler(svc SegmentsServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	segmentsServiceMethods := endhost.File_proto_endhost_v1_path_proto.Services().ByName("SegmentsService").Methods()
+	segmentsServiceListSegmentsHandler := connect.NewUnaryHandler(
+		SegmentsServiceListSegmentsProcedure,
 		svc.ListSegments,
-		connect.WithSchema(pathServiceMethods.ByName("ListSegments")),
+		connect.WithSchema(segmentsServiceMethods.ByName("ListSegments")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/scion.endhost.v1.PathService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/scion.endhost.v1.SegmentsService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case PathServiceListSegmentsProcedure:
-			pathServiceListSegmentsHandler.ServeHTTP(w, r)
+		case SegmentsServiceListSegmentsProcedure:
+			segmentsServiceListSegmentsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
 	})
 }
 
-// UnimplementedPathServiceHandler returns CodeUnimplemented from all methods.
-type UnimplementedPathServiceHandler struct{}
+// UnimplementedSegmentsServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedSegmentsServiceHandler struct{}
 
-func (UnimplementedPathServiceHandler) ListSegments(context.Context, *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("scion.endhost.v1.PathService.ListSegments is not implemented"))
+func (UnimplementedSegmentsServiceHandler) ListSegments(context.Context, *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("scion.endhost.v1.SegmentsService.ListSegments is not implemented"))
 }

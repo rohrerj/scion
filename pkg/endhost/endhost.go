@@ -83,6 +83,9 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 		api:        api,
 		httpClient: &http.Client{},
 	}
+	if u.Scheme == "http" {
+		options.insecure = true
+	}
 	trustDB, err := storage.NewInMemoryTrustStorage()
 	if err != nil {
 		return nil, err
@@ -112,8 +115,8 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 		if err != nil {
 			return nil, err
 		}
-		c.PathService = c.NewPathService()
 		c.TrustService = c.NewTrustService()
+		c.PathService = c.NewPathService()
 		c.DRKeyService = c.NewDRKeyService()
 		return c, nil
 	}

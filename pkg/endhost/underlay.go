@@ -81,13 +81,19 @@ func (u *UnderlayService) ListUnderlays(ctx context.Context, isdAs *addr.IA) (*U
 		// udp underlay is available
 		underlays.Udp = &UdpUnderlay{}
 		for _, router := range res.Msg.Udp.Routers {
-			underlays.Udp.Routers = append(underlays.Udp.Routers, UdpRouter{
-				IsdAs:               router.IsdAs,
-				Address:             router.Address,
-				Interfaces:          router.Interfaces,
-				DispatchedPortStart: router.DispatchedRange.DispatchedPortStart,
-				DispatchedPortEnd:   router.DispatchedRange.DispatchedPortEnd,
-			})
+			newRouter := UdpRouter{
+				IsdAs:      router.IsdAs,
+				Address:    router.Address,
+				Interfaces: router.Interfaces,
+			}
+			if router.DispatchedRange != nil {
+				newRouter.DispatchedPortStart = router.DispatchedRange.DispatchedPortStart
+				newRouter.DispatchedPortEnd = router.DispatchedRange.DispatchedPortEnd
+			} else {
+				newRouter.DispatchedPortStart = 1024
+				newRouter.DispatchedPortEnd = 65535
+			}
+			underlays.Udp.Routers = append(underlays.Udp.Routers, newRouter)
 		}
 	}
 	if res.Msg.Snap != nil {
