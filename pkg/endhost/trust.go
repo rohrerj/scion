@@ -42,7 +42,8 @@ type trustServiceProvider struct {
 	ts *TrustService
 }
 
-func (p *trustServiceProvider) NotifyTRC(ctx context.Context, id cppki.TRCID, opts ...trust.Option) error {
+func (p *trustServiceProvider) NotifyTRC(ctx context.Context, id cppki.TRCID,
+	opts ...trust.Option) error {
 	return nil
 }
 
@@ -60,7 +61,9 @@ func chainToCerts(c *Chain) ([]*x509.Certificate, error) {
 	return chain, nil
 }
 
-func (p *trustServiceProvider) GetChains(ctx context.Context, query trust.ChainQuery, opts ...trust.Option) ([][]*x509.Certificate, error) {
+func (p *trustServiceProvider) GetChains(ctx context.Context, query trust.ChainQuery,
+	opts ...trust.Option) ([][]*x509.Certificate, error) {
+
 	var certs [][]*x509.Certificate
 	chains, err := p.ts.ListChains(ctx, []Subject{
 		{
@@ -86,7 +89,9 @@ func (p *trustServiceProvider) GetChains(ctx context.Context, query trust.ChainQ
 	return certs, nil
 }
 
-func (p *trustServiceProvider) GetSignedTRC(ctx context.Context, id cppki.TRCID, opts ...trust.Option) (cppki.SignedTRC, error) {
+func (p *trustServiceProvider) GetSignedTRC(ctx context.Context, id cppki.TRCID,
+	opts ...trust.Option) (cppki.SignedTRC, error) {
+
 	trcBytes, err := p.ts.TRC(ctx, uint32(id.ISD), uint64(id.Base), uint64(id.Serial))
 	if err != nil {
 		return cppki.SignedTRC{}, err
@@ -133,10 +138,13 @@ type Chain struct {
 	Subject Subject
 }
 
-// ListChains checks for all subjects whether the turstDB already contains a valid chain, then it creates
-// a list of subjects for which no valid chain is found and performs a ListChains request for these subjects.
-// The returned chains are stored in the trustDB and the function returns the chains for all requested subjects.
-func (t *TrustService) ListChains(ctx context.Context, subjects []Subject, validity cppki.Validity) (*Chains, error) {
+// ListChains checks for all subjects whether the turstDB already contains a valid chain,
+// then it creates a list of subjects for which no valid chain is found and performs a ListChains
+// request for these subjects. The returned chains are stored in the trustDB and the function
+// returns the chains for all requested subjects.
+func (t *TrustService) ListChains(ctx context.Context, subjects []Subject,
+	validity cppki.Validity) (*Chains, error) {
+
 	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url)
 	req := &connect.Request[endhost.ListChainsRequest]{
 		Msg: &endhost.ListChainsRequest{
@@ -208,7 +216,9 @@ func (t *TrustService) ListChains(ctx context.Context, subjects []Subject, valid
 
 // TRC checks whether the requested TRC is already stored in the trustDB and returns it if found.
 // Otherwise it performs a TRC request, stores the returned TRC in the trustDB and returns it.
-func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial uint64) ([]byte, error) {
+func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial uint64) (
+	[]byte, error) {
+
 	trcID := cppki.TRCID{
 		ISD:    addr.ISD(isd),
 		Base:   scrypto.Version(base),
@@ -248,7 +258,9 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 // It then uses the verifer to perform the segment verification.
 // An error slice of length equal to the number of segments is returned where each entry is nil
 // if the corresponding segment is valid or contains the verification error if it is not valid.
-func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.PathSegment) ([]error, error) {
+func (t *TrustService) VerifyPathSegments(ctx context.Context, segments []*seg.PathSegment) (
+	[]error, error) {
+
 	subjects := make([]Subject, 0, 1)
 	var globalNotBefore time.Time
 	var globalNotAfter time.Time

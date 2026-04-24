@@ -30,7 +30,10 @@ type UnderlayServer struct {
 	Requests metrics.Counter
 }
 
-func (u UnderlayServer) ListUnderlays(ctx context.Context, req *connect.Request[endhost.ListUnderlaysRequest]) (*connect.Response[endhost.ListUnderlaysResponse], error) {
+func (u UnderlayServer) ListUnderlays(ctx context.Context,
+	req *connect.Request[endhost.ListUnderlaysRequest]) (
+	*connect.Response[endhost.ListUnderlaysResponse], error) {
+
 	// TODO: Parameter IsdAs is currently ignored since only a single IsdAS is supported
 	// TODO: Currently only the UDP Underlay is returned, add support for snap later
 	logger := log.FromCtx(ctx)

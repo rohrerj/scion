@@ -69,7 +69,8 @@ func (s EndhostServer) Chains(ctx context.Context,
 			SubjectKeyID: subject.SubjectKeyId,
 			Validity:     validity,
 		}
-		chains, err := s.Provider.GetChains(ctx, query, trust.AllowInactive(), trust.Client(peer.Addr))
+		chains, err := s.Provider.GetChains(ctx, query, trust.AllowInactive(),
+			trust.Client(peer.Addr))
 		if err != nil {
 			logger.Info("Unable to retrieve chains", "query", query, "err", err)
 			s.updateMetric(span, labels.WithResult(trustmetrics.ErrParse), err)

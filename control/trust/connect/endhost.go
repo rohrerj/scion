@@ -27,7 +27,10 @@ type EndhostServer struct {
 	*grpc.EndhostServer
 }
 
-func (e EndhostServer) ListChains(ctx context.Context, req *connect.Request[endhost.ListChainsRequest]) (*connect.Response[endhost.ListChainsResponse], error) {
+func (e EndhostServer) ListChains(ctx context.Context,
+	req *connect.Request[endhost.ListChainsRequest]) (
+	*connect.Response[endhost.ListChainsResponse], error) {
+
 	rep, err := e.EndhostServer.Chains(ctx, req.Msg)
 	if err != nil {
 		return nil, err
@@ -35,7 +38,10 @@ func (e EndhostServer) ListChains(ctx context.Context, req *connect.Request[endh
 	return connect.NewResponse(rep), nil
 }
 
-func (e EndhostServer) GetTrc(ctx context.Context, req *connect.Request[endhost.TRCRequest]) (*connect.Response[endhost.TRCResponse], error) {
+func (e EndhostServer) GetTrc(ctx context.Context,
+	req *connect.Request[endhost.TRCRequest]) (
+	*connect.Response[endhost.TRCResponse], error) {
+
 	rep, err := e.EndhostServer.TRC(ctx, req.Msg)
 	if err != nil {
 		return nil, err

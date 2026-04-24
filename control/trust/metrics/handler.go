@@ -52,7 +52,8 @@ func newHandler() handler {
 	return handler{
 		Requests: prom.NewCounterVecWithLabels(Namespace, "", "received_requests_total",
 			"Number of requests served by the trust engine", HandlerLabels{}),
-		EndhostRequests: prom.NewCounterVecWithLabels(Namespace, "", "received_endhost_requests_total",
+		EndhostRequests: prom.NewCounterVecWithLabels(Namespace, "",
+			"received_endhost_requests_total",
 			"Number of requests served by the endhost api trust engine", HandlerLabels{}),
 	}
 }

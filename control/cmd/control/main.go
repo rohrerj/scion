@@ -890,7 +890,7 @@ func realMain(ctx context.Context) error {
 				return err
 			}
 		default:
-			return serrors.New("unkown scheme", "scheme", u.Scheme)
+			return serrors.New("unknown scheme", "scheme", u.Scheme)
 		}
 		return nil
 	})

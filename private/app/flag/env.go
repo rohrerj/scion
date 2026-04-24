@@ -119,7 +119,8 @@ If both --sciond and --config-dir are set, --sciond takes priority.`,
 	endhostApi := ""
 	e.endhostApi = flagSet.VarPF((*stringVal)(&endhostApi),
 		"endhost", "",
-		`Connect to the endhost API at the specified endpoint ([scheme]://[host]:[port]/[PathPrefix])`)
+		`Connect to the endhost API at the specified endpoint 
+		([scheme]://[host]:[port]/[PathPrefix])`)
 
 	configDirHelp := `Directory containing topology.json and certs/ for standalone mode.
 If both --sciond and --config-dir are set, --sciond takes priority.
@@ -167,7 +168,8 @@ func (e *SCIONEnvironment) Validate() error {
 	}
 
 	// On non-Linux platforms with no flags set, we need either --sciond or --config-dir
-	return serrors.New("either --endhost or --sciond or --config-dir must be specified on this platform")
+	return serrors.New(`either --endhost or --sciond or --config-dir must
+	be specified on this platform`)
 }
 
 // LoadExternalVar loads variables from the SCION environment file and from the

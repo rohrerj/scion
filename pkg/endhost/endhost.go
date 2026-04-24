@@ -155,7 +155,8 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 	c.httpClient.Transport = &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true,
-			// VerifyConnection requires knowledge of the local IA, which is only available after loading the topology.
+			// VerifyConnection requires knowledge of the local IA,
+			// which is only available after loading the topology.
 			//VerifyConnection:      tlsVerifier.VerifyConnection,
 			VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
 		},
@@ -171,7 +172,8 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 			InsecureSkipVerify:    true,
 			VerifyConnection:      tlsVerifier.VerifyConnection,
 			VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
-			ServerName:            fmt.Sprintf("%s,%s", c.Topology.LocalIA, endhostAddr.IP.String()),
+			ServerName: fmt.Sprintf("%s,%s", c.Topology.LocalIA,
+				endhostAddr.IP.String()),
 		},
 		DialContext: dialContext,
 	}

@@ -41,7 +41,9 @@ func (c *Connector) NewDRKeyService() *DRKeyService {
 	return d
 }
 
-func (d *DRKeyService) ASHostKey(ctx context.Context, req drkey.ASHostMeta) (*drkey.ASHostKey, error) {
+func (d *DRKeyService) ASHostKey(ctx context.Context, req drkey.ASHostMeta) (
+	*drkey.ASHostKey, error) {
+
 	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url)
 	rep, err := client.DRKeyASHost(ctx, &connect.Request[endhost.DRKeyASHostRequest]{
 		Msg: &endhost.DRKeyASHostRequest{
@@ -57,7 +59,8 @@ func (d *DRKeyService) ASHostKey(ctx context.Context, req drkey.ASHostMeta) (*dr
 	}
 	return &drkey.ASHostKey{
 		ProtoId: req.ProtoId,
-		Epoch:   drkey.NewEpoch(uint32(rep.Msg.EpochBegin.Seconds), uint32(rep.Msg.EpochEnd.Seconds)),
+		Epoch: drkey.NewEpoch(uint32(rep.Msg.EpochBegin.Seconds),
+			uint32(rep.Msg.EpochEnd.Seconds)),
 		SrcIA:   req.SrcIA,
 		DstIA:   req.DstIA,
 		DstHost: req.DstHost,
@@ -65,7 +68,9 @@ func (d *DRKeyService) ASHostKey(ctx context.Context, req drkey.ASHostMeta) (*dr
 	}, nil
 }
 
-func (d *DRKeyService) HostASKey(ctx context.Context, req drkey.HostASMeta) (*drkey.HostASKey, error) {
+func (d *DRKeyService) HostASKey(ctx context.Context, req drkey.HostASMeta) (
+	*drkey.HostASKey, error) {
+
 	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url)
 	rep, err := client.DRKeyHostAS(ctx, &connect.Request[endhost.DRKeyHostASRequest]{
 		Msg: &endhost.DRKeyHostASRequest{
@@ -81,7 +86,8 @@ func (d *DRKeyService) HostASKey(ctx context.Context, req drkey.HostASMeta) (*dr
 	}
 	return &drkey.HostASKey{
 		ProtoId: req.ProtoId,
-		Epoch:   drkey.NewEpoch(uint32(rep.Msg.EpochBegin.Seconds), uint32(rep.Msg.EpochEnd.Seconds)),
+		Epoch: drkey.NewEpoch(uint32(rep.Msg.EpochBegin.Seconds),
+			uint32(rep.Msg.EpochEnd.Seconds)),
 		SrcIA:   req.SrcIA,
 		DstIA:   req.DstIA,
 		SrcHost: req.SrcHost,
@@ -89,24 +95,28 @@ func (d *DRKeyService) HostASKey(ctx context.Context, req drkey.HostASMeta) (*dr
 	}, nil
 }
 
-func (d *DRKeyService) HostHostKey(ctx context.Context, req drkey.HostHostMeta) (*drkey.HostHostKey, error) {
+func (d *DRKeyService) HostHostKey(ctx context.Context, req drkey.HostHostMeta) (
+	*drkey.HostHostKey, error) {
+
 	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url)
-	rep, err := client.DRKeyHostHost(ctx, &connect.Request[endhost.DRKeyHostHostRequest]{
-		Msg: &endhost.DRKeyHostHostRequest{
-			ValTime:    timestamppb.New(req.Validity),
-			ProtocolId: drpb.Protocol(req.ProtoId),
-			SrcIa:      uint64(req.SrcIA),
-			DstIa:      uint64(req.DstIA),
-			SrcHost:    req.SrcHost,
-			DstHost:    req.DstHost,
-		},
-	})
+	rep, err := client.DRKeyHostHost(ctx,
+		&connect.Request[endhost.DRKeyHostHostRequest]{
+			Msg: &endhost.DRKeyHostHostRequest{
+				ValTime:    timestamppb.New(req.Validity),
+				ProtocolId: drpb.Protocol(req.ProtoId),
+				SrcIa:      uint64(req.SrcIA),
+				DstIa:      uint64(req.DstIA),
+				SrcHost:    req.SrcHost,
+				DstHost:    req.DstHost,
+			},
+		})
 	if err != nil {
 		return nil, serrors.Wrap("on HostHostKey", err)
 	}
 	return &drkey.HostHostKey{
 		ProtoId: req.ProtoId,
-		Epoch:   drkey.NewEpoch(uint32(rep.Msg.EpochBegin.Seconds), uint32(rep.Msg.EpochEnd.Seconds)),
+		Epoch: drkey.NewEpoch(uint32(rep.Msg.EpochBegin.Seconds),
+			uint32(rep.Msg.EpochEnd.Seconds)),
 		SrcIA:   req.SrcIA,
 		DstIA:   req.DstIA,
 		SrcHost: req.SrcHost,

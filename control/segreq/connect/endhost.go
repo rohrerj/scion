@@ -27,7 +27,10 @@ type EndhostServer struct {
 	*grpc.EndhostServer
 }
 
-func (s EndhostServer) ListSegments(ctx context.Context, req *connect.Request[endhost.ListSegmentsRequest]) (*connect.Response[endhost.ListSegmentsResponse], error) {
+func (s EndhostServer) ListSegments(ctx context.Context,
+	req *connect.Request[endhost.ListSegmentsRequest]) (
+	*connect.Response[endhost.ListSegmentsResponse], error) {
+
 	res, err := s.EndhostServer.ListSegments(ctx, req.Msg)
 	if err != nil {
 		return nil, err

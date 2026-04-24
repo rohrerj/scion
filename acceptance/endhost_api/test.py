@@ -18,8 +18,6 @@
 This test verifies that the end2end integration test works using the SCION endhost API.
 """
 
-from plumbum import cli
-
 from acceptance.common import base
 
 
@@ -32,7 +30,8 @@ class Test(base.TestTopogen):
     def _run(self):
         ping_test = self.get_executable("end2end_integration")
         print("=== Running end2end integration with endhost API ===")
-        ping_test["-d","--endhost", "-outDir", self.artifacts].run_fg()
+        ping_test["-d", "--endhost", "-outDir", self.artifacts].run_fg()
+
 
 if __name__ == "__main__":
     base.main(Test)

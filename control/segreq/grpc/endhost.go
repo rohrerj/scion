@@ -26,7 +26,6 @@ import (
 	"github.com/scionproto/scion/pkg/metrics"
 	"github.com/scionproto/scion/pkg/private/prom"
 	ehpb "github.com/scionproto/scion/pkg/proto/endhost"
-	"github.com/scionproto/scion/pkg/segment"
 	seg "github.com/scionproto/scion/pkg/segment"
 	"github.com/scionproto/scion/private/pathdb"
 	"github.com/scionproto/scion/private/segment/segfetcher"
@@ -85,7 +84,8 @@ func (s EndhostServer) ListSegments(ctx context.Context,
 		res.DownSegments = append(res.DownSegments, seg.PathSegmentToPB(segment))
 	}
 
-	logger.Debug("Replied with segments", "up", len(res.UpSegments), "core", len(res.CoreSegments), "down", len(res.DownSegments))
+	logger.Debug("Replied with segments", "up", len(res.UpSegments), "core", len(res.CoreSegments),
+		"down", len(res.DownSegments))
 	s.updateMetric(span, prom.Success, nil)
 	s.incSegmentsSent(len(resUp) + len(resCore) + len(resDown))
 	return res, nil
@@ -111,7 +111,8 @@ func (s EndhostServer) incSegmentsSent(segments int) {
 // all path segments relevant for connection between the src IA and dst IA
 // (they might be cached in the path DB) and check whether they can be stitched together.
 // In that case, the newely combined paths will be cached in the store.
-func (s EndhostServer) getPaths(ctx context.Context, src, dst addr.IA) ([]segreq.CombinedPath, error) {
+func (s EndhostServer) getPaths(ctx context.Context, src, dst addr.IA) (
+	[]segreq.CombinedPath, error) {
 	if paths, found := s.PathStore.Get(src, dst); found {
 		return paths, nil
 	}
@@ -131,11 +132,11 @@ func (s EndhostServer) getPaths(ctx context.Context, src, dst addr.IA) ([]segreq
 		}
 		for _, meta := range segs {
 			switch meta.Type {
-			case segment.TypeCore:
+			case seg.TypeCore:
 				coreSegments = append(coreSegments, meta.Segment)
-			case segment.TypeDown:
+			case seg.TypeDown:
 				downSegments = append(downSegments, meta.Segment)
-			case segment.TypeUp:
+			case seg.TypeUp:
 				upSegments = append(upSegments, meta.Segment)
 			}
 		}
@@ -164,11 +165,14 @@ func (s EndhostServer) getPaths(ctx context.Context, src, dst addr.IA) ([]segreq
 			// we have up + core + down, up + core, or up + down paths
 			for _, upSegment := range upSegments {
 				for _, coreSegment := range coreSegments {
-					if upSegment.FirstIA() == coreSegment.FirstIA() || upSegment.FirstIA() == coreSegment.LastIA() {
+					if upSegment.FirstIA() == coreSegment.FirstIA() ||
+						upSegment.FirstIA() == coreSegment.LastIA() {
+
 						if len(downSegments) != 0 {
 							// we have up segment, core segment and down segment
 							for _, downSegment := range downSegments {
-								if coreSegment.FirstIA() == downSegment.FirstIA() || coreSegment.LastIA() == downSegment.FirstIA() {
+								if coreSegment.FirstIA() == downSegment.FirstIA() ||
+									coreSegment.LastIA() == downSegment.FirstIA() {
 									allPaths = append(allPaths, segreq.CombinedPath{
 										UpSegment:   upSegment,
 										CoreSegment: coreSegment,
@@ -199,7 +203,8 @@ func (s EndhostServer) getPaths(ctx context.Context, src, dst addr.IA) ([]segreq
 			// we have only core + down paths
 			for _, coreSegment := range coreSegments {
 				for _, downSegment := range downSegments {
-					if coreSegment.FirstIA() == downSegment.FirstIA() || coreSegment.LastIA() == downSegment.FirstIA() {
+					if coreSegment.FirstIA() == downSegment.FirstIA() ||
+						coreSegment.LastIA() == downSegment.FirstIA() {
 						allPaths = append(allPaths, segreq.CombinedPath{
 							CoreSegment: coreSegment,
 							DownSegment: downSegment,

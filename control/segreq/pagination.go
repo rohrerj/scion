@@ -30,11 +30,15 @@ func NewPaginator() *Paginator {
 // GetPage takes a sorted slice of combined paths, the page size and page token.
 // Default pageToken is "" or "0".
 // Returns in total 'pageSize' up-path, core-path and down-path segments if the number of unique
-// segments is >= 'pageSize'. If the number of unique segments is > 'pageSize', a pageToken corresponding
-// to the next page is returned. A pageToken of "" implies that we have reached the end.
-// For each page, including the final page, it is guaranteed to contain the segments to construct at least 1 full path.
+// segments is >= 'pageSize'. If the number of unique segments is > 'pageSize', a pageToken
+// corresponding to the next page is returned. A pageToken of "" implies that we have reached
+// the end.
+// For each page, including the final page, it is guaranteed to contain the segments to construct
+// at least 1 full path.
 // Within a page, all path segments are unique. Path segments may repeat over different pages.
-func (p *Paginator) GetPage(paths []CombinedPath, pageSize int, pageToken string) ([]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, string) {
+func (p *Paginator) GetPage(paths []CombinedPath, pageSize int, pageToken string) (
+	[]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, string) {
+
 	pagination, err := strconv.Atoi(pageToken)
 	if err != nil {
 		pagination = 0
@@ -170,7 +174,8 @@ func (p *Paginator) GetPage(paths []CombinedPath, pageSize int, pageToken string
 		}
 	}
 	if len(up)+len(core)+len(down) < pageSize || (i == len(paths) && !partialPath) {
-		// we have reached the last page (i.e. together with the current page, the endhost should have received all path segments)
+		// we have reached the last page (i.e. together with the current page,
+		// the endhost should have received all path segments)
 		return up, core, down, ""
 	}
 	return up, core, down, strconv.Itoa(i)

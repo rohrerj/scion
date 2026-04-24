@@ -74,7 +74,9 @@ func WithNumberOfPaths(n uint32) PathReqOption {
 	}
 }
 
-func (s *PathService) filterVerifiedSegments(ctx context.Context, segments []*seg.PathSegment) ([]*seg.PathSegment, error) {
+func (s *PathService) filterVerifiedSegments(ctx context.Context, segments []*seg.PathSegment) (
+	[]*seg.PathSegment, error) {
+
 	verifiedSegments := make([]*seg.PathSegment, 0, len(segments))
 	verificationErrors, err := s.trustService.VerifyPathSegments(ctx, segments)
 	if err != nil {
@@ -92,10 +94,13 @@ func (s *PathService) filterVerifiedSegments(ctx context.Context, segments []*se
 }
 
 // Paths returns all paths from the src IA to the dst IA.
-// It asks for the corresponding path segments from the endhost API endpoint and combines them into
-// end to end paths. The maximum number of paths returned can be configured via the WithNumberOfPaths options.
-// Additionally, the VerifyPathSegments option can be used to filter out all path segments that fail verification.
-func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts ...PathReqOption) ([]snet.Path, error) {
+// It asks for the corresponding path segments from the endhost API endpoint and combines them
+// into end to end paths. The maximum number of paths returned can be configured via the
+// WithNumberOfPaths options. Additionally, the VerifyPathSegments option can be used to filter
+// out all path segments that fail verification.
+func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts ...PathReqOption) (
+	[]snet.Path, error) {
+
 	interfacesToString := func(elems []snet.PathInterface) string {
 		parts := make([]string, len(elems))
 		for i, e := range elems {
@@ -195,7 +200,9 @@ func (s *Paginator) HasNext() bool {
 	return s.hasNext
 }
 
-func (s *Paginator) NextPage(ctx context.Context) ([]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
+func (s *Paginator) NextPage(ctx context.Context) (
+	[]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
+
 	client := endhostconnect.NewPathServiceClient(s.httpClient, s.url)
 	res, err := client.ListSegments(ctx, &connect.Request[endhost.ListSegmentsRequest]{
 		Msg: &endhost.ListSegmentsRequest{

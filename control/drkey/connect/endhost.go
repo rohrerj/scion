@@ -18,6 +18,7 @@ import (
 	"context"
 
 	"connectrpc.com/connect"
+
 	"github.com/scionproto/scion/control/drkey/grpc"
 	"github.com/scionproto/scion/pkg/proto/control_plane"
 	"github.com/scionproto/scion/pkg/proto/endhost"
@@ -27,7 +28,10 @@ type EndhostDRKeyServer struct {
 	*grpc.Server
 }
 
-func (e EndhostDRKeyServer) DRKeyASHost(ctx context.Context, req *connect.Request[endhost.DRKeyASHostRequest]) (*connect.Response[endhost.DRKeyASHostResponse], error) {
+func (e EndhostDRKeyServer) DRKeyASHost(ctx context.Context,
+	req *connect.Request[endhost.DRKeyASHostRequest]) (
+	*connect.Response[endhost.DRKeyASHostResponse], error) {
+
 	rep, err := e.Server.DRKeyASHost(ctx, &control_plane.DRKeyASHostRequest{
 		ValTime:    req.Msg.ValTime,
 		ProtocolId: req.Msg.ProtocolId,
@@ -45,7 +49,10 @@ func (e EndhostDRKeyServer) DRKeyASHost(ctx context.Context, req *connect.Reques
 	}), nil
 }
 
-func (e EndhostDRKeyServer) DRKeyHostAS(ctx context.Context, req *connect.Request[endhost.DRKeyHostASRequest]) (*connect.Response[endhost.DRKeyHostASResponse], error) {
+func (e EndhostDRKeyServer) DRKeyHostAS(ctx context.Context,
+	req *connect.Request[endhost.DRKeyHostASRequest]) (
+	*connect.Response[endhost.DRKeyHostASResponse], error) {
+
 	rep, err := e.Server.DRKeyHostAS(ctx, &control_plane.DRKeyHostASRequest{
 		ValTime:    req.Msg.ValTime,
 		ProtocolId: req.Msg.ProtocolId,
@@ -63,7 +70,10 @@ func (e EndhostDRKeyServer) DRKeyHostAS(ctx context.Context, req *connect.Reques
 	}), nil
 }
 
-func (e EndhostDRKeyServer) DRKeyHostHost(ctx context.Context, req *connect.Request[endhost.DRKeyHostHostRequest]) (*connect.Response[endhost.DRKeyHostHostResponse], error) {
+func (e EndhostDRKeyServer) DRKeyHostHost(ctx context.Context,
+	req *connect.Request[endhost.DRKeyHostHostRequest]) (
+	*connect.Response[endhost.DRKeyHostHostResponse], error) {
+
 	rep, err := e.Server.DRKeyHostHost(ctx, &control_plane.DRKeyHostHostRequest{
 		ValTime:    req.Msg.ValTime,
 		ProtocolId: req.Msg.ProtocolId,

@@ -355,7 +355,8 @@ class TopoGenerator(object):
             if not self.args.docker:
                 port = self.args.port_gen.register(elem_id+"_endhost")
             d = {
-                'url': "https://[%s]:%d" % (ip, port) if ':' in ip else "https://%s:%d" % (ip, port),
+                'url': "https://[%s]:%d" % (ip, port) if ':' in ip else
+                "https://%s:%d" % (ip, port),
             }
             self.topo_dicts[topo_id]['endhost_api'][elem_id] = d
 
