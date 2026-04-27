@@ -28,6 +28,7 @@ import (
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/private/storage"
+	db "github.com/scionproto/scion/private/storage/trust/memory"
 	"github.com/scionproto/scion/private/trust"
 )
 
@@ -86,11 +87,8 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOptions) (*Con
 	if u.Scheme == "http" {
 		options.insecure = true
 	}
-	trustDB, err := storage.NewInMemoryTrustStorage()
-	if err != nil {
-		return nil, err
-	}
-	c.trustDB = trustDB
+
+	c.trustDB = db.NewTrustMemoryDB()
 	var dialContext func(ctx context.Context, network string, address string) (net.Conn, error)
 	if options.localIP != "" {
 		dialer := &net.Dialer{

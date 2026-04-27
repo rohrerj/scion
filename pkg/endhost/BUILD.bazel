@@ -29,6 +29,7 @@ go_library(
         "//pkg/snet/path:go_default_library",
         "//private/path/combinator:go_default_library",
         "//private/storage:go_default_library",
+        "//private/storage/trust/memory:go_default_library",
         "//private/trust:go_default_library",
         "@com_connectrpc_connect//:go_default_library",
         "@com_github_patrickmn_go_cache//:go_default_library",
