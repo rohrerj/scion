@@ -112,6 +112,8 @@ pkg_tar(
         "//daemon/cmd/daemon",
         "//dispatcher/cmd/dispatcher",
         "//gateway/cmd/gateway",
+        "//marketplace/cmd/marketplace",
+        "//marketplace_client",
         "//router/cmd/router",
         "//scion-pki/cmd/scion-pki",
         "//scion/cmd/scion",

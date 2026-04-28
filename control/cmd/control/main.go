@@ -52,6 +52,7 @@ import (
 	drkeygrpc "github.com/scionproto/scion/control/drkey/grpc"
 	drkeyhappy "github.com/scionproto/scion/control/drkey/happy"
 	"github.com/scionproto/scion/control/ifstate"
+	"github.com/scionproto/scion/control/marketplace"
 	api "github.com/scionproto/scion/control/mgmtapi"
 	"github.com/scionproto/scion/control/onehop"
 	"github.com/scionproto/scion/control/segreg"
@@ -77,6 +78,7 @@ import (
 	cpconnect "github.com/scionproto/scion/pkg/proto/control_plane/v1/control_planeconnect"
 	dpb "github.com/scionproto/scion/pkg/proto/discovery"
 	dconnect "github.com/scionproto/scion/pkg/proto/discovery/v1/discoveryconnect"
+	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	discoveryext "github.com/scionproto/scion/pkg/segment/extensions/discovery"
@@ -1073,6 +1075,46 @@ func realMain(ctx context.Context) error {
 		defer log.HandlePanic()
 		<-errCtx.Done()
 		return cleanup.Do()
+	})
+
+	g.Go(func() error {
+		defer log.HandlePanic()
+
+		redemptionClient := marketplace.RedemptionClient{
+			MarketplaceUrl: "https://localhost:8888",
+			IA:             topo.IA(),
+			Addr:           topo.ControlServiceAddress(globalCfg.General.ID),
+		}
+		redemptionClient.Init()
+		return nil
+	})
+	g.Go(func() error {
+		defer log.HandlePanic()
+		assetPublisher := marketplace.PublishAssetsClient{
+			MarketplaceUrl: "https://localhost:8888",
+			IA:             topo.IA(),
+			Addr:           topo.ControlServiceAddress(globalCfg.General.ID),
+		}
+		time.Sleep(5 * time.Second)
+		ingress := uint32(1)
+		egress := uint32(2)
+		_, err := assetPublisher.Publish(ctx, &hummingbird.PublishAssetRequest{
+			Bandwidth:       100,
+			BandwidthMin:    10,
+			StartAt:         1000000,
+			StopsAt:         2000000,
+			Price:           100,
+			TimeGranularity: 1,
+			TimeMinDuration: 1,
+			BwGranularity:   1,
+			IfIdIngress:     &ingress,
+			IfIdEgress:      &egress,
+		})
+		if err != nil {
+			log.Error("error publishing asset", "err", err)
+			return err
+		}
+		return nil
 	})
 
 	return g.Wait()
