@@ -33,7 +33,12 @@ type RedemptionServerPeer struct {
 }
 
 func (c *RedemptionServerPeer) SendAndReceive(req *hummingbird.RedeemAssetFromASRequest) (*hummingbird.RedeemAssetFromASResponse, error) {
-	c.sendCh <- req
+	select {
+	case c.sendCh <- req:
+	default:
+		return nil, serrors.New("could not insert into queue")
+	}
+
 	fmt.Println("inserted into send channel")
 	select {
 	case resp := <-c.recvCh:
@@ -55,6 +60,7 @@ func (s *Server) RedeemAsset(ctx context.Context, stream *connect.BidiStream[hum
 		fmt.Println("invalid addr")
 		return serrors.New("invalid addr")
 	}
+	stream.Receive()
 	clientID := addr.IP.String()
 	client, found := s.clients[clientID]
 	if !found {
@@ -64,28 +70,25 @@ func (s *Server) RedeemAsset(ctx context.Context, stream *connect.BidiStream[hum
 
 	fmt.Println("Client connected:", clientID)
 
-	go func() {
-		for {
-			fmt.Println("waiting for send channel")
-			req := <-client.sendCh
-			fmt.Println("got something on send channel")
-			if req == nil {
-				return
-			}
-			fmt.Println("send redemption request")
-			if err := stream.Send(req); err != nil {
-				log.Println("Send error:", err)
-				return
-			}
-			msg, err := stream.Receive()
-			if err != nil {
-				fmt.Println("Receive error:", err)
-				client.recvCh <- nil
-				return
-			}
-			fmt.Println("received redemption response")
-			client.recvCh <- msg
+	for {
+		fmt.Println("waiting for send channel")
+		req := <-client.sendCh
+		fmt.Println("got something on send channel", clientID)
+		if req == nil {
+			return nil
 		}
-	}()
-	return nil
+		fmt.Println("send redemption request")
+		if err := stream.Send(req); err != nil {
+			log.Println("Send error:", err)
+			return err
+		}
+		msg, err := stream.Receive()
+		if err != nil {
+			fmt.Println("Receive error:", err)
+			client.recvCh <- nil
+			return err
+		}
+		fmt.Println("received redemption response")
+		client.recvCh <- msg
+	}
 }

@@ -1114,6 +1114,22 @@ func realMain(ctx context.Context) error {
 			log.Error("error publishing asset", "err", err)
 			return err
 		}
+		_, err = assetPublisher.Publish(ctx, &hummingbird.PublishAssetRequest{
+			Bandwidth:       50,
+			BandwidthMin:    10,
+			StartAt:         1000000,
+			StopsAt:         2000000,
+			Price:           50,
+			TimeGranularity: 1,
+			TimeMinDuration: 1,
+			BwGranularity:   1,
+			IfIdIngress:     &ingress,
+			IfIdEgress:      &egress,
+		})
+		if err != nil {
+			log.Error("error publishing asset", "err", err)
+			return err
+		}
 		return nil
 	})
 

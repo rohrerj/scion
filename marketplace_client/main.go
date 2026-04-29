@@ -9,6 +9,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt"
+	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 )
@@ -60,17 +61,19 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println(infoRep.Msg.String())
+	fmt.Println("info", infoRep.Msg.String())
+	targetIA := uint64(addr.MustParseIA("1-ff00:0:110"))
 	searchAssetRep, err := client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
 		Msg: &hummingbird.SearchAssetsRequest{
 			Owned: false,
+			Ia:    &targetIA,
 		},
 	})
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println(searchAssetRep.Msg.String())
+	fmt.Println("searched assets", searchAssetRep.Msg.String())
 	if len(searchAssetRep.Msg.Assets) == 0 {
 		fmt.Println("no assets found")
 		return
@@ -88,11 +91,12 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println(boughtAssets.Msg.String())
+	fmt.Println("bought assets:", boughtAssets.Msg.String())
 	if len(boughtAssets.Msg.Assets) == 0 {
 		fmt.Println("no assets bought")
 		return
 	}
+
 	redeemedAssets, err := client.RedeemAsset(ctx, &connect.Request[hummingbird.RedeemAssetRequest]{
 		Msg: &hummingbird.RedeemAssetRequest{
 			IngressAssetId: boughtAssets.Msg.Assets[0].AssetId,
@@ -102,5 +106,5 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println(redeemedAssets.Msg.String())
+	fmt.Println("redeemed assets:", redeemedAssets.Msg.String())
 }

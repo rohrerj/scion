@@ -49,6 +49,7 @@ func NewService() *Service {
 	return &Service{
 		redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
 		assets:                make(map[uint64]*Asset),
+		currentAssetID:        1,
 	}
 }
 
@@ -86,7 +87,7 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 	return &connect.Response[hummingbird.MarketplaceInfoResponse]{
 		Msg: &hummingbird.MarketplaceInfoResponse{
 			ApiMajorVersion: 1,
-			ApiMinorVersion: 0,
+			ApiMinorVersion: 2,
 			Currency:        "CHF",
 		},
 	}, nil
@@ -120,9 +121,13 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 
 func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingbird.RedeemAssetRequest]) (*connect.Response[hummingbird.RedeemAssetResponse], error) {
 	fmt.Println("RedeemAsset")
+	user := ctx.Value("user").(string)
 	ingressAsset, found := s.assets[req.Msg.IngressAssetId]
 	if !found {
 		return nil, serrors.New("asset not found")
+	}
+	if ingressAsset.Owner != user {
+		return nil, serrors.New("user is not owner of the asset")
 	}
 	peer1, found := s.redemptionServerPeers[ingressAsset.IA]
 	if !found {
@@ -149,20 +154,32 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 	repAssets := make([]*hummingbird.Asset, 0, len(s.assets))
 	if req.Msg.Owned {
 		for id, asset := range s.assets {
+			if req.Msg.Ia != nil && *req.Msg.Ia != uint64(asset.IA) {
+				continue
+			}
 			if asset.Owner == user {
 				repAssets = append(repAssets, &hummingbird.Asset{
-					AssetId: id,
-					Ia:      uint64(asset.IA),
+					AssetId:  id,
+					Ia:       uint64(asset.IA),
+					Bw:       asset.Bandwidth,
+					StartsAt: asset.StartAt,
+					StopsAt:  asset.StopsAt,
 					// other fields omitted
 				})
 			}
 		}
 	} else {
 		for id, asset := range s.assets {
+			if req.Msg.Ia != nil && *req.Msg.Ia != uint64(asset.IA) {
+				continue
+			}
 			if asset.Owner == "" {
 				repAssets = append(repAssets, &hummingbird.Asset{
-					AssetId: id,
-					Ia:      uint64(asset.IA),
+					AssetId:  id,
+					Ia:       uint64(asset.IA),
+					Bw:       asset.Bandwidth,
+					StartsAt: asset.StartAt,
+					StopsAt:  asset.StopsAt,
 					// other fields omitted
 				})
 			}
