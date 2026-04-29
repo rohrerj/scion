@@ -31,78 +31,165 @@ var methodScopes = map[string]string{
 	"/proto.hummingbird.v1.MarketplaceService/BuyAssets":         "BuyAssets",
 	"/proto.hummingbird.v1.MarketplaceService/FetchReservations": "FetchReservations",
 	"/proto.hummingbird.v1.MarketplaceService/RedeemAsset":       "RedeemAsset",
+	"/proto.hummingbird.v1.RedemptionService/RedeemAsset":        "RedeemAssetAS",
 }
 
-func AuthInterceptor() connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(
-			ctx context.Context,
-			req connect.AnyRequest,
-		) (connect.AnyResponse, error) {
-			method := req.Spec().Procedure
-			requiredScope, found := methodScopes[method]
-			if !found {
-				//no rules apply
-				return next(ctx, req)
-			}
-			authHeader := req.Header().Get("Authorization")
+type AuthInterceptor struct{}
 
-			if !strings.HasPrefix(authHeader, "Bearer ") {
-				return nil, connect.NewError(
-					connect.CodeUnauthenticated,
-					fmt.Errorf("missing bearer token"),
-				)
-			}
+func NewAuthInterceptor() *AuthInterceptor {
+	return &AuthInterceptor{}
+}
 
-			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+func (a *AuthInterceptor) WrapStreamingClient(
+	next connect.StreamingClientFunc,
+) connect.StreamingClientFunc {
+	return next
+}
 
-			// Parse + validate JWT
-			token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-				if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, fmt.Errorf("unexpected signing method")
-				}
-				return jwtSecret, nil
-			})
-			if err != nil || !token.Valid {
-				return nil, connect.NewError(
-					connect.CodeUnauthenticated,
-					fmt.Errorf("invalid token"),
-				)
-			}
+func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(
+		ctx context.Context,
+		req connect.AnyRequest,
+	) (connect.AnyResponse, error) {
 
-			claims, ok := token.Claims.(jwt.MapClaims)
-			if !ok {
-				return nil, connect.NewError(
-					connect.CodeUnauthenticated,
-					fmt.Errorf("invalid claims"),
-				)
-			}
-
-			user, ok := claims["sub"].(string)
-			if !ok || user == "" {
-				return nil, connect.NewError(
-					connect.CodeUnauthenticated,
-					fmt.Errorf("missing subject"),
-				)
-			}
-			scopeStr, ok := claims["scope"].(string)
-			if !ok || scopeStr == "" {
-				return nil, connect.NewError(
-					connect.CodePermissionDenied,
-					fmt.Errorf("missing scopes"),
-				)
-			}
-			scopes := parseScopes(scopeStr)
-
-			if found && !scopes[requiredScope] {
-				return nil, connect.NewError(connect.CodePermissionDenied,
-					fmt.Errorf("missing scope: %s", requiredScope))
-			}
-
-			ctx = context.WithValue(ctx, "user", user)
-
+		method := req.Spec().Procedure
+		fmt.Printf("Auth Interceptor for %s\n", method)
+		requiredScope, found := methodScopes[method]
+		if !found {
+			//no rules apply
+			fmt.Println("no rules apply for", method)
 			return next(ctx, req)
 		}
+		authHeader := req.Header().Get("Authorization")
+
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			return nil, connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("missing bearer token"),
+			)
+		}
+
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+
+		// Parse + validate JWT
+		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method")
+			}
+			return jwtSecret, nil
+		})
+		if err != nil || !token.Valid {
+			return nil, connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("invalid token"),
+			)
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			return nil, connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("invalid claims"),
+			)
+		}
+
+		user, ok := claims["sub"].(string)
+		if !ok || user == "" {
+			return nil, connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("missing subject"),
+			)
+		}
+		scopeStr, ok := claims["scope"].(string)
+		if !ok || scopeStr == "" {
+			return nil, connect.NewError(
+				connect.CodePermissionDenied,
+				fmt.Errorf("missing scopes"),
+			)
+		}
+		scopes := parseScopes(scopeStr)
+
+		if found && !scopes[requiredScope] {
+			return nil, connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("missing scope: %s", requiredScope))
+		}
+
+		ctx = context.WithValue(ctx, "user", user)
+
+		return next(ctx, req)
+	}
+}
+
+func (a *AuthInterceptor) WrapStreamingHandler(
+	next connect.StreamingHandlerFunc,
+) connect.StreamingHandlerFunc {
+
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		method := conn.Spec().Procedure
+		fmt.Printf("Auth Interceptor for %s\n", method)
+		requiredScope, found := methodScopes[method]
+		if !found {
+			//no rules apply
+			fmt.Println("no rules apply for", method)
+			return next(ctx, conn)
+		}
+		authHeader := conn.RequestHeader().Get("Authorization")
+
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			return connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("missing bearer token"),
+			)
+		}
+
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+
+		// Parse + validate JWT
+		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method")
+			}
+			return jwtSecret, nil
+		})
+		if err != nil || !token.Valid {
+			return connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("invalid token"),
+			)
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			return connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("invalid claims"),
+			)
+		}
+
+		user, ok := claims["sub"].(string)
+		if !ok || user == "" {
+			return connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("missing subject"),
+			)
+		}
+		scopeStr, ok := claims["scope"].(string)
+		if !ok || scopeStr == "" {
+			return connect.NewError(
+				connect.CodePermissionDenied,
+				fmt.Errorf("missing scopes"),
+			)
+		}
+		scopes := parseScopes(scopeStr)
+
+		if found && !scopes[requiredScope] {
+			return connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("missing scope: %s", requiredScope))
+		}
+
+		ctx = context.WithValue(ctx, "user", user)
+
+		return next(ctx, conn)
 	}
 }
 

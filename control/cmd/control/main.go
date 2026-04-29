@@ -1085,7 +1085,10 @@ func realMain(ctx context.Context) error {
 			IA:             topo.IA(),
 			Addr:           topo.ControlServiceAddress(globalCfg.General.ID),
 		}
-		redemptionClient.Init()
+		if err := redemptionClient.Init(); err != nil {
+			log.Error("redemtpion service", "err", err)
+			return err
+		}
 		return nil
 	})
 	g.Go(func() error {

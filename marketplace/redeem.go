@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
 	"time"
 
 	"connectrpc.com/connect"
@@ -13,16 +12,16 @@ import (
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 )
 
-func (s *Server) NewRedemptionServerPeer(ia addr.IA, addr string) *RedemptionServerPeer {
+func (s *Server) NewRedemptionServerPeer(ia addr.IA) *RedemptionServerPeer {
 	if s.clients == nil {
-		s.clients = make(map[string]*RedemptionServerPeer)
+		s.clients = make(map[addr.IA]*RedemptionServerPeer)
 	}
 	peer := &RedemptionServerPeer{
 		ia:     ia,
 		sendCh: make(chan *hummingbird.RedeemAssetFromASRequest),
 		recvCh: make(chan *hummingbird.RedeemAssetFromASResponse),
 	}
-	s.clients[addr] = peer
+	s.clients[ia] = peer
 	return peer
 }
 
@@ -50,18 +49,17 @@ func (c *RedemptionServerPeer) SendAndReceive(req *hummingbird.RedeemAssetFromAS
 }
 
 type Server struct {
-	clients map[string]*RedemptionServerPeer
+	clients map[addr.IA]*RedemptionServerPeer
 }
 
 func (s *Server) RedeemAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
 	fmt.Println("RedeemAsset (AS)")
-	addr, err := net.ResolveUDPAddr("udp", stream.Peer().Addr)
+	user := ctx.Value("user").(string)
+	clientID, err := addr.ParseIA(user)
 	if err != nil {
-		fmt.Println("invalid addr")
-		return serrors.New("invalid addr")
+		return err
 	}
 	stream.Receive()
-	clientID := addr.IP.String()
 	client, found := s.clients[clientID]
 	if !found {
 		fmt.Println("client not registered", "clientID", clientID)

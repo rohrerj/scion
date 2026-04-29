@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
@@ -21,18 +22,13 @@ type RedemptionClient struct {
 	Addr           *net.UDPAddr
 }
 
-func (c *RedemptionClient) Init() {
-	dialer := &net.Dialer{
-		Timeout:   5 * time.Second,
-		KeepAlive: 5 * time.Second,
-		LocalAddr: &net.TCPAddr{
-			IP:   c.Addr.IP,
-			Zone: c.Addr.Zone,
-		},
+func (c *RedemptionClient) Init() error {
+	jwtToken, err := createToken(c.IA)
+	if err != nil {
+		return err
 	}
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		DialContext:     dialer.DialContext,
 	}
 	http2.ConfigureTransport(tr)
 
@@ -40,6 +36,7 @@ func (c *RedemptionClient) Init() {
 	client := hummingbirdconnect.NewRedemptionServiceClient(
 		httpclient,
 		c.MarketplaceUrl,
+		connect.WithInterceptors(NewAuthInterceptor(jwtToken)),
 	)
 
 	ctx := context.Background()
@@ -47,13 +44,13 @@ func (c *RedemptionClient) Init() {
 	stream := client.RedeemAsset(ctx)
 
 	fmt.Println("Connected to marketplace")
-	err := stream.Send(&hummingbird.RedeemAssetFromASResponse{})
+	err = stream.Send(&hummingbird.RedeemAssetFromASResponse{})
 	fmt.Println("send empty", err)
 	for {
 		msg, err := stream.Receive()
 		if err != nil {
 			log.Println("Stream error:", err)
-			return
+			return err
 		}
 		fmt.Println("received redemption request")
 
@@ -67,7 +64,7 @@ func (c *RedemptionClient) Init() {
 
 		if err := stream.Send(rep); err != nil {
 			log.Println("Send error:", err)
-			return
+			return err
 		}
 	}
 }

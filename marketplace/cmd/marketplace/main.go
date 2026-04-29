@@ -47,14 +47,16 @@ func realMain(ctx context.Context) error {
 
 	service := marketplace.NewService()
 	redemptionServer := &marketplace.Server{}
-	service.RegisterRedemptionServerPeer(ctx, redemptionServer.NewRedemptionServerPeer(addr.MustParseIA("1-ff00:0:110"), "127.0.0.11"))
-	service.RegisterRedemptionServerPeer(ctx, redemptionServer.NewRedemptionServerPeer(addr.MustParseIA("1-ff00:0:111"), "127.0.0.18"))
-	//service.RegisterRedemptionServerPeer(ctx, redemptionServer.NewRedemptionServerPeer(addr.MustParseIA("1-ff00:0:112"), "3"))
+	service.RegisterRedemptionServerPeer(ctx, redemptionServer.NewRedemptionServerPeer(addr.MustParseIA("1-ff00:0:110")))
+	service.RegisterRedemptionServerPeer(ctx, redemptionServer.NewRedemptionServerPeer(addr.MustParseIA("1-ff00:0:111")))
+	service.RegisterRedemptionServerPeer(ctx, redemptionServer.NewRedemptionServerPeer(addr.MustParseIA("1-ff00:0:112")))
 
 	mux := http.NewServeMux()
-	path, handler := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.AuthInterceptor()))
+	path, handler := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor()))
+	path2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(redemptionServer, connect.WithInterceptors(marketplace.NewAuthInterceptor()))
 
 	mux.Handle(path, handler)
+	mux.Handle(path2, handler2)
 
 	server := &http.Server{
 		Addr:    ":8888",
@@ -63,8 +65,6 @@ func realMain(ctx context.Context) error {
 			Certificates: []tls.Certificate{cert},
 		},
 	}
-	path2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(redemptionServer, connect.WithInterceptors(marketplace.AuthInterceptor()))
-	mux.Handle(path2, handler2)
 
 	log.Printf("HTTPS server running on %s\n", ":8888")
 
