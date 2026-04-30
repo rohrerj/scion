@@ -1084,6 +1084,7 @@ func realMain(ctx context.Context) error {
 			MarketplaceUrl: "https://localhost:8888",
 			IA:             topo.IA(),
 			Addr:           topo.ControlServiceAddress(globalCfg.General.ID),
+			Token:          globalCfg.Marketplace.Token,
 		}
 		if err := redemptionClient.Init(); err != nil {
 			log.Error("redemtpion service", "err", err)
@@ -1097,6 +1098,7 @@ func realMain(ctx context.Context) error {
 			MarketplaceUrl: "https://localhost:8888",
 			IA:             topo.IA(),
 			Addr:           topo.ControlServiceAddress(globalCfg.General.ID),
+			Token:          globalCfg.Marketplace.Token,
 		}
 		time.Sleep(5 * time.Second)
 		ingress := uint32(1)

@@ -20,13 +20,10 @@ type RedemptionClient struct {
 	MarketplaceUrl string
 	IA             addr.IA
 	Addr           *net.UDPAddr
+	Token          string
 }
 
 func (c *RedemptionClient) Init() error {
-	jwtToken, err := createToken(c.IA)
-	if err != nil {
-		return err
-	}
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
@@ -36,7 +33,7 @@ func (c *RedemptionClient) Init() error {
 	client := hummingbirdconnect.NewRedemptionServiceClient(
 		httpclient,
 		c.MarketplaceUrl,
-		connect.WithInterceptors(NewAuthInterceptor(jwtToken)),
+		connect.WithInterceptors(NewAuthInterceptor(c.Token)),
 	)
 
 	ctx := context.Background()
@@ -44,7 +41,7 @@ func (c *RedemptionClient) Init() error {
 	stream := client.RedeemAsset(ctx)
 
 	fmt.Println("Connected to marketplace")
-	err = stream.Send(&hummingbird.RedeemAssetFromASResponse{})
+	err := stream.Send(&hummingbird.RedeemAssetFromASResponse{})
 	fmt.Println("send empty", err)
 	for {
 		msg, err := stream.Receive()

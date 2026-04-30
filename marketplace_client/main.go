@@ -5,35 +5,17 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"time"
+	"os"
 
 	"connectrpc.com/connect"
-	"github.com/golang-jwt/jwt"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 )
 
-var jwtSecret = []byte("test-key")
-
-func createToken() (string, error) {
-	claims := jwt.MapClaims{
-		"sub":   "alice",
-		"scope": "SearchAssets,BuyAssets,FetchReservations,RedeemAsset",
-		"exp":   time.Now().Add(time.Hour).Unix(),
-		"iat":   time.Now().Unix(),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
-}
-
-var jwtToken string
-
-func authInterceptor() connect.UnaryInterceptorFunc {
+func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-
 			req.Header().Set("Authorization", "Bearer "+jwtToken)
 			return next(ctx, req)
 		}
@@ -41,12 +23,12 @@ func authInterceptor() connect.UnaryInterceptorFunc {
 }
 
 func main() {
-	token, err := createToken()
-	if err != nil {
-		fmt.Println(err)
+	args := os.Args
+	if len(args) != 2 {
+		fmt.Println("Provide JWT token as command line argument. Requested at: https://localhost:8888")
 		return
 	}
-	jwtToken = token
+	jwtToken := args[1]
 	marketUrl := "https://localhost:8888"
 	client := hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
 		Transport: &http.Transport{
@@ -54,7 +36,7 @@ func main() {
 				InsecureSkipVerify: true,
 			},
 		},
-	}, marketUrl, connect.WithInterceptors(authInterceptor()))
+	}, marketUrl, connect.WithInterceptors(authInterceptor(jwtToken)))
 	ctx := context.Background()
 	infoRep, err := client.Info(ctx, &connect.Request[hummingbird.MarketplaceInfoRequest]{})
 	if err != nil {

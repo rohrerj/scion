@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scionproto/scion/control/marketplace"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/private/util"
@@ -65,6 +66,7 @@ type Config struct {
 	CA          CA                 `toml:"ca,omitempty"`
 	TrustEngine trustengine.Config `toml:"trustengine,omitempty"`
 	DRKey       DRKeyConfig        `toml:"drkey,omitempty"`
+	Marketplace marketplace.Config `toml:"marketplace,omitempty"`
 }
 
 // InitDefaults initializes the default values for all parts of the config.
@@ -85,6 +87,7 @@ func (cfg *Config) InitDefaults() {
 		&cfg.CA,
 		&cfg.TrustEngine,
 		&cfg.DRKey,
+		&cfg.Marketplace,
 	)
 }
 
@@ -105,6 +108,7 @@ func (cfg *Config) Validate() error {
 		&cfg.CA,
 		&cfg.TrustEngine,
 		&cfg.DRKey,
+		&cfg.Marketplace,
 	)
 }
 
@@ -144,6 +148,7 @@ func (cfg *Config) Sample(dst io.Writer, path config.Path, _ config.CtxMap) {
 		&cfg.CA,
 		&cfg.TrustEngine,
 		&cfg.DRKey,
+		&cfg.Marketplace,
 	)
 }
 

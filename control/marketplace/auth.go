@@ -2,26 +2,9 @@ package marketplace
 
 import (
 	"context"
-	"time"
 
 	"connectrpc.com/connect"
-	"github.com/golang-jwt/jwt"
-	"github.com/scionproto/scion/pkg/addr"
 )
-
-var jwtSecret = []byte("test-key")
-
-func createToken(ia addr.IA) (string, error) {
-	claims := jwt.MapClaims{
-		"sub":   ia.String(),
-		"scope": "PublishAsset,RedeemAssetAS",
-		"exp":   time.Now().Add(time.Hour).Unix(),
-		"iat":   time.Now().Unix(),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
-}
 
 type AuthInterceptor struct {
 	token string

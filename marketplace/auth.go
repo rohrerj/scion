@@ -23,21 +23,23 @@ import (
 	"github.com/golang-jwt/jwt"
 )
 
-var jwtSecret = []byte("test-key")
-
 var methodScopes = map[string]string{
-	"/proto.hummingbird.v1.MarketplaceService/PublishAsset":      "PublishAsset",
-	"/proto.hummingbird.v1.MarketplaceService/SearchAssets":      "SearchAssets",
-	"/proto.hummingbird.v1.MarketplaceService/BuyAssets":         "BuyAssets",
-	"/proto.hummingbird.v1.MarketplaceService/FetchReservations": "FetchReservations",
-	"/proto.hummingbird.v1.MarketplaceService/RedeemAsset":       "RedeemAsset",
-	"/proto.hummingbird.v1.RedemptionService/RedeemAsset":        "RedeemAssetAS",
+	"/proto.hummingbird.v1.MarketplaceService/PublishAsset":      "AS",
+	"/proto.hummingbird.v1.MarketplaceService/SearchAssets":      "User",
+	"/proto.hummingbird.v1.MarketplaceService/BuyAssets":         "User",
+	"/proto.hummingbird.v1.MarketplaceService/FetchReservations": "User",
+	"/proto.hummingbird.v1.MarketplaceService/RedeemAsset":       "User",
+	"/proto.hummingbird.v1.RedemptionService/RedeemAsset":        "AS",
 }
 
-type AuthInterceptor struct{}
+type AuthInterceptor struct {
+	Verifier *Verifier
+}
 
-func NewAuthInterceptor() *AuthInterceptor {
-	return &AuthInterceptor{}
+func NewAuthInterceptor(v *Verifier) *AuthInterceptor {
+	return &AuthInterceptor{
+		Verifier: v,
+	}
 }
 
 func (a *AuthInterceptor) WrapStreamingClient(
@@ -71,13 +73,7 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
-		// Parse + validate JWT
-		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method")
-			}
-			return jwtSecret, nil
-		})
+		token, err := a.Verifier.VerifyToken(tokenStr)
 		if err != nil || !token.Valid {
 			return nil, connect.NewError(
 				connect.CodeUnauthenticated,
@@ -144,13 +140,7 @@ func (a *AuthInterceptor) WrapStreamingHandler(
 
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
-		// Parse + validate JWT
-		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method")
-			}
-			return jwtSecret, nil
-		})
+		token, err := a.Verifier.VerifyToken(tokenStr)
 		if err != nil || !token.Valid {
 			return connect.NewError(
 				connect.CodeUnauthenticated,
