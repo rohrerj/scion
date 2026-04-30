@@ -1077,14 +1077,18 @@ func realMain(ctx context.Context) error {
 		return cleanup.Do()
 	})
 
+	getClientCert := cs.NewTLSCertificateLoader(
+		topo.IA(), x509.ExtKeyUsageClientAuth, trustDB, globalCfg.General.ConfigDir,
+	).GetClientCertificate
+
 	g.Go(func() error {
 		defer log.HandlePanic()
 
 		redemptionClient := marketplace.RedemptionClient{
 			MarketplaceUrl: "https://localhost:8888",
 			IA:             topo.IA(),
-			Addr:           topo.ControlServiceAddress(globalCfg.General.ID),
 			Token:          globalCfg.Marketplace.Token,
+			GetClientCert:  getClientCert,
 		}
 		if err := redemptionClient.Init(); err != nil {
 			log.Error("redemtpion service", "err", err)
@@ -1097,8 +1101,8 @@ func realMain(ctx context.Context) error {
 		assetPublisher := marketplace.PublishAssetsClient{
 			MarketplaceUrl: "https://localhost:8888",
 			IA:             topo.IA(),
-			Addr:           topo.ControlServiceAddress(globalCfg.General.ID),
 			Token:          globalCfg.Marketplace.Token,
+			GetClientCert:  getClientCert,
 		}
 		time.Sleep(5 * time.Second)
 		ingress := uint32(1)

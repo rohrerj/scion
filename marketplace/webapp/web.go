@@ -3,6 +3,8 @@ package webapp
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"sync"
@@ -10,12 +12,12 @@ import (
 
 	"github.com/golang-jwt/jwt"
 	"github.com/scionproto/scion/marketplace"
-	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/scrypto/cppki"
 )
 
 var templates = template.Must(template.ParseGlob("marketplace/templates/*.html"))
 
-func Init(signer *marketplace.Signer, mux *http.ServeMux) {
+func Init(signer *marketplace.Signer, mux *http.ServeMux, iaMux *http.ServeMux) {
 	h := &Handler{
 		users:    make(map[string]User),
 		sessions: make(map[string]string),
@@ -24,6 +26,8 @@ func Init(signer *marketplace.Signer, mux *http.ServeMux) {
 	mux.HandleFunc("/", h.tokenHandler)
 	mux.HandleFunc("/login", h.loginHandler)
 	mux.HandleFunc("/register", h.registerHandler)
+
+	iaMux.HandleFunc("/ia-token", h.tokenIAHandler)
 }
 
 type User struct {
@@ -49,6 +53,35 @@ func (h *Handler) getSessionUser(r *http.Request) (string, bool) {
 
 	username, ok := h.sessions[cookie.Value]
 	return username, ok
+}
+
+func (h *Handler) tokenIAHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if len(r.TLS.PeerCertificates) == 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	ia, err := cppki.ExtractIA(r.TLS.PeerCertificates[0].Subject)
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	name := ia.String()
+	fmt.Println(name)
+	token, err := h.createToken(name, false)
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	response := map[string]string{
+		"user":  name,
+		"token": token,
+	}
+
+	json.NewEncoder(w).Encode(response)
 }
 
 func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
@@ -144,16 +177,13 @@ func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 		templates.ExecuteTemplate(w, "token.html", map[string]any{})
 		return
 	}
-	_, err := addr.ParseIA(username)
-	isUser := err != nil
-	token, err := h.createToken(username, isUser)
+	token, err := h.createToken(username, true)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 	}
 
 	templates.ExecuteTemplate(w, "token.html", map[string]any{
-		"Token":       token,
-		"IsUserToken": isUser,
+		"Token": token,
 	})
 }
 
@@ -170,7 +200,7 @@ func (h *Handler) createToken(sub string, isUser bool) (string, error) {
 		claims = jwt.MapClaims{
 			"sub":   sub,
 			"scope": "AS",
-			"exp":   time.Now().Add(time.Hour).Unix(),
+			"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
 			"iat":   time.Now().Unix(),
 		}
 	}

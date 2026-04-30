@@ -12,7 +12,6 @@
     {{end}}
     {{if .Token}}
     <h4>Your token:</h4>
-    <p>Is User Token: {{.IsUserToken}}</p>
     <p style="color:blue;">{{.Token}}</p>
     {{else}}
     <form method="POST" action="/token">

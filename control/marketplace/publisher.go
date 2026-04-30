@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"net"
 	"net/http"
 
 	"connectrpc.com/connect"
@@ -16,8 +15,8 @@ import (
 type PublishAssetsClient struct {
 	MarketplaceUrl string
 	IA             addr.IA
-	Addr           *net.UDPAddr
 	Token          string
+	GetClientCert  func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
 }
 
 func (p *PublishAssetsClient) Publish(ctx context.Context, req *hummingbird.PublishAssetRequest) (*hummingbird.PublishAssetResponse, error) {
@@ -25,7 +24,8 @@ func (p *PublishAssetsClient) Publish(ctx context.Context, req *hummingbird.Publ
 	client := hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
+				InsecureSkipVerify:   true,
+				GetClientCertificate: p.GetClientCert,
 			},
 		},
 	}, p.MarketplaceUrl, connect.WithInterceptors(NewAuthInterceptor(p.Token)))

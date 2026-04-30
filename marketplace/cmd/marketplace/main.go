@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -35,6 +36,8 @@ import (
 	"github.com/scionproto/scion/marketplace/webapp"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
+	"github.com/scionproto/scion/private/storage"
+	"github.com/scionproto/scion/private/trust"
 )
 
 func main() {
@@ -54,6 +57,15 @@ func realMain(ctx context.Context) error {
 	}
 	jwtSigner := marketplace.NewSigner(signingPrivKey)
 	jwtVerifier := marketplace.NewVerifier(signingPubKey)
+	trustDB, err := storage.NewInMemoryTrustStorage()
+	if err != nil {
+		return err
+	}
+	_, err = trust.LoadTRCs(context.Background(), "gen/trcs", trustDB)
+	if err != nil {
+		return err
+	}
+	trustVerifer := trust.NewTLSCryptoVerifier(trustDB)
 
 	service := marketplace.NewService()
 	redemptionServer := &marketplace.Server{}
@@ -68,7 +80,8 @@ func realMain(ctx context.Context) error {
 	mux.Handle(path, handler)
 	mux.Handle(path2, handler2)
 
-	webapp.Init(jwtSigner, mux)
+	iaUserRegistrationMux := http.NewServeMux()
+	webapp.Init(jwtSigner, mux, iaUserRegistrationMux)
 
 	server := &http.Server{
 		Addr:    ":8888",
@@ -78,9 +91,24 @@ func realMain(ctx context.Context) error {
 		},
 	}
 
-	log.Printf("HTTPS server running on %s\n", ":8888")
-
-	log.Fatal(server.ListenAndServeTLS("", ""))
+	accountServer := &http.Server{
+		Addr:    ":8889",
+		Handler: iaUserRegistrationMux,
+		TLSConfig: &tls.Config{
+			ClientAuth:            tls.RequireAnyClientCert,
+			Certificates:          []tls.Certificate{cert},
+			VerifyPeerCertificate: trustVerifer.VerifyClientCertificate,
+		},
+	}
+	g := sync.WaitGroup{}
+	g.Go(func() {
+		fmt.Println(server.ListenAndServeTLS("", ""))
+	})
+	g.Go(func() {
+		fmt.Println(accountServer.ListenAndServeTLS("", ""))
+	})
+	log.Printf("HTTPS server running on %s and AS user creation on %s\n", ":8888", ":8889")
+	g.Wait()
 	return nil
 }
 

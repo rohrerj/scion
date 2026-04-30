@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"time"
 
@@ -19,13 +18,16 @@ import (
 type RedemptionClient struct {
 	MarketplaceUrl string
 	IA             addr.IA
-	Addr           *net.UDPAddr
 	Token          string
+	GetClientCert  func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
 }
 
 func (c *RedemptionClient) Init() error {
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify:   true,
+			GetClientCertificate: c.GetClientCert,
+		},
 	}
 	http2.ConfigureTransport(tr)
 
