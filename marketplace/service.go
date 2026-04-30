@@ -17,6 +17,7 @@ package marketplace
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/addr"
@@ -43,6 +44,7 @@ type Service struct {
 	redemptionServerPeers map[addr.IA]*RedemptionServerPeer
 	assets                map[uint64]*Asset
 	currentAssetID        uint64
+	mtx                   sync.Mutex
 }
 
 func NewService() *Service {
@@ -58,6 +60,8 @@ func (s *Service) RegisterRedemptionServerPeer(ctx context.Context, peer *Redemp
 }
 
 func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbird.BuyAssetsRequest]) (*connect.Response[hummingbird.BuyAssetsResponse], error) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 	fmt.Println("BuyAssets")
 	user := ctx.Value("user").(string)
 	boughtAssets := make([]*hummingbird.BoughtAsset, 0, 1)
@@ -94,6 +98,8 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 }
 
 func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[hummingbird.PublishAssetRequest]) (*connect.Response[hummingbird.PublishAssetResponse], error) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 	fmt.Println("PublishAsset")
 	user := ctx.Value("user").(string)
 	ia, err := addr.ParseIA(user)
@@ -120,6 +126,8 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 }
 
 func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingbird.RedeemAssetRequest]) (*connect.Response[hummingbird.RedeemAssetResponse], error) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 	fmt.Println("RedeemAsset")
 	user := ctx.Value("user").(string)
 	ingressAsset, found := s.assets[req.Msg.IngressAssetId]
@@ -149,6 +157,8 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 }
 
 func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[hummingbird.SearchAssetsRequest]) (*connect.Response[hummingbird.SearchAssetsResponse], error) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 	fmt.Println("SearchAssets")
 	user := ctx.Value("user").(string)
 	repAssets := make([]*hummingbird.Asset, 0, len(s.assets))
