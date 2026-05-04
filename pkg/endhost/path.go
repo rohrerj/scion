@@ -138,7 +138,8 @@ func (s *PathService) filterVerifiedSegments(ctx context.Context, up []*seg.Path
 		if options.skipSegmentVerificationIfUnimplemented {
 			return up, core, down, nil
 		} else {
-			return up, core, down, serrors.New("requested segment verification but unsupported by local AS")
+			return up, core, down,
+				serrors.New("requested segment verification but unsupported by local AS")
 		}
 	}
 	return verifiedUp, verifiedCore, verifiedDown, nil

@@ -73,12 +73,15 @@ func (m *MemoryDB) Chain(_ context.Context, chainID []byte) ([]*x509.Certificate
 	return []*x509.Certificate{as, ca}, nil
 }
 
-func (m *MemoryDB) Chains(_ context.Context, query trust.ChainQuery) ([][]*x509.Certificate, error) {
+func (m *MemoryDB) Chains(_ context.Context, query trust.ChainQuery) (
+	[][]*x509.Certificate, error) {
+
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 	var res [][]*x509.Certificate
 	for _, chain := range m.chains {
-		if len(query.SubjectKeyID) != 0 && slices.Compare(chain.subjectKeyID, query.SubjectKeyID) != 0 {
+		if len(query.SubjectKeyID) != 0 &&
+			slices.Compare(chain.subjectKeyID, query.SubjectKeyID) != 0 {
 			continue
 		}
 		if !query.Validity.IsZero() {
@@ -165,7 +168,8 @@ func (m *MemoryDB) SignedTRC(_ context.Context, id cppki.TRCID) (cppki.SignedTRC
 		var latest cppki.TRCID
 		for trcid := range m.trcs {
 			if trcid.ISD == id.ISD {
-				if trcid.Base > latestBase || (trcid.Base == latestBase && trcid.Serial > latestSerial) {
+				if trcid.Base > latestBase ||
+					(trcid.Base == latestBase && trcid.Serial > latestSerial) {
 					latestBase = trcid.Base
 					latestSerial = trcid.Serial
 					latest = trcid
@@ -185,11 +189,13 @@ func (m *MemoryDB) SignedTRC(_ context.Context, id cppki.TRCID) (cppki.SignedTRC
 	return trc, nil
 }
 
-func (m *MemoryDB) SignedTRCs(_ context.Context, query storage.TRCsQuery) (cppki.SignedTRCs, error) {
+func (m *MemoryDB) SignedTRCs(_ context.Context, query storage.TRCsQuery) (
+	cppki.SignedTRCs, error) {
+
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 	var res cppki.SignedTRCs
-	appendTrc := func(trc db_trc) error {
+	appendTRC := func(trc db_trc) error {
 		curRes, err := cppki.DecodeSignedTRC(trc.raw)
 		if err != nil {
 			return err
@@ -206,7 +212,8 @@ func (m *MemoryDB) SignedTRCs(_ context.Context, query storage.TRCsQuery) (cppki
 			storedID, found := tmp[trcid.ISD]
 			if !found {
 				tmp[trcid.ISD] = trcid
-			} else if trcid.Base > storedID.Base || (trcid.Base == storedID.Base && trcid.Serial > storedID.Serial) {
+			} else if trcid.Base > storedID.Base ||
+				(trcid.Base == storedID.Base && trcid.Serial > storedID.Serial) {
 				tmp[trcid.ISD] = trcid
 			}
 		}
@@ -215,7 +222,7 @@ func (m *MemoryDB) SignedTRCs(_ context.Context, query storage.TRCsQuery) (cppki
 			if !found {
 				continue
 			}
-			if err := appendTrc(raw); err != nil {
+			if err := appendTRC(raw); err != nil {
 				return nil, err
 			}
 		}
@@ -224,7 +231,7 @@ func (m *MemoryDB) SignedTRCs(_ context.Context, query storage.TRCsQuery) (cppki
 			if len(query.ISD) > 0 && !slices.Contains(query.ISD, trcid.ISD) {
 				continue
 			}
-			if err := appendTrc(trc); err != nil {
+			if err := appendTRC(trc); err != nil {
 				return nil, err
 			}
 		}

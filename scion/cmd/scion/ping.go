@@ -161,9 +161,10 @@ On other errors, ping will exit with code 2.
 				endhostOpts := []endhost.ConnectOption{}
 				if envFlags.ConfigDir() != "" {
 					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")
-					endhostOpts = append(endhostOpts, endhost.WithTrcDir(trcDir))
+					endhostOpts = append(endhostOpts, endhost.WithTRCDir(trcDir))
 				}
-				connector, err := endhost.NewConnector(traceCtx, envFlags.EndhostApi(), endhostOpts...)
+				connector, err := endhost.NewConnector(traceCtx, envFlags.EndhostApi(),
+					endhostOpts...)
 				if err != nil {
 					return serrors.Wrap("init endhost api connector", err)
 				}

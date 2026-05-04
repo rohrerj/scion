@@ -54,7 +54,7 @@ func WithInsecureConnection() ConnectOption {
 }
 
 // Loads all TRCs from the provided folder.
-func WithTrcDir(dir string) ConnectOption {
+func WithTRCDir(dir string) ConnectOption {
 	return func(o *connectOptions) {
 		o.trcDir = dir
 	}
@@ -256,7 +256,9 @@ type Connector struct {
 
 // loadTopology is called from NewConnector and uses the underlay service to determine the
 // available underlays, the local IA and its interfaces and populates a snet.Topology struct.
-func (c *Connector) loadTopology(ctx context.Context, localIA addr.IA, iaSelector func([]addr.IA) addr.IA) (snet.Topology, error) {
+func (c *Connector) loadTopology(ctx context.Context, localIA addr.IA,
+	iaSelector func([]addr.IA) addr.IA) (snet.Topology, error) {
+
 	topo := snet.Topology{}
 	allUnderlays, err := c.UnderlayService.ListUnderlays(ctx, nil)
 	if err != nil {
