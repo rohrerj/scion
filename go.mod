@@ -61,6 +61,13 @@ require (
 )
 
 require (
+	github.com/google/btree v1.1.2 // indirect
+	golang.org/x/time v0.12.0 // indirect
+	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
+	gvisor.dev/gvisor v0.0.0-20250503011706-39ed1f5ac29c // indirect
+)
+
+require (
 	github.com/HdrHistogram/hdrhistogram-go v1.1.2 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -120,6 +127,8 @@ require (
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/mod v0.30.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
+	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb
+	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
