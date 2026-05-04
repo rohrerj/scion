@@ -438,8 +438,9 @@ func (t *RWTopology) Copy() *RWTopology {
 		DispatchedPortStart: t.DispatchedPortStart,
 		DispatchedPortEnd:   t.DispatchedPortEnd,
 
-		BR:        copyBRMap(t.BR),
-		IFInfoMap: t.IFInfoMap.copy(),
+		BR:         copyBRMap(t.BR),
+		EndhostAPI: copyEndhostAPIMap(t.EndhostAPI),
+		IFInfoMap:  t.IFInfoMap.copy(),
 
 		CS:                        t.CS.copy(),
 		DS:                        t.DS.copy(),
@@ -472,6 +473,20 @@ func copyBRMap(m map[string]BRInfo) map[string]BRInfo {
 	newM := make(map[string]BRInfo)
 	for k, v := range m {
 		newM[k] = *v.copy()
+	}
+	return newM
+}
+
+func copyEndhostAPIMap(m map[string]EndhostAPIInfo) map[string]EndhostAPIInfo {
+	if m == nil {
+		return nil
+	}
+	newM := make(map[string]EndhostAPIInfo)
+	for k, v := range m {
+		newM[k] = EndhostAPIInfo{
+			Name: v.Name,
+			Url:  v.Url,
+		}
 	}
 	return newM
 }
