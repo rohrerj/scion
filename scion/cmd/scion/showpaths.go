@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -111,7 +112,12 @@ On other errors, showpaths will exit with code 2.
 			defer cancel()
 
 			if envFlags.EndhostApi() != "" {
-				connector, err := endhost.NewConnector(traceCtx, envFlags.EndhostApi())
+				endhostOpts := []endhost.ConnectOption{}
+				if envFlags.ConfigDir() != "" {
+					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")
+					endhostOpts = append(endhostOpts, endhost.WithTrcDir(trcDir))
+				}
+				connector, err := endhost.NewConnector(traceCtx, envFlags.EndhostApi(), endhostOpts...)
 				if err != nil {
 					return serrors.Wrap("init endhost api connector", err)
 				}

@@ -34,10 +34,11 @@ import (
 )
 
 type PathService struct {
-	url          string
-	httpClient   *http.Client
-	trustService *TrustService
-	topo         snet.Topology
+	url                     string
+	httpClient              *http.Client
+	trustService            *TrustService
+	topo                    snet.Topology
+	verificationUnsupported bool
 }
 
 func (c *Connector) NewPathService() *PathService {
@@ -52,8 +53,9 @@ func (c *Connector) NewPathService() *PathService {
 
 type PathReqOption func(*pathReqOptions)
 type pathReqOptions struct {
-	verifyPathSegments bool
-	numPaths           uint32
+	verifyPathSegments                     bool
+	numPaths                               uint32
+	skipSegmentVerificationIfUnimplemented bool
 }
 
 // WithVerifyPathSegments filters out all path segments for which
@@ -74,23 +76,72 @@ func WithNumberOfPaths(n uint32) PathReqOption {
 	}
 }
 
-func (s *PathService) filterVerifiedSegments(ctx context.Context, segments []*seg.PathSegment) (
-	[]*seg.PathSegment, error) {
-
-	verifiedSegments := make([]*seg.PathSegment, 0, len(segments))
-	verificationErrors, err := s.trustService.VerifyPathSegments(ctx, segments)
-	if err != nil {
-		return nil, err
+func WithSkipSegmentVerificationIfUnsupportedByAS() PathReqOption {
+	return func(o *pathReqOptions) {
+		o.skipSegmentVerificationIfUnimplemented = true
 	}
-	for i := range verificationErrors {
-		if verificationErrors[i] != nil {
-			log.Debug("Path segment filtered", "firstIA", segments[i].FirstIA(),
-				"lastIA", segments[i].LastIA(), "err", verificationErrors[i])
+}
+
+func (s *PathService) filterVerifiedSegments(ctx context.Context, up []*seg.PathSegment,
+	core []*seg.PathSegment, down []*seg.PathSegment, options *pathReqOptions) (
+	[]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
+
+	verify := func(segments []*seg.PathSegment) ([]*seg.PathSegment, error) {
+		if len(segments) == 0 {
+			return segments, nil
+		}
+		verifiedSegments := make([]*seg.PathSegment, 0, len(segments))
+		verificationErrors, err := s.trustService.VerifyPathSegments(ctx, segments)
+		if err != nil {
+			return nil, err
+		}
+		for i := range verificationErrors {
+			if verificationErrors[i] != nil {
+				log.Debug("Path segment filtered", "firstIA", segments[i].FirstIA(),
+					"lastIA", segments[i].LastIA(), "err", verificationErrors[i])
+			} else {
+				verifiedSegments = append(verifiedSegments, segments[i])
+			}
+		}
+		return verifiedSegments, nil
+	}
+	if s.trustService == nil {
+		return nil, nil, nil, serrors.New("trust service not configured")
+	}
+
+	verifiedUp, err := verify(up)
+	if err != nil {
+		if connect.CodeOf(err) == connect.CodeUnimplemented {
+			s.verificationUnsupported = true
 		} else {
-			verifiedSegments = append(verifiedSegments, segments[i])
+			return nil, nil, nil, err
 		}
 	}
-	return verifiedSegments, nil
+	verifiedCore, err := verify(core)
+	if err != nil {
+		if connect.CodeOf(err) == connect.CodeUnimplemented {
+			s.verificationUnsupported = true
+		} else {
+			return nil, nil, nil, err
+		}
+	}
+	verifiedDown, err := verify(down)
+	if err != nil {
+		if connect.CodeOf(err) == connect.CodeUnimplemented {
+			s.verificationUnsupported = true
+		} else {
+			return nil, nil, nil, err
+		}
+	}
+	if s.verificationUnsupported {
+		log.Debug("requested segment verification but unsupported by local AS")
+		if options.skipSegmentVerificationIfUnimplemented {
+			return up, core, down, nil
+		} else {
+			return up, core, down, serrors.New("requested segment verification but unsupported by local AS")
+		}
+	}
+	return verifiedUp, verifiedCore, verifiedDown, nil
 }
 
 // Paths returns all paths from the src IA to the dst IA.
@@ -125,20 +176,12 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts 
 		if err != nil {
 			return nil, err
 		}
-		/*if options.verifyPathSegments {
-			up, err = s.filterVerifiedSegments(ctx, up)
+		if options.verifyPathSegments && !s.verificationUnsupported {
+			up, core, down, err = s.filterVerifiedSegments(ctx, up, core, down, options)
 			if err != nil {
 				return nil, err
 			}
-			core, err = s.filterVerifiedSegments(ctx, core)
-			if err != nil {
-				return nil, err
-			}
-			down, err = s.filterVerifiedSegments(ctx, down)
-			if err != nil {
-				return nil, err
-			}
-		}*/
+		}
 		combinedPaths := combinator.Combine(src, dst, up, core, down, false)
 		for _, p := range combinedPaths {
 			mapKey := interfacesToString(p.Metadata.Interfaces)

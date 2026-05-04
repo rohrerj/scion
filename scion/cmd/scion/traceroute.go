@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -125,7 +126,12 @@ On other errors, traceroute will exit with code 2.
 				path.WithEPIC(flags.epic),
 			}
 			if envFlags.EndhostApi() != "" {
-				connector, err := endhost.NewConnector(traceCtx, envFlags.EndhostApi())
+				endhostOpts := []endhost.ConnectOption{}
+				if envFlags.ConfigDir() != "" {
+					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")
+					endhostOpts = append(endhostOpts, endhost.WithTrcDir(trcDir))
+				}
+				connector, err := endhost.NewConnector(traceCtx, envFlags.EndhostApi(), endhostOpts...)
 				if err != nil {
 					return serrors.Wrap("init endhost api connector", err)
 				}

@@ -138,7 +138,7 @@ type Chain struct {
 	Subject Subject
 }
 
-// ListChains checks for all subjects whether the turstDB already contains a valid chain,
+// ListChains checks for all subjects whether the trustDB already contains a valid chain,
 // then it creates a list of subjects for which no valid chain is found and performs a ListChains
 // request for these subjects. The returned chains are stored in the trustDB and the function
 // returns the chains for all requested subjects.
