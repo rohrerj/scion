@@ -104,7 +104,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 	if err != nil {
 		return nil, err
 	}
-	endhostAddr, err := net.ResolveTCPAddr("tcp", u.Host)
+	endhostApiAddr, err := net.ResolveTCPAddr("tcp", u.Host)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 					VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
 					Certificates:          clientCerts,
 					ServerName: fmt.Sprintf("%s,%s", c.Topology.LocalIA,
-						endhostAddr.IP.String()),
+						endhostApiAddr.IP.String()),
 				},
 			},
 		}
@@ -224,7 +224,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 					VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
 					Certificates:          clientCerts,
 					ServerName: fmt.Sprintf("%s,%s", c.Topology.LocalIA,
-						endhostAddr.IP.String()),
+						endhostApiAddr.IP.String()),
 				},
 			},
 		}
