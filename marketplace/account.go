@@ -155,7 +155,6 @@ func (s *ASTokenManager) IssueJWT(ctx context.Context, req *connect.Request[humm
 	}, nil
 }
 
-// RevokeJWT implements [hummingbirdconnect.AccountServiceHandler].
-func (s *ASTokenManager) RevokeJWT(ctx context.Context, req *connect.Request[hummingbird.JWTRevocationRequest]) (*connect.Response[hummingbird.JWTRevocationResponse], error) {
+func (s *ASTokenManager) ResetJWT(ctx context.Context, req *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error) {
 	panic("unimplemented")
 }
