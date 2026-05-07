@@ -19,7 +19,7 @@ option go_package = "github.com/scionproto/scion/pkg/proto/hummingbird";
 package proto.hummingbird.v1;
 
 service RedemptionService {
-    rpc RedeemAsset(stream RedeemAssetFromASResponse) returns (stream RedeemAssetFromASRequest) {}
+    rpc RedeemASAsset(stream RedeemAssetFromASResponse) returns (stream RedeemAssetFromASRequest) {}
 }
 
 message RedeemAssetFromASRequest {

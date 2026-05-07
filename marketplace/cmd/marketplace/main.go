@@ -32,21 +32,40 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"golang.org/x/net/http2"
+
 	"github.com/scionproto/scion/marketplace"
 	"github.com/scionproto/scion/marketplace/webapp"
-	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/proto/control_plane/v1/control_planeconnect"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
+	"github.com/scionproto/scion/private/app/launcher"
 	"github.com/scionproto/scion/private/storage"
+	"github.com/scionproto/scion/private/topology"
 	"github.com/scionproto/scion/private/trust"
 )
 
+var globalCfg marketplace.Config
+
 func main() {
-	if err := realMain(context.Background()); err != nil {
-		fmt.Println(err)
+	application := launcher.Application{
+		ApplicationBase: launcher.ApplicationBase{
+			TOMLConfig: &globalCfg,
+			ShortName:  "SCION Daemon",
+			Main:       realMain,
+		},
 	}
+	application.Run()
 }
 
 func realMain(ctx context.Context) error {
+	topo, err := topology.NewLoader(topology.LoaderCfg{
+		File:      globalCfg.General.Topology(),
+		Validator: &topology.DefaultValidator{},
+	})
+	if err != nil {
+		return serrors.Wrap("creating topology loader", err)
+	}
 	cert, err := generateSelfSignedCert()
 	if err != nil {
 		log.Fatal(err)
@@ -61,21 +80,25 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = trust.LoadTRCs(context.Background(), "gen/trcs", trustDB)
+	_, err = trust.LoadTRCs(context.Background(), "gen/marketplace/certs", trustDB)
 	if err != nil {
 		return err
 	}
+	trustDB = marketplace.FromTrustDB(trustDB, control_planeconnect.NewTrustMaterialServiceClient(&http.Client{
+		Transport: &http2.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}, fmt.Sprintf("https://%s", topo.ControlServiceAddresses()[0].String())))
+
 	trustVerifer := trust.NewTLSCryptoVerifier(trustDB)
 
 	service := marketplace.NewService()
-	redemptionServer := &marketplace.Server{}
-	service.RegisterRedemptionServerPeer(ctx, redemptionServer.NewRedemptionServerPeer(addr.MustParseIA("1-ff00:0:110")))
-	service.RegisterRedemptionServerPeer(ctx, redemptionServer.NewRedemptionServerPeer(addr.MustParseIA("1-ff00:0:111")))
-	service.RegisterRedemptionServerPeer(ctx, redemptionServer.NewRedemptionServerPeer(addr.MustParseIA("1-ff00:0:112")))
 
 	mux := http.NewServeMux()
 	path, handler := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier)))
-	path2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(redemptionServer, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier)))
+	path2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier)))
 
 	mux.Handle(path, handler)
 	mux.Handle(path2, handler2)
@@ -84,7 +107,7 @@ func realMain(ctx context.Context) error {
 	webapp.Init(jwtSigner, mux, iaUserRegistrationMux)
 
 	server := &http.Server{
-		Addr:    ":8888",
+		Addr:    globalCfg.Marketplace.APIAddr,
 		Handler: mux,
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{cert},
@@ -92,7 +115,7 @@ func realMain(ctx context.Context) error {
 	}
 
 	accountServer := &http.Server{
-		Addr:    ":8889",
+		Addr:    globalCfg.Marketplace.AccountAddr,
 		Handler: iaUserRegistrationMux,
 		TLSConfig: &tls.Config{
 			ClientAuth:            tls.RequireAnyClientCert,

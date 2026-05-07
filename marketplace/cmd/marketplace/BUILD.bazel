@@ -8,10 +8,14 @@ go_library(
     deps = [
         "//marketplace:go_default_library",
         "//marketplace/webapp:go_default_library",
-        "//pkg/addr:go_default_library",
+        "//pkg/private/serrors:go_default_library",
+        "//private/app/launcher:go_default_library",
         "//private/storage:go_default_library",
+        "//private/topology:go_default_library",
         "//private/trust:go_default_library",
         "@com_connectrpc_connect//:go_default_library",
+        "@com_github_scionproto_scion//pkg/proto/control_plane/v1/control_planeconnect:go_default_library",
+        "@org_golang_x_net//http2:go_default_library",
         "@com_github_scionproto_scion//pkg/proto/hummingbird/v1/hummingbirdconnect:go_default_library",
     ],
 )

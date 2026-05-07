@@ -40,7 +40,7 @@ func (c *RedemptionClient) Init() error {
 
 	ctx := context.Background()
 	time.Sleep(5 * time.Second)
-	stream := client.RedeemAsset(ctx)
+	stream := client.RedeemASAsset(ctx)
 
 	fmt.Println("Connected to marketplace")
 	err := stream.Send(&hummingbird.RedeemAssetFromASResponse{})

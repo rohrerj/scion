@@ -233,9 +233,9 @@ const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
 	"\n" +
 	"message_id\x18\x03 \x01(\x04R\tmessageId\"(\n" +
 	"\x0fReservationInfo\x12\x15\n" +
-	"\x06res_id\x18\x01 \x01(\tR\x05resId2\x89\x01\n" +
-	"\x11RedemptionService\x12t\n" +
-	"\vRedeemAsset\x12/.proto.hummingbird.v1.RedeemAssetFromASResponse\x1a..proto.hummingbird.v1.RedeemAssetFromASRequest\"\x00(\x010\x01B3Z1github.com/scionproto/scion/pkg/proto/hummingbirdb\x06proto3"
+	"\x06res_id\x18\x01 \x01(\tR\x05resId2\x8b\x01\n" +
+	"\x11RedemptionService\x12v\n" +
+	"\rRedeemASAsset\x12/.proto.hummingbird.v1.RedeemAssetFromASResponse\x1a..proto.hummingbird.v1.RedeemAssetFromASRequest\"\x00(\x010\x01B3Z1github.com/scionproto/scion/pkg/proto/hummingbirdb\x06proto3"
 
 var (
 	file_proto_hummingbird_v1_redemption_proto_rawDescOnce sync.Once
@@ -257,8 +257,8 @@ var file_proto_hummingbird_v1_redemption_proto_goTypes = []any{
 }
 var file_proto_hummingbird_v1_redemption_proto_depIdxs = []int32{
 	2, // 0: proto.hummingbird.v1.RedeemAssetFromASResponse.reservation:type_name -> proto.hummingbird.v1.ReservationInfo
-	1, // 1: proto.hummingbird.v1.RedemptionService.RedeemAsset:input_type -> proto.hummingbird.v1.RedeemAssetFromASResponse
-	0, // 2: proto.hummingbird.v1.RedemptionService.RedeemAsset:output_type -> proto.hummingbird.v1.RedeemAssetFromASRequest
+	1, // 1: proto.hummingbird.v1.RedemptionService.RedeemASAsset:input_type -> proto.hummingbird.v1.RedeemAssetFromASResponse
+	0, // 2: proto.hummingbird.v1.RedemptionService.RedeemASAsset:output_type -> proto.hummingbird.v1.RedeemAssetFromASRequest
 	2, // [2:3] is the sub-list for method output_type
 	1, // [1:2] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
@@ -302,7 +302,7 @@ const _ = grpc.SupportPackageIsVersion6
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
 type RedemptionServiceClient interface {
-	RedeemAsset(ctx context.Context, opts ...grpc.CallOption) (RedemptionService_RedeemAssetClient, error)
+	RedeemASAsset(ctx context.Context, opts ...grpc.CallOption) (RedemptionService_RedeemASAssetClient, error)
 }
 
 type redemptionServiceClient struct {
@@ -313,30 +313,30 @@ func NewRedemptionServiceClient(cc grpc.ClientConnInterface) RedemptionServiceCl
 	return &redemptionServiceClient{cc}
 }
 
-func (c *redemptionServiceClient) RedeemAsset(ctx context.Context, opts ...grpc.CallOption) (RedemptionService_RedeemAssetClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_RedemptionService_serviceDesc.Streams[0], "/proto.hummingbird.v1.RedemptionService/RedeemAsset", opts...)
+func (c *redemptionServiceClient) RedeemASAsset(ctx context.Context, opts ...grpc.CallOption) (RedemptionService_RedeemASAssetClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_RedemptionService_serviceDesc.Streams[0], "/proto.hummingbird.v1.RedemptionService/RedeemASAsset", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &redemptionServiceRedeemAssetClient{stream}
+	x := &redemptionServiceRedeemASAssetClient{stream}
 	return x, nil
 }
 
-type RedemptionService_RedeemAssetClient interface {
+type RedemptionService_RedeemASAssetClient interface {
 	Send(*RedeemAssetFromASResponse) error
 	Recv() (*RedeemAssetFromASRequest, error)
 	grpc.ClientStream
 }
 
-type redemptionServiceRedeemAssetClient struct {
+type redemptionServiceRedeemASAssetClient struct {
 	grpc.ClientStream
 }
 
-func (x *redemptionServiceRedeemAssetClient) Send(m *RedeemAssetFromASResponse) error {
+func (x *redemptionServiceRedeemASAssetClient) Send(m *RedeemAssetFromASResponse) error {
 	return x.ClientStream.SendMsg(m)
 }
 
-func (x *redemptionServiceRedeemAssetClient) Recv() (*RedeemAssetFromASRequest, error) {
+func (x *redemptionServiceRedeemASAssetClient) Recv() (*RedeemAssetFromASRequest, error) {
 	m := new(RedeemAssetFromASRequest)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -346,40 +346,40 @@ func (x *redemptionServiceRedeemAssetClient) Recv() (*RedeemAssetFromASRequest, 
 
 // RedemptionServiceServer is the server API for RedemptionService service.
 type RedemptionServiceServer interface {
-	RedeemAsset(RedemptionService_RedeemAssetServer) error
+	RedeemASAsset(RedemptionService_RedeemASAssetServer) error
 }
 
 // UnimplementedRedemptionServiceServer can be embedded to have forward compatible implementations.
 type UnimplementedRedemptionServiceServer struct {
 }
 
-func (*UnimplementedRedemptionServiceServer) RedeemAsset(RedemptionService_RedeemAssetServer) error {
-	return status.Errorf(codes.Unimplemented, "method RedeemAsset not implemented")
+func (*UnimplementedRedemptionServiceServer) RedeemASAsset(RedemptionService_RedeemASAssetServer) error {
+	return status.Errorf(codes.Unimplemented, "method RedeemASAsset not implemented")
 }
 
 func RegisterRedemptionServiceServer(s *grpc.Server, srv RedemptionServiceServer) {
 	s.RegisterService(&_RedemptionService_serviceDesc, srv)
 }
 
-func _RedemptionService_RedeemAsset_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(RedemptionServiceServer).RedeemAsset(&redemptionServiceRedeemAssetServer{stream})
+func _RedemptionService_RedeemASAsset_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(RedemptionServiceServer).RedeemASAsset(&redemptionServiceRedeemASAssetServer{stream})
 }
 
-type RedemptionService_RedeemAssetServer interface {
+type RedemptionService_RedeemASAssetServer interface {
 	Send(*RedeemAssetFromASRequest) error
 	Recv() (*RedeemAssetFromASResponse, error)
 	grpc.ServerStream
 }
 
-type redemptionServiceRedeemAssetServer struct {
+type redemptionServiceRedeemASAssetServer struct {
 	grpc.ServerStream
 }
 
-func (x *redemptionServiceRedeemAssetServer) Send(m *RedeemAssetFromASRequest) error {
+func (x *redemptionServiceRedeemASAssetServer) Send(m *RedeemAssetFromASRequest) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *redemptionServiceRedeemAssetServer) Recv() (*RedeemAssetFromASResponse, error) {
+func (x *redemptionServiceRedeemASAssetServer) Recv() (*RedeemAssetFromASResponse, error) {
 	m := new(RedeemAssetFromASResponse)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -393,8 +393,8 @@ var _RedemptionService_serviceDesc = grpc.ServiceDesc{
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "RedeemAsset",
-			Handler:       _RedemptionService_RedeemAsset_Handler,
+			StreamName:    "RedeemASAsset",
+			Handler:       _RedemptionService_RedeemASAsset_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

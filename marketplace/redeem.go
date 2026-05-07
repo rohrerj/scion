@@ -12,16 +12,16 @@ import (
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 )
 
-func (s *Server) NewRedemptionServerPeer(ia addr.IA) *RedemptionServerPeer {
-	if s.clients == nil {
-		s.clients = make(map[addr.IA]*RedemptionServerPeer)
+func (s *Service) newRedemptionServerPeer(ia addr.IA) *RedemptionServerPeer {
+	if s.redemptionServerPeers == nil {
+		s.redemptionServerPeers = make(map[addr.IA]*RedemptionServerPeer)
 	}
 	peer := &RedemptionServerPeer{
 		ia:     ia,
 		sendCh: make(chan *hummingbird.RedeemAssetFromASRequest),
 		recvCh: make(chan *hummingbird.RedeemAssetFromASResponse),
 	}
-	s.clients[ia] = peer
+	s.redemptionServerPeers[ia] = peer
 	return peer
 }
 
@@ -48,11 +48,7 @@ func (c *RedemptionServerPeer) SendAndReceive(req *hummingbird.RedeemAssetFromAS
 	}
 }
 
-type Server struct {
-	clients map[addr.IA]*RedemptionServerPeer
-}
-
-func (s *Server) RedeemAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
+func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
 	fmt.Println("RedeemAsset (AS)")
 	user := ctx.Value("user").(string)
 	clientID, err := addr.ParseIA(user)
@@ -60,13 +56,16 @@ func (s *Server) RedeemAsset(ctx context.Context, stream *connect.BidiStream[hum
 		return err
 	}
 	stream.Receive()
-	client, found := s.clients[clientID]
+	s.mtx.Lock()
+	client, found := s.redemptionServerPeers[clientID]
 	if !found {
-		fmt.Println("client not registered", "clientID", clientID)
-		return serrors.New("client not registered", "clientID", clientID)
+		client = s.newRedemptionServerPeer(clientID)
+		s.redemptionServerPeers[clientID] = client
+		fmt.Println("AS client newely registered", "clientID", clientID)
 	}
+	s.mtx.Unlock()
 
-	fmt.Println("Client connected:", clientID)
+	fmt.Println("AS client connected:", clientID)
 
 	for {
 		fmt.Println("waiting for send channel")

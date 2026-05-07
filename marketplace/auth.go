@@ -29,7 +29,7 @@ var methodScopes = map[string]string{
 	"/proto.hummingbird.v1.MarketplaceService/BuyAssets":         "User",
 	"/proto.hummingbird.v1.MarketplaceService/FetchReservations": "User",
 	"/proto.hummingbird.v1.MarketplaceService/RedeemAsset":       "User",
-	"/proto.hummingbird.v1.RedemptionService/RedeemAsset":        "AS",
+	"/proto.hummingbird.v1.RedemptionService/RedeemASAsset":      "AS",
 }
 
 type AuthInterceptor struct {
@@ -75,6 +75,7 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 
 		token, err := a.Verifier.VerifyToken(tokenStr)
 		if err != nil || !token.Valid {
+			fmt.Println("invalid token")
 			return nil, connect.NewError(
 				connect.CodeUnauthenticated,
 				fmt.Errorf("invalid token"),
