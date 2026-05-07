@@ -20,9 +20,11 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"net/netip"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -65,6 +67,7 @@ import (
 	cstrustconnect "github.com/scionproto/scion/control/trust/connect"
 	cstrustgrpc "github.com/scionproto/scion/control/trust/grpc"
 	cstrustmetrics "github.com/scionproto/scion/control/trust/metrics"
+	underlayconnect "github.com/scionproto/scion/control/underlay/connect"
 	"github.com/scionproto/scion/pkg/addr"
 	libconnect "github.com/scionproto/scion/pkg/connect"
 	"github.com/scionproto/scion/pkg/connect/happy"
@@ -78,6 +81,7 @@ import (
 	cpconnect "github.com/scionproto/scion/pkg/proto/control_plane/v1/control_planeconnect"
 	dpb "github.com/scionproto/scion/pkg/proto/discovery"
 	dconnect "github.com/scionproto/scion/pkg/proto/discovery/v1/discoveryconnect"
+	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
@@ -374,6 +378,7 @@ func realMain(ctx context.Context) error {
 	)
 	connectInter := http.NewServeMux()
 	connectIntra := http.NewServeMux()
+	connectEndhost := http.NewServeMux()
 
 	// Register trust material related handlers.
 	trustServer := &cstrustgrpc.MaterialServer{
@@ -387,6 +392,14 @@ func realMain(ctx context.Context) error {
 	}))
 	connectIntra.Handle(cpconnect.NewTrustMaterialServiceHandler(cstrustconnect.MaterialServer{
 		MaterialServer: trustServer,
+	}))
+	endhostTrustServer := &cstrustgrpc.EndhostServer{
+		Provider: provider,
+		IA:       topo.IA(),
+		Requests: libmetrics.NewPromCounter(cstrustmetrics.Handler.EndhostRequests),
+	}
+	connectEndhost.Handle(endhostconnect.NewTrustServiceHandler(cstrustconnect.EndhostServer{
+		EndhostServer: endhostTrustServer,
 	}))
 
 	// Handle beaconing.
@@ -433,10 +446,38 @@ func realMain(ctx context.Context) error {
 		Requests:     libmetrics.NewPromCounter(metrics.SegmentLookupRequestsTotal),
 		SegmentsSent: libmetrics.NewPromCounter(metrics.SegmentLookupSegmentsSentTotal),
 	}
+	segmentEndhostServer := &segreqgrpc.EndhostServer{
+		Lookuper: segreq.ForwardingLookup{
+			LocalIA:     topo.IA(),
+			CoreChecker: segreq.CoreChecker{Inspector: inspector},
+			Fetcher:     segreq.NewFetcher(fetcherCfg),
+			Expander: segreq.WildcardExpander{
+				LocalIA:   topo.IA(),
+				Core:      topo.Core(),
+				Inspector: inspector,
+				PathDB:    pathDB,
+			},
+		},
+		LocalIA:      topo.IA(),
+		IsCore:       topo.Core(),
+		Inspector:    inspector,
+		PathDB:       pathDB,
+		PathStore:    segreq.NewStore(),
+		Paginator:    segreq.NewPaginator(),
+		Requests:     libmetrics.NewPromCounter(metrics.ListSegmentsRequestsTotal),
+		SegmentsSent: libmetrics.NewPromCounter(metrics.ListSegmentsSentSegments),
+	}
 
 	// Always register a forwarding lookup for AS internal requests.
 	connectIntra.Handle(cpconnect.NewSegmentLookupServiceHandler(segreqconnect.LookupServer{
 		LookupServer: forwardingLookupServer,
+	}))
+	connectEndhost.Handle(endhostconnect.NewSegmentsServiceHandler(segreqconnect.EndhostServer{
+		EndhostServer: segmentEndhostServer,
+	}))
+	connectEndhost.Handle(endhostconnect.NewUnderlayServiceHandler(underlayconnect.UnderlayServer{
+		Topology: topo,
+		Requests: libmetrics.NewPromCounter(metrics.UnderlaysRequestsTotal),
 	}))
 	if topo.Core() {
 		cppb.RegisterSegmentLookupServiceServer(quicServer, authLookupServer)
@@ -757,6 +798,9 @@ func realMain(ctx context.Context) error {
 		connectIntra.Handle(cpconnect.NewDRKeyIntraServiceHandler(drkeyconnect.Server{
 			Server: drkeyService,
 		}))
+		connectEndhost.Handle(endhostconnect.NewDRKeyServiceHandler(drkeyconnect.EndhostDRKeyServer{
+			Server: drkeyService,
+		}))
 		log.Info("DRKey is enabled")
 	} else {
 		log.Info("DRKey is DISABLED by configuration")
@@ -808,6 +852,50 @@ func realMain(ctx context.Context) error {
 		cleanup.Add(func() error { quicServer.GracefulStop(); return nil })
 	}
 
+	endhostTLSConfig := &tls.Config{
+		GetCertificate: cs.NewTLSCertificateLoader(
+			topo.IA(),
+			x509.ExtKeyUsageServerAuth,
+			trustDB,
+			globalCfg.General.ConfigDir,
+		).GetCertificate,
+	}
+	endhostServer := http.Server{
+		Handler:   libconnect.AttachPeer(connectEndhost),
+		TLSConfig: endhostTLSConfig,
+	}
+	endhost_api, found := topo.EndhostAPI()[globalCfg.General.ID]
+	if !found {
+		return serrors.New("endhost api endpoint not found in topology")
+	}
+	g.Go(func() error {
+		defer log.HandlePanic()
+		u, err := url.Parse(endhost_api.Url)
+		if err != nil {
+			return err
+		}
+		addr, err := net.ResolveTCPAddr("tcp", u.Host)
+		if err != nil {
+			return err
+		}
+		tcpListener, err := net.ListenTCP("tcp", addr)
+		if err != nil {
+			return err
+		}
+		switch u.Scheme {
+		case "https":
+			if err = endhostServer.ServeTLS(tcpListener, "", ""); err != nil {
+				return err
+			}
+		case "http":
+			if err = endhostServer.Serve(tcpListener); err != nil {
+				return err
+			}
+		default:
+			return serrors.New("unknown scheme", "scheme", u.Scheme)
+		}
+		return nil
+	})
 	intraServer := http.Server{
 		Handler: h2c.NewHandler(libconnect.AttachPeer(connectIntra), &http2.Server{}),
 	}
