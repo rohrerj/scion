@@ -15,8 +15,7 @@ import (
 type PublishAssetsClient struct {
 	MarketplaceUrl string
 	IA             addr.IA
-	Token          string
-	GetClientCert  func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
+	Token          *JwtToken
 }
 
 func (p *PublishAssetsClient) Publish(ctx context.Context, req *hummingbird.PublishAssetRequest) (*hummingbird.PublishAssetResponse, error) {
@@ -24,8 +23,7 @@ func (p *PublishAssetsClient) Publish(ctx context.Context, req *hummingbird.Publ
 	client := hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify:   true,
-				GetClientCertificate: p.GetClientCert,
+				InsecureSkipVerify: true,
 			},
 		},
 	}, p.MarketplaceUrl, connect.WithInterceptors(NewAuthInterceptor(p.Token)))

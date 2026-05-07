@@ -40,21 +40,11 @@ programs = br1-ff00_0_111-1,br1-ff00_0_111-2,br1-ff00_0_111-3,cs1-ff00_0_111-1,s
 6. Start using `./scion.sh start`
 
 # Configure ASes to sell assets on marketplace
-Currently if configured, ASes only sell hardcoded assets just to test whether publishing and redeeming assets work.
-
-1. Each AS needs a JWT token. Currently this can be automatically requested using this command:
-`curl https://localhost:8889/ia-token --cert gen/ASff00_0_110/crypto/as/ISD1-ASff00_0_110.pem --key gen/ASff00_0_110/crypto/as/cp-as.key -k -X POST`
-where the folder paths and file names are dependent on the AS that wants to request the AS. (curl uses this certificate in a mTLS handshake)
-2. Open the control service configuration file and add:
-```
-[marketplace]
-token = XXX
-```
-where XXX is the token you previously obtained.
-3. Repeat this for the other ASes you want. Then restart the topology.
+No manual step necessary for connectivity. ASes will use their AS certificate to request a JWT token which then will be used for both publishing assets and redeeming assets.
+Only hardcoded assets are published.
 
 # Connect as an endhost
-1. You need a JWT token, while the topology is running, open in the webbrowser `https://localhost:8888`, register using a new user and password. (accounts are in-memory, restarting the topology will delete the account, however, the JWT tokens remain valid as long as the topology is not reseted)
+1. You need a JWT token, while the topology is running, open in the webbrowser `https://localhost:8889`, register using a new user and password. (accounts are in-memory, restarting the topology will delete the account)
 2. Click on the "Create new Token" button.
 3. Now run the command `./bin/marketplace_client XXX`
 where XXX is your token. The tokens have a validity of 1 week.

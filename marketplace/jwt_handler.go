@@ -18,7 +18,7 @@ func NewSigner(privKey ed25519.PrivateKey) *Signer {
 }
 
 func (s *Signer) GenerateToken(claims jwt.MapClaims) (string, error) {
-	token := jwt.NewWithClaims(*&jwt.SigningMethodEdDSA, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	signedToken, err := token.SignedString(s.privKey)
 	if err != nil {
 		return "", err
@@ -38,7 +38,6 @@ func NewVerifier(pubKey ed25519.PublicKey) *Verifier {
 
 func (v *Verifier) VerifyToken(token string) (*jwt.Token, error) {
 	parsedToken, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
-		// Always check signing method!
 		if t.Method != jwt.SigningMethodEdDSA {
 			return nil, fmt.Errorf("unexpected signing method")
 		}

@@ -35,6 +35,7 @@ import (
 
 	"github.com/scionproto/scion/marketplace"
 	"github.com/scionproto/scion/marketplace/webapp"
+	libconnect "github.com/scionproto/scion/pkg/connect"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
@@ -108,9 +109,6 @@ func realMain(ctx context.Context) error {
 	mux.Handle(path, handler)
 	mux.Handle(path2, handler2)
 
-	iaUserRegistrationMux := http.NewServeMux()
-	webapp.Init(jwtSigner, mux, iaUserRegistrationMux)
-
 	server := &http.Server{
 		Addr:    globalCfg.Marketplace.APIAddr,
 		Handler: mux,
@@ -118,14 +116,25 @@ func realMain(ctx context.Context) error {
 			Certificates: []tls.Certificate{cert},
 		},
 	}
+	accountDB := marketplace.NewAccountDB()
+	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(marketplace.NewASTokenManager(jwtSigner, accountDB))
+
+	accountMux := http.NewServeMux()
+	webapp.Init(jwtSigner, accountDB, accountMux)
+	accountMux.Handle(accountPath, libconnect.AttachPeer(accountHandler))
 
 	accountServer := &http.Server{
 		Addr:    globalCfg.Marketplace.AccountAddr,
-		Handler: iaUserRegistrationMux,
+		Handler: accountMux,
 		TLSConfig: &tls.Config{
-			ClientAuth:            tls.RequireAnyClientCert,
-			Certificates:          []tls.Certificate{cert},
-			VerifyPeerCertificate: trustVerifer.VerifyClientCertificate,
+			ClientAuth:   tls.RequestClientCert,
+			Certificates: []tls.Certificate{cert},
+			VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+				if len(rawCerts) == 0 {
+					return nil
+				}
+				return trustVerifer.VerifyClientCertificate(rawCerts, verifiedChains)
+			},
 		},
 	}
 	g := sync.WaitGroup{}

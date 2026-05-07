@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_library")
 go_library(
     name = "go_default_library",
     srcs = [
+        "account.go",
         "auth.go",
         "config.go",
         "jwt_handler.go",
@@ -26,6 +27,8 @@ go_library(
         "//private/trust:go_default_library",
         "@com_connectrpc_connect//:go_default_library",
         "@com_github_golang_jwt_jwt//:go_default_library",
+        "@org_golang_google_grpc//credentials:go_default_library",
+        "@org_golang_google_grpc//peer:go_default_library",
         "//pkg/proto/endhost/v1/endhostconnect:go_default_library",
     ],
 )

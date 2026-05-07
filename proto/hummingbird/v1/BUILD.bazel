@@ -5,6 +5,7 @@ proto_library(
     srcs = [
         "marketplace.proto",
         "redemption.proto",
+        "account.proto",
     ],
     visibility = ["//visibility:public"],
 )

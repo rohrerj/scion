@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
+	"sync"
 
 	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/addr"
-	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 )
 
@@ -17,9 +16,10 @@ func (s *Service) newRedemptionServerPeer(ia addr.IA) *RedemptionServerPeer {
 		s.redemptionServerPeers = make(map[addr.IA]*RedemptionServerPeer)
 	}
 	peer := &RedemptionServerPeer{
-		ia:     ia,
-		sendCh: make(chan *hummingbird.RedeemAssetFromASRequest),
-		recvCh: make(chan *hummingbird.RedeemAssetFromASResponse),
+		ia:      ia,
+		sendCh:  make(chan *hummingbird.RedeemAssetFromASRequest),
+		recvCh:  make(chan *hummingbird.RedeemAssetFromASResponse),
+		pending: make(map[uint64]chan *hummingbird.RedeemAssetFromASResponse),
 	}
 	s.redemptionServerPeers[ia] = peer
 	return peer
@@ -29,8 +29,24 @@ type RedemptionServerPeer struct {
 	ia     addr.IA
 	sendCh chan *hummingbird.RedeemAssetFromASRequest
 	recvCh chan *hummingbird.RedeemAssetFromASResponse
+
+	pending map[uint64]chan *hummingbird.RedeemAssetFromASResponse
+	mu      sync.Mutex
 }
 
+func (c *RedemptionServerPeer) Send(req *hummingbird.RedeemAssetFromASRequest) <-chan *hummingbird.RedeemAssetFromASResponse {
+	respCh := make(chan *hummingbird.RedeemAssetFromASResponse, 1)
+
+	c.mu.Lock()
+	c.pending[req.RequestId] = respCh
+	c.mu.Unlock()
+
+	c.sendCh <- req
+
+	return respCh
+}
+
+/*
 func (c *RedemptionServerPeer) SendAndReceive(req *hummingbird.RedeemAssetFromASRequest) (*hummingbird.RedeemAssetFromASResponse, error) {
 	select {
 	case c.sendCh <- req:
@@ -46,7 +62,7 @@ func (c *RedemptionServerPeer) SendAndReceive(req *hummingbird.RedeemAssetFromAS
 	case <-time.After(2 * time.Second):
 		return nil, serrors.New("timeout waiting for response")
 	}
-}
+}*/
 
 func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
 	fmt.Println("RedeemAsset (AS)")
@@ -67,25 +83,34 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 
 	fmt.Println("AS client connected:", clientID)
 
+	go func() {
+		for req := range client.sendCh {
+			if req == nil {
+				return
+			}
+			if err := stream.Send(req); err != nil {
+				log.Println("Send error:", err)
+				return
+			}
+		}
+	}()
+
 	for {
-		fmt.Println("waiting for send channel")
-		req := <-client.sendCh
-		fmt.Println("got something on send channel", clientID)
-		if req == nil {
-			return nil
-		}
-		fmt.Println("send redemption request")
-		if err := stream.Send(req); err != nil {
-			log.Println("Send error:", err)
-			return err
-		}
 		msg, err := stream.Receive()
 		if err != nil {
-			fmt.Println("Receive error:", err)
-			client.recvCh <- nil
-			return err
+			log.Println("Receive error:", err)
+			continue
 		}
-		fmt.Println("received redemption response")
-		client.recvCh <- msg
+
+		reqID := msg.RequestId
+
+		client.mu.Lock()
+		ch, ok := client.pending[reqID]
+		if ok {
+			ch <- msg
+			close(ch)
+			delete(client.pending, reqID)
+		}
+		client.mu.Unlock()
 	}
 }

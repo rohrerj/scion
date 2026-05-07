@@ -7,18 +7,23 @@ import (
 )
 
 type Config struct {
-	Token string `toml:"token,omitempty"`
+	MarketplaceApi string `toml:"marketplace_api,omitempty"`
+	AccountApi     string `toml:"account_api,omitempty"`
 }
 
-// Sample implements [config.Sampler].
 func (c *Config) Sample(dst io.Writer, path config.Path, ctx config.CtxMap) {
 
 }
 
-// Validate implements [config.Validator].
 func (c *Config) Validate() error {
 	return nil
 }
 
 func (c *Config) InitDefaults() {
+	if c.MarketplaceApi == "" {
+		c.MarketplaceApi = "https://localhost:8888"
+	}
+	if c.AccountApi == "" {
+		c.AccountApi = "https://localhost:8889"
+	}
 }

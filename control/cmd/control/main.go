@@ -1164,19 +1164,23 @@ func realMain(ctx context.Context) error {
 		<-errCtx.Done()
 		return cleanup.Do()
 	})
-
-	getClientCert := cs.NewTLSCertificateLoader(
-		topo.IA(), x509.ExtKeyUsageClientAuth, trustDB, globalCfg.General.ConfigDir,
-	).GetClientCertificate
+	jwtToken := &marketplace.JwtToken{}
 
 	g.Go(func() error {
 		defer log.HandlePanic()
+		getClientCert := cs.NewTLSCertificateLoader(
+			topo.IA(), x509.ExtKeyUsageClientAuth, trustDB, globalCfg.General.ConfigDir,
+		).GetClientCertificate
+		tokenRenewer := marketplace.NewTokenRenwer(globalCfg.Marketplace.AccountApi, getClientCert, jwtToken)
+		return tokenRenewer.InitTokenRenewer()
+	})
 
+	g.Go(func() error {
+		defer log.HandlePanic()
 		redemptionClient := marketplace.RedemptionClient{
-			MarketplaceUrl: "https://localhost:8888",
+			MarketplaceUrl: globalCfg.Marketplace.MarketplaceApi,
 			IA:             topo.IA(),
-			Token:          globalCfg.Marketplace.Token,
-			GetClientCert:  getClientCert,
+			Token:          jwtToken,
 		}
 		if err := redemptionClient.Init(); err != nil {
 			log.Error("redemtpion service", "err", err)
@@ -1187,45 +1191,52 @@ func realMain(ctx context.Context) error {
 	g.Go(func() error {
 		defer log.HandlePanic()
 		assetPublisher := marketplace.PublishAssetsClient{
-			MarketplaceUrl: "https://localhost:8888",
+			MarketplaceUrl: globalCfg.Marketplace.MarketplaceApi,
 			IA:             topo.IA(),
-			Token:          globalCfg.Marketplace.Token,
-			GetClientCert:  getClientCert,
+			Token:          jwtToken,
 		}
-		time.Sleep(5 * time.Second)
-		ingress := uint32(1)
-		egress := uint32(2)
-		_, err := assetPublisher.Publish(ctx, &hummingbird.PublishAssetRequest{
-			Bandwidth:       100,
-			BandwidthMin:    10,
-			StartAt:         1000000,
-			StopsAt:         2000000,
-			Price:           100,
-			TimeGranularity: 1,
-			TimeMinDuration: 1,
-			BwGranularity:   1,
-			IfIdIngress:     &ingress,
-			IfIdEgress:      &egress,
-		})
-		if err != nil {
-			log.Error("error publishing asset", "err", err)
-			return err
+		for {
+			time.Sleep(5 * time.Second)
+			ingress := uint32(1)
+			egress := uint32(2)
+			_, err := assetPublisher.Publish(ctx, &hummingbird.PublishAssetRequest{
+				Bandwidth:       100,
+				BandwidthMin:    10,
+				StartAt:         1000000,
+				StopsAt:         2000000,
+				Price:           100,
+				TimeGranularity: 1,
+				TimeMinDuration: 1,
+				BwGranularity:   1,
+				IfIdIngress:     &ingress,
+				IfIdEgress:      &egress,
+			})
+			if err != nil {
+				log.Error("error publishing asset", "err", err)
+				continue
+			}
+			break
 		}
-		_, err = assetPublisher.Publish(ctx, &hummingbird.PublishAssetRequest{
-			Bandwidth:       50,
-			BandwidthMin:    10,
-			StartAt:         1000000,
-			StopsAt:         2000000,
-			Price:           50,
-			TimeGranularity: 1,
-			TimeMinDuration: 1,
-			BwGranularity:   1,
-			IfIdIngress:     &ingress,
-			IfIdEgress:      &egress,
-		})
-		if err != nil {
-			log.Error("error publishing asset", "err", err)
-			return err
+		for {
+			ingress := uint32(1)
+			egress := uint32(2)
+			_, err = assetPublisher.Publish(ctx, &hummingbird.PublishAssetRequest{
+				Bandwidth:       50,
+				BandwidthMin:    10,
+				StartAt:         1000000,
+				StopsAt:         2000000,
+				Price:           50,
+				TimeGranularity: 1,
+				TimeMinDuration: 1,
+				BwGranularity:   1,
+				IfIdIngress:     &ingress,
+				IfIdEgress:      &egress,
+			})
+			if err != nil {
+				log.Error("error publishing asset", "err", err)
+				continue
+			}
+			break
 		}
 		return nil
 	})

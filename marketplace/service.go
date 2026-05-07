@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/addr"
@@ -143,19 +144,22 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	if !found {
 		return nil, serrors.New("peer not found", "key", ingressAsset.IA)
 	}
-	rep, err := peer1.SendAndReceive(&hummingbird.RedeemAssetFromASRequest{
+	respCh := peer1.Send(&hummingbird.RedeemAssetFromASRequest{
 		Bw: ingressAsset.Bandwidth,
 		// other fields omitted
 	})
-	if err != nil {
-		return nil, err
+	select {
+	case resp := <-respCh:
+		fmt.Println("got out of receive channel")
+		return &connect.Response[hummingbird.RedeemAssetResponse]{
+			Msg: &hummingbird.RedeemAssetResponse{
+				Ak:    resp.Ak,
+				ResId: "my-res-id",
+			},
+		}, nil
+	case <-time.After(2 * time.Second):
+		return nil, serrors.New("timeout")
 	}
-	return &connect.Response[hummingbird.RedeemAssetResponse]{
-		Msg: &hummingbird.RedeemAssetResponse{
-			Ak:    rep.Ak,
-			ResId: "my-res-id",
-		},
-	}, nil
 }
 
 func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[hummingbird.SearchAssetsRequest]) (*connect.Response[hummingbird.SearchAssetsResponse], error) {

@@ -3,6 +3,7 @@ load("//tools/proto:connect.bzl", "go_connect_library")
 go_connect_library(
     name = "go_default_library",
     files = [
+        "account.connect.go",
         "marketplace.connect.go",
         "redemption.connect.go",
     ],

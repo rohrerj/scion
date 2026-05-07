@@ -32,7 +32,7 @@ type RedeemAssetFromASRequest struct {
 	Bw            uint64                 `protobuf:"varint,3,opt,name=bw,proto3" json:"bw,omitempty"`
 	StartsAt      uint64                 `protobuf:"varint,4,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
 	StopsAt       uint64                 `protobuf:"varint,5,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
-	MessageId     uint64                 `protobuf:"varint,6,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	RequestId     uint64                 `protobuf:"varint,6,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -102,9 +102,9 @@ func (x *RedeemAssetFromASRequest) GetStopsAt() uint64 {
 	return 0
 }
 
-func (x *RedeemAssetFromASRequest) GetMessageId() uint64 {
+func (x *RedeemAssetFromASRequest) GetRequestId() uint64 {
 	if x != nil {
-		return x.MessageId
+		return x.RequestId
 	}
 	return 0
 }
@@ -113,7 +113,7 @@ type RedeemAssetFromASResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Reservation   *ReservationInfo       `protobuf:"bytes,1,opt,name=reservation,proto3" json:"reservation,omitempty"`
 	Ak            string                 `protobuf:"bytes,2,opt,name=ak,proto3" json:"ak,omitempty"`
-	MessageId     uint64                 `protobuf:"varint,3,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	RequestId     uint64                 `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -162,9 +162,9 @@ func (x *RedeemAssetFromASResponse) GetAk() string {
 	return ""
 }
 
-func (x *RedeemAssetFromASResponse) GetMessageId() uint64 {
+func (x *RedeemAssetFromASResponse) GetRequestId() uint64 {
 	if x != nil {
-		return x.MessageId
+		return x.RequestId
 	}
 	return 0
 }
@@ -226,12 +226,12 @@ const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
 	"\tstarts_at\x18\x04 \x01(\x04R\bstartsAt\x12\x19\n" +
 	"\bstops_at\x18\x05 \x01(\x04R\astopsAt\x12\x1d\n" +
 	"\n" +
-	"message_id\x18\x06 \x01(\x04R\tmessageId\"\x93\x01\n" +
+	"request_id\x18\x06 \x01(\x04R\trequestId\"\x93\x01\n" +
 	"\x19RedeemAssetFromASResponse\x12G\n" +
 	"\vreservation\x18\x01 \x01(\v2%.proto.hummingbird.v1.ReservationInfoR\vreservation\x12\x0e\n" +
 	"\x02ak\x18\x02 \x01(\tR\x02ak\x12\x1d\n" +
 	"\n" +
-	"message_id\x18\x03 \x01(\x04R\tmessageId\"(\n" +
+	"request_id\x18\x03 \x01(\x04R\trequestId\"(\n" +
 	"\x0fReservationInfo\x12\x15\n" +
 	"\x06res_id\x18\x01 \x01(\tR\x05resId2\x8b\x01\n" +
 	"\x11RedemptionService\x12v\n" +

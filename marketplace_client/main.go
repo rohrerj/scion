@@ -25,7 +25,7 @@ func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
 func main() {
 	args := os.Args
 	if len(args) != 2 {
-		fmt.Println("Provide JWT token as command line argument. Requested at: https://localhost:8888")
+		fmt.Println("Provide JWT token as command line argument. Requested at: https://localhost:8889")
 		return
 	}
 	jwtToken := args[1]

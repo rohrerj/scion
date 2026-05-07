@@ -18,15 +18,13 @@ import (
 type RedemptionClient struct {
 	MarketplaceUrl string
 	IA             addr.IA
-	Token          string
-	GetClientCert  func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
+	Token          *JwtToken
 }
 
 func (c *RedemptionClient) Init() error {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify:   true,
-			GetClientCertificate: c.GetClientCert,
+			InsecureSkipVerify: true,
 		},
 	}
 	http2.ConfigureTransport(tr)
@@ -37,9 +35,11 @@ func (c *RedemptionClient) Init() error {
 		c.MarketplaceUrl,
 		connect.WithInterceptors(NewAuthInterceptor(c.Token)),
 	)
+	for c.Token.String() == "" {
+		time.Sleep(5 * time.Second)
+	}
 
 	ctx := context.Background()
-	time.Sleep(5 * time.Second)
 	stream := client.RedeemASAsset(ctx)
 
 	fmt.Println("Connected to marketplace")
@@ -48,8 +48,7 @@ func (c *RedemptionClient) Init() error {
 	for {
 		msg, err := stream.Receive()
 		if err != nil {
-			log.Println("Stream error:", err)
-			return err
+			log.Println("Receive error:", err)
 		}
 		fmt.Println("received redemption request")
 
@@ -58,12 +57,11 @@ func (c *RedemptionClient) Init() error {
 				ResId: "my-res-id",
 			},
 			Ak:        "my-ak",
-			MessageId: msg.MessageId,
+			RequestId: msg.RequestId,
 		}
 
 		if err := stream.Send(rep); err != nil {
 			log.Println("Send error:", err)
-			return err
 		}
 	}
 }

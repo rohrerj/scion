@@ -8,6 +8,7 @@ go_library(
     deps = [
         "//marketplace:go_default_library",
         "//marketplace/webapp:go_default_library",
+        "//pkg/connect:go_default_library",
         "//pkg/private/serrors:go_default_library",
         "//private/app/launcher:go_default_library",
         "//private/storage:go_default_library",

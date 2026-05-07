@@ -3,8 +3,6 @@ package webapp
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"html/template"
 	"net/http"
 	"sync"
@@ -12,34 +10,26 @@ import (
 
 	"github.com/golang-jwt/jwt"
 	"github.com/scionproto/scion/marketplace"
-	"github.com/scionproto/scion/pkg/scrypto/cppki"
 )
 
 var templates = template.Must(template.ParseGlob("marketplace/templates/*.html"))
 
-func Init(signer *marketplace.Signer, mux *http.ServeMux, iaMux *http.ServeMux) {
+func Init(signer *marketplace.Signer, accountDB *marketplace.AccountDB, mux *http.ServeMux) {
 	h := &Handler{
-		users:    make(map[string]User),
-		sessions: make(map[string]string),
-		signer:   signer,
+		sessions:  make(map[string]string),
+		signer:    signer,
+		accountDB: accountDB,
 	}
 	mux.HandleFunc("/", h.tokenHandler)
 	mux.HandleFunc("/login", h.loginHandler)
 	mux.HandleFunc("/register", h.registerHandler)
-
-	iaMux.HandleFunc("/ia-token", h.tokenIAHandler)
-}
-
-type User struct {
-	Username string
-	Password string
 }
 
 type Handler struct {
-	users    map[string]User
-	sessions map[string]string
-	mu       sync.Mutex
-	signer   *marketplace.Signer
+	accountDB *marketplace.AccountDB
+	sessions  map[string]string
+	mu        sync.Mutex
+	signer    *marketplace.Signer
 }
 
 func (h *Handler) getSessionUser(r *http.Request) (string, bool) {
@@ -55,35 +45,6 @@ func (h *Handler) getSessionUser(r *http.Request) (string, bool) {
 	return username, ok
 }
 
-func (h *Handler) tokenIAHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if len(r.TLS.PeerCertificates) == 0 {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-	ia, err := cppki.ExtractIA(r.TLS.PeerCertificates[0].Subject)
-	if err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	name := ia.String()
-	fmt.Println(name)
-	token, err := h.createToken(name, false)
-	if err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	response := map[string]string{
-		"user":  name,
-		"token": token,
-	}
-
-	json.NewEncoder(w).Encode(response)
-}
-
 func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		templates.ExecuteTemplate(w, "register.html", map[string]any{})
@@ -94,22 +55,17 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	u := User{
+	u := &marketplace.User{
 		Username: username,
 		Password: password,
 	}
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if _, exists := h.users[u.Username]; exists {
+	if !h.accountDB.CreateNonExistingUser(u) {
 		templates.ExecuteTemplate(w, "register.html", map[string]any{
 			"Error": "Username already exists",
 		})
 		return
 	}
 
-	h.users[u.Username] = u
 	sessionID := h.generateSessionID()
 	h.sessions[sessionID] = u.Username
 
@@ -138,16 +94,13 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	u := User{
+	u := &marketplace.User{
 		Username: username,
 		Password: password,
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	stored, exists := h.users[u.Username]
-	if !exists || stored.Password != u.Password {
+	dbUser := h.accountDB.GetUser(u.Username)
+	if dbUser == nil || dbUser.Password != u.Password {
 		templates.ExecuteTemplate(w, "login.html", map[string]any{
 			"Error": "invalid credentials",
 		})
@@ -177,9 +130,15 @@ func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 		templates.ExecuteTemplate(w, "token.html", map[string]any{})
 		return
 	}
-	token, err := h.createToken(username, true)
+	dbUser := h.accountDB.GetUser(username)
+	if dbUser == nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	token, err := h.createToken(dbUser)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
 	}
 
 	templates.ExecuteTemplate(w, "token.html", map[string]any{
@@ -187,23 +146,13 @@ func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) createToken(sub string, isUser bool) (string, error) {
-	var claims jwt.MapClaims
-	if isUser {
-		claims = jwt.MapClaims{
-			"sub":   sub,
-			"scope": "User",
-			"exp":   time.Now().Add(time.Hour).Unix(),
-			"iat":   time.Now().Unix(),
-		}
-	} else {
-		claims = jwt.MapClaims{
-			"sub":   sub,
-			"scope": "AS",
-			"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
-			"iat":   time.Now().Unix(),
-		}
+func (h *Handler) createToken(user *marketplace.User) (string, error) {
+	claims := jwt.MapClaims{
+		"sub":   user.Username,
+		"scope": "User",
+		"exp":   time.Now().Add(time.Hour).Unix(),
+		"iat":   time.Now().Unix(),
+		"ver":   user.RevocationVersion,
 	}
-
 	return h.signer.GenerateToken(claims)
 }

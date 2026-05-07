@@ -18,27 +18,19 @@ option go_package = "github.com/scionproto/scion/pkg/proto/hummingbird";
 
 package proto.hummingbird.v1;
 
-service RedemptionService {
-    rpc RedeemASAsset(stream RedeemAssetFromASResponse) returns (stream RedeemAssetFromASRequest) {}
+service AccountService {
+    rpc IssueJWT(JWTIssuanceRequest) returns (JWTIssuanceResponse) {}
+    rpc ResetJWT(JWTResetRequest) returns (JWTResetResponse) {}
 }
 
-message RedeemAssetFromASRequest {
-    uint32 ingress_id = 1;
-    uint32 egress_id = 2;
-    uint64 bw = 3;
-    uint64 starts_at = 4;
-    uint64 stops_at = 5;
-    // to match request with response
-    uint64 request_id = 6;
+message JWTIssuanceRequest {}
+
+message JWTIssuanceResponse {
+    string jwt = 1;
 }
 
-message RedeemAssetFromASResponse {
-    ReservationInfo reservation = 1;
-    string ak = 2;
-    // to match request with response
-    uint64 request_id = 3;
-}
+message JWTResetRequest {}
 
-message ReservationInfo {
-    string res_id = 1;
+message JWTResetResponse {
+    string jwt = 1;
 }

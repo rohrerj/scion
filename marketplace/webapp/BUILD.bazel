@@ -7,7 +7,6 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//marketplace:go_default_library",
-        "//pkg/scrypto/cppki:go_default_library",
         "@com_github_golang_jwt_jwt//:go_default_library",
     ],
 )
