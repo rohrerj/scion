@@ -16,7 +16,7 @@ go_library(
         "//pkg/addr:go_default_library",
         "//pkg/log:go_default_library",
         "//pkg/private/serrors:go_default_library",
-        "//pkg/proto/control_plane:go_default_library",
+        "//pkg/proto/endhost:go_default_library",
         "//pkg/proto/hummingbird:go_default_library",
         "//pkg/scrypto/cppki:go_default_library",
         "//private/config:go_default_library",
@@ -26,6 +26,6 @@ go_library(
         "//private/trust:go_default_library",
         "@com_connectrpc_connect//:go_default_library",
         "@com_github_golang_jwt_jwt//:go_default_library",
-        "@com_github_scionproto_scion//pkg/proto/control_plane/v1/control_planeconnect:go_default_library",
+        "//pkg/proto/endhost/v1/endhostconnect:go_default_library",
     ],
 )

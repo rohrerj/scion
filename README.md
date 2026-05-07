@@ -1,68 +1,60 @@
-# SCION
+# How to set up the marketplace
+The code for the marketplace can be found in the *marketplace* folder.
+The topology generator scripts do not set up a marketplace, this has to be done manually:
 
-[![Slack chat](https://img.shields.io/badge/chat%20on-slack-blue?logo=slack)](https://scionproto.slack.com)
-[![Matrix chat](https://img.shields.io/badge/chat%20on-matrix-blue?logo=matrix)](https://matrix.to/#/#dev:matrix.scion.org)
-[![Awesome](https://cdn.rawgit.com/sindresorhus/awesome/d7305f38d29fed78fa85652e3a63e154dd8e8829/media/badge.svg)](https://github.com/scionproto/awesome-scion)
-[![ReadTheDocs](https://img.shields.io/badge/doc-reference-blue?version=latest&style=flat&label=docs&logo=read-the-docs&logoColor=white)](https://docs.scion.org/en/latest)
-[![Go Docs](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white)](https://pkg.go.dev/github.com/scionproto/scion)
-[![Nightly Build](https://badge.buildkite.com/b70b65b38a75eb8724f41a6f1203c9327cfb767f07a0c1934e.svg)](https://buildkite.com/scionproto/scion-nightly/builds/latest)
-[![Go Report Card](https://goreportcard.com/badge/github.com/scionproto/scion)](https://goreportcard.com/report/github.com/scionproto/scion)
-[![GitHub issues](https://img.shields.io/github/issues/scionproto/scion/help%20wanted.svg?label=help%20wanted&color=purple)](https://github.com/scionproto/scion/issues?q=is%3Aopen+is%3Aissue+label%3A%22help+wanted%22)
-[![GitHub issues](https://img.shields.io/github/issues/scionproto/scion/good%20first%20issue.svg?label=good%20first%20issue&color=purple)](https://github.com/scionproto/scion/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22)
-[![Release](https://img.shields.io/github/release-pre/scionproto/scion.svg)](https://github.com/scionproto/scion/releases)
-[![License](https://img.shields.io/github/license/scionproto/scion.svg?maxAge=2592000)](https://github.com/scionproto/scion/blob/master/LICENSE)
 
-Welcome to the open-source implementation of [SCION](https://www.scion.org/)
-(Scalability, Control and Isolation On next-generation Networks), a future Internet architecture.
-SCION provides route control, failure isolation, and explicit trust information for end-to-end communication.
-To find out more about the project, please visit our [documentation site](https://docs.scion.org/en/latest/).
-
-## Installation
-
-Installation packages for Debian and derivatives are available for x86-64, arm64, x86-32 and arm.
-These packages can be found in the [latest release](https://github.com/scionproto/scion/releases/latest).
-Packages for in-development versions can be found from the [latest nightly build](https://buildkite.com/scionproto/scion-nightly/builds/latest).
-
-Alternatively, "naked" pre-built binaries are available for Linux x86-64 and
-can be downloaded from the [latest release](https://github.com/scionproto/scion/releases/latest) or the
-[latest nightly build](https://buildkite.com/scionproto/scion-nightly/builds/latest).
-
-### Build from sources
-
-SCION can be built with `go build`. To build all binaries used in a SCION deployment (i.e.
-excluding the testing and development tools), run
-
-```sh
-CGO_ENABLED=0 go build -o bin ./router/... ./control/... ./dispatcher/... ./daemon/... ./scion/... ./scion-pki/... ./gateway/...
+0. Create your topology like normally, e.g. `./scion.sh topology -c topology/default.topo`
+1. Inside *gen* create a folder *marketplace* and inside of it a file *marketplace.toml* and a folder called *certs*.
+2. Copy the sample marketplace configuration into *marketplace.toml*:
 ```
+[general]
+id = "marketplace"
+config_dir = "gen/ASff00_0_111"
 
-The default way to build SCION, however, uses Bazel.
-In particular, this allows to run all the tests, linters etc.
-Please visit our [documentation site](https://docs.scion.org/en/latest/dev/setup.html) for
-instructions on how to set up Bazel and the full development environment.
+[log.console]
+level = "debug"
 
-### Connecting to the SCION Network
+[marketplace]
+api_addr = "localhost:8888"
+account_addr = "localhost:8889"
+```
+3. (Optionally) copy trust root configurations into *gen/marketplace/certs*
+4. Add an entry in the *gen/supervisord.conf* like this:
+```
+[program:marketplace]
+autostart = false
+autorestart = false
+environment = TZ=UTC,GODEBUG="cgocheck=0"
+stdout_logfile = logs/marketplace.log
+redirect_stderr = True
+startretries = 0
+startsecs = 5
+priority = 100
+command = bin/marketplace --config gen/marketplace/marketplace.toml
+```
+5. Add the marketplace program to the AS program list in the *gen/supervisord.conf*. This could look like this:
+```
+[group:as1-ff00_0_111]
+programs = br1-ff00_0_111-1,br1-ff00_0_111-2,br1-ff00_0_111-3,cs1-ff00_0_111-1,sd1-ff00_0_111,marketplace
+```
+6. Start using `./scion.sh start`
 
-Join [SCIONLab](https://www.scionlab.org) if you're interested in playing with SCION in an
-operational global test deployment of SCION.
+# Configure ASes to sell assets on marketplace
+Currently if configured, ASes only sell hardcoded assets just to test whether publishing and redeeming assets work.
 
-The [awesome-scion](https://github.com/scionproto/awesome-scion#deployments) list contains
-pointers to production deployments of SCION.
+1. Each AS needs a JWT token. Currently this can be automatically requested using this command:
+`curl https://localhost:8889/ia-token --cert gen/ASff00_0_110/crypto/as/ISD1-ASff00_0_110.pem --key gen/ASff00_0_110/crypto/as/cp-as.key -k -X POST`
+where the folder paths and file names are dependent on the AS that wants to request the AS. (curl uses this certificate in a mTLS handshake)
+2. Open the control service configuration file and add:
+```
+[marketplace]
+token = XXX
+```
+where XXX is the token you previously obtained.
+3. Repeat this for the other ASes you want. Then restart the topology.
 
-## Contributing
-
-Interested in contribution to the SCION project? Please visit our
-[contribution guide](https://docs.scion.org/en/latest/dev/contribute.html)
-for more information about how you can do so.
-
-Join us on our [slack workspace](https://scionproto.slack.com) with this invite link:
-[join scionproto.slack.com](https://join.slack.com/t/scionproto/shared_invite/zt-3ccepqf5z-~piJ5HBOV2dnjIBNGfeJmw)
-
-Join us in our #dev room on our federated [matrix instance](https://matrix.scion.org) with this link:
-[#dev:matrix.scion.org](https://matrix.to/#/#dev:matrix.scion.org)
-
-## License
-
-[![License](https://img.shields.io/github/license/scionproto/scion.svg?maxAge=2592000)](https://github.com/scionproto/scion/blob/master/LICENSE)
-
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](code_of_conduct.md)
+# Connect as an endhost
+1. You need a JWT token, while the topology is running, open in the webbrowser `https://localhost:8888`, register using a new user and password. (accounts are in-memory, restarting the topology will delete the account, however, the JWT tokens remain valid as long as the topology is not reseted)
+2. Click on the "Create new Token" button.
+3. Now run the command `./bin/marketplace_client XXX`
+where XXX is your token. The tokens have a validity of 1 week.

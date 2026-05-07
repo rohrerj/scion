@@ -7,8 +7,8 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/private/serrors"
-	"github.com/scionproto/scion/pkg/proto/control_plane"
-	"github.com/scionproto/scion/pkg/proto/control_plane/v1/control_planeconnect"
+	"github.com/scionproto/scion/pkg/proto/endhost"
+	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	"github.com/scionproto/scion/private/storage"
 	storageTrust "github.com/scionproto/scion/private/storage/trust"
@@ -17,19 +17,19 @@ import (
 
 type DB_Wrapper struct {
 	db     storage.TrustDB
-	client control_planeconnect.TrustMaterialServiceClient
+	client endhostconnect.TrustServiceClient
 }
 
-func FromTrustDB(db storage.TrustDB, controlClient control_planeconnect.TrustMaterialServiceClient) *DB_Wrapper {
+func FromTrustDB(db storage.TrustDB, client endhostconnect.TrustServiceClient) *DB_Wrapper {
 	return &DB_Wrapper{
 		db:     db,
-		client: controlClient,
+		client: client,
 	}
 }
 
 func (d *DB_Wrapper) requestTRCFromCS(ctx context.Context, isd uint32, base uint64, serial uint64) ([]byte, error) {
-	rep, err := d.client.TRC(ctx, &connect.Request[control_plane.TRCRequest]{
-		Msg: &control_plane.TRCRequest{
+	rep, err := d.client.GetTrc(ctx, &connect.Request[endhost.TRCRequest]{
+		Msg: &endhost.TRCRequest{
 			Isd:    isd,
 			Base:   base,
 			Serial: serial,
@@ -63,7 +63,7 @@ func (d *DB_Wrapper) InsertTRC(ctx context.Context, trc cppki.SignedTRC) (bool, 
 
 func (d *DB_Wrapper) SignedTRC(ctx context.Context, id cppki.TRCID) (cppki.SignedTRC, error) {
 	trc, err := d.db.SignedTRC(ctx, id)
-	if err == nil && trc.IsZero() {
+	if err == nil && !trc.IsZero() {
 		return trc, nil
 	}
 	fmt.Println("trust material not found, must request from CS")
@@ -82,6 +82,6 @@ func (d *DB_Wrapper) SignedTRC(ctx context.Context, id cppki.TRCID) (cppki.Signe
 	return trc, nil
 }
 
-func (d *DB_Wrapper) SignedTRCs(context.Context, storageTrust.TRCsQuery) (cppki.SignedTRCs, error) {
-	panic("unimplemented")
+func (d *DB_Wrapper) SignedTRCs(ctx context.Context, query storageTrust.TRCsQuery) (cppki.SignedTRCs, error) {
+	return d.db.SignedTRCs(ctx, query)
 }

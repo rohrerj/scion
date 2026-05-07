@@ -32,12 +32,11 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
 
 	"github.com/scionproto/scion/marketplace"
 	"github.com/scionproto/scion/marketplace/webapp"
 	"github.com/scionproto/scion/pkg/private/serrors"
-	"github.com/scionproto/scion/pkg/proto/control_plane/v1/control_planeconnect"
+	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"github.com/scionproto/scion/private/app/launcher"
 	"github.com/scionproto/scion/private/storage"
@@ -84,13 +83,19 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	trustDB = marketplace.FromTrustDB(trustDB, control_planeconnect.NewTrustMaterialServiceClient(&http.Client{
-		Transport: &http2.Transport{
+	var endhostAPI string
+	for _, k := range topo.EndhostAPI() {
+		endhostAPI = k.Url
+		break
+	}
+
+	trustDB = marketplace.FromTrustDB(trustDB, endhostconnect.NewTrustServiceClient(&http.Client{
+		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true,
 			},
 		},
-	}, fmt.Sprintf("https://%s", topo.ControlServiceAddresses()[0].String())))
+	}, endhostAPI))
 
 	trustVerifer := trust.NewTLSCryptoVerifier(trustDB)
 
