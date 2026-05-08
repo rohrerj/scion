@@ -44,5 +44,5 @@ message RedeemAssetFromASResponse {
 message ReservationInfo {
     uint64 res_id = 1;
     uint64 bw_rounded = 2;
-    string bw_dataplane_encoding = 3;
+    uint32  bw_dataplane_encoding = 3;
 }

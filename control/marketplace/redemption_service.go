@@ -57,7 +57,7 @@ func (c *RedemptionClient) Init() error {
 			ResInfo: &hummingbird.ReservationInfo{
 				ResId:               resID,
 				BwRounded:           1,
-				BwDataplaneEncoding: "secret_encoding_method",
+				BwDataplaneEncoding: 0xFF,
 			},
 			Ak:        "my-ak",
 			RequestId: msg.RequestId,

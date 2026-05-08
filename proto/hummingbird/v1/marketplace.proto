@@ -123,7 +123,7 @@ message RedeemAssetResponse {
     string ak = 1;
     uint64 res_id = 2;
     uint64 bw_rounded = 3;
-    string bw_dataplane_encoding = 4;
+    uint32  bw_dataplane_encoding = 4;
 }
 
 message FetchReservationsRequest {

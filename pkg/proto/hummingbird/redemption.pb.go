@@ -174,7 +174,7 @@ type ReservationInfo struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	ResId               uint64                 `protobuf:"varint,1,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
 	BwRounded           uint64                 `protobuf:"varint,2,opt,name=bw_rounded,json=bwRounded,proto3" json:"bw_rounded,omitempty"`
-	BwDataplaneEncoding string                 `protobuf:"bytes,3,opt,name=bw_dataplane_encoding,json=bwDataplaneEncoding,proto3" json:"bw_dataplane_encoding,omitempty"`
+	BwDataplaneEncoding uint32                 `protobuf:"varint,3,opt,name=bw_dataplane_encoding,json=bwDataplaneEncoding,proto3" json:"bw_dataplane_encoding,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -223,11 +223,11 @@ func (x *ReservationInfo) GetBwRounded() uint64 {
 	return 0
 }
 
-func (x *ReservationInfo) GetBwDataplaneEncoding() string {
+func (x *ReservationInfo) GetBwDataplaneEncoding() uint32 {
 	if x != nil {
 		return x.BwDataplaneEncoding
 	}
-	return ""
+	return 0
 }
 
 var File_proto_hummingbird_v1_redemption_proto protoreflect.FileDescriptor
@@ -253,7 +253,7 @@ const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
 	"\x06res_id\x18\x01 \x01(\x04R\x05resId\x12\x1d\n" +
 	"\n" +
 	"bw_rounded\x18\x02 \x01(\x04R\tbwRounded\x122\n" +
-	"\x15bw_dataplane_encoding\x18\x03 \x01(\tR\x13bwDataplaneEncoding2\x8b\x01\n" +
+	"\x15bw_dataplane_encoding\x18\x03 \x01(\rR\x13bwDataplaneEncoding2\x8b\x01\n" +
 	"\x11RedemptionService\x12v\n" +
 	"\rRedeemASAsset\x12/.proto.hummingbird.v1.RedeemAssetFromASResponse\x1a..proto.hummingbird.v1.RedeemAssetFromASRequest\"\x00(\x010\x01B3Z1github.com/scionproto/scion/pkg/proto/hummingbirdb\x06proto3"
 
