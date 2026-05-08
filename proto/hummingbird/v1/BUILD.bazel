@@ -8,4 +8,7 @@ proto_library(
         "account.proto",
     ],
     visibility = ["//visibility:public"],
+    deps = [
+        "@protobuf//:timestamp_proto",
+    ],
 )

@@ -13,6 +13,7 @@ import (
 	status "google.golang.org/grpc/status"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -24,6 +25,58 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+type AssetType int32
+
+const (
+	AssetType_Any            AssetType = 0
+	AssetType_Ingress        AssetType = 1
+	AssetType_Egress         AssetType = 2
+	AssetType_Interface_Pair AssetType = 3
+)
+
+// Enum value maps for AssetType.
+var (
+	AssetType_name = map[int32]string{
+		0: "Any",
+		1: "Ingress",
+		2: "Egress",
+		3: "Interface_Pair",
+	}
+	AssetType_value = map[string]int32{
+		"Any":            0,
+		"Ingress":        1,
+		"Egress":         2,
+		"Interface_Pair": 3,
+	}
+)
+
+func (x AssetType) Enum() *AssetType {
+	p := new(AssetType)
+	*p = x
+	return p
+}
+
+func (x AssetType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AssetType) Descriptor() protoreflect.EnumDescriptor {
+	return file_proto_hummingbird_v1_marketplace_proto_enumTypes[0].Descriptor()
+}
+
+func (AssetType) Type() protoreflect.EnumType {
+	return &file_proto_hummingbird_v1_marketplace_proto_enumTypes[0]
+}
+
+func (x AssetType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AssetType.Descriptor instead.
+func (AssetType) EnumDescriptor() ([]byte, []int) {
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{0}
+}
 
 type MarketplaceInfoRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -125,14 +178,13 @@ type PublishAssetRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Bandwidth       uint64                 `protobuf:"varint,1,opt,name=bandwidth,proto3" json:"bandwidth,omitempty"`
 	BandwidthMin    uint64                 `protobuf:"varint,2,opt,name=bandwidth_min,json=bandwidthMin,proto3" json:"bandwidth_min,omitempty"`
-	StartAt         uint64                 `protobuf:"varint,3,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"`
-	StopsAt         uint64                 `protobuf:"varint,4,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
+	StartAt         *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"`
+	StopsAt         *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
 	Price           uint64                 `protobuf:"varint,5,opt,name=price,proto3" json:"price,omitempty"`
 	TimeGranularity uint64                 `protobuf:"varint,6,opt,name=time_granularity,json=timeGranularity,proto3" json:"time_granularity,omitempty"`
 	TimeMinDuration uint64                 `protobuf:"varint,7,opt,name=time_min_duration,json=timeMinDuration,proto3" json:"time_min_duration,omitempty"`
-	BwGranularity   uint64                 `protobuf:"varint,8,opt,name=bw_granularity,json=bwGranularity,proto3" json:"bw_granularity,omitempty"`
-	IfIdIngress     *uint32                `protobuf:"varint,9,opt,name=if_id_ingress,json=ifIdIngress,proto3,oneof" json:"if_id_ingress,omitempty"`
-	IfIdEgress      *uint32                `protobuf:"varint,10,opt,name=if_id_egress,json=ifIdEgress,proto3,oneof" json:"if_id_egress,omitempty"`
+	IfIdIngress     *uint32                `protobuf:"varint,8,opt,name=if_id_ingress,json=ifIdIngress,proto3,oneof" json:"if_id_ingress,omitempty"`
+	IfIdEgress      *uint32                `protobuf:"varint,9,opt,name=if_id_egress,json=ifIdEgress,proto3,oneof" json:"if_id_egress,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -181,18 +233,18 @@ func (x *PublishAssetRequest) GetBandwidthMin() uint64 {
 	return 0
 }
 
-func (x *PublishAssetRequest) GetStartAt() uint64 {
+func (x *PublishAssetRequest) GetStartAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.StartAt
 	}
-	return 0
+	return nil
 }
 
-func (x *PublishAssetRequest) GetStopsAt() uint64 {
+func (x *PublishAssetRequest) GetStopsAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.StopsAt
 	}
-	return 0
+	return nil
 }
 
 func (x *PublishAssetRequest) GetPrice() uint64 {
@@ -216,13 +268,6 @@ func (x *PublishAssetRequest) GetTimeMinDuration() uint64 {
 	return 0
 }
 
-func (x *PublishAssetRequest) GetBwGranularity() uint64 {
-	if x != nil {
-		return x.BwGranularity
-	}
-	return 0
-}
-
 func (x *PublishAssetRequest) GetIfIdIngress() uint32 {
 	if x != nil && x.IfIdIngress != nil {
 		return *x.IfIdIngress
@@ -239,6 +284,7 @@ func (x *PublishAssetRequest) GetIfIdEgress() uint32 {
 
 type PublishAssetResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	AssetId       uint64                 `protobuf:"varint,1,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -273,16 +319,24 @@ func (*PublishAssetResponse) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *PublishAssetResponse) GetAssetId() uint64 {
+	if x != nil {
+		return x.AssetId
+	}
+	return 0
+}
+
 type SearchAssetsRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Owned           bool                   `protobuf:"varint,1,opt,name=owned,proto3" json:"owned,omitempty"`
 	Ia              *uint64                `protobuf:"varint,2,opt,name=ia,proto3,oneof" json:"ia,omitempty"`
-	IngressId       *uint32                `protobuf:"varint,3,opt,name=ingress_id,json=ingressId,proto3,oneof" json:"ingress_id,omitempty"`
-	EgressId        *uint32                `protobuf:"varint,4,opt,name=egress_id,json=egressId,proto3,oneof" json:"egress_id,omitempty"`
-	MinBw           *uint64                `protobuf:"varint,5,opt,name=min_bw,json=minBw,proto3,oneof" json:"min_bw,omitempty"`
-	StartsAtLatest  *uint64                `protobuf:"varint,6,opt,name=starts_at_latest,json=startsAtLatest,proto3,oneof" json:"starts_at_latest,omitempty"`
-	StopsAtEarliest *uint64                `protobuf:"varint,7,opt,name=stops_at_earliest,json=stopsAtEarliest,proto3,oneof" json:"stops_at_earliest,omitempty"`
-	Price           *uint64                `protobuf:"varint,8,opt,name=price,proto3,oneof" json:"price,omitempty"`
+	AssetType       *AssetType             `protobuf:"varint,3,opt,name=asset_type,json=assetType,proto3,enum=proto.hummingbird.v1.AssetType,oneof" json:"asset_type,omitempty"`
+	IfIdIngress     *uint32                `protobuf:"varint,4,opt,name=if_id_ingress,json=ifIdIngress,proto3,oneof" json:"if_id_ingress,omitempty"`
+	IfIdEgress      *uint32                `protobuf:"varint,5,opt,name=if_id_egress,json=ifIdEgress,proto3,oneof" json:"if_id_egress,omitempty"`
+	MinRequiredBw   *uint64                `protobuf:"varint,6,opt,name=min_required_bw,json=minRequiredBw,proto3,oneof" json:"min_required_bw,omitempty"`
+	StartsAtLatest  *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=starts_at_latest,json=startsAtLatest,proto3,oneof" json:"starts_at_latest,omitempty"`
+	StopsAtEarliest *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=stops_at_earliest,json=stopsAtEarliest,proto3,oneof" json:"stops_at_earliest,omitempty"`
+	Price           *uint64                `protobuf:"varint,9,opt,name=price,proto3,oneof" json:"price,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -331,39 +385,46 @@ func (x *SearchAssetsRequest) GetIa() uint64 {
 	return 0
 }
 
-func (x *SearchAssetsRequest) GetIngressId() uint32 {
-	if x != nil && x.IngressId != nil {
-		return *x.IngressId
+func (x *SearchAssetsRequest) GetAssetType() AssetType {
+	if x != nil && x.AssetType != nil {
+		return *x.AssetType
+	}
+	return AssetType_Any
+}
+
+func (x *SearchAssetsRequest) GetIfIdIngress() uint32 {
+	if x != nil && x.IfIdIngress != nil {
+		return *x.IfIdIngress
 	}
 	return 0
 }
 
-func (x *SearchAssetsRequest) GetEgressId() uint32 {
-	if x != nil && x.EgressId != nil {
-		return *x.EgressId
+func (x *SearchAssetsRequest) GetIfIdEgress() uint32 {
+	if x != nil && x.IfIdEgress != nil {
+		return *x.IfIdEgress
 	}
 	return 0
 }
 
-func (x *SearchAssetsRequest) GetMinBw() uint64 {
-	if x != nil && x.MinBw != nil {
-		return *x.MinBw
+func (x *SearchAssetsRequest) GetMinRequiredBw() uint64 {
+	if x != nil && x.MinRequiredBw != nil {
+		return *x.MinRequiredBw
 	}
 	return 0
 }
 
-func (x *SearchAssetsRequest) GetStartsAtLatest() uint64 {
-	if x != nil && x.StartsAtLatest != nil {
-		return *x.StartsAtLatest
+func (x *SearchAssetsRequest) GetStartsAtLatest() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartsAtLatest
 	}
-	return 0
+	return nil
 }
 
-func (x *SearchAssetsRequest) GetStopsAtEarliest() uint64 {
-	if x != nil && x.StopsAtEarliest != nil {
-		return *x.StopsAtEarliest
+func (x *SearchAssetsRequest) GetStopsAtEarliest() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StopsAtEarliest
 	}
-	return 0
+	return nil
 }
 
 func (x *SearchAssetsRequest) GetPrice() uint64 {
@@ -429,14 +490,14 @@ type Asset struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	AssetId         uint64                 `protobuf:"varint,1,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
 	Ia              uint64                 `protobuf:"varint,2,opt,name=ia,proto3" json:"ia,omitempty"`
-	IfId            uint32                 `protobuf:"varint,3,opt,name=if_id,json=ifId,proto3" json:"if_id,omitempty"`
-	IsIngress       bool                   `protobuf:"varint,4,opt,name=is_ingress,json=isIngress,proto3" json:"is_ingress,omitempty"`
-	Bw              uint64                 `protobuf:"varint,5,opt,name=bw,proto3" json:"bw,omitempty"`
-	StartsAt        uint64                 `protobuf:"varint,6,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
-	StopsAt         uint64                 `protobuf:"varint,7,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
-	Price           uint64                 `protobuf:"varint,8,opt,name=price,proto3" json:"price,omitempty"`
+	AssetType       AssetType              `protobuf:"varint,3,opt,name=asset_type,json=assetType,proto3,enum=proto.hummingbird.v1.AssetType" json:"asset_type,omitempty"`
+	IfIdIngress     uint32                 `protobuf:"varint,4,opt,name=if_id_ingress,json=ifIdIngress,proto3" json:"if_id_ingress,omitempty"`
+	IfIdEgress      uint32                 `protobuf:"varint,5,opt,name=if_id_egress,json=ifIdEgress,proto3" json:"if_id_egress,omitempty"`
+	Bw              uint64                 `protobuf:"varint,6,opt,name=bw,proto3" json:"bw,omitempty"`
+	StartsAt        *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
+	StopsAt         *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
 	TimeGranularity uint64                 `protobuf:"varint,9,opt,name=time_granularity,json=timeGranularity,proto3" json:"time_granularity,omitempty"`
-	BwGranularity   uint64                 `protobuf:"varint,10,opt,name=bw_granularity,json=bwGranularity,proto3" json:"bw_granularity,omitempty"`
+	Price           uint64                 `protobuf:"varint,10,opt,name=price,proto3" json:"price,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -485,18 +546,25 @@ func (x *Asset) GetIa() uint64 {
 	return 0
 }
 
-func (x *Asset) GetIfId() uint32 {
+func (x *Asset) GetAssetType() AssetType {
 	if x != nil {
-		return x.IfId
+		return x.AssetType
+	}
+	return AssetType_Any
+}
+
+func (x *Asset) GetIfIdIngress() uint32 {
+	if x != nil {
+		return x.IfIdIngress
 	}
 	return 0
 }
 
-func (x *Asset) GetIsIngress() bool {
+func (x *Asset) GetIfIdEgress() uint32 {
 	if x != nil {
-		return x.IsIngress
+		return x.IfIdEgress
 	}
-	return false
+	return 0
 }
 
 func (x *Asset) GetBw() uint64 {
@@ -506,25 +574,18 @@ func (x *Asset) GetBw() uint64 {
 	return 0
 }
 
-func (x *Asset) GetStartsAt() uint64 {
+func (x *Asset) GetStartsAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.StartsAt
 	}
-	return 0
+	return nil
 }
 
-func (x *Asset) GetStopsAt() uint64 {
+func (x *Asset) GetStopsAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.StopsAt
 	}
-	return 0
-}
-
-func (x *Asset) GetPrice() uint64 {
-	if x != nil {
-		return x.Price
-	}
-	return 0
+	return nil
 }
 
 func (x *Asset) GetTimeGranularity() uint64 {
@@ -534,9 +595,9 @@ func (x *Asset) GetTimeGranularity() uint64 {
 	return 0
 }
 
-func (x *Asset) GetBwGranularity() uint64 {
+func (x *Asset) GetPrice() uint64 {
 	if x != nil {
-		return x.BwGranularity
+		return x.Price
 	}
 	return 0
 }
@@ -596,8 +657,8 @@ func (x *BuyAssetsRequest) GetMaxPrice() uint64 {
 type BuyAsset struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	AssetId         uint64                 `protobuf:"varint,1,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
-	StartsAtExactly uint64                 `protobuf:"varint,2,opt,name=starts_at_exactly,json=startsAtExactly,proto3" json:"starts_at_exactly,omitempty"`
-	StopsAtExactly  uint64                 `protobuf:"varint,3,opt,name=stops_at_exactly,json=stopsAtExactly,proto3" json:"stops_at_exactly,omitempty"`
+	StartsAtExactly *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=starts_at_exactly,json=startsAtExactly,proto3" json:"starts_at_exactly,omitempty"`
+	StopsAtExactly  *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=stops_at_exactly,json=stopsAtExactly,proto3" json:"stops_at_exactly,omitempty"`
 	BwExact         uint64                 `protobuf:"varint,4,opt,name=bw_exact,json=bwExact,proto3" json:"bw_exact,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -640,18 +701,18 @@ func (x *BuyAsset) GetAssetId() uint64 {
 	return 0
 }
 
-func (x *BuyAsset) GetStartsAtExactly() uint64 {
+func (x *BuyAsset) GetStartsAtExactly() *timestamppb.Timestamp {
 	if x != nil {
 		return x.StartsAtExactly
 	}
-	return 0
+	return nil
 }
 
-func (x *BuyAsset) GetStopsAtExactly() uint64 {
+func (x *BuyAsset) GetStopsAtExactly() *timestamppb.Timestamp {
 	if x != nil {
 		return x.StopsAtExactly
 	}
-	return 0
+	return nil
 }
 
 func (x *BuyAsset) GetBwExact() uint64 {
@@ -761,6 +822,7 @@ type RedeemAssetRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	IngressAssetId uint64                 `protobuf:"varint,1,opt,name=ingress_asset_id,json=ingressAssetId,proto3" json:"ingress_asset_id,omitempty"`
 	EgressAssetId  uint64                 `protobuf:"varint,2,opt,name=egress_asset_id,json=egressAssetId,proto3" json:"egress_asset_id,omitempty"`
+	IfPairAssetId  uint64                 `protobuf:"varint,3,opt,name=if_pair_asset_id,json=ifPairAssetId,proto3" json:"if_pair_asset_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -809,12 +871,21 @@ func (x *RedeemAssetRequest) GetEgressAssetId() uint64 {
 	return 0
 }
 
+func (x *RedeemAssetRequest) GetIfPairAssetId() uint64 {
+	if x != nil {
+		return x.IfPairAssetId
+	}
+	return 0
+}
+
 type RedeemAssetResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ak            string                 `protobuf:"bytes,1,opt,name=ak,proto3" json:"ak,omitempty"`
-	ResId         string                 `protobuf:"bytes,2,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Ak                  string                 `protobuf:"bytes,1,opt,name=ak,proto3" json:"ak,omitempty"`
+	ResId               uint64                 `protobuf:"varint,2,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
+	BwRounded           uint64                 `protobuf:"varint,3,opt,name=bw_rounded,json=bwRounded,proto3" json:"bw_rounded,omitempty"`
+	BwDataplaneEncoding string                 `protobuf:"bytes,4,opt,name=bw_dataplane_encoding,json=bwDataplaneEncoding,proto3" json:"bw_dataplane_encoding,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *RedeemAssetResponse) Reset() {
@@ -854,9 +925,23 @@ func (x *RedeemAssetResponse) GetAk() string {
 	return ""
 }
 
-func (x *RedeemAssetResponse) GetResId() string {
+func (x *RedeemAssetResponse) GetResId() uint64 {
 	if x != nil {
 		return x.ResId
+	}
+	return 0
+}
+
+func (x *RedeemAssetResponse) GetBwRounded() uint64 {
+	if x != nil {
+		return x.BwRounded
+	}
+	return 0
+}
+
+func (x *RedeemAssetResponse) GetBwDataplaneEncoding() string {
+	if x != nil {
+		return x.BwDataplaneEncoding
 	}
 	return ""
 }
@@ -867,8 +952,8 @@ type FetchReservationsRequest struct {
 	IngressId     *uint32                `protobuf:"varint,2,opt,name=ingress_id,json=ingressId,proto3,oneof" json:"ingress_id,omitempty"`
 	EgressId      *uint32                `protobuf:"varint,3,opt,name=egress_id,json=egressId,proto3,oneof" json:"egress_id,omitempty"`
 	Bw            *uint64                `protobuf:"varint,4,opt,name=bw,proto3,oneof" json:"bw,omitempty"`
-	StartsAt      *uint64                `protobuf:"varint,5,opt,name=starts_at,json=startsAt,proto3,oneof" json:"starts_at,omitempty"`
-	StopsAt       *uint64                `protobuf:"varint,6,opt,name=stops_at,json=stopsAt,proto3,oneof" json:"stops_at,omitempty"`
+	StartsAt      *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=starts_at,json=startsAt,proto3,oneof" json:"starts_at,omitempty"`
+	StopsAt       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=stops_at,json=stopsAt,proto3,oneof" json:"stops_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -931,18 +1016,18 @@ func (x *FetchReservationsRequest) GetBw() uint64 {
 	return 0
 }
 
-func (x *FetchReservationsRequest) GetStartsAt() uint64 {
-	if x != nil && x.StartsAt != nil {
-		return *x.StartsAt
+func (x *FetchReservationsRequest) GetStartsAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartsAt
 	}
-	return 0
+	return nil
 }
 
-func (x *FetchReservationsRequest) GetStopsAt() uint64 {
-	if x != nil && x.StopsAt != nil {
-		return *x.StopsAt
+func (x *FetchReservationsRequest) GetStopsAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StopsAt
 	}
-	return 0
+	return nil
 }
 
 type FetchReservationsResponse struct {
@@ -996,8 +1081,8 @@ type Reservation struct {
 	IngressId     uint32                 `protobuf:"varint,3,opt,name=ingress_id,json=ingressId,proto3" json:"ingress_id,omitempty"`
 	EgressId      uint32                 `protobuf:"varint,4,opt,name=egress_id,json=egressId,proto3" json:"egress_id,omitempty"`
 	Bw            uint64                 `protobuf:"varint,5,opt,name=bw,proto3" json:"bw,omitempty"`
-	StartsAt      uint64                 `protobuf:"varint,6,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
-	StopsAt       uint64                 `protobuf:"varint,7,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
+	StartsAt      *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
+	StopsAt       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
 	Ak            string                 `protobuf:"bytes,8,opt,name=ak,proto3" json:"ak,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1068,18 +1153,18 @@ func (x *Reservation) GetBw() uint64 {
 	return 0
 }
 
-func (x *Reservation) GetStartsAt() uint64 {
+func (x *Reservation) GetStartsAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.StartsAt
 	}
-	return 0
+	return nil
 }
 
-func (x *Reservation) GetStopsAt() uint64 {
+func (x *Reservation) GetStopsAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.StopsAt
 	}
-	return 0
+	return nil
 }
 
 func (x *Reservation) GetAk() string {
@@ -1093,89 +1178,95 @@ var File_proto_hummingbird_v1_marketplace_proto protoreflect.FileDescriptor
 
 const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\n" +
-	"&proto/hummingbird/v1/marketplace.proto\x12\x14proto.hummingbird.v1\"\x18\n" +
+	"&proto/hummingbird/v1/marketplace.proto\x12\x14proto.hummingbird.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x18\n" +
 	"\x16MarketplaceInfoRequest\"\x8d\x01\n" +
 	"\x17MarketplaceInfoResponse\x12*\n" +
 	"\x11api_major_version\x18\x01 \x01(\x04R\x0fapiMajorVersion\x12*\n" +
 	"\x11api_minor_version\x18\x02 \x01(\x04R\x0fapiMinorVersion\x12\x1a\n" +
-	"\bcurrency\x18\x03 \x01(\tR\bcurrency\"\x95\x03\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency\"\xa6\x03\n" +
 	"\x13PublishAssetRequest\x12\x1c\n" +
 	"\tbandwidth\x18\x01 \x01(\x04R\tbandwidth\x12#\n" +
-	"\rbandwidth_min\x18\x02 \x01(\x04R\fbandwidthMin\x12\x19\n" +
-	"\bstart_at\x18\x03 \x01(\x04R\astartAt\x12\x19\n" +
-	"\bstops_at\x18\x04 \x01(\x04R\astopsAt\x12\x14\n" +
+	"\rbandwidth_min\x18\x02 \x01(\x04R\fbandwidthMin\x125\n" +
+	"\bstart_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\astartAt\x125\n" +
+	"\bstops_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12\x14\n" +
 	"\x05price\x18\x05 \x01(\x04R\x05price\x12)\n" +
 	"\x10time_granularity\x18\x06 \x01(\x04R\x0ftimeGranularity\x12*\n" +
-	"\x11time_min_duration\x18\a \x01(\x04R\x0ftimeMinDuration\x12%\n" +
-	"\x0ebw_granularity\x18\b \x01(\x04R\rbwGranularity\x12'\n" +
-	"\rif_id_ingress\x18\t \x01(\rH\x00R\vifIdIngress\x88\x01\x01\x12%\n" +
-	"\fif_id_egress\x18\n" +
-	" \x01(\rH\x01R\n" +
+	"\x11time_min_duration\x18\a \x01(\x04R\x0ftimeMinDuration\x12'\n" +
+	"\rif_id_ingress\x18\b \x01(\rH\x00R\vifIdIngress\x88\x01\x01\x12%\n" +
+	"\fif_id_egress\x18\t \x01(\rH\x01R\n" +
 	"ifIdEgress\x88\x01\x01B\x10\n" +
 	"\x0e_if_id_ingressB\x0f\n" +
-	"\r_if_id_egress\"\x16\n" +
-	"\x14PublishAssetResponse\"\x81\x03\n" +
+	"\r_if_id_egress\"1\n" +
+	"\x14PublishAssetResponse\x12\x19\n" +
+	"\basset_id\x18\x01 \x01(\x04R\aassetId\"\xb7\x04\n" +
 	"\x13SearchAssetsRequest\x12\x14\n" +
 	"\x05owned\x18\x01 \x01(\bR\x05owned\x12\x13\n" +
-	"\x02ia\x18\x02 \x01(\x04H\x00R\x02ia\x88\x01\x01\x12\"\n" +
+	"\x02ia\x18\x02 \x01(\x04H\x00R\x02ia\x88\x01\x01\x12C\n" +
 	"\n" +
-	"ingress_id\x18\x03 \x01(\rH\x01R\tingressId\x88\x01\x01\x12 \n" +
-	"\tegress_id\x18\x04 \x01(\rH\x02R\begressId\x88\x01\x01\x12\x1a\n" +
-	"\x06min_bw\x18\x05 \x01(\x04H\x03R\x05minBw\x88\x01\x01\x12-\n" +
-	"\x10starts_at_latest\x18\x06 \x01(\x04H\x04R\x0estartsAtLatest\x88\x01\x01\x12/\n" +
-	"\x11stops_at_earliest\x18\a \x01(\x04H\x05R\x0fstopsAtEarliest\x88\x01\x01\x12\x19\n" +
-	"\x05price\x18\b \x01(\x04H\x06R\x05price\x88\x01\x01B\x05\n" +
+	"asset_type\x18\x03 \x01(\x0e2\x1f.proto.hummingbird.v1.AssetTypeH\x01R\tassetType\x88\x01\x01\x12'\n" +
+	"\rif_id_ingress\x18\x04 \x01(\rH\x02R\vifIdIngress\x88\x01\x01\x12%\n" +
+	"\fif_id_egress\x18\x05 \x01(\rH\x03R\n" +
+	"ifIdEgress\x88\x01\x01\x12+\n" +
+	"\x0fmin_required_bw\x18\x06 \x01(\x04H\x04R\rminRequiredBw\x88\x01\x01\x12I\n" +
+	"\x10starts_at_latest\x18\a \x01(\v2\x1a.google.protobuf.TimestampH\x05R\x0estartsAtLatest\x88\x01\x01\x12K\n" +
+	"\x11stops_at_earliest\x18\b \x01(\v2\x1a.google.protobuf.TimestampH\x06R\x0fstopsAtEarliest\x88\x01\x01\x12\x19\n" +
+	"\x05price\x18\t \x01(\x04H\aR\x05price\x88\x01\x01B\x05\n" +
 	"\x03_iaB\r\n" +
-	"\v_ingress_idB\f\n" +
-	"\n" +
-	"_egress_idB\t\n" +
-	"\a_min_bwB\x13\n" +
+	"\v_asset_typeB\x10\n" +
+	"\x0e_if_id_ingressB\x0f\n" +
+	"\r_if_id_egressB\x12\n" +
+	"\x10_min_required_bwB\x13\n" +
 	"\x11_starts_at_latestB\x14\n" +
 	"\x12_stops_at_earliestB\b\n" +
 	"\x06_price\"a\n" +
 	"\x14SearchAssetsResponse\x12\x14\n" +
 	"\x05owned\x18\x01 \x01(\bR\x05owned\x123\n" +
-	"\x06assets\x18\x02 \x03(\v2\x1b.proto.hummingbird.v1.AssetR\x06assets\"\x96\x02\n" +
+	"\x06assets\x18\x02 \x03(\v2\x1b.proto.hummingbird.v1.AssetR\x06assets\"\xf9\x02\n" +
 	"\x05Asset\x12\x19\n" +
 	"\basset_id\x18\x01 \x01(\x04R\aassetId\x12\x0e\n" +
-	"\x02ia\x18\x02 \x01(\x04R\x02ia\x12\x13\n" +
-	"\x05if_id\x18\x03 \x01(\rR\x04ifId\x12\x1d\n" +
+	"\x02ia\x18\x02 \x01(\x04R\x02ia\x12>\n" +
 	"\n" +
-	"is_ingress\x18\x04 \x01(\bR\tisIngress\x12\x0e\n" +
-	"\x02bw\x18\x05 \x01(\x04R\x02bw\x12\x1b\n" +
-	"\tstarts_at\x18\x06 \x01(\x04R\bstartsAt\x12\x19\n" +
-	"\bstops_at\x18\a \x01(\x04R\astopsAt\x12\x14\n" +
-	"\x05price\x18\b \x01(\x04R\x05price\x12)\n" +
-	"\x10time_granularity\x18\t \x01(\x04R\x0ftimeGranularity\x12%\n" +
-	"\x0ebw_granularity\x18\n" +
-	" \x01(\x04R\rbwGranularity\"g\n" +
+	"asset_type\x18\x03 \x01(\x0e2\x1f.proto.hummingbird.v1.AssetTypeR\tassetType\x12\"\n" +
+	"\rif_id_ingress\x18\x04 \x01(\rR\vifIdIngress\x12 \n" +
+	"\fif_id_egress\x18\x05 \x01(\rR\n" +
+	"ifIdEgress\x12\x0e\n" +
+	"\x02bw\x18\x06 \x01(\x04R\x02bw\x127\n" +
+	"\tstarts_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
+	"\bstops_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12)\n" +
+	"\x10time_granularity\x18\t \x01(\x04R\x0ftimeGranularity\x12\x14\n" +
+	"\x05price\x18\n" +
+	" \x01(\x04R\x05price\"g\n" +
 	"\x10BuyAssetsRequest\x126\n" +
 	"\x06assets\x18\x01 \x03(\v2\x1e.proto.hummingbird.v1.BuyAssetR\x06assets\x12\x1b\n" +
-	"\tmax_price\x18\x02 \x01(\x04R\bmaxPrice\"\x96\x01\n" +
+	"\tmax_price\x18\x02 \x01(\x04R\bmaxPrice\"\xce\x01\n" +
 	"\bBuyAsset\x12\x19\n" +
-	"\basset_id\x18\x01 \x01(\x04R\aassetId\x12*\n" +
-	"\x11starts_at_exactly\x18\x02 \x01(\x04R\x0fstartsAtExactly\x12(\n" +
-	"\x10stops_at_exactly\x18\x03 \x01(\x04R\x0estopsAtExactly\x12\x19\n" +
+	"\basset_id\x18\x01 \x01(\x04R\aassetId\x12F\n" +
+	"\x11starts_at_exactly\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x0fstartsAtExactly\x12D\n" +
+	"\x10stops_at_exactly\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x0estopsAtExactly\x12\x19\n" +
 	"\bbw_exact\x18\x04 \x01(\x04R\abwExact\"b\n" +
 	"\x11BuyAssetsResponse\x129\n" +
 	"\x06assets\x18\x01 \x03(\v2!.proto.hummingbird.v1.BoughtAssetR\x06assets\x12\x12\n" +
 	"\x04cost\x18\x02 \x01(\x04R\x04cost\"(\n" +
 	"\vBoughtAsset\x12\x19\n" +
-	"\basset_id\x18\x01 \x01(\x04R\aassetId\"f\n" +
+	"\basset_id\x18\x01 \x01(\x04R\aassetId\"\x8f\x01\n" +
 	"\x12RedeemAssetRequest\x12(\n" +
 	"\x10ingress_asset_id\x18\x01 \x01(\x04R\x0eingressAssetId\x12&\n" +
-	"\x0fegress_asset_id\x18\x02 \x01(\x04R\regressAssetId\"<\n" +
+	"\x0fegress_asset_id\x18\x02 \x01(\x04R\regressAssetId\x12'\n" +
+	"\x10if_pair_asset_id\x18\x03 \x01(\x04R\rifPairAssetId\"\x8f\x01\n" +
 	"\x13RedeemAssetResponse\x12\x0e\n" +
 	"\x02ak\x18\x01 \x01(\tR\x02ak\x12\x15\n" +
-	"\x06res_id\x18\x02 \x01(\tR\x05resId\"\x92\x02\n" +
+	"\x06res_id\x18\x02 \x01(\x04R\x05resId\x12\x1d\n" +
+	"\n" +
+	"bw_rounded\x18\x03 \x01(\x04R\tbwRounded\x122\n" +
+	"\x15bw_dataplane_encoding\x18\x04 \x01(\tR\x13bwDataplaneEncoding\"\xca\x02\n" +
 	"\x18FetchReservationsRequest\x12\x13\n" +
 	"\x02ia\x18\x01 \x01(\x04H\x00R\x02ia\x88\x01\x01\x12\"\n" +
 	"\n" +
 	"ingress_id\x18\x02 \x01(\rH\x01R\tingressId\x88\x01\x01\x12 \n" +
 	"\tegress_id\x18\x03 \x01(\rH\x02R\begressId\x88\x01\x01\x12\x13\n" +
-	"\x02bw\x18\x04 \x01(\x04H\x03R\x02bw\x88\x01\x01\x12 \n" +
-	"\tstarts_at\x18\x05 \x01(\x04H\x04R\bstartsAt\x88\x01\x01\x12\x1e\n" +
-	"\bstops_at\x18\x06 \x01(\x04H\x05R\astopsAt\x88\x01\x01B\x05\n" +
+	"\x02bw\x18\x04 \x01(\x04H\x03R\x02bw\x88\x01\x01\x12<\n" +
+	"\tstarts_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampH\x04R\bstartsAt\x88\x01\x01\x12:\n" +
+	"\bstops_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampH\x05R\astopsAt\x88\x01\x01B\x05\n" +
 	"\x03_iaB\r\n" +
 	"\v_ingress_idB\f\n" +
 	"\n" +
@@ -1185,17 +1276,23 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"_starts_atB\v\n" +
 	"\t_stops_at\"b\n" +
 	"\x19FetchReservationsResponse\x12E\n" +
-	"\freservations\x18\x01 \x03(\v2!.proto.hummingbird.v1.ReservationR\freservations\"\xc8\x01\n" +
+	"\freservations\x18\x01 \x03(\v2!.proto.hummingbird.v1.ReservationR\freservations\"\x80\x02\n" +
 	"\vReservation\x12\x15\n" +
 	"\x06res_id\x18\x01 \x01(\x04R\x05resId\x12\x0e\n" +
 	"\x02ia\x18\x02 \x01(\x04R\x02ia\x12\x1d\n" +
 	"\n" +
 	"ingress_id\x18\x03 \x01(\rR\tingressId\x12\x1b\n" +
 	"\tegress_id\x18\x04 \x01(\rR\begressId\x12\x0e\n" +
-	"\x02bw\x18\x05 \x01(\x04R\x02bw\x12\x1b\n" +
-	"\tstarts_at\x18\x06 \x01(\x04R\bstartsAt\x12\x19\n" +
-	"\bstops_at\x18\a \x01(\x04R\astopsAt\x12\x0e\n" +
-	"\x02ak\x18\b \x01(\tR\x02ak2\x8b\x05\n" +
+	"\x02bw\x18\x05 \x01(\x04R\x02bw\x127\n" +
+	"\tstarts_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
+	"\bstops_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12\x0e\n" +
+	"\x02ak\x18\b \x01(\tR\x02ak*A\n" +
+	"\tAssetType\x12\a\n" +
+	"\x03Any\x10\x00\x12\v\n" +
+	"\aIngress\x10\x01\x12\n" +
+	"\n" +
+	"\x06Egress\x10\x02\x12\x12\n" +
+	"\x0eInterface_Pair\x10\x032\x8b\x05\n" +
 	"\x12MarketplaceService\x12e\n" +
 	"\x04Info\x12,.proto.hummingbird.v1.MarketplaceInfoRequest\x1a-.proto.hummingbird.v1.MarketplaceInfoResponse\"\x00\x12g\n" +
 	"\fPublishAsset\x12).proto.hummingbird.v1.PublishAssetRequest\x1a*.proto.hummingbird.v1.PublishAssetResponse\"\x00\x12g\n" +
@@ -1216,47 +1313,64 @@ func file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP() []byte {
 	return file_proto_hummingbird_v1_marketplace_proto_rawDescData
 }
 
+var file_proto_hummingbird_v1_marketplace_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_proto_hummingbird_v1_marketplace_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_proto_hummingbird_v1_marketplace_proto_goTypes = []any{
-	(*MarketplaceInfoRequest)(nil),    // 0: proto.hummingbird.v1.MarketplaceInfoRequest
-	(*MarketplaceInfoResponse)(nil),   // 1: proto.hummingbird.v1.MarketplaceInfoResponse
-	(*PublishAssetRequest)(nil),       // 2: proto.hummingbird.v1.PublishAssetRequest
-	(*PublishAssetResponse)(nil),      // 3: proto.hummingbird.v1.PublishAssetResponse
-	(*SearchAssetsRequest)(nil),       // 4: proto.hummingbird.v1.SearchAssetsRequest
-	(*SearchAssetsResponse)(nil),      // 5: proto.hummingbird.v1.SearchAssetsResponse
-	(*Asset)(nil),                     // 6: proto.hummingbird.v1.Asset
-	(*BuyAssetsRequest)(nil),          // 7: proto.hummingbird.v1.BuyAssetsRequest
-	(*BuyAsset)(nil),                  // 8: proto.hummingbird.v1.BuyAsset
-	(*BuyAssetsResponse)(nil),         // 9: proto.hummingbird.v1.BuyAssetsResponse
-	(*BoughtAsset)(nil),               // 10: proto.hummingbird.v1.BoughtAsset
-	(*RedeemAssetRequest)(nil),        // 11: proto.hummingbird.v1.RedeemAssetRequest
-	(*RedeemAssetResponse)(nil),       // 12: proto.hummingbird.v1.RedeemAssetResponse
-	(*FetchReservationsRequest)(nil),  // 13: proto.hummingbird.v1.FetchReservationsRequest
-	(*FetchReservationsResponse)(nil), // 14: proto.hummingbird.v1.FetchReservationsResponse
-	(*Reservation)(nil),               // 15: proto.hummingbird.v1.Reservation
+	(AssetType)(0),                    // 0: proto.hummingbird.v1.AssetType
+	(*MarketplaceInfoRequest)(nil),    // 1: proto.hummingbird.v1.MarketplaceInfoRequest
+	(*MarketplaceInfoResponse)(nil),   // 2: proto.hummingbird.v1.MarketplaceInfoResponse
+	(*PublishAssetRequest)(nil),       // 3: proto.hummingbird.v1.PublishAssetRequest
+	(*PublishAssetResponse)(nil),      // 4: proto.hummingbird.v1.PublishAssetResponse
+	(*SearchAssetsRequest)(nil),       // 5: proto.hummingbird.v1.SearchAssetsRequest
+	(*SearchAssetsResponse)(nil),      // 6: proto.hummingbird.v1.SearchAssetsResponse
+	(*Asset)(nil),                     // 7: proto.hummingbird.v1.Asset
+	(*BuyAssetsRequest)(nil),          // 8: proto.hummingbird.v1.BuyAssetsRequest
+	(*BuyAsset)(nil),                  // 9: proto.hummingbird.v1.BuyAsset
+	(*BuyAssetsResponse)(nil),         // 10: proto.hummingbird.v1.BuyAssetsResponse
+	(*BoughtAsset)(nil),               // 11: proto.hummingbird.v1.BoughtAsset
+	(*RedeemAssetRequest)(nil),        // 12: proto.hummingbird.v1.RedeemAssetRequest
+	(*RedeemAssetResponse)(nil),       // 13: proto.hummingbird.v1.RedeemAssetResponse
+	(*FetchReservationsRequest)(nil),  // 14: proto.hummingbird.v1.FetchReservationsRequest
+	(*FetchReservationsResponse)(nil), // 15: proto.hummingbird.v1.FetchReservationsResponse
+	(*Reservation)(nil),               // 16: proto.hummingbird.v1.Reservation
+	(*timestamppb.Timestamp)(nil),     // 17: google.protobuf.Timestamp
 }
 var file_proto_hummingbird_v1_marketplace_proto_depIdxs = []int32{
-	6,  // 0: proto.hummingbird.v1.SearchAssetsResponse.assets:type_name -> proto.hummingbird.v1.Asset
-	8,  // 1: proto.hummingbird.v1.BuyAssetsRequest.assets:type_name -> proto.hummingbird.v1.BuyAsset
-	10, // 2: proto.hummingbird.v1.BuyAssetsResponse.assets:type_name -> proto.hummingbird.v1.BoughtAsset
-	15, // 3: proto.hummingbird.v1.FetchReservationsResponse.reservations:type_name -> proto.hummingbird.v1.Reservation
-	0,  // 4: proto.hummingbird.v1.MarketplaceService.Info:input_type -> proto.hummingbird.v1.MarketplaceInfoRequest
-	2,  // 5: proto.hummingbird.v1.MarketplaceService.PublishAsset:input_type -> proto.hummingbird.v1.PublishAssetRequest
-	4,  // 6: proto.hummingbird.v1.MarketplaceService.SearchAssets:input_type -> proto.hummingbird.v1.SearchAssetsRequest
-	7,  // 7: proto.hummingbird.v1.MarketplaceService.BuyAssets:input_type -> proto.hummingbird.v1.BuyAssetsRequest
-	11, // 8: proto.hummingbird.v1.MarketplaceService.RedeemAsset:input_type -> proto.hummingbird.v1.RedeemAssetRequest
-	13, // 9: proto.hummingbird.v1.MarketplaceService.FetchReservations:input_type -> proto.hummingbird.v1.FetchReservationsRequest
-	1,  // 10: proto.hummingbird.v1.MarketplaceService.Info:output_type -> proto.hummingbird.v1.MarketplaceInfoResponse
-	3,  // 11: proto.hummingbird.v1.MarketplaceService.PublishAsset:output_type -> proto.hummingbird.v1.PublishAssetResponse
-	5,  // 12: proto.hummingbird.v1.MarketplaceService.SearchAssets:output_type -> proto.hummingbird.v1.SearchAssetsResponse
-	9,  // 13: proto.hummingbird.v1.MarketplaceService.BuyAssets:output_type -> proto.hummingbird.v1.BuyAssetsResponse
-	12, // 14: proto.hummingbird.v1.MarketplaceService.RedeemAsset:output_type -> proto.hummingbird.v1.RedeemAssetResponse
-	14, // 15: proto.hummingbird.v1.MarketplaceService.FetchReservations:output_type -> proto.hummingbird.v1.FetchReservationsResponse
-	10, // [10:16] is the sub-list for method output_type
-	4,  // [4:10] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	17, // 0: proto.hummingbird.v1.PublishAssetRequest.start_at:type_name -> google.protobuf.Timestamp
+	17, // 1: proto.hummingbird.v1.PublishAssetRequest.stops_at:type_name -> google.protobuf.Timestamp
+	0,  // 2: proto.hummingbird.v1.SearchAssetsRequest.asset_type:type_name -> proto.hummingbird.v1.AssetType
+	17, // 3: proto.hummingbird.v1.SearchAssetsRequest.starts_at_latest:type_name -> google.protobuf.Timestamp
+	17, // 4: proto.hummingbird.v1.SearchAssetsRequest.stops_at_earliest:type_name -> google.protobuf.Timestamp
+	7,  // 5: proto.hummingbird.v1.SearchAssetsResponse.assets:type_name -> proto.hummingbird.v1.Asset
+	0,  // 6: proto.hummingbird.v1.Asset.asset_type:type_name -> proto.hummingbird.v1.AssetType
+	17, // 7: proto.hummingbird.v1.Asset.starts_at:type_name -> google.protobuf.Timestamp
+	17, // 8: proto.hummingbird.v1.Asset.stops_at:type_name -> google.protobuf.Timestamp
+	9,  // 9: proto.hummingbird.v1.BuyAssetsRequest.assets:type_name -> proto.hummingbird.v1.BuyAsset
+	17, // 10: proto.hummingbird.v1.BuyAsset.starts_at_exactly:type_name -> google.protobuf.Timestamp
+	17, // 11: proto.hummingbird.v1.BuyAsset.stops_at_exactly:type_name -> google.protobuf.Timestamp
+	11, // 12: proto.hummingbird.v1.BuyAssetsResponse.assets:type_name -> proto.hummingbird.v1.BoughtAsset
+	17, // 13: proto.hummingbird.v1.FetchReservationsRequest.starts_at:type_name -> google.protobuf.Timestamp
+	17, // 14: proto.hummingbird.v1.FetchReservationsRequest.stops_at:type_name -> google.protobuf.Timestamp
+	16, // 15: proto.hummingbird.v1.FetchReservationsResponse.reservations:type_name -> proto.hummingbird.v1.Reservation
+	17, // 16: proto.hummingbird.v1.Reservation.starts_at:type_name -> google.protobuf.Timestamp
+	17, // 17: proto.hummingbird.v1.Reservation.stops_at:type_name -> google.protobuf.Timestamp
+	1,  // 18: proto.hummingbird.v1.MarketplaceService.Info:input_type -> proto.hummingbird.v1.MarketplaceInfoRequest
+	3,  // 19: proto.hummingbird.v1.MarketplaceService.PublishAsset:input_type -> proto.hummingbird.v1.PublishAssetRequest
+	5,  // 20: proto.hummingbird.v1.MarketplaceService.SearchAssets:input_type -> proto.hummingbird.v1.SearchAssetsRequest
+	8,  // 21: proto.hummingbird.v1.MarketplaceService.BuyAssets:input_type -> proto.hummingbird.v1.BuyAssetsRequest
+	12, // 22: proto.hummingbird.v1.MarketplaceService.RedeemAsset:input_type -> proto.hummingbird.v1.RedeemAssetRequest
+	14, // 23: proto.hummingbird.v1.MarketplaceService.FetchReservations:input_type -> proto.hummingbird.v1.FetchReservationsRequest
+	2,  // 24: proto.hummingbird.v1.MarketplaceService.Info:output_type -> proto.hummingbird.v1.MarketplaceInfoResponse
+	4,  // 25: proto.hummingbird.v1.MarketplaceService.PublishAsset:output_type -> proto.hummingbird.v1.PublishAssetResponse
+	6,  // 26: proto.hummingbird.v1.MarketplaceService.SearchAssets:output_type -> proto.hummingbird.v1.SearchAssetsResponse
+	10, // 27: proto.hummingbird.v1.MarketplaceService.BuyAssets:output_type -> proto.hummingbird.v1.BuyAssetsResponse
+	13, // 28: proto.hummingbird.v1.MarketplaceService.RedeemAsset:output_type -> proto.hummingbird.v1.RedeemAssetResponse
+	15, // 29: proto.hummingbird.v1.MarketplaceService.FetchReservations:output_type -> proto.hummingbird.v1.FetchReservationsResponse
+	24, // [24:30] is the sub-list for method output_type
+	18, // [18:24] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_proto_hummingbird_v1_marketplace_proto_init() }
@@ -1272,13 +1386,14 @@ func file_proto_hummingbird_v1_marketplace_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_hummingbird_v1_marketplace_proto_rawDesc), len(file_proto_hummingbird_v1_marketplace_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_proto_hummingbird_v1_marketplace_proto_goTypes,
 		DependencyIndexes: file_proto_hummingbird_v1_marketplace_proto_depIdxs,
+		EnumInfos:         file_proto_hummingbird_v1_marketplace_proto_enumTypes,
 		MessageInfos:      file_proto_hummingbird_v1_marketplace_proto_msgTypes,
 	}.Build()
 	File_proto_hummingbird_v1_marketplace_proto = out.File

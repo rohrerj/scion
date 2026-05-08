@@ -44,6 +44,7 @@ func (c *RedemptionClient) Init() error {
 	fmt.Println("Connected to marketplace")
 	err := stream.Send(&hummingbird.RedeemAssetFromASResponse{})
 	fmt.Println("send empty", err)
+	resID := uint64(0)
 	for {
 		msg, err := stream.Receive()
 		if err != nil {
@@ -53,12 +54,15 @@ func (c *RedemptionClient) Init() error {
 		fmt.Println("received redemption request")
 
 		rep := &hummingbird.RedeemAssetFromASResponse{
-			Reservation: &hummingbird.ReservationInfo{
-				ResId: "my-res-id",
+			ResInfo: &hummingbird.ReservationInfo{
+				ResId:               resID,
+				BwRounded:           1,
+				BwDataplaneEncoding: "secret_encoding_method",
 			},
 			Ak:        "my-ak",
 			RequestId: msg.RequestId,
 		}
+		resID++
 
 		if err := stream.Send(rep); err != nil {
 			fmt.Println("Send error:", err)

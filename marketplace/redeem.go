@@ -39,6 +39,8 @@ func (c *RedemptionServerPeer) Send(req *hummingbird.RedeemAssetFromASRequest) <
 	respCh := make(chan *hummingbird.RedeemAssetFromASResponse, 1)
 
 	c.mu.Lock()
+	req.RequestId = c.requestID
+	c.requestID++
 	c.pending[req.RequestId] = respCh
 	c.mu.Unlock()
 
@@ -71,8 +73,6 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 			if req == nil {
 				return
 			}
-			req.RequestId = client.requestID
-			client.requestID++
 			if err := stream.Send(req); err != nil {
 				log.Println("Send error:", err)
 				return

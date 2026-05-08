@@ -24,6 +24,7 @@ import (
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type Asset struct {
@@ -31,12 +32,11 @@ type Asset struct {
 	IA              addr.IA
 	Bandwidth       uint64
 	BandwidthMin    uint64
-	StartAt         uint64
-	StopsAt         uint64
+	StartAt         time.Time
+	StopsAt         time.Time
 	Price           uint64
 	TimeGranularity uint64
 	TimeMinDuration uint64
-	BwGranularity   uint64
 	IfIdIngress     *uint32
 	IfIdEgress      *uint32
 }
@@ -105,22 +105,25 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 	if err != nil {
 		return nil, err
 	}
+
 	s.assets[s.currentAssetID] = &Asset{
 		IA:              ia,
 		Bandwidth:       req.Msg.Bandwidth,
 		BandwidthMin:    req.Msg.BandwidthMin,
-		StartAt:         req.Msg.StartAt,
-		StopsAt:         req.Msg.StopsAt,
+		StartAt:         req.Msg.StartAt.AsTime(),
+		StopsAt:         req.Msg.StopsAt.AsTime(),
 		Price:           req.Msg.Price,
 		TimeGranularity: req.Msg.TimeGranularity,
 		TimeMinDuration: req.Msg.TimeMinDuration,
-		BwGranularity:   req.Msg.BwGranularity,
 		IfIdIngress:     req.Msg.IfIdIngress,
 		IfIdEgress:      req.Msg.IfIdEgress,
 	}
+	resp := &hummingbird.PublishAssetResponse{
+		AssetId: s.currentAssetID,
+	}
 	s.currentAssetID++
 	return &connect.Response[hummingbird.PublishAssetResponse]{
-		Msg: &hummingbird.PublishAssetResponse{},
+		Msg: resp,
 	}, nil
 }
 
@@ -149,8 +152,10 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 		fmt.Println("got out of receive channel")
 		return &connect.Response[hummingbird.RedeemAssetResponse]{
 			Msg: &hummingbird.RedeemAssetResponse{
-				Ak:    resp.Ak,
-				ResId: "my-res-id",
+				Ak:                  resp.Ak,
+				ResId:               resp.ResInfo.ResId,
+				BwRounded:           resp.ResInfo.BwRounded,
+				BwDataplaneEncoding: resp.ResInfo.BwDataplaneEncoding,
 			},
 		}, nil
 	case <-time.After(2 * time.Second):
@@ -174,8 +179,8 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 					AssetId:  id,
 					Ia:       uint64(asset.IA),
 					Bw:       asset.Bandwidth,
-					StartsAt: asset.StartAt,
-					StopsAt:  asset.StopsAt,
+					StartsAt: timestamppb.New(asset.StartAt),
+					StopsAt:  timestamppb.New(asset.StopsAt),
 					// other fields omitted
 				})
 			}
@@ -190,8 +195,8 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 					AssetId:  id,
 					Ia:       uint64(asset.IA),
 					Bw:       asset.Bandwidth,
-					StartsAt: asset.StartAt,
-					StopsAt:  asset.StopsAt,
+					StartsAt: timestamppb.New(asset.StartAt),
+					StopsAt:  timestamppb.New(asset.StopsAt),
 					// other fields omitted
 				})
 			}

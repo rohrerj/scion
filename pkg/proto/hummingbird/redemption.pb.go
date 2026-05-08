@@ -13,6 +13,7 @@ import (
 	status "google.golang.org/grpc/status"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -30,8 +31,8 @@ type RedeemAssetFromASRequest struct {
 	IngressId     uint32                 `protobuf:"varint,1,opt,name=ingress_id,json=ingressId,proto3" json:"ingress_id,omitempty"`
 	EgressId      uint32                 `protobuf:"varint,2,opt,name=egress_id,json=egressId,proto3" json:"egress_id,omitempty"`
 	Bw            uint64                 `protobuf:"varint,3,opt,name=bw,proto3" json:"bw,omitempty"`
-	StartsAt      uint64                 `protobuf:"varint,4,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
-	StopsAt       uint64                 `protobuf:"varint,5,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
+	StartsAt      *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
+	StopsAt       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
 	RequestId     uint64                 `protobuf:"varint,6,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -88,18 +89,18 @@ func (x *RedeemAssetFromASRequest) GetBw() uint64 {
 	return 0
 }
 
-func (x *RedeemAssetFromASRequest) GetStartsAt() uint64 {
+func (x *RedeemAssetFromASRequest) GetStartsAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.StartsAt
 	}
-	return 0
+	return nil
 }
 
-func (x *RedeemAssetFromASRequest) GetStopsAt() uint64 {
+func (x *RedeemAssetFromASRequest) GetStopsAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.StopsAt
 	}
-	return 0
+	return nil
 }
 
 func (x *RedeemAssetFromASRequest) GetRequestId() uint64 {
@@ -111,7 +112,7 @@ func (x *RedeemAssetFromASRequest) GetRequestId() uint64 {
 
 type RedeemAssetFromASResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Reservation   *ReservationInfo       `protobuf:"bytes,1,opt,name=reservation,proto3" json:"reservation,omitempty"`
+	ResInfo       *ReservationInfo       `protobuf:"bytes,1,opt,name=res_info,json=resInfo,proto3" json:"res_info,omitempty"`
 	Ak            string                 `protobuf:"bytes,2,opt,name=ak,proto3" json:"ak,omitempty"`
 	RequestId     uint64                 `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -148,9 +149,9 @@ func (*RedeemAssetFromASResponse) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_redemption_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *RedeemAssetFromASResponse) GetReservation() *ReservationInfo {
+func (x *RedeemAssetFromASResponse) GetResInfo() *ReservationInfo {
 	if x != nil {
-		return x.Reservation
+		return x.ResInfo
 	}
 	return nil
 }
@@ -170,10 +171,12 @@ func (x *RedeemAssetFromASResponse) GetRequestId() uint64 {
 }
 
 type ReservationInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ResId         string                 `protobuf:"bytes,1,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ResId               uint64                 `protobuf:"varint,1,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
+	BwRounded           uint64                 `protobuf:"varint,2,opt,name=bw_rounded,json=bwRounded,proto3" json:"bw_rounded,omitempty"`
+	BwDataplaneEncoding string                 `protobuf:"bytes,3,opt,name=bw_dataplane_encoding,json=bwDataplaneEncoding,proto3" json:"bw_dataplane_encoding,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ReservationInfo) Reset() {
@@ -206,9 +209,23 @@ func (*ReservationInfo) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_redemption_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ReservationInfo) GetResId() string {
+func (x *ReservationInfo) GetResId() uint64 {
 	if x != nil {
 		return x.ResId
+	}
+	return 0
+}
+
+func (x *ReservationInfo) GetBwRounded() uint64 {
+	if x != nil {
+		return x.BwRounded
+	}
+	return 0
+}
+
+func (x *ReservationInfo) GetBwDataplaneEncoding() string {
+	if x != nil {
+		return x.BwDataplaneEncoding
 	}
 	return ""
 }
@@ -217,23 +234,26 @@ var File_proto_hummingbird_v1_redemption_proto protoreflect.FileDescriptor
 
 const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
 	"\n" +
-	"%proto/hummingbird/v1/redemption.proto\x12\x14proto.hummingbird.v1\"\xbd\x01\n" +
+	"%proto/hummingbird/v1/redemption.proto\x12\x14proto.hummingbird.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf5\x01\n" +
 	"\x18RedeemAssetFromASRequest\x12\x1d\n" +
 	"\n" +
 	"ingress_id\x18\x01 \x01(\rR\tingressId\x12\x1b\n" +
 	"\tegress_id\x18\x02 \x01(\rR\begressId\x12\x0e\n" +
-	"\x02bw\x18\x03 \x01(\x04R\x02bw\x12\x1b\n" +
-	"\tstarts_at\x18\x04 \x01(\x04R\bstartsAt\x12\x19\n" +
-	"\bstops_at\x18\x05 \x01(\x04R\astopsAt\x12\x1d\n" +
+	"\x02bw\x18\x03 \x01(\x04R\x02bw\x127\n" +
+	"\tstarts_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
+	"\bstops_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x06 \x01(\x04R\trequestId\"\x93\x01\n" +
-	"\x19RedeemAssetFromASResponse\x12G\n" +
-	"\vreservation\x18\x01 \x01(\v2%.proto.hummingbird.v1.ReservationInfoR\vreservation\x12\x0e\n" +
+	"request_id\x18\x06 \x01(\x04R\trequestId\"\x8c\x01\n" +
+	"\x19RedeemAssetFromASResponse\x12@\n" +
+	"\bres_info\x18\x01 \x01(\v2%.proto.hummingbird.v1.ReservationInfoR\aresInfo\x12\x0e\n" +
 	"\x02ak\x18\x02 \x01(\tR\x02ak\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x03 \x01(\x04R\trequestId\"(\n" +
+	"request_id\x18\x03 \x01(\x04R\trequestId\"{\n" +
 	"\x0fReservationInfo\x12\x15\n" +
-	"\x06res_id\x18\x01 \x01(\tR\x05resId2\x8b\x01\n" +
+	"\x06res_id\x18\x01 \x01(\x04R\x05resId\x12\x1d\n" +
+	"\n" +
+	"bw_rounded\x18\x02 \x01(\x04R\tbwRounded\x122\n" +
+	"\x15bw_dataplane_encoding\x18\x03 \x01(\tR\x13bwDataplaneEncoding2\x8b\x01\n" +
 	"\x11RedemptionService\x12v\n" +
 	"\rRedeemASAsset\x12/.proto.hummingbird.v1.RedeemAssetFromASResponse\x1a..proto.hummingbird.v1.RedeemAssetFromASRequest\"\x00(\x010\x01B3Z1github.com/scionproto/scion/pkg/proto/hummingbirdb\x06proto3"
 
@@ -254,16 +274,19 @@ var file_proto_hummingbird_v1_redemption_proto_goTypes = []any{
 	(*RedeemAssetFromASRequest)(nil),  // 0: proto.hummingbird.v1.RedeemAssetFromASRequest
 	(*RedeemAssetFromASResponse)(nil), // 1: proto.hummingbird.v1.RedeemAssetFromASResponse
 	(*ReservationInfo)(nil),           // 2: proto.hummingbird.v1.ReservationInfo
+	(*timestamppb.Timestamp)(nil),     // 3: google.protobuf.Timestamp
 }
 var file_proto_hummingbird_v1_redemption_proto_depIdxs = []int32{
-	2, // 0: proto.hummingbird.v1.RedeemAssetFromASResponse.reservation:type_name -> proto.hummingbird.v1.ReservationInfo
-	1, // 1: proto.hummingbird.v1.RedemptionService.RedeemASAsset:input_type -> proto.hummingbird.v1.RedeemAssetFromASResponse
-	0, // 2: proto.hummingbird.v1.RedemptionService.RedeemASAsset:output_type -> proto.hummingbird.v1.RedeemAssetFromASRequest
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	3, // 0: proto.hummingbird.v1.RedeemAssetFromASRequest.starts_at:type_name -> google.protobuf.Timestamp
+	3, // 1: proto.hummingbird.v1.RedeemAssetFromASRequest.stops_at:type_name -> google.protobuf.Timestamp
+	2, // 2: proto.hummingbird.v1.RedeemAssetFromASResponse.res_info:type_name -> proto.hummingbird.v1.ReservationInfo
+	1, // 3: proto.hummingbird.v1.RedemptionService.RedeemASAsset:input_type -> proto.hummingbird.v1.RedeemAssetFromASResponse
+	0, // 4: proto.hummingbird.v1.RedemptionService.RedeemASAsset:output_type -> proto.hummingbird.v1.RedeemAssetFromASRequest
+	4, // [4:5] is the sub-list for method output_type
+	3, // [3:4] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_proto_hummingbird_v1_redemption_proto_init() }

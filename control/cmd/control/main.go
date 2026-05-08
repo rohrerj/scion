@@ -41,6 +41,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cs "github.com/scionproto/scion/control"
 	"github.com/scionproto/scion/control/beacon"
@@ -1202,12 +1203,11 @@ func realMain(ctx context.Context) error {
 			_, err := assetPublisher.Publish(ctx, &hummingbird.PublishAssetRequest{
 				Bandwidth:       100,
 				BandwidthMin:    10,
-				StartAt:         1000000,
-				StopsAt:         2000000,
+				StartAt:         timestamppb.New(time.Now()),
+				StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24)),
 				Price:           100,
 				TimeGranularity: 1,
 				TimeMinDuration: 1,
-				BwGranularity:   1,
 				IfIdIngress:     &ingress,
 				IfIdEgress:      &egress,
 			})
@@ -1223,12 +1223,11 @@ func realMain(ctx context.Context) error {
 			_, err = assetPublisher.Publish(ctx, &hummingbird.PublishAssetRequest{
 				Bandwidth:       50,
 				BandwidthMin:    10,
-				StartAt:         1000000,
-				StopsAt:         2000000,
+				StartAt:         timestamppb.New(time.Now()),
+				StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24)),
 				Price:           50,
 				TimeGranularity: 1,
 				TimeMinDuration: 1,
-				BwGranularity:   1,
 				IfIdIngress:     &ingress,
 				IfIdEgress:      &egress,
 			})

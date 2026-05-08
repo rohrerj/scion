@@ -18,6 +18,8 @@ option go_package = "github.com/scionproto/scion/pkg/proto/hummingbird";
 
 package proto.hummingbird.v1;
 
+import "google/protobuf/timestamp.proto";
+
 service RedemptionService {
     rpc RedeemASAsset(stream RedeemAssetFromASResponse) returns (stream RedeemAssetFromASRequest) {}
 }
@@ -26,19 +28,21 @@ message RedeemAssetFromASRequest {
     uint32 ingress_id = 1;
     uint32 egress_id = 2;
     uint64 bw = 3;
-    uint64 starts_at = 4;
-    uint64 stops_at = 5;
+    google.protobuf.Timestamp starts_at = 4;
+    google.protobuf.Timestamp stops_at = 5;
     // to match request with response
     uint64 request_id = 6;
 }
 
 message RedeemAssetFromASResponse {
-    ReservationInfo reservation = 1;
+    ReservationInfo res_info = 1;
     string ak = 2;
     // to match request with response
     uint64 request_id = 3;
 }
 
 message ReservationInfo {
-    string res_id = 1;
+    uint64 res_id = 1;
+    uint64 bw_rounded = 2;
+    string bw_dataplane_encoding = 3;
 }
