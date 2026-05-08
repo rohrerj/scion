@@ -211,7 +211,8 @@ func fetchPathsFromEndhostApi(
 ) ([]snet.Path, error) {
 	topo := conn.Topology
 	paths, err := conn.PathService.Paths(ctx, remote, topo.LocalIA,
-		endhost.WithVerifyPathSegments())
+		endhost.WithVerifyPathSegments(),
+		endhost.WithSkipSegmentVerificationIfUnsupportedByAS())
 	if err != nil {
 		return nil, serrors.Wrap("retrieving paths", err)
 	}

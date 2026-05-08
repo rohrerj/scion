@@ -115,7 +115,9 @@ On other errors, showpaths will exit with code 2.
 				endhostOpts := []endhost.ConnectOption{}
 				if envFlags.ConfigDir() != "" {
 					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")
-					endhostOpts = append(endhostOpts, endhost.WithTRCDir(trcDir))
+					if stat, err := os.Stat(trcDir); err == nil && stat.IsDir() {
+						endhostOpts = append(endhostOpts, endhost.WithTRCDir(trcDir))
+					}
 				}
 				connector, err := endhost.NewConnector(traceCtx, envFlags.EndhostApi(),
 					endhostOpts...)
