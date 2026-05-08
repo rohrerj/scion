@@ -21,6 +21,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt"
+	"github.com/scionproto/scion/pkg/addr"
 )
 
 var methodScopes = map[string]string{
@@ -33,13 +34,58 @@ var methodScopes = map[string]string{
 }
 
 type AuthInterceptor struct {
-	Verifier *Verifier
+	Verifier  *Verifier
+	accountDB *AccountDB
 }
 
-func NewAuthInterceptor(v *Verifier) *AuthInterceptor {
+func NewAuthInterceptor(v *Verifier, accountDB *AccountDB) *AuthInterceptor {
 	return &AuthInterceptor{
-		Verifier: v,
+		Verifier:  v,
+		accountDB: accountDB,
 	}
+}
+
+func (a *AuthInterceptor) verifyTokenVersion(user string, claims jwt.MapClaims, scopes map[string]bool) error {
+	tokenVersion := uint64(0)
+	if scopes["AS"] {
+		ia, err := addr.ParseIA(user)
+		if err != nil {
+			return connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("invalid token"),
+			)
+		}
+		dbUser := a.accountDB.GetASUser(ia)
+		if dbUser == nil {
+			return connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("invalid token"),
+			)
+		}
+		tokenVersion = dbUser.TokenVersion
+	} else if scopes["User"] {
+		dbUser := a.accountDB.GetUser(user)
+		if dbUser == nil {
+			return connect.NewError(
+				connect.CodeUnauthenticated,
+				fmt.Errorf("invalid token"),
+			)
+		}
+		tokenVersion = dbUser.TokenVersion
+	} else {
+		return connect.NewError(
+			connect.CodeUnauthenticated,
+			fmt.Errorf("invalid token"),
+		)
+	}
+	versionClaim, ok := claims["ver"].(float64)
+	if !ok || uint64(versionClaim) < tokenVersion {
+		return connect.NewError(
+			connect.CodeUnauthenticated,
+			fmt.Errorf("invalid token"),
+		)
+	}
+	return nil
 }
 
 func (a *AuthInterceptor) WrapStreamingClient(
@@ -105,6 +151,9 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 			)
 		}
 		scopes := parseScopes(scopeStr)
+		if err = a.verifyTokenVersion(user, claims, scopes); err != nil {
+			return nil, err
+		}
 
 		if found && !scopes[requiredScope] {
 			return nil, connect.NewError(connect.CodePermissionDenied,
@@ -172,6 +221,9 @@ func (a *AuthInterceptor) WrapStreamingHandler(
 			)
 		}
 		scopes := parseScopes(scopeStr)
+		if err = a.verifyTokenVersion(user, claims, scopes); err != nil {
+			return err
+		}
 
 		if found && !scopes[requiredScope] {
 			return connect.NewError(connect.CodePermissionDenied,
@@ -186,7 +238,7 @@ func (a *AuthInterceptor) WrapStreamingHandler(
 
 func parseScopes(scopeStr string) map[string]bool {
 	scopes := make(map[string]bool)
-	for _, s := range strings.Split(scopeStr, ",") {
+	for s := range strings.SplitSeq(scopeStr, ",") {
 		if s != "" {
 			scopes[s] = true
 		}

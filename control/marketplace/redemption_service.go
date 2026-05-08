@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -48,7 +47,8 @@ func (c *RedemptionClient) Init() error {
 	for {
 		msg, err := stream.Receive()
 		if err != nil {
-			log.Println("Receive error:", err)
+			fmt.Println("Receive error:", err)
+			return err
 		}
 		fmt.Println("received redemption request")
 
@@ -61,7 +61,7 @@ func (c *RedemptionClient) Init() error {
 		}
 
 		if err := stream.Send(rep); err != nil {
-			log.Println("Send error:", err)
+			fmt.Println("Send error:", err)
 		}
 	}
 }

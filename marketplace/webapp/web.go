@@ -152,7 +152,7 @@ func (h *Handler) createToken(user *marketplace.User) (string, error) {
 		"scope": "User",
 		"exp":   time.Now().Add(time.Hour).Unix(),
 		"iat":   time.Now().Unix(),
-		"ver":   user.RevocationVersion,
+		"ver":   user.TokenVersion,
 	}
 	return h.signer.GenerateToken(claims)
 }

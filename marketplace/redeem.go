@@ -30,8 +30,9 @@ type RedemptionServerPeer struct {
 	sendCh chan *hummingbird.RedeemAssetFromASRequest
 	recvCh chan *hummingbird.RedeemAssetFromASResponse
 
-	pending map[uint64]chan *hummingbird.RedeemAssetFromASResponse
-	mu      sync.Mutex
+	pending   map[uint64]chan *hummingbird.RedeemAssetFromASResponse
+	requestID uint64
+	mu        sync.Mutex
 }
 
 func (c *RedemptionServerPeer) Send(req *hummingbird.RedeemAssetFromASRequest) <-chan *hummingbird.RedeemAssetFromASResponse {
@@ -45,24 +46,6 @@ func (c *RedemptionServerPeer) Send(req *hummingbird.RedeemAssetFromASRequest) <
 
 	return respCh
 }
-
-/*
-func (c *RedemptionServerPeer) SendAndReceive(req *hummingbird.RedeemAssetFromASRequest) (*hummingbird.RedeemAssetFromASResponse, error) {
-	select {
-	case c.sendCh <- req:
-	default:
-		return nil, serrors.New("could not insert into queue")
-	}
-
-	fmt.Println("inserted into send channel")
-	select {
-	case resp := <-c.recvCh:
-		fmt.Println("got out of receive channel")
-		return resp, nil
-	case <-time.After(2 * time.Second):
-		return nil, serrors.New("timeout waiting for response")
-	}
-}*/
 
 func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
 	fmt.Println("RedeemAsset (AS)")
@@ -88,6 +71,8 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 			if req == nil {
 				return
 			}
+			req.RequestId = client.requestID
+			client.requestID++
 			if err := stream.Send(req); err != nil {
 				log.Println("Send error:", err)
 				return

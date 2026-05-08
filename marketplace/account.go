@@ -17,14 +17,14 @@ import (
 )
 
 type User struct {
-	Username          string
-	Password          string
-	RevocationVersion uint64
+	Username     string
+	Password     string
+	TokenVersion uint64
 }
 
 type ASUser struct {
-	IA                addr.IA
-	RevocationVersion uint64
+	IA           addr.IA
+	TokenVersion uint64
 }
 
 type AccountDB struct {
@@ -119,7 +119,6 @@ func NewASTokenManager(signer *Signer, db *AccountDB) *ASTokenManager {
 	}
 }
 
-// IssueJWT implements [hummingbirdconnect.AccountServiceHandler].
 func (s *ASTokenManager) IssueJWT(ctx context.Context, req *connect.Request[hummingbird.JWTIssuanceRequest]) (*connect.Response[hummingbird.JWTIssuanceResponse], error) {
 	name, err := subjectFromCtx(ctx)
 	if err != nil {
@@ -128,8 +127,8 @@ func (s *ASTokenManager) IssueJWT(ctx context.Context, req *connect.Request[humm
 	user := s.db.GetASUser(name)
 	if user == nil {
 		user = &ASUser{
-			IA:                name,
-			RevocationVersion: 0,
+			IA:           name,
+			TokenVersion: 0,
 		}
 		if !s.db.CreateNonExistingASUser(user) {
 			return nil, serrors.New("register failed")
@@ -141,7 +140,7 @@ func (s *ASTokenManager) IssueJWT(ctx context.Context, req *connect.Request[humm
 		"scope": "AS",
 		"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
 		"iat":   time.Now().Unix(),
-		"ver":   user.RevocationVersion,
+		"ver":   user.TokenVersion,
 	}
 	token, err := s.signer.GenerateToken(claims)
 	if err != nil {
@@ -156,5 +155,13 @@ func (s *ASTokenManager) IssueJWT(ctx context.Context, req *connect.Request[humm
 }
 
 func (s *ASTokenManager) ResetJWT(ctx context.Context, req *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error) {
-	panic("unimplemented")
+	name, err := subjectFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	user := s.db.GetASUser(name)
+	if user != nil {
+		user.TokenVersion++
+	}
+	return &connect.Response[hummingbird.JWTResetResponse]{Msg: &hummingbird.JWTResetResponse{}}, nil
 }

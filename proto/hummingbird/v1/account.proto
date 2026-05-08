@@ -31,6 +31,4 @@ message JWTIssuanceResponse {
 
 message JWTResetRequest {}
 
-message JWTResetResponse {
-    string jwt = 1;
-}
+message JWTResetResponse {}

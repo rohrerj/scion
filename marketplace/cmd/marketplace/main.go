@@ -89,7 +89,7 @@ func realMain(ctx context.Context) error {
 		endhostAPI = k.Url
 		break
 	}
-
+	accountDB := marketplace.NewAccountDB()
 	trustDB = marketplace.FromTrustDB(trustDB, endhostconnect.NewTrustServiceClient(&http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -103,8 +103,8 @@ func realMain(ctx context.Context) error {
 	service := marketplace.NewService()
 
 	mux := http.NewServeMux()
-	path, handler := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier)))
-	path2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier)))
+	path, handler := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier, accountDB)))
+	path2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier, accountDB)))
 
 	mux.Handle(path, handler)
 	mux.Handle(path2, handler2)
@@ -116,7 +116,7 @@ func realMain(ctx context.Context) error {
 			Certificates: []tls.Certificate{cert},
 		},
 	}
-	accountDB := marketplace.NewAccountDB()
+
 	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(marketplace.NewASTokenManager(jwtSigner, accountDB))
 
 	accountMux := http.NewServeMux()

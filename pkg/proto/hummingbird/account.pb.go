@@ -143,7 +143,6 @@ func (*JWTResetRequest) Descriptor() ([]byte, []int) {
 
 type JWTResetResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Jwt           string                 `protobuf:"bytes,1,opt,name=jwt,proto3" json:"jwt,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -178,13 +177,6 @@ func (*JWTResetResponse) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *JWTResetResponse) GetJwt() string {
-	if x != nil {
-		return x.Jwt
-	}
-	return ""
-}
-
 var File_proto_hummingbird_v1_account_proto protoreflect.FileDescriptor
 
 const file_proto_hummingbird_v1_account_proto_rawDesc = "" +
@@ -193,9 +185,8 @@ const file_proto_hummingbird_v1_account_proto_rawDesc = "" +
 	"\x12JWTIssuanceRequest\"'\n" +
 	"\x13JWTIssuanceResponse\x12\x10\n" +
 	"\x03jwt\x18\x01 \x01(\tR\x03jwt\"\x11\n" +
-	"\x0fJWTResetRequest\"$\n" +
-	"\x10JWTResetResponse\x12\x10\n" +
-	"\x03jwt\x18\x01 \x01(\tR\x03jwt2\xd0\x01\n" +
+	"\x0fJWTResetRequest\"\x12\n" +
+	"\x10JWTResetResponse2\xd0\x01\n" +
 	"\x0eAccountService\x12a\n" +
 	"\bIssueJWT\x12(.proto.hummingbird.v1.JWTIssuanceRequest\x1a).proto.hummingbird.v1.JWTIssuanceResponse\"\x00\x12[\n" +
 	"\bResetJWT\x12%.proto.hummingbird.v1.JWTResetRequest\x1a&.proto.hummingbird.v1.JWTResetResponse\"\x00B3Z1github.com/scionproto/scion/pkg/proto/hummingbirdb\x06proto3"

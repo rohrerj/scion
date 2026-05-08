@@ -50,15 +50,11 @@ type Service struct {
 
 func NewService() *Service {
 	return &Service{
-		//redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
-		assets:         make(map[uint64]*Asset),
-		currentAssetID: 1,
+		redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
+		assets:                make(map[uint64]*Asset),
+		currentAssetID:        1,
 	}
 }
-
-/*func (s *Service) RegisterRedemptionServerPeer(ctx context.Context, peer *RedemptionServerPeer) {
-	s.redemptionServerPeers[peer.ia] = peer
-}*/
 
 func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbird.BuyAssetsRequest]) (*connect.Response[hummingbird.BuyAssetsResponse], error) {
 	s.mtx.Lock()
