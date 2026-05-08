@@ -1,31 +1,43 @@
+// Copyright 2026 ETH Zurich
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package snap
 
 import (
 	"context"
-	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"net"
+	"net/http"
 	"net/netip"
-	"net/url"
 
 	"connectrpc.com/connect"
-	"golang.org/x/crypto/curve25519"
+	"github.com/scionproto/scion/pkg/proto/snap"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/netstack"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-
-	"github.com/scionproto/scion/pkg/proto/snap"
 )
 
 type SnapTunnel struct {
-	device    *device.Device
-	tun       *netstack.Net
-	remoteTun net.IP
+	device   *device.Device
+	net      *netstack.Net
+	remoteIP net.IP
 }
 
-func InitSnapTunnel(ctx context.Context, snapControlURL string, localTunIP, remoteTunIP net.IP) (*SnapTunnel, error) {
-	client, err := NewSnapControlClient(snapControlURL, nil)
+func InitSnapTunnel(ctx context.Context, snapControlURL string, token string, localTunIP netip.Addr) (*SnapTunnel, error) {
+	client, err := newSnapControlClient(snapControlURL, &http.Client{}, token)
 	if err != nil {
 		return nil, fmt.Errorf("create snap control client: %w", err)
 	}
@@ -34,8 +46,19 @@ func InitSnapTunnel(ctx context.Context, snapControlURL string, localTunIP, remo
 	if err != nil {
 		return nil, fmt.Errorf("get dataplane address: %w", err)
 	}
+	clientPublicKey := client.privateKey.PublicKey()
+	psk, err := client.registerTunnelIdentity(ctx, clientPublicKey[:], nil)
+	if err != nil {
+		return nil, fmt.Errorf("register tunnel identity: %w", err)
+	}
 
-	tunnel, err := client.establishWireGuardTunnel(ctx, dp, localTunIP, remoteTunIP)
+	var peerKey wgtypes.Key
+	copy(peerKey[:], dp.SnapStaticX25519)
+	remoteAddr, err := net.ResolveUDPAddr("udp", dp.Address)
+	if err != nil {
+		return nil, fmt.Errorf("resolve endpoint: %w", err)
+	}
+	tunnel, err := client.establishWireGuardTunnel(localTunIP, remoteAddr, peerKey, psk)
 	if err != nil {
 		return nil, fmt.Errorf("establish wireguard tunnel: %w", err)
 	}
@@ -43,76 +66,75 @@ func InitSnapTunnel(ctx context.Context, snapControlURL string, localTunIP, remo
 	return tunnel, nil
 }
 
-func (c *SnapControlClient) establishWireGuardTunnel(ctx context.Context, dp *SnapDataPlane, localTunIP, remoteTunIP net.IP) (*SnapTunnel, error) {
-	remoteAddr, err := net.ResolveUDPAddr("udp", dp.Address)
+func (c *SnapControlClient) establishWireGuardTunnel(
+	localTunIP netip.Addr,
+	remoteAddr *net.UDPAddr,
+	serverKey wgtypes.Key,
+	psk []byte,
+) (*SnapTunnel, error) {
+
+	tun, tnet, err := netstack.CreateNetTUN(
+		[]netip.Addr{localTunIP},
+		nil,
+		1420,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("parse dataplane address: %w", err)
+		return nil, fmt.Errorf("create netstack tun: %w", err)
 	}
 
-	localAddr := netip.AddrFrom4([4]byte(localTunIP.To4()))
-	tun, tnet, err := netstack.CreateNetTUN([]netip.Addr{localAddr}, nil, 1420)
+	logger := device.NewLogger(
+		device.LogLevelVerbose,
+		"snaptun",
+	)
+
+	wg := device.NewDevice(
+		tun,
+		conn.NewDefaultBind(),
+		logger,
+	)
+
+	privateKey, err := wgtypes.GeneratePrivateKey()
 	if err != nil {
-		return nil, fmt.Errorf("create TUN device: %w", err)
+		wg.Close()
+		return nil, err
 	}
 
-	bind := conn.NewDefaultBind()
-	wgDevice := device.NewDevice(tun, bind, device.NewLogger(device.LogLevelVerbose, "wireguard"))
+	config := fmt.Sprintf(`
+private_key=%s
+replace_peers=true
 
-	privateKey, err := generateWireGuardKey()
-	if err != nil {
-		wgDevice.Close()
-		return nil, fmt.Errorf("generate private key: %w", err)
-	}
+public_key=%s
+endpoint=%s
+persistent_keepalive_interval=10
 
-	if len(dp.SnapStaticX25519) != 32 {
-		wgDevice.Close()
-		return nil, fmt.Errorf("server static key length %d", len(dp.SnapStaticX25519))
-	}
-	var peerKey wgtypes.Key
-	copy(peerKey[:], dp.SnapStaticX25519)
-
-	config := fmt.Sprintf(
-		"private_key=%s\npeer=%s\nendpoint=%s\npersistent_keepalive_interval=25\nallowed_ip=0.0.0.0/0\n",
+allowed_ip=0.0.0.0/0
+`,
 		privateKey.String(),
-		peerKey.String(),
+		serverKey.String(),
 		remoteAddr.String(),
 	)
-	if err := wgDevice.IpcSet(config); err != nil {
-		wgDevice.Close()
-		return nil, fmt.Errorf("set device config: %w", err)
+	if len(psk) == 32 {
+		config += fmt.Sprintf(
+			"\npreshared_key=%s\n",
+			base64.StdEncoding.EncodeToString(psk),
+		)
 	}
 
-	if dp.SnapTunControlAddress != nil {
-		if err := c.registerTunnelIdentity(ctx, dp.SnapTunControlAddress, privateKey); err != nil {
-			wgDevice.Close()
-			return nil, fmt.Errorf("register tunnel identity: %w", err)
-		}
+	if err := wg.IpcSet(config); err != nil {
+		wg.Close()
+		return nil, fmt.Errorf("ipc set: %w", err)
 	}
 
-	if err := wgDevice.Up(); err != nil {
-		wgDevice.Close()
-		return nil, fmt.Errorf("bring up wireguard device: %w", err)
+	if err := wg.Up(); err != nil {
+		wg.Close()
+		return nil, fmt.Errorf("device up: %w", err)
 	}
 
 	return &SnapTunnel{
-		device:    wgDevice,
-		tun:       tnet,
-		remoteTun: remoteTunIP,
+		device:   wg,
+		net:      tnet,
+		remoteIP: net.ParseIP("10.0.0.1"),
 	}, nil
-}
-
-func (t *SnapTunnel) SendPacket(payload []byte) error {
-	conn, err := t.tun.DialUDP(nil, &net.UDPAddr{IP: t.remoteTun, Port: 0})
-	if err != nil {
-		return fmt.Errorf("dial through tunnel: %w", err)
-	}
-	defer conn.Close()
-
-	_, err = conn.Write(payload)
-	if err != nil {
-		return fmt.Errorf("write to tunnel: %w", err)
-	}
-	return nil
 }
 
 func (t *SnapTunnel) Close() error {
@@ -122,36 +144,47 @@ func (t *SnapTunnel) Close() error {
 	return nil
 }
 
-func generateWireGuardKey() (wgtypes.Key, error) {
-	var key wgtypes.Key
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return key, err
+func (t *SnapTunnel) SendPacket(
+	payload []byte,
+	port int,
+) error {
+
+	conn, err := t.net.DialUDP(nil, &net.UDPAddr{
+		IP:   t.remoteIP,
+		Port: port,
+	})
+	if err != nil {
+		return fmt.Errorf("dial udp: %w", err)
 	}
-	copy(key[:], b)
-	return key, nil
+	defer conn.Close()
+
+	_, err = conn.Write(payload)
+	if err != nil {
+		return fmt.Errorf("write udp: %w", err)
+	}
+
+	return nil
 }
 
-func (c *SnapControlClient) registerTunnelIdentity(ctx context.Context, tunnelControlURL *url.URL, privateKey wgtypes.Key) error {
-	tunnelClient, err := NewSnapControlClient(tunnelControlURL.String(), nil)
-	if err != nil {
-		return fmt.Errorf("create tunnel control client: %w", err)
+func (c *SnapControlClient) registerTunnelIdentity(ctx context.Context, clientPublicKey []byte, psk []byte) ([]byte, error) {
+	if len(psk) != 0 && len(psk) != 32 {
+		return nil, fmt.Errorf("psk must be 32 bytes or empty")
 	}
-
-	var x25519Private [32]byte
-	copy(x25519Private[:], privateKey[:])
-
-	var initiatorPublic [32]byte
-	curve25519.ScalarBaseMult(&initiatorPublic, &x25519Private)
-
-	req := connect.NewRequest(&snap.RegisterSnapTunIdentityRequest{
-		InitiatorStaticX25519: initiatorPublic[:],
+	req := &snap.RegisterSnapTunIdentityRequest{
+		InitiatorStaticX25519: clientPublicKey,
 		PskShare:              make([]byte, 32),
-	})
-
-	_, err = tunnelClient.RegisterSnapTunIdentity(ctx, req)
-	if err != nil {
-		return fmt.Errorf("register snap-tun identity RPC failed: %w", err)
 	}
-	return nil
+	if len(psk) == 32 {
+		copy(req.PskShare, psk)
+	}
+	resp, err := c.client.RegisterSnapTunIdentity(ctx, &connect.Request[snap.RegisterSnapTunIdentityRequest]{
+		Msg: req,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Msg.PskShare) != 0 && len(resp.Msg.PskShare) != 32 {
+		return nil, fmt.Errorf("invalid server psk length: %d", len(resp.Msg.PskShare))
+	}
+	return resp.Msg.PskShare, nil
 }
