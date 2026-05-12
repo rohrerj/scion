@@ -24,7 +24,9 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 
+	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -266,22 +268,39 @@ func (c *Connector) loadTopology(ctx context.Context, localIA addr.IA,
 	}
 	c.underlays = allUnderlays
 	// TODO: add support for snap
-	if c.underlays.Udp == nil || len(c.underlays.Udp.Routers) == 0 {
+	/*if c.underlays.Udp == nil || len(c.underlays.Udp.Routers) == 0 {
 		return topo, serrors.New("Local IA cannot be determined without a UDP underlay present")
-	}
+	}*/
 
 	allPossibleLocalIAs := make([]addr.IA, 0, 1)
 	iaPortRange := make(map[addr.IA]snet.TopologyPortRange)
-	for _, router := range c.underlays.Udp.Routers {
-		ia := addr.IA(router.IsdAs)
-		_, found := iaPortRange[ia]
-		if !found {
-			allPossibleLocalIAs = append(allPossibleLocalIAs, ia)
-			iaPortRange[ia] = snet.TopologyPortRange{
-				Start: uint16(router.DispatchedPortStart),
-				End:   uint16(router.DispatchedPortEnd),
+	snapIAs := make(map[addr.IA]string)
+	if c.underlays.Udp != nil {
+		for _, router := range c.underlays.Udp.Routers {
+			ia := addr.IA(router.IsdAs)
+			_, found := iaPortRange[ia]
+			if !found {
+				allPossibleLocalIAs = append(allPossibleLocalIAs, ia)
+				iaPortRange[ia] = snet.TopologyPortRange{
+					Start: uint16(router.DispatchedPortStart),
+					End:   uint16(router.DispatchedPortEnd),
+				}
 			}
 		}
+	}
+	if c.underlays.Snap != nil {
+		for _, snap := range c.underlays.Snap.Snaps {
+			snapControl := snap.Address
+			for _, ia := range snap.IsdASes {
+				if !slices.Contains(allPossibleLocalIAs, ia) {
+					allPossibleLocalIAs = append(allPossibleLocalIAs, ia)
+					snapIAs[ia] = snapControl
+				}
+			}
+		}
+	}
+	if len(allPossibleLocalIAs) == 0 {
+		return topo, serrors.New("No AS found")
 	}
 	if localIA.IsZero() {
 		if iaSelector != nil {
@@ -291,32 +310,45 @@ func (c *Connector) loadTopology(ctx context.Context, localIA addr.IA,
 		}
 	}
 	portRange, found := iaPortRange[localIA]
-	if !found {
-		return topo, serrors.New("invalid IA selected", "found local IAs", allPossibleLocalIAs)
+	if found {
+		topo.PortRange = snet.TopologyPortRange{
+			Start: portRange.Start,
+			End:   portRange.End,
+		}
 	}
 	topo.LocalIA = localIA
 
-	topo.PortRange = snet.TopologyPortRange{
-		Start: portRange.Start,
-		End:   portRange.End,
-	}
 	c.interfaces = make(map[uint16]netip.AddrPort)
-	for _, router := range c.underlays.Udp.Routers {
-		if localIA != addr.IA(router.IsdAs) {
-			// skip routers that do not belong to selected local IA
-			continue
-		}
-		addr, err := netip.ParseAddrPort(router.Address)
-		if err != nil {
-			return topo, err
-		}
-		for _, inf := range router.Interfaces {
-			c.interfaces[uint16(inf)] = addr
+	if c.underlays.Udp != nil {
+		for _, router := range c.underlays.Udp.Routers {
+			if localIA != addr.IA(router.IsdAs) {
+				// skip routers that do not belong to selected local IA
+				continue
+			}
+			addr, err := netip.ParseAddrPort(router.Address)
+			if err != nil {
+				return topo, err
+			}
+			for _, inf := range router.Interfaces {
+				c.interfaces[uint16(inf)] = addr
+			}
 		}
 	}
 	topo.Interface = func(u uint16) (netip.AddrPort, bool) {
 		addr, ok := c.interfaces[u]
 		return addr, ok
 	}
+	if snapControl, found := snapIAs[localIA]; found {
+		topo.SnapApi = snapControl
+	}
 	return topo, nil
+}
+
+func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			req.Header().Set("Authorization", "Bearer "+jwtToken)
+			return next(ctx, req)
+		}
+	}
 }

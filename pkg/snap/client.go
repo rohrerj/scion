@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 
 	"connectrpc.com/connect"
@@ -88,21 +87,4 @@ func (c *SnapControlClient) GetDataPlaneAddress(ctx context.Context) (*SnapDataP
 	}
 
 	return result, nil
-}
-
-func (c *SnapControlClient) RegisterSnapTunIdentity(ctx context.Context, req *connect.Request[snap.RegisterSnapTunIdentityRequest]) (*connect.Response[snap.RegisterSnapTunIdentityResponse], error) {
-	return c.client.RegisterSnapTunIdentity(ctx, req)
-}
-
-func Init(ctx context.Context, snapControlAddr string, token string) {
-	tunnel, err := InitSnapTunnel(ctx, snapControlAddr, token, netip.MustParseAddr("10.0.0.1"))
-	if err != nil {
-		panic(err)
-	}
-	defer tunnel.Close()
-
-	payload := []byte("example SCION packet bytes")
-	if err := tunnel.SendPacket(payload, 8888); err != nil {
-		panic(err)
-	}
 }

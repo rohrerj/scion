@@ -62,7 +62,8 @@ type Snap struct {
 }
 
 func (u *UnderlayService) ListUnderlays(ctx context.Context, isdAs *addr.IA) (*Underlays, error) {
-	client := endhostconnect.NewUnderlayServiceClient(u.httpClient, u.url)
+	token := ""
+	client := endhostconnect.NewUnderlayServiceClient(u.httpClient, u.url, connect.WithInterceptors(authInterceptor(token)))
 	var targetIsdAs *uint64
 	if isdAs != nil {
 		tmp := uint64(*isdAs)

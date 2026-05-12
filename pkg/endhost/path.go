@@ -189,23 +189,23 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts 
 			if _, isSeen := seen[mapKey]; isSeen {
 				continue
 			}
-			nextHopNetIpPort, ok := s.topo.Interface(uint16(p.Metadata.Interfaces[0].ID))
-			if !ok {
-				return nil, serrors.New("nexthop cannot be determined")
-			}
-			addr := nextHopNetIpPort.Addr()
-			nextHop := &net.UDPAddr{
-				IP:   addr.AsSlice(),
-				Port: int(nextHopNetIpPort.Port()),
-				Zone: addr.Zone(),
-			}
 			path := snetpath.Path{
 				Src:           src,
 				Dst:           dst,
 				DataplanePath: p.SCIONPath,
 				Meta:          p.Metadata,
-				NextHop:       nextHop,
 			}
+			nextHopNetIpPort, ok := s.topo.Interface(uint16(p.Metadata.Interfaces[0].ID))
+			if ok {
+				addr := nextHopNetIpPort.Addr()
+				nextHop := &net.UDPAddr{
+					IP:   addr.AsSlice(),
+					Port: int(nextHopNetIpPort.Port()),
+					Zone: addr.Zone(),
+				}
+				path.NextHop = nextHop
+			}
+
 			paths = append(paths, path)
 			seen[mapKey] = struct{}{}
 		}
@@ -246,8 +246,9 @@ func (s *Paginator) HasNext() bool {
 
 func (s *Paginator) NextPage(ctx context.Context) (
 	[]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
+	token := ""
 
-	client := endhostconnect.NewSegmentsServiceClient(s.httpClient, s.url)
+	client := endhostconnect.NewSegmentsServiceClient(s.httpClient, s.url, connect.WithInterceptors(authInterceptor(token)))
 	res, err := client.ListSegments(ctx, &connect.Request[endhost.ListSegmentsRequest]{
 		Msg: &endhost.ListSegmentsRequest{
 			SrcIsdAs:  uint64(s.src),
