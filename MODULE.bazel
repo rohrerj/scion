@@ -96,6 +96,8 @@ use_repo(
     "com_github_stretchr_testify",
     "com_github_uber_jaeger_client_go",
     "com_github_vishvananda_netlink",
+    "com_zx2c4_golang_wireguard",
+    "com_zx2c4_golang_wireguard_wgctrl",
     "in_gopkg_yaml_v3",
     "org_go4_netipx",
     "org_golang_google_grpc",

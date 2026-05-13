@@ -1,0 +1,32 @@
+load("@rules_go//go:def.bzl", "go_library")
+load("//tools:go.bzl", "go_test")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "auth.go",
+        "client.go",
+        "tunnel.go",
+    ],
+    importpath = "github.com/scionproto/scion/pkg/snap",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/proto/snap:go_default_library",
+        "//pkg/proto/snap/v1/snapconnect:go_default_library",
+        "@com_connectrpc_connect//:go_default_library",
+        "@com_zx2c4_golang_wireguard//conn:go_default_library",
+        "@com_zx2c4_golang_wireguard//device:go_default_library",
+        "@com_zx2c4_golang_wireguard//tun/netstack:go_default_library",
+        "@com_zx2c4_golang_wireguard_wgctrl//wgtypes:go_default_library",
+    ],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = ["snap_test.go"],
+    deps = [
+        ":go_default_library",
+        "//pkg/addr:go_default_library",
+        "//pkg/endhost:go_default_library",
+    ],
+)
