@@ -27,6 +27,7 @@ import (
 	"slices"
 
 	"connectrpc.com/connect"
+
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -46,6 +47,7 @@ type connectOptions struct {
 	localIASelector func([]addr.IA) addr.IA
 	// tls client certificate, might be required for drkey requests
 	tlsCertificate *tls.Certificate
+	token          string
 }
 
 // Disables all TLS verifications. Implies allow insecure.
@@ -93,6 +95,12 @@ func WithClientCert(certs []*x509.Certificate, privKey crypto.PrivateKey) Connec
 	}
 }
 
+func WithToken(jwt string) ConnectOption {
+	return func(o *connectOptions) {
+		o.token = jwt
+	}
+}
+
 // NewConnector initializes the endhost API connector using the provided api URL.
 // When no TRCs are provided, the connector will try to fetch the local ISD TRC from the
 // endhost API. However, since the client does not have the trust material to verify the connection
@@ -111,7 +119,8 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 		return nil, err
 	}
 	c := &Connector{
-		api: api,
+		api:   api,
+		token: options.token,
 	}
 	if u.Scheme == "http" {
 		options.insecure = true
@@ -254,6 +263,7 @@ type Connector struct {
 	// cached values
 	underlays  *Underlays
 	interfaces map[uint16]netip.AddrPort
+	token      string
 }
 
 // loadTopology is called from NewConnector and uses the underlay service to determine the
@@ -347,7 +357,9 @@ func (c *Connector) loadTopology(ctx context.Context, localIA addr.IA,
 func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			req.Header().Set("Authorization", "Bearer "+jwtToken)
+			if jwtToken != "" {
+				req.Header().Set("Authorization", "Bearer "+jwtToken)
+			}
 			return next(ctx, req)
 		}
 	}

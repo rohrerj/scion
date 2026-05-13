@@ -29,12 +29,14 @@ import (
 type UnderlayService struct {
 	url        string
 	httpClient *http.Client
+	token      string
 }
 
 func (c *Connector) NewUnderlayService() *UnderlayService {
 	u := &UnderlayService{
 		url:        c.api,
 		httpClient: c.httpClient,
+		token:      c.token,
 	}
 	return u
 }
@@ -62,8 +64,7 @@ type Snap struct {
 }
 
 func (u *UnderlayService) ListUnderlays(ctx context.Context, isdAs *addr.IA) (*Underlays, error) {
-	token := ""
-	client := endhostconnect.NewUnderlayServiceClient(u.httpClient, u.url, connect.WithInterceptors(authInterceptor(token)))
+	client := endhostconnect.NewUnderlayServiceClient(u.httpClient, u.url, connect.WithInterceptors(authInterceptor(u.token)))
 	var targetIsdAs *uint64
 	if isdAs != nil {
 		tmp := uint64(*isdAs)

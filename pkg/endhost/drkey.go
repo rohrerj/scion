@@ -31,12 +31,14 @@ import (
 type DRKeyService struct {
 	url        string
 	httpClient *http.Client
+	token      string
 }
 
 func (c *Connector) NewDRKeyService() *DRKeyService {
 	d := &DRKeyService{
 		url:        c.api,
 		httpClient: c.httpClient,
+		token:      c.token,
 	}
 	return d
 }
@@ -44,7 +46,7 @@ func (c *Connector) NewDRKeyService() *DRKeyService {
 func (d *DRKeyService) ASHostKey(ctx context.Context, req drkey.ASHostMeta) (
 	*drkey.ASHostKey, error) {
 
-	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url)
+	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url, connect.WithInterceptors(authInterceptor(d.token)))
 	rep, err := client.DRKeyASHost(ctx, &connect.Request[endhost.DRKeyASHostRequest]{
 		Msg: &endhost.DRKeyASHostRequest{
 			ValTime:    timestamppb.New(req.Validity),
@@ -71,7 +73,7 @@ func (d *DRKeyService) ASHostKey(ctx context.Context, req drkey.ASHostMeta) (
 func (d *DRKeyService) HostASKey(ctx context.Context, req drkey.HostASMeta) (
 	*drkey.HostASKey, error) {
 
-	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url)
+	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url, connect.WithInterceptors(authInterceptor(d.token)))
 	rep, err := client.DRKeyHostAS(ctx, &connect.Request[endhost.DRKeyHostASRequest]{
 		Msg: &endhost.DRKeyHostASRequest{
 			ValTime:    timestamppb.New(req.Validity),
@@ -98,7 +100,7 @@ func (d *DRKeyService) HostASKey(ctx context.Context, req drkey.HostASMeta) (
 func (d *DRKeyService) HostHostKey(ctx context.Context, req drkey.HostHostMeta) (
 	*drkey.HostHostKey, error) {
 
-	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url)
+	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url, connect.WithInterceptors(authInterceptor(d.token)))
 	rep, err := client.DRKeyHostHost(ctx,
 		&connect.Request[endhost.DRKeyHostHostRequest]{
 			Msg: &endhost.DRKeyHostHostRequest{

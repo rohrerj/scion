@@ -39,6 +39,7 @@ type PathService struct {
 	trustService            *TrustService
 	topo                    snet.Topology
 	verificationUnsupported bool
+	token                   string
 }
 
 func (c *Connector) NewPathService() *PathService {
@@ -47,6 +48,7 @@ func (c *Connector) NewPathService() *PathService {
 		topo:         c.Topology,
 		httpClient:   c.httpClient,
 		trustService: c.TrustService,
+		token:        c.token,
 	}
 	return p
 }
@@ -225,6 +227,7 @@ type Paginator struct {
 	src          addr.IA
 	dst          addr.IA
 	trustService *TrustService
+	token        string
 }
 
 func (s *PathService) NewPaginator(dst, src addr.IA, pageSize int32) *Paginator {
@@ -246,9 +249,8 @@ func (s *Paginator) HasNext() bool {
 
 func (s *Paginator) NextPage(ctx context.Context) (
 	[]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
-	token := ""
 
-	client := endhostconnect.NewSegmentsServiceClient(s.httpClient, s.url, connect.WithInterceptors(authInterceptor(token)))
+	client := endhostconnect.NewSegmentsServiceClient(s.httpClient, s.url, connect.WithInterceptors(authInterceptor(s.token)))
 	res, err := client.ListSegments(ctx, &connect.Request[endhost.ListSegmentsRequest]{
 		Msg: &endhost.ListSegmentsRequest{
 			SrcIsdAs:  uint64(s.src),
