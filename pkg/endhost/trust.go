@@ -105,6 +105,7 @@ type TrustService struct {
 	verifier   trust.Verifier
 	provider   *trustServiceProvider
 	trustDB    storage.TrustDB
+	token      string
 }
 
 func (c *Connector) NewTrustService() *TrustService {
@@ -118,6 +119,7 @@ func (c *Connector) NewTrustService() *TrustService {
 			Cache:  cache.New(time.Minute, time.Minute),
 		},
 		trustDB: c.trustDB,
+		token:   c.token,
 	}
 	provider.ts = t
 	return t
@@ -145,7 +147,7 @@ type Chain struct {
 func (t *TrustService) ListChains(ctx context.Context, subjects []Subject,
 	validity cppki.Validity) (*Chains, error) {
 
-	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url)
+	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url, connect.WithInterceptors(authInterceptor(t.token)))
 	req := &connect.Request[endhost.ListChainsRequest]{
 		Msg: &endhost.ListChainsRequest{
 			Subjects:          make([]*endhost.Subject, 0, len(subjects)),
@@ -231,7 +233,7 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 	if !trc.IsZero() {
 		return trc.Raw, nil
 	}
-	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url)
+	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url, connect.WithInterceptors(authInterceptor(t.token)))
 	rep, err := client.GetTrc(ctx, &connect.Request[endhost.TRCRequest]{
 		Msg: &endhost.TRCRequest{
 			Isd:    isd,
