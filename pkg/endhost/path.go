@@ -170,7 +170,7 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts 
 	if options.numPaths != 0 {
 		maxRequestedPaths = options.numPaths
 	}
-	paginator := s.NewPaginator(dst, src, 64)
+	paginator := s.NewPaginator(dst, src, 64, s.token)
 	paths := make([]snet.Path, 0, 64)
 	seen := make(map[string]struct{})
 
@@ -230,7 +230,7 @@ type Paginator struct {
 	token        string
 }
 
-func (s *PathService) NewPaginator(dst, src addr.IA, pageSize int32) *Paginator {
+func (s *PathService) NewPaginator(dst, src addr.IA, pageSize int32, jwtToken string) *Paginator {
 	return &Paginator{
 		url:          s.url,
 		httpClient:   s.httpClient,
@@ -240,6 +240,7 @@ func (s *PathService) NewPaginator(dst, src addr.IA, pageSize int32) *Paginator 
 		src:          src,
 		dst:          dst,
 		trustService: s.trustService,
+		token:        jwtToken,
 	}
 }
 
