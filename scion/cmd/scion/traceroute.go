@@ -126,7 +126,9 @@ On other errors, traceroute will exit with code 2.
 				path.WithEPIC(flags.epic),
 			}
 			if envFlags.EndhostApi() != "" {
-				endhostOpts := []endhost.ConnectOption{}
+				endhostOpts := []endhost.ConnectOption{
+					endhost.WithToken(envFlags.EndhostApiToken()),
+				}
 				if envFlags.ConfigDir() != "" {
 					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")
 					if stat, err := os.Stat(trcDir); err == nil && stat.IsDir() {

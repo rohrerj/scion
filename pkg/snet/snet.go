@@ -46,8 +46,12 @@ import (
 	"github.com/scionproto/scion/pkg/metrics/v2"
 	"github.com/scionproto/scion/pkg/private/common"
 	"github.com/scionproto/scion/pkg/private/serrors"
-	"github.com/scionproto/scion/pkg/snap"
 )
+
+type SnapConfig struct {
+	SnapControlApi string
+	Token          string
+}
 
 // Topology provides information about the topology of the local ISD-AS.
 type Topology struct {
@@ -59,7 +63,7 @@ type Topology struct {
 	// Interface provides information about a local interface. If the interface
 	// is not present, the second return value must be false.
 	Interface func(uint16) (netip.AddrPort, bool)
-	SnapApi   string
+	Snap      SnapConfig
 }
 
 // TopologyPortRange is the range of ports that are directly dispatched to the
@@ -96,72 +100,32 @@ type SCIONNetwork struct {
 	STUNEnabled bool
 }
 
-func listenSnapRange(snapTunnel *snap.SnapTunnel, addr *net.UDPAddr, start, end uint16) (net.PacketConn, error) {
-	restrictedStart := start
-	if start < 1024 {
-		restrictedStart = 1024
+func (n *SCIONNetwork) OpenSnap(ctx context.Context) (PacketConn, error) {
+	if n.Topology.Snap.SnapControlApi == "" {
+		return nil, serrors.New("Cannot use SNAP without SNAP enabled topology")
 	}
-	for port := end; port >= restrictedStart; port-- {
-		pconn, err := snapTunnel.ListenUDP(&net.UDPAddr{
-			IP:   addr.IP,
-			Port: int(port),
-		})
-		if err == nil {
-			return pconn, nil
-		}
-		if errorIsAddrUnavailable(err) {
-			continue
-		}
-		return nil, err
-	}
-	return nil, serrors.Wrap("binding to port range", ErrAddrInUse,
-		"start", restrictedStart, "end", end)
-}
-
-func (n *SCIONNetwork) OpenSnap(ctx context.Context, snapTunnel *snap.SnapTunnel, addr *net.UDPAddr) (PacketConn, error) {
-	var pconn snapPacketConn
-	var err error
-	if addr == nil || addr.IP.IsUnspecified() {
-		return nil, serrors.New("nil or unspecified address is not supported")
-	}
-	start, end := n.Topology.PortRange.Start, n.Topology.PortRange.End
-	if addr.Port == 0 {
-		pconn.PacketConn, err = listenSnapRange(snapTunnel, addr, start, end)
-	} else {
-		if addr.Port < int(start) || addr.Port > int(end) {
-			log.Info("Provided port is outside the SCION/UDP range, "+
-				"it will only receive packets if shim dispatcher is configured",
-				"start", start, "end", end, "port", addr.Port)
-		}
-		pconn.PacketConn, err = snapTunnel.ListenUDP(addr)
-	}
+	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.SnapControlApi, n.Topology.Snap.Token)
 	if err != nil {
 		return nil, err
 	}
-	return &SCIONPacketConn{
-		conn:        pconn,
-		SCMPHandler: n.SCMPHandler,
-		Metrics:     n.PacketConnMetrics,
-		Topology:    n.Topology,
-	}, nil
+	return snapConn, nil
 }
-func (n *SCIONNetwork) DialSnap(ctx context.Context, snapTunnel *snap.SnapTunnel, listen *net.UDPAddr,
-	remote *UDPAddr) (*Conn, error) {
-	metrics.CounterInc(n.Metrics.Dials)
+
+func (n *SCIONNetwork) DialSnap(ctx context.Context, remote *UDPAddr) (*Conn, error) {
+	if n.Topology.Snap.SnapControlApi == "" {
+		return nil, serrors.New("Cannot use SNAP without SNAP enabled topology")
+	}
 	if remote == nil {
 		return nil, serrors.New("Unable to dial to nil remote")
 	}
-	packetConn, err := n.OpenSnap(ctx, snapTunnel, listen)
+	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.SnapControlApi, n.Topology.Snap.Token)
 	if err != nil {
 		return nil, err
 	}
-	log.FromCtx(ctx).Debug("UDP socket opened on", "addr", packetConn.LocalAddr(), "to", remote)
-
-	if n.STUNEnabled {
-		log.Debug("STUN requested but not supported by SNAP. STUN remains disabled.")
+	if remote.NextHop == nil {
+		remote.NextHop = snapConn.NextHop()
 	}
-
-	return NewCookedConn(packetConn, n.Topology, WithReplyPather(n.ReplyPather), WithRemote(remote))
+	return NewCookedConn(snapConn, n.Topology, WithReplyPather(n.ReplyPather), WithRemote(remote))
 }
 
 // OpenRaw returns a PacketConn which listens on the specified address.

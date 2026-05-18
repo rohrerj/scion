@@ -108,9 +108,15 @@ func Run(ctx context.Context, cfg Config) (Stats, error) {
 		Topology:    cfg.Topology,
 	}
 
-	// We need to manufacture a netip.UDPAddr as we're constrained by the sn API.
-	netUdpAddr := net.UDPAddrFromAddrPort(netip.AddrPortFrom(cfg.Local.Host.IP(), 0))
-	conn, err := sn.OpenRaw(ctx, netUdpAddr)
+	var conn snet.PacketConn
+	var err error
+	if sn.Topology.Snap.SnapControlApi != "" {
+		conn, err = sn.OpenSnap(ctx)
+	} else {
+		// We need to manufacture a netip.UDPAddr as we're constrained by the sn API.
+		netUdpAddr := net.UDPAddrFromAddrPort(netip.AddrPortFrom(cfg.Local.Host.IP(), 0))
+		conn, err = sn.OpenRaw(ctx, netUdpAddr)
+	}
 	if err != nil {
 		return Stats{}, err
 	}

@@ -80,19 +80,21 @@ func (v *ipVal) String() string { return netip.Addr(*v).String() }
 // SCIONEnvironment can be used to access the common SCION configuration values,
 // like the SCION daemon address and the local IP as well as the local ISD-AS.
 type SCIONEnvironment struct {
-	sciondFlag    *pflag.Flag
-	sciondEnv     *string
-	ia            addr.IA
-	iaFlag        *pflag.Flag
-	local         netip.Addr
-	localEnv      *netip.Addr
-	localFlag     *pflag.Flag
-	configDir     string
-	configDirFlag *pflag.Flag
-	file          env.SCION
-	filepath      string
-	endhostApi    *pflag.Flag
-	endhostEnv    *string
+	sciondFlag      *pflag.Flag
+	sciondEnv       *string
+	ia              addr.IA
+	iaFlag          *pflag.Flag
+	local           netip.Addr
+	localEnv        *netip.Addr
+	localFlag       *pflag.Flag
+	configDir       string
+	configDirFlag   *pflag.Flag
+	file            env.SCION
+	filepath        string
+	endhostApi      *pflag.Flag
+	endhostEnv      *string
+	endhostApiToken *pflag.Flag
+	endhostTokenEnv *string
 
 	mtx sync.Mutex
 }
@@ -121,6 +123,10 @@ If both --sciond and --config-dir are set, --sciond takes priority.`,
 		"endhost", "",
 		`Connect to the endhost API at the specified endpoint 
 		([scheme]://[host]:[port]/[PathPrefix])`)
+	endhostApiToken := ""
+	e.endhostApiToken = flagSet.VarPF((*stringVal)(&endhostApiToken),
+		"endhost_token", "",
+		`JWT token to authenticate towards the endhost API server`)
 
 	configDirHelp := `Directory containing topology.json and certs/ for standalone mode.
 If both --sciond and --config-dir are set, --sciond takes priority.
@@ -215,6 +221,9 @@ func (e *SCIONEnvironment) loadFile() error {
 // before accessing the values, otherwise the environment variables are not
 // respected.
 func (e *SCIONEnvironment) loadEnv() error {
+	if d, ok := os.LookupEnv("SCION_ENDHOST_API_TOKEN"); ok {
+		e.endhostTokenEnv = &d
+	}
 	if d, ok := os.LookupEnv("SCION_ENDHOST_API"); ok {
 		e.endhostEnv = &d
 	}
@@ -274,6 +283,20 @@ func (e *SCIONEnvironment) EndhostApi() string {
 	}
 	if e.endhostEnv != nil {
 		return *e.endhostEnv
+	}
+	return ""
+}
+
+func (e *SCIONEnvironment) EndhostApiToken() string {
+	e.mtx.Lock()
+	defer e.mtx.Unlock()
+
+	if e.endhostApiToken != nil && e.endhostApiToken.Changed {
+		value := e.endhostApiToken.Value.String()
+		return value
+	}
+	if e.endhostTokenEnv != nil {
+		return *e.endhostTokenEnv
 	}
 	return ""
 }

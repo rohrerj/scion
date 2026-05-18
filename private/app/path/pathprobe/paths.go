@@ -175,14 +175,16 @@ func (p Prober) GetStatuses(ctx context.Context, paths []snet.Path,
 		localIPSlice, err := p.resolveLocalIP(path.UnderlayNextHop())
 		localIP, ok := netip.AddrFromSlice(localIPSlice)
 		if err != nil || !ok {
-			addStatus(
-				PathKey(path),
-				Status{
-					Status:         StatusUnknown,
-					AdditionalInfo: fmt.Sprintf("Failed to resolve local IP: %s", err),
-				},
-			)
-			continue
+			if sn.Topology.Snap.SnapControlApi == "" {
+				addStatus(
+					PathKey(path),
+					Status{
+						Status:         StatusUnknown,
+						AdditionalInfo: fmt.Sprintf("Failed to resolve local IP: %s", err),
+					},
+				)
+				continue
+			}
 		}
 		pathsPerIP[localIP] = append(pathsPerIP[localIP], path)
 		addStatus(PathKey(path), Status{Status: StatusTimeout, LocalIP: localIP})
@@ -194,8 +196,15 @@ func (p Prober) GetStatuses(ctx context.Context, paths []snet.Path,
 	for localIP, paths := range pathsPerIP {
 		g.Go(func() error {
 			defer log.HandlePanic()
+			var conn snet.PacketConn
+			var err error
 
-			conn, err := sn.OpenRaw(ctx, &net.UDPAddr{IP: localIP.AsSlice()})
+			if !localIP.IsValid() && sn.Topology.Snap.SnapControlApi != "" {
+				conn, err = sn.OpenSnap(ctx)
+				localIP = conn.LocalAddr().(*net.UDPAddr).AddrPort().Addr()
+			} else {
+				conn, err = sn.OpenRaw(ctx, &net.UDPAddr{IP: localIP.AsSlice()})
+			}
 			if err != nil {
 				return serrors.Wrap("creating packet conn", err, "local", localIP)
 			}

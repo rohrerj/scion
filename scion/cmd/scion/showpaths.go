@@ -110,9 +110,10 @@ On other errors, showpaths will exit with code 2.
 
 			ctx, cancel := context.WithTimeout(traceCtx, flags.timeout)
 			defer cancel()
-
 			if envFlags.EndhostApi() != "" {
-				endhostOpts := []endhost.ConnectOption{}
+				endhostOpts := []endhost.ConnectOption{
+					endhost.WithToken(envFlags.EndhostApiToken()),
+				}
 				if envFlags.ConfigDir() != "" {
 					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")
 					if stat, err := os.Stat(trcDir); err == nil && stat.IsDir() {

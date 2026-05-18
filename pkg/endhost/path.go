@@ -113,7 +113,8 @@ func (s *PathService) filterVerifiedSegments(ctx context.Context, up []*seg.Path
 
 	verifiedUp, err := verify(up)
 	if err != nil {
-		if connect.CodeOf(err) == connect.CodeUnimplemented {
+
+		if connect.CodeOf(err) == connect.CodeUnimplemented || connect.CodeOf(err) == connect.CodeUnavailable {
 			s.verificationUnsupported = true
 		} else {
 			return nil, nil, nil, err
@@ -121,7 +122,7 @@ func (s *PathService) filterVerifiedSegments(ctx context.Context, up []*seg.Path
 	}
 	verifiedCore, err := verify(core)
 	if err != nil {
-		if connect.CodeOf(err) == connect.CodeUnimplemented {
+		if connect.CodeOf(err) == connect.CodeUnimplemented || connect.CodeOf(err) == connect.CodeUnavailable {
 			s.verificationUnsupported = true
 		} else {
 			return nil, nil, nil, err
@@ -129,7 +130,7 @@ func (s *PathService) filterVerifiedSegments(ctx context.Context, up []*seg.Path
 	}
 	verifiedDown, err := verify(down)
 	if err != nil {
-		if connect.CodeOf(err) == connect.CodeUnimplemented {
+		if connect.CodeOf(err) == connect.CodeUnimplemented || connect.CodeOf(err) == connect.CodeUnavailable {
 			s.verificationUnsupported = true
 		} else {
 			return nil, nil, nil, err

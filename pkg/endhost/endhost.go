@@ -349,7 +349,10 @@ func (c *Connector) loadTopology(ctx context.Context, localIA addr.IA,
 		return addr, ok
 	}
 	if snapControl, found := snapIAs[localIA]; found {
-		topo.SnapApi = snapControl
+		topo.Snap = snet.SnapConfig{
+			SnapControlApi: snapControl,
+			Token:          c.token,
+		}
 	}
 	return topo, nil
 }

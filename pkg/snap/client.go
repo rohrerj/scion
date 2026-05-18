@@ -28,7 +28,8 @@ import (
 )
 
 type SnapControlClient struct {
-	client     snapconnect.SnapControlClient
+	//client     snapconnect.SnapControlClient
+	httpClient *http.Client
 	token      string
 	api        string
 	privateKey wgtypes.Key
@@ -47,21 +48,21 @@ func newSnapControlClient(baseURL string, httpClient *http.Client, token string)
 	if _, err := url.Parse(baseURL); err != nil {
 		return nil, fmt.Errorf("invalid snap control URL: %w", err)
 	}
-	client := snapconnect.NewSnapControlClient(httpClient, baseURL, connect.WithInterceptors(authInterceptor(token)))
 	privateKey, err := wgtypes.GeneratePrivateKey()
 	if err != nil {
 		return nil, fmt.Errorf("generate private key: %w", err)
 	}
 	return &SnapControlClient{
-		client:     client,
+		httpClient: httpClient,
 		api:        baseURL,
 		token:      token,
 		privateKey: privateKey,
 	}, nil
 }
 
-func (c *SnapControlClient) GetDataPlaneAddress(ctx context.Context) (*SnapDataPlane, error) {
-	resp, err := c.client.GetSnapDataPlaneAddress(ctx, connect.NewRequest(&snap.GetSnapDataPlaneRequest{}))
+func (c *SnapControlClient) getDataPlaneAddress(ctx context.Context) (*SnapDataPlane, error) {
+	client := snapconnect.NewSnapControlClient(c.httpClient, c.api, connect.WithInterceptors(authInterceptor(c.token)))
+	resp, err := client.GetSnapDataPlaneAddress(ctx, connect.NewRequest(&snap.GetSnapDataPlaneRequest{}))
 	if err != nil {
 		return nil, fmt.Errorf("get dataplane address failed: %w", err)
 	}
@@ -87,4 +88,29 @@ func (c *SnapControlClient) GetDataPlaneAddress(ctx context.Context) (*SnapDataP
 	}
 
 	return result, nil
+}
+
+func (c *SnapControlClient) registerTunnelIdentity(ctx context.Context, addr string, clientPublicKey []byte, psk []byte) ([]byte, error) {
+	if len(psk) != 0 && len(psk) != 32 {
+		return nil, fmt.Errorf("psk must be 32 bytes or empty")
+	}
+	client := snapconnect.NewSnapControlClient(c.httpClient, addr, connect.WithInterceptors(authInterceptor(c.token)))
+	fmt.Println("client pk", clientPublicKey)
+	req := &snap.RegisterSnapTunIdentityRequest{
+		InitiatorStaticX25519: clientPublicKey,
+		PskShare:              make([]byte, 32),
+	}
+	if len(psk) == 32 {
+		copy(req.PskShare[0:], psk)
+	}
+	resp, err := client.RegisterSnapTunIdentity(ctx, &connect.Request[snap.RegisterSnapTunIdentityRequest]{
+		Msg: req,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Msg.PskShare) != 0 && len(resp.Msg.PskShare) != 32 {
+		return nil, fmt.Errorf("invalid server psk length: %d", len(resp.Msg.PskShare))
+	}
+	return resp.Msg.PskShare, nil
 }

@@ -13,6 +13,7 @@ go_library(
         "reply_pather.go",
         "router.go",
         "scmp.go",
+        "snap.go",
         "snap_conn.go",
         "snet.go",
         "sock_error_posix.go",
