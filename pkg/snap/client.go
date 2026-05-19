@@ -41,7 +41,10 @@ type SnapDataPlane struct {
 	SnapStaticX25519      []byte
 }
 
-func newSnapControlClient(baseURL string, httpClient *http.Client, token string) (*SnapControlClient, error) {
+// NewSnapControlClient returns a client that can communicate with the SNAP control endpoint.
+// It is used by the NewTunnel function, or if the endhost needs to query the DataPlane address
+// of the SNAP endpoint.
+func NewSnapControlClient(baseURL string, httpClient *http.Client, token string) (*SnapControlClient, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -60,7 +63,7 @@ func newSnapControlClient(baseURL string, httpClient *http.Client, token string)
 	}, nil
 }
 
-func (c *SnapControlClient) getDataPlaneAddress(ctx context.Context) (*SnapDataPlane, error) {
+func (c *SnapControlClient) GetDataPlaneAddress(ctx context.Context) (*SnapDataPlane, error) {
 	client := snapconnect.NewSnapControlClient(c.httpClient, c.api, connect.WithInterceptors(authInterceptor(c.token)))
 	resp, err := client.GetSnapDataPlaneAddress(ctx, connect.NewRequest(&snap.GetSnapDataPlaneRequest{}))
 	if err != nil {
@@ -95,7 +98,6 @@ func (c *SnapControlClient) registerTunnelIdentity(ctx context.Context, addr str
 		return nil, fmt.Errorf("psk must be 32 bytes or empty")
 	}
 	client := snapconnect.NewSnapControlClient(c.httpClient, addr, connect.WithInterceptors(authInterceptor(c.token)))
-	fmt.Println("client pk", clientPublicKey)
 	req := &snap.RegisterSnapTunIdentityRequest{
 		InitiatorStaticX25519: clientPublicKey,
 		PskShare:              make([]byte, 32),

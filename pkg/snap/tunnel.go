@@ -35,12 +35,12 @@ type SnapTunnel struct {
 }
 
 func NewSnapTunnel(ctx context.Context, snapControlURL string, token string) (*SnapTunnel, error) {
-	client, err := newSnapControlClient(snapControlURL, &http.Client{}, token)
+	client, err := NewSnapControlClient(snapControlURL, &http.Client{}, token)
 	if err != nil {
 		return nil, fmt.Errorf("create snap control client: %w", err)
 	}
 
-	dp, err := client.getDataPlaneAddress(ctx)
+	dp, err := client.GetDataPlaneAddress(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get dataplane address: %w", err)
 	}

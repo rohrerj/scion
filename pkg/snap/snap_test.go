@@ -70,7 +70,7 @@ func TestFullEndhost(t *testing.T) {
 	if len(paths) == 0 {
 		t.Fatal("no paths")
 	}
-	snapApi := connector.Topology.Snap.SnapControlApi
+	snapApi := connector.Topology.Snap.ControlApi
 
 	tunnel, err := snap.NewSnapTunnel(ctx, snapApi, token)
 	if err != nil {

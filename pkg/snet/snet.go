@@ -49,8 +49,11 @@ import (
 )
 
 type SnapConfig struct {
-	SnapControlApi string
-	Token          string
+	// The connectrpc base URL for the SNAP control API endpoint
+	ControlApi string
+	// The nexthop address for the SNAP
+	DataplaneAddress string
+	Token            string
 }
 
 // Topology provides information about the topology of the local ISD-AS.
@@ -101,10 +104,10 @@ type SCIONNetwork struct {
 }
 
 func (n *SCIONNetwork) OpenSnap(ctx context.Context) (PacketConn, error) {
-	if n.Topology.Snap.SnapControlApi == "" {
+	if n.Topology.Snap.ControlApi == "" {
 		return nil, serrors.New("Cannot use SNAP without SNAP enabled topology")
 	}
-	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.SnapControlApi, n.Topology.Snap.Token)
+	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.ControlApi, n.Topology.Snap.Token)
 	if err != nil {
 		return nil, err
 	}
@@ -112,13 +115,13 @@ func (n *SCIONNetwork) OpenSnap(ctx context.Context) (PacketConn, error) {
 }
 
 func (n *SCIONNetwork) DialSnap(ctx context.Context, remote *UDPAddr) (*Conn, error) {
-	if n.Topology.Snap.SnapControlApi == "" {
+	if n.Topology.Snap.ControlApi == "" {
 		return nil, serrors.New("Cannot use SNAP without SNAP enabled topology")
 	}
 	if remote == nil {
 		return nil, serrors.New("Unable to dial to nil remote")
 	}
-	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.SnapControlApi, n.Topology.Snap.Token)
+	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.ControlApi, n.Topology.Snap.Token)
 	if err != nil {
 		return nil, err
 	}

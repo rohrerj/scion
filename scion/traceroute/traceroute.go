@@ -110,7 +110,7 @@ func Run(ctx context.Context, cfg Config) (Stats, error) {
 
 	var conn snet.PacketConn
 	var err error
-	if sn.Topology.Snap.SnapControlApi != "" {
+	if cfg.NextHop.String() == sn.Topology.Snap.DataplaneAddress {
 		conn, err = sn.OpenSnap(ctx)
 	} else {
 		// We need to manufacture a netip.UDPAddr as we're constrained by the sn API.

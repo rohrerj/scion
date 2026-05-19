@@ -207,6 +207,12 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts 
 					Zone: addr.Zone(),
 				}
 				path.NextHop = nextHop
+			} else if s.topo.Snap.DataplaneAddress != "" {
+				nextHop, err := net.ResolveUDPAddr("udp", s.topo.Snap.DataplaneAddress)
+				if err != nil {
+					return nil, err
+				}
+				path.NextHop = nextHop
 			}
 
 			paths = append(paths, path)

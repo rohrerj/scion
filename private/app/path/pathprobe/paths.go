@@ -171,11 +171,20 @@ func (p Prober) GetStatuses(ctx context.Context, paths []snet.Path,
 	// Resolve all the local IPs per path. We will open one connection
 	// per local IP address.
 	pathsPerIP := map[netip.Addr][]snet.Path{}
+	snapPaths := []snet.Path{}
 	for _, path := range paths {
-		localIPSlice, err := p.resolveLocalIP(path.UnderlayNextHop())
-		localIP, ok := netip.AddrFromSlice(localIPSlice)
-		if err != nil || !ok {
-			if sn.Topology.Snap.SnapControlApi == "" {
+		var localIP netip.Addr
+		if path.UnderlayNextHop().String() == sn.Topology.Snap.DataplaneAddress {
+			// we cannot determine the correct localIP for SNAP endpoints here because
+			// it has to be the public IP address of the endhost. Because of that we set it
+			// to an empty address and below when connecting to the SNAP tunnel, we update
+			// the local IP accordingly.
+			snapPaths = append(snapPaths, path)
+			pathsPerIP[localIP] = append(pathsPerIP[localIP], path)
+		} else {
+			localIPSlice, err := p.resolveLocalIP(path.UnderlayNextHop())
+			localIP, ok = netip.AddrFromSlice(localIPSlice)
+			if err != nil || !ok {
 				addStatus(
 					PathKey(path),
 					Status{
@@ -198,8 +207,7 @@ func (p Prober) GetStatuses(ctx context.Context, paths []snet.Path,
 			defer log.HandlePanic()
 			var conn snet.PacketConn
 			var err error
-
-			if !localIP.IsValid() && sn.Topology.Snap.SnapControlApi != "" {
+			if !localIP.IsValid() && sn.Topology.Snap.ControlApi != "" {
 				conn, err = sn.OpenSnap(ctx)
 				localIP = conn.LocalAddr().(*net.UDPAddr).AddrPort().Addr()
 			} else {
