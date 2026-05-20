@@ -822,7 +822,7 @@ type RedeemAssetRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	IngressAssetId uint64                 `protobuf:"varint,1,opt,name=ingress_asset_id,json=ingressAssetId,proto3" json:"ingress_asset_id,omitempty"`
 	EgressAssetId  uint64                 `protobuf:"varint,2,opt,name=egress_asset_id,json=egressAssetId,proto3" json:"egress_asset_id,omitempty"`
-	IfPairAssetId  uint64                 `protobuf:"varint,3,opt,name=if_pair_asset_id,json=ifPairAssetId,proto3" json:"if_pair_asset_id,omitempty"`
+	IfPairAssetId  *uint64                `protobuf:"varint,3,opt,name=if_pair_asset_id,json=ifPairAssetId,proto3,oneof" json:"if_pair_asset_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -872,8 +872,8 @@ func (x *RedeemAssetRequest) GetEgressAssetId() uint64 {
 }
 
 func (x *RedeemAssetRequest) GetIfPairAssetId() uint64 {
-	if x != nil {
-		return x.IfPairAssetId
+	if x != nil && x.IfPairAssetId != nil {
+		return *x.IfPairAssetId
 	}
 	return 0
 }
@@ -1248,11 +1248,12 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x06assets\x18\x01 \x03(\v2!.proto.hummingbird.v1.BoughtAssetR\x06assets\x12\x12\n" +
 	"\x04cost\x18\x02 \x01(\x04R\x04cost\"(\n" +
 	"\vBoughtAsset\x12\x19\n" +
-	"\basset_id\x18\x01 \x01(\x04R\aassetId\"\x8f\x01\n" +
+	"\basset_id\x18\x01 \x01(\x04R\aassetId\"\xa9\x01\n" +
 	"\x12RedeemAssetRequest\x12(\n" +
 	"\x10ingress_asset_id\x18\x01 \x01(\x04R\x0eingressAssetId\x12&\n" +
-	"\x0fegress_asset_id\x18\x02 \x01(\x04R\regressAssetId\x12'\n" +
-	"\x10if_pair_asset_id\x18\x03 \x01(\x04R\rifPairAssetId\"\x8f\x01\n" +
+	"\x0fegress_asset_id\x18\x02 \x01(\x04R\regressAssetId\x12,\n" +
+	"\x10if_pair_asset_id\x18\x03 \x01(\x04H\x00R\rifPairAssetId\x88\x01\x01B\x13\n" +
+	"\x11_if_pair_asset_id\"\x8f\x01\n" +
 	"\x13RedeemAssetResponse\x12\x0e\n" +
 	"\x02ak\x18\x01 \x01(\tR\x02ak\x12\x15\n" +
 	"\x06res_id\x18\x02 \x01(\x04R\x05resId\x12\x1d\n" +
@@ -1380,6 +1381,7 @@ func file_proto_hummingbird_v1_marketplace_proto_init() {
 	}
 	file_proto_hummingbird_v1_marketplace_proto_msgTypes[2].OneofWrappers = []any{}
 	file_proto_hummingbird_v1_marketplace_proto_msgTypes[4].OneofWrappers = []any{}
+	file_proto_hummingbird_v1_marketplace_proto_msgTypes[11].OneofWrappers = []any{}
 	file_proto_hummingbird_v1_marketplace_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

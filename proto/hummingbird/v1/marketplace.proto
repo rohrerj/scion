@@ -116,7 +116,7 @@ message BoughtAsset {
 message RedeemAssetRequest {
     uint64 ingress_asset_id = 1;
     uint64 egress_asset_id = 2;
-    uint64 if_pair_asset_id = 3;
+    optional uint64 if_pair_asset_id = 3;
 }
 
 message RedeemAssetResponse {

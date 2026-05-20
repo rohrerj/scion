@@ -1196,47 +1196,51 @@ func realMain(ctx context.Context) error {
 			IA:             topo.IA(),
 			Token:          jwtToken,
 		}
-		for {
-			time.Sleep(5 * time.Second)
-			ingress := uint32(1)
-			egress := uint32(2)
-			_, err := assetPublisher.Publish(ctx, &hummingbird.PublishAssetRequest{
-				Bandwidth:       100,
-				BandwidthMin:    10,
-				StartAt:         timestamppb.New(time.Now()),
-				StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24)),
-				Price:           100,
-				TimeGranularity: 1,
-				TimeMinDuration: 1,
-				IfIdIngress:     &ingress,
-				IfIdEgress:      &egress,
-			})
-			if err != nil {
-				log.Error("error publishing asset", "err", err)
-				continue
+		ifids := topo.IfIDs()
+		assets := []*hummingbird.PublishAssetRequest{}
+		for _, ifid1 := range ifids {
+			for _, ifid2 := range ifids {
+				if ifid1 == ifid2 {
+					continue
+				}
+				ingress := uint32(ifid1)
+				egress := uint32(ifid2)
+				assets = append(assets, &hummingbird.PublishAssetRequest{
+					Bandwidth:       1000,
+					BandwidthMin:    100,
+					StartAt:         timestamppb.New(time.Now()),
+					StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24)),
+					Price:           100,
+					TimeGranularity: 1,
+					TimeMinDuration: 1,
+					IfIdIngress:     &ingress,
+					IfIdEgress:      &egress,
+				})
+				assets = append(assets, &hummingbird.PublishAssetRequest{
+					Bandwidth:       2000,
+					BandwidthMin:    200,
+					StartAt:         timestamppb.New(time.Now()),
+					StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24)),
+					Price:           200,
+					TimeGranularity: 1,
+					TimeMinDuration: 1,
+					IfIdIngress:     &ingress,
+					IfIdEgress:      &egress,
+				})
 			}
-			break
 		}
-		for {
-			ingress := uint32(1)
-			egress := uint32(2)
-			_, err = assetPublisher.Publish(ctx, &hummingbird.PublishAssetRequest{
-				Bandwidth:       50,
-				BandwidthMin:    10,
-				StartAt:         timestamppb.New(time.Now()),
-				StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24)),
-				Price:           50,
-				TimeGranularity: 1,
-				TimeMinDuration: 1,
-				IfIdIngress:     &ingress,
-				IfIdEgress:      &egress,
-			})
-			if err != nil {
-				log.Error("error publishing asset", "err", err)
-				continue
+		for _, asset := range assets {
+			for {
+				_, err := assetPublisher.Publish(ctx, asset)
+				if err != nil {
+					log.Error("error publishing asset", "err", err)
+					time.Sleep(time.Second)
+					continue
+				}
+				break
 			}
-			break
 		}
+
 		return nil
 	})
 

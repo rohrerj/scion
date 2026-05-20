@@ -41,10 +41,22 @@ type Asset struct {
 	IfIdEgress      *uint32
 }
 
+type Reservation struct {
+	ResId     uint64
+	Ia        addr.IA
+	IngressId uint32
+	EgressId  uint32
+	Bw        uint64
+	StartsAt  time.Time
+	StopsAt   time.Time
+	Ak        string
+}
+
 type Service struct {
 	redemptionServerPeers map[addr.IA]*RedemptionServerPeer
 	assets                map[uint64]*Asset
 	currentAssetID        uint64
+	reservations          map[string][]*Reservation
 	mtx                   sync.Mutex
 }
 
@@ -52,6 +64,7 @@ func NewService() *Service {
 	return &Service{
 		redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
 		assets:                make(map[uint64]*Asset),
+		reservations:          make(map[string][]*Reservation),
 		currentAssetID:        1,
 	}
 }
@@ -79,10 +92,47 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 	}, nil
 }
 
-func (s *Service) FetchReservations(context.Context, *connect.Request[hummingbird.FetchReservationsRequest]) (*connect.Response[hummingbird.FetchReservationsResponse], error) {
+func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hummingbird.FetchReservationsRequest]) (*connect.Response[hummingbird.FetchReservationsResponse], error) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return nil, nil
+	user := ctx.Value("user").(string)
+	allReservations := s.reservations[user]
+	resp := make([]*hummingbird.Reservation, 0, 1)
+	for _, res := range allReservations {
+		if req.Msg.Ia != nil && uint64(res.Ia) != *req.Msg.Ia {
+			continue
+		}
+		if req.Msg.StartsAt != nil && res.StartsAt.Before(req.Msg.StartsAt.AsTime()) {
+			continue
+		}
+		if req.Msg.StopsAt != nil && res.StopsAt.After(req.Msg.StopsAt.AsTime()) {
+			continue
+		}
+		if req.Msg.Bw != nil && res.Bw < *req.Msg.Bw {
+			continue
+		}
+		if req.Msg.IngressId != nil && res.IngressId != *req.Msg.IngressId {
+			continue
+		}
+		if req.Msg.EgressId != nil && res.EgressId != *req.Msg.EgressId {
+			continue
+		}
+		resp = append(resp, &hummingbird.Reservation{
+			ResId:     res.ResId,
+			Ia:        uint64(res.Ia),
+			IngressId: res.IngressId,
+			EgressId:  res.EgressId,
+			Bw:        res.Bw,
+			StartsAt:  timestamppb.New(res.StartsAt),
+			StopsAt:   timestamppb.New(res.StopsAt),
+			Ak:        res.Ak,
+		})
+	}
+	return &connect.Response[hummingbird.FetchReservationsResponse]{
+		Msg: &hummingbird.FetchReservationsResponse{
+			Reservations: resp,
+		},
+	}, nil
 }
 
 func (s *Service) Info(context.Context, *connect.Request[hummingbird.MarketplaceInfoRequest]) (*connect.Response[hummingbird.MarketplaceInfoResponse], error) {
@@ -132,24 +182,97 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	defer s.mtx.Unlock()
 	fmt.Println("RedeemAsset")
 	user := ctx.Value("user").(string)
-	ingressAsset, found := s.assets[req.Msg.IngressAssetId]
+	var bw uint64
+	var ingressID uint32
+	var egressID uint32
+	var startsAt time.Time
+	var stopsAt time.Time
+	var ia addr.IA
+	if req.Msg.IfPairAssetId != nil {
+		pairAsset, found := s.assets[*req.Msg.IfPairAssetId]
+		if !found {
+			return nil, serrors.New("asset not found")
+		}
+		if pairAsset.Owner != user {
+			return nil, serrors.New("user is not owner of the asset")
+		}
+		if pairAsset.IfIdIngress == nil {
+			return nil, serrors.New("pair asset requires ingress interface")
+		}
+		if pairAsset.IfIdEgress == nil {
+			return nil, serrors.New("pair asset requires egress interface")
+		}
+		bw = pairAsset.Bandwidth
+		ingressID = *pairAsset.IfIdIngress
+		egressID = *pairAsset.IfIdEgress
+		startsAt = pairAsset.StartAt
+		stopsAt = pairAsset.StopsAt
+		ia = pairAsset.IA
+	} else {
+		ingressAsset, found := s.assets[req.Msg.IngressAssetId]
+		if !found {
+			return nil, serrors.New("asset not found")
+		}
+		if ingressAsset.Owner != user {
+			return nil, serrors.New("user is not owner of the asset")
+		}
+		egressAsset, found := s.assets[req.Msg.EgressAssetId]
+		if !found {
+			return nil, serrors.New("asset not found")
+		}
+		if egressAsset.Owner != user {
+			return nil, serrors.New("user is not owner of the asset")
+		}
+		if ingressAsset.IA != egressAsset.IA {
+			return nil, serrors.New("ingress and egress asset have to belong to same IA")
+		}
+		if ingressAsset.IfIdIngress == nil {
+			return nil, serrors.New("ingress asset requires ingress interface")
+		}
+		if egressAsset.IfIdEgress == nil {
+			return nil, serrors.New("egress asset requires egress interface")
+		}
+		bw = min(ingressAsset.Bandwidth, egressAsset.Bandwidth)
+		ingressID = *ingressAsset.IfIdIngress
+		egressID = *egressAsset.IfIdEgress
+		ia = ingressAsset.IA
+		if ingressAsset.StartAt.Before(egressAsset.StartAt) {
+			startsAt = egressAsset.StartAt
+		}
+		if ingressAsset.StopsAt.Before(egressAsset.StopsAt) {
+			stopsAt = ingressAsset.StopsAt
+		}
+	}
+	if stopsAt.Before(startsAt) {
+		return nil, serrors.New("egress asset requires egress interface")
+	}
+	peer, found := s.redemptionServerPeers[ia]
 	if !found {
-		return nil, serrors.New("asset not found")
+		return nil, serrors.New("peer not found", "key", ia)
 	}
-	if ingressAsset.Owner != user {
-		return nil, serrors.New("user is not owner of the asset")
-	}
-	peer1, found := s.redemptionServerPeers[ingressAsset.IA]
-	if !found {
-		return nil, serrors.New("peer not found", "key", ingressAsset.IA)
-	}
-	respCh := peer1.Send(&hummingbird.RedeemAssetFromASRequest{
-		Bw: ingressAsset.Bandwidth,
-		// other fields omitted
+	respCh := peer.Send(&hummingbird.RedeemAssetFromASRequest{
+		Bw:        bw,
+		IngressId: ingressID,
+		EgressId:  egressID,
+		StartsAt:  timestamppb.New(startsAt),
+		StopsAt:   timestamppb.New(stopsAt),
 	})
 	select {
 	case resp := <-respCh:
-		fmt.Println("got out of receive channel")
+		userReservations, found := s.reservations[user]
+		if !found {
+			userReservations = []*Reservation{}
+			s.reservations[user] = userReservations
+		}
+		userReservations = append(userReservations, &Reservation{
+			ResId:     resp.ResInfo.ResId,
+			Ia:        ia,
+			IngressId: ingressID,
+			EgressId:  egressID,
+			Bw:        bw,
+			StartsAt:  startsAt,
+			StopsAt:   stopsAt,
+		})
 		return &connect.Response[hummingbird.RedeemAssetResponse]{
 			Msg: &hummingbird.RedeemAssetResponse{
 				Ak:                  resp.Ak,
@@ -158,7 +281,7 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 				BwDataplaneEncoding: resp.ResInfo.BwDataplaneEncoding,
 			},
 		}, nil
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		return nil, serrors.New("timeout")
 	}
 }
@@ -168,45 +291,67 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 	defer s.mtx.Unlock()
 	fmt.Println("SearchAssets")
 	user := ctx.Value("user").(string)
-	repAssets := make([]*hummingbird.Asset, 0, len(s.assets))
-	if req.Msg.Owned {
-		for id, asset := range s.assets {
-			if req.Msg.Ia != nil && *req.Msg.Ia != uint64(asset.IA) {
+	repAssets := make([]*hummingbird.Asset, 0, 1)
+	for id, asset := range s.assets {
+		if req.Msg.Owned {
+			if asset.Owner != user {
 				continue
 			}
-			if asset.Owner == user {
-				repAssets = append(repAssets, &hummingbird.Asset{
-					AssetId:  id,
-					Ia:       uint64(asset.IA),
-					Bw:       asset.Bandwidth,
-					StartsAt: timestamppb.New(asset.StartAt),
-					StopsAt:  timestamppb.New(asset.StopsAt),
-					// other fields omitted
-				})
-			}
+		} else if asset.Owner != "" {
+			continue
 		}
-	} else {
-		for id, asset := range s.assets {
-			if req.Msg.Ia != nil && *req.Msg.Ia != uint64(asset.IA) {
+		if req.Msg.Ia != nil && *req.Msg.Ia != uint64(asset.IA) {
+			continue
+		}
+		if req.Msg.AssetType != nil {
+			if *req.Msg.AssetType == hummingbird.AssetType_Interface_Pair && (asset.IfIdIngress == nil || asset.IfIdEgress == nil) {
 				continue
 			}
-			if asset.Owner == "" {
-				repAssets = append(repAssets, &hummingbird.Asset{
-					AssetId:  id,
-					Ia:       uint64(asset.IA),
-					Bw:       asset.Bandwidth,
-					StartsAt: timestamppb.New(asset.StartAt),
-					StopsAt:  timestamppb.New(asset.StopsAt),
-					// other fields omitted
-				})
+			if *req.Msg.AssetType == hummingbird.AssetType_Ingress && asset.IfIdIngress == nil {
+				continue
 			}
-
+			if *req.Msg.AssetType == hummingbird.AssetType_Egress && asset.IfIdEgress == nil {
+				continue
+			}
 		}
+		if req.Msg.MinRequiredBw != nil && asset.Bandwidth < *req.Msg.MinRequiredBw {
+			continue
+		}
+		if req.Msg.Price != nil && asset.Price > *req.Msg.Price {
+			continue
+		}
+		if req.Msg.StartsAtLatest != nil && asset.StartAt.After(req.Msg.StartsAtLatest.AsTime()) {
+			continue
+		}
+		if req.Msg.StopsAtEarliest != nil && asset.StopsAt.Before(req.Msg.StopsAtEarliest.AsTime()) {
+			continue
+		}
+		repAsset := &hummingbird.Asset{
+			AssetId:         id,
+			Ia:              uint64(asset.IA),
+			Bw:              asset.Bandwidth,
+			StartsAt:        timestamppb.New(asset.StartAt),
+			StopsAt:         timestamppb.New(asset.StopsAt),
+			Price:           asset.Price,
+			TimeGranularity: asset.TimeGranularity,
+		}
+		if asset.IfIdIngress != nil && asset.IfIdEgress != nil {
+			repAsset.AssetType = hummingbird.AssetType_Interface_Pair
+			repAsset.IfIdIngress = *asset.IfIdIngress
+			repAsset.IfIdEgress = *asset.IfIdEgress
+		} else if asset.IfIdIngress != nil {
+			repAsset.AssetType = hummingbird.AssetType_Ingress
+			repAsset.IfIdIngress = *asset.IfIdIngress
+		} else if asset.IfIdIngress != nil {
+			repAsset.AssetType = hummingbird.AssetType_Egress
+			repAsset.IfIdEgress = *asset.IfIdEgress
+		}
+		repAssets = append(repAssets, repAsset)
 	}
 
 	return &connect.Response[hummingbird.SearchAssetsResponse]{
 		Msg: &hummingbird.SearchAssetsResponse{
-			Owned:  false,
+			Owned:  req.Msg.Owned,
 			Assets: repAssets,
 		},
 	}, nil
