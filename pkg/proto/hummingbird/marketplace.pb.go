@@ -29,25 +29,22 @@ const (
 type AssetType int32
 
 const (
-	AssetType_Any            AssetType = 0
-	AssetType_Ingress        AssetType = 1
-	AssetType_Egress         AssetType = 2
-	AssetType_Interface_Pair AssetType = 3
+	AssetType_Ingress        AssetType = 0
+	AssetType_Egress         AssetType = 1
+	AssetType_Interface_Pair AssetType = 2
 )
 
 // Enum value maps for AssetType.
 var (
 	AssetType_name = map[int32]string{
-		0: "Any",
-		1: "Ingress",
-		2: "Egress",
-		3: "Interface_Pair",
+		0: "Ingress",
+		1: "Egress",
+		2: "Interface_Pair",
 	}
 	AssetType_value = map[string]int32{
-		"Any":            0,
-		"Ingress":        1,
-		"Egress":         2,
-		"Interface_Pair": 3,
+		"Ingress":        0,
+		"Egress":         1,
+		"Interface_Pair": 2,
 	}
 )
 
@@ -389,7 +386,7 @@ func (x *SearchAssetsRequest) GetAssetType() AssetType {
 	if x != nil && x.AssetType != nil {
 		return *x.AssetType
 	}
-	return AssetType_Any
+	return AssetType_Ingress
 }
 
 func (x *SearchAssetsRequest) GetIfIdIngress() uint32 {
@@ -550,7 +547,7 @@ func (x *Asset) GetAssetType() AssetType {
 	if x != nil {
 		return x.AssetType
 	}
-	return AssetType_Any
+	return AssetType_Ingress
 }
 
 func (x *Asset) GetIfIdIngress() uint32 {
@@ -1289,13 +1286,12 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x02bw\x18\x05 \x01(\x04R\x02bw\x127\n" +
 	"\tstarts_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
 	"\bstops_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12\x0e\n" +
-	"\x02ak\x18\b \x01(\tR\x02ak*A\n" +
-	"\tAssetType\x12\a\n" +
-	"\x03Any\x10\x00\x12\v\n" +
-	"\aIngress\x10\x01\x12\n" +
+	"\x02ak\x18\b \x01(\tR\x02ak*8\n" +
+	"\tAssetType\x12\v\n" +
+	"\aIngress\x10\x00\x12\n" +
 	"\n" +
-	"\x06Egress\x10\x02\x12\x12\n" +
-	"\x0eInterface_Pair\x10\x032\x8b\x05\n" +
+	"\x06Egress\x10\x01\x12\x12\n" +
+	"\x0eInterface_Pair\x10\x022\x8b\x05\n" +
 	"\x12MarketplaceService\x12e\n" +
 	"\x04Info\x12,.proto.hummingbird.v1.MarketplaceInfoRequest\x1a-.proto.hummingbird.v1.MarketplaceInfoResponse\"\x00\x12g\n" +
 	"\fPublishAsset\x12).proto.hummingbird.v1.PublishAssetRequest\x1a*.proto.hummingbird.v1.PublishAssetResponse\"\x00\x12g\n" +

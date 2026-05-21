@@ -64,30 +64,85 @@ func userInteraction(url string, token string) {
 		case option == "redeem":
 			handleRedeem(ctx, reader, client)
 		case option == "reservation":
+			handleReservation(ctx, reader, client)
 		case option == "exit":
 			return
 		}
+		fmt.Println("----------")
 	}
 }
-func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
-	fmt.Println("Redeem Query.")
-	ownedAssets, err := c.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
-		Msg: &hummingbird.SearchAssetsRequest{
-			Owned: true,
-		},
+func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	var ia *uint64
+	var ingress *uint32
+	var egress *uint32
+	var bw *uint64
+	var startsAt *time.Time
+	var stopsAt *time.Time
+	fmt.Println("Handle fetch reservation query. Filters are ignored if empty.")
+	ia = readOptionalIAUint64(reader, "IA: ")
+	ingress = readOptionalUint32(reader, "Ingress: ")
+	egress = readOptionalUint32(reader, "Egress: ")
+	bw = readOptionalUint64(reader, "BW: ")
+	startsAt = readOptionalTime(reader, "Starts At (2006-01-02T15:04:05): ")
+	stopsAt = readOptionalTime(reader, "Stops At (2006-01-02T15:04:05): ")
+
+	req := &hummingbird.FetchReservationsRequest{
+		Ia:        ia,
+		IngressId: ingress,
+		EgressId:  egress,
+		Bw:        bw,
+	}
+	if startsAt != nil {
+		req.StartsAt = timestamppb.New(*startsAt)
+	}
+	if stopsAt != nil {
+		req.StopsAt = timestamppb.New(*stopsAt)
+	}
+	rep, err := c.FetchReservations(ctx, &connect.Request[hummingbird.FetchReservationsRequest]{
+		Msg: req,
 	})
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println("Currently owned assets:")
-	for _, asset := range ownedAssets.Msg.Assets {
-		fmt.Printf("%d %s,", asset.AssetId, asset.AssetType.String())
+	type Reservation struct {
+		ResId     uint64
+		Ia        addr.IA
+		IngressId uint32
+		EgressId  uint32
+		Bw        uint64
+		StartsAt  time.Time
+		StopsAt   time.Time
+		Ak        string
 	}
-	fmt.Println()
-	option := readOptionalUint32(reader, "Select option:\n0: ingress and egress assets\n1: interface-pair asset: ")
+	transformed := make([]*Reservation, 0, len(rep.Msg.Reservations))
+	for _, res := range rep.Msg.Reservations {
+		transformed = append(transformed, &Reservation{
+			ResId:     res.ResId,
+			Ia:        addr.IA(res.Ia),
+			IngressId: res.IngressId,
+			EgressId:  res.EgressId,
+			Bw:        res.Bw,
+			StartsAt:  res.StartsAt.AsTime(),
+			StopsAt:   res.StopsAt.AsTime(),
+		})
+	}
+	j, err := json.MarshalIndent(transformed, "", "\t")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(j))
+}
+
+func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	fmt.Println("Redeem Query.")
+	var err error
+	option := readOptionalUint32(reader, "Select option:\n0: ingress and egress assets\n1: interface-pair asset:\n")
 	var rep *connect.Response[hummingbird.RedeemAssetResponse]
-	if option == nil || *option == 0 {
+	if option == nil {
+		return
+	} else if *option == 0 {
 		ingressAssetID := readUint64(reader, "Ingress Asset ID: ")
 		egressAssetID := readUint64(reader, "Egress Asset ID: ")
 		b := readOptionalBool(reader, "Confirm redemption? [true,false]: ")
@@ -101,7 +156,7 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 				EgressAssetId:  egressAssetID,
 			},
 		})
-	} else {
+	} else if *option == 1 {
 		assetID := readUint64(reader, "Interface-pair Asset ID: ")
 		b := readOptionalBool(reader, "Confirm redemption? [true,false]: ")
 		if b != nil && *b == false {
@@ -113,6 +168,8 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 				IfPairAssetId: &assetID,
 			},
 		})
+	} else {
+		return
 	}
 	if err != nil {
 		fmt.Println(err)
@@ -133,6 +190,7 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 	fmt.Println("Buy Query.")
 	buyAssets := make([]*hummingbird.BuyAsset, 0, 1)
 	for {
+		fmt.Printf("Currently %d assets in the shopping cart.\n", len(buyAssets))
 		printBuyOptions()
 		option, err := reader.ReadString('\n')
 		option = strings.TrimSpace(option)
@@ -144,8 +202,8 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 		case option == "add":
 			buyAsset := &hummingbird.BuyAsset{
 				AssetId:         readUint64(reader, "AssetID: "),
-				StartsAtExactly: timestamppb.New(readTime(reader, "Starts at exactly (2006-01-02T15:04:05):")),
-				StopsAtExactly:  timestamppb.New(readTime(reader, "Stops at exactly (2006-01-02T15:04:05):")),
+				StartsAtExactly: timestamppb.New(readTime(reader, "Starts at exactly (2006-01-02T15:04:05): ")),
+				StopsAtExactly:  timestamppb.New(readTime(reader, "Stops at exactly (2006-01-02T15:04:05): ")),
 				BwExact:         readUint64(reader, "BW exact: "),
 			}
 			buyAssets = append(buyAssets, buyAsset)
@@ -163,12 +221,18 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 			}
 		case option == "submit":
 			maxPrice := readUint64(reader, "Max Price: ")
-			c.BuyAssets(ctx, &connect.Request[hummingbird.BuyAssetsRequest]{
+			rep, err := c.BuyAssets(ctx, &connect.Request[hummingbird.BuyAssetsRequest]{
 				Msg: &hummingbird.BuyAssetsRequest{
 					Assets:   buyAssets,
 					MaxPrice: maxPrice,
 				},
 			})
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			fmt.Printf("Bought assets for a total cost of %d\n", rep.Msg.Cost)
+			return
 		case option == "cancel":
 			return
 		}
@@ -185,10 +249,10 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 	var price *uint64
 	var startsAtLatest *time.Time
 	var stopsAtEarliest *time.Time
-	fmt.Println("Search Query. Empty means omission")
+	fmt.Println("Search Query. Owned is mandatory, other filters are ignored if empty.")
 
 	owned = readOptionalBool(reader, "Owned [true/false]: ")
-	ia = readOptionalUint64(reader, "IA: ")
+	ia = readOptionalIAUint64(reader, "IA: ")
 	assetType = readOptionalAssetType(reader, "Asset Type: ")
 	ingress = readOptionalUint32(reader, "Ingress: ")
 	egress = readOptionalUint32(reader, "Egress: ")
@@ -273,6 +337,25 @@ func readUint64(reader *bufio.Reader, prompt string) uint64 {
 	}
 
 	return v
+}
+
+func readOptionalIAUint64(reader *bufio.Reader, prompt string) *uint64 {
+	fmt.Print(prompt)
+
+	text, _ := reader.ReadString('\n')
+	text = strings.TrimSpace(text)
+
+	if text == "" {
+		return nil
+	}
+	ia, err := addr.ParseIA(text)
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+	v := uint64(ia)
+
+	return &v
 }
 
 func readOptionalUint64(reader *bufio.Reader, prompt string) *uint64 {
@@ -383,13 +466,12 @@ func readOptionalAssetType(reader *bufio.Reader, prompt string) *hummingbird.Ass
 		return nil
 	}
 	var assetType hummingbird.AssetType
-	if text == "any" {
-		assetType = hummingbird.AssetType_Any
-	} else if text == "ingress" {
+	switch text {
+	case "ingress":
 		assetType = hummingbird.AssetType_Ingress
-	} else if text == "egress" {
+	case "egress":
 		assetType = hummingbird.AssetType_Egress
-	} else if text == "pair" {
+	case "pair":
 		assetType = hummingbird.AssetType_Interface_Pair
 	}
 	return &assetType
@@ -397,72 +479,14 @@ func readOptionalAssetType(reader *bufio.Reader, prompt string) *hummingbird.Ass
 
 func main() {
 	args := os.Args
-	if len(args) != 2 {
-		fmt.Println("Provide JWT token as command line argument. Requested at: https://localhost:8889")
+	if len(args) != 3 {
+		fmt.Printf("%s <marketplace_api_url> <jwt_token>\n", args[0])
 		return
 	}
-	jwtToken := args[1]
-	marketUrl := "https://localhost:8888"
-	userInteraction(marketUrl, jwtToken)
-	/*client := hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-	}, marketUrl, connect.WithInterceptors(authInterceptor(jwtToken)))
-	ctx := context.Background()
-	infoRep, err := client.Info(ctx, &connect.Request[hummingbird.MarketplaceInfoRequest]{})
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Println("info", infoRep.Msg.String())
-	targetIA := uint64(addr.MustParseIA("1-ff00:0:110"))
-	searchAssetRep, err := client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
-		Msg: &hummingbird.SearchAssetsRequest{
-			Owned: false,
-			Ia:    &targetIA,
-		},
-	})
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Println("searched assets", searchAssetRep.Msg.String())
-	if len(searchAssetRep.Msg.Assets) == 0 {
-		fmt.Println("no assets found")
-		return
-	}
-	boughtAssets, err := client.BuyAssets(ctx, &connect.Request[hummingbird.BuyAssetsRequest]{
-		Msg: &hummingbird.BuyAssetsRequest{
-			Assets: []*hummingbird.BuyAsset{
-				{
-					AssetId: searchAssetRep.Msg.Assets[0].AssetId,
-				},
-			},
-		},
-	})
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Println("bought assets:", boughtAssets.Msg.String())
-	if len(boughtAssets.Msg.Assets) == 0 {
-		fmt.Println("no assets bought")
-		return
-	}
-
-	redeemedAssets, err := client.RedeemAsset(ctx, &connect.Request[hummingbird.RedeemAssetRequest]{
-		Msg: &hummingbird.RedeemAssetRequest{
-			IngressAssetId: boughtAssets.Msg.Assets[0].AssetId,
-		},
-	})
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Println("redeemed assets:", redeemedAssets.Msg.String())*/
+	url := args[1]
+	jwtToken := args[2]
+	//marketUrl := "https://localhost:8888"
+	userInteraction(url, jwtToken)
 }
 
 type Asset struct {

@@ -159,8 +159,18 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 			return nil, connect.NewError(connect.CodePermissionDenied,
 				fmt.Errorf("missing scope: %s", requiredScope))
 		}
-
-		ctx = context.WithValue(ctx, "user", user)
+		if scopes["User"] {
+			dbUser := a.accountDB.GetUser(user)
+			ctx = context.WithValue(ctx, "user", dbUser)
+		} else {
+			ia, err := addr.ParseIA(user)
+			if err != nil {
+				return nil, connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("invalid scope"))
+			}
+			dbUser := a.accountDB.GetASUser(ia)
+			ctx = context.WithValue(ctx, "user", dbUser)
+		}
 
 		return next(ctx, req)
 	}

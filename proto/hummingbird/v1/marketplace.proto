@@ -56,10 +56,9 @@ message PublishAssetResponse {
 }
 
 enum AssetType {
-    Any = 0;
-    Ingress = 1;
-    Egress = 2;
-    Interface_Pair = 3;
+    Ingress = 0;
+    Egress = 1;
+    Interface_Pair = 2;
 }
 
 message SearchAssetsRequest {

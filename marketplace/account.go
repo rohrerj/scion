@@ -20,6 +20,8 @@ type User struct {
 	Username     string
 	Password     string
 	TokenVersion uint64
+	Reservations *[]*Reservation
+	mtx          sync.RWMutex
 }
 
 type ASUser struct {
@@ -53,12 +55,22 @@ func (db *AccountDB) CreateNonExistingUser(user *User) bool {
 	if user == nil {
 		return false
 	}
-	db.mtx.Lock()
-	defer db.mtx.Unlock()
+	db.mtx.RLock()
 	if db.users[user.Username] == nil {
-		db.users[user.Username] = user
-		return true
+		db.mtx.RUnlock()
+		db.mtx.Lock()
+		defer db.mtx.Unlock()
+		if db.users[user.Username] == nil {
+			db.users[user.Username] = user
+			if user.Reservations == nil {
+				user.Reservations = &[]*Reservation{}
+			}
+			return true
+		}
+	} else {
+		db.mtx.RUnlock()
 	}
+
 	return false
 }
 func (db *AccountDB) CreateNonExistingASUser(user *ASUser) bool {
