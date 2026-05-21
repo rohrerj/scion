@@ -60,27 +60,119 @@ func userInteraction(url string, token string) {
 		case option == "search":
 			handleSearch(ctx, reader, client)
 		case option == "buy":
+			handleBuy(ctx, reader, client)
 		case option == "redeem":
+			handleRedeem(ctx, reader, client)
 		case option == "reservation":
 		case option == "exit":
 			return
-		default:
-			break
 		}
 	}
 }
-
-func handleBuy(ctx context.Context, c hummingbirdconnect.MarketplaceServiceClient) {
-	fmt.Println("Buy Query. Empty means omission")
-	/*c.BuyAssets(ctx, &connect.Request[hummingbird.BuyAssetsRequest]{
-		Msg: &hummingbird.BuyAssetsRequest{
-			Assets: []*hummingbird.BuyAsset{
-				&hummingbird.BuyAsset{
-					AssetId: ,
-				}
-			},
+func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	fmt.Println("Redeem Query.")
+	ownedAssets, err := c.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+		Msg: &hummingbird.SearchAssetsRequest{
+			Owned: true,
 		},
-	})*/
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("Currently owned assets:")
+	for _, asset := range ownedAssets.Msg.Assets {
+		fmt.Printf("%d %s,", asset.AssetId, asset.AssetType.String())
+	}
+	fmt.Println()
+	option := readOptionalUint32(reader, "Select option:\n0: ingress and egress assets\n1: interface-pair asset: ")
+	var rep *connect.Response[hummingbird.RedeemAssetResponse]
+	if option == nil || *option == 0 {
+		ingressAssetID := readUint64(reader, "Ingress Asset ID: ")
+		egressAssetID := readUint64(reader, "Egress Asset ID: ")
+		b := readOptionalBool(reader, "Confirm redemption? [true,false]: ")
+		if b != nil && *b == false {
+			fmt.Println("cancel redemption")
+			return
+		}
+		rep, err = c.RedeemAsset(ctx, &connect.Request[hummingbird.RedeemAssetRequest]{
+			Msg: &hummingbird.RedeemAssetRequest{
+				IngressAssetId: ingressAssetID,
+				EgressAssetId:  egressAssetID,
+			},
+		})
+	} else {
+		assetID := readUint64(reader, "Interface-pair Asset ID: ")
+		b := readOptionalBool(reader, "Confirm redemption? [true,false]: ")
+		if b != nil && *b == false {
+			fmt.Println("cancel redemption")
+			return
+		}
+		rep, err = c.RedeemAsset(ctx, &connect.Request[hummingbird.RedeemAssetRequest]{
+			Msg: &hummingbird.RedeemAssetRequest{
+				IfPairAssetId: &assetID,
+			},
+		})
+	}
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("Redemption Result:")
+	fmt.Printf("ResID: %d\nAk: %s\nBw: %d\nEncoding: %d\n", rep.Msg.ResId, rep.Msg.Ak, rep.Msg.BwRounded, rep.Msg.BwDataplaneEncoding)
+
+}
+func printBuyOptions() {
+	fmt.Println("-> add")
+	fmt.Println("-> remove")
+	fmt.Println("-> list")
+	fmt.Println("-> submit")
+	fmt.Println("-> cancel")
+}
+func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	fmt.Println("Buy Query.")
+	buyAssets := make([]*hummingbird.BuyAsset, 0, 1)
+	for {
+		printBuyOptions()
+		option, err := reader.ReadString('\n')
+		option = strings.TrimSpace(option)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		switch {
+		case option == "add":
+			buyAsset := &hummingbird.BuyAsset{
+				AssetId:         readUint64(reader, "AssetID: "),
+				StartsAtExactly: timestamppb.New(readTime(reader, "Starts at exactly (2006-01-02T15:04:05):")),
+				StopsAtExactly:  timestamppb.New(readTime(reader, "Stops at exactly (2006-01-02T15:04:05):")),
+				BwExact:         readUint64(reader, "BW exact: "),
+			}
+			buyAssets = append(buyAssets, buyAsset)
+		case option == "remove":
+			index := readUint64(reader, "List index to remove: ")
+			if int(index) >= len(buyAssets) {
+				fmt.Println("index invalid")
+				break
+			}
+			buyAssets = append(buyAssets[:index], buyAssets[index+1:]...)
+		case option == "list":
+			for index, asset := range buyAssets {
+				jsonAsset, _ := json.Marshal(asset)
+				fmt.Printf("%d:%s\n", index, string(jsonAsset))
+			}
+		case option == "submit":
+			maxPrice := readUint64(reader, "Max Price: ")
+			c.BuyAssets(ctx, &connect.Request[hummingbird.BuyAssetsRequest]{
+				Msg: &hummingbird.BuyAssetsRequest{
+					Assets:   buyAssets,
+					MaxPrice: maxPrice,
+				},
+			})
+		case option == "cancel":
+			return
+		}
+	}
 }
 
 func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
@@ -140,8 +232,8 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 			StartAt:         asset.StartsAt.AsTime(),
 			StopsAt:         asset.StopsAt.AsTime(),
 			Price:           asset.Price,
-			IfIdIngress:     &asset.IfIdEgress,
-			IfIdEgress:      &asset.IfIdIngress,
+			IfIdIngress:     asset.IfIdEgress,
+			IfIdEgress:      asset.IfIdIngress,
 			TimeGranularity: asset.TimeGranularity,
 		})
 	}
@@ -163,6 +255,25 @@ func handleInfo(ctx context.Context, c hummingbirdconnect.MarketplaceServiceClie
 }
 
 type AssetType string
+
+func readUint64(reader *bufio.Reader, prompt string) uint64 {
+	fmt.Print(prompt)
+
+	text, _ := reader.ReadString('\n')
+	text = strings.TrimSpace(text)
+
+	if text == "" {
+		return 0
+	}
+
+	v, err := strconv.ParseUint(text, 10, 64)
+	if err != nil {
+		fmt.Println("Invalid uint64")
+		return 0
+	}
+
+	return v
+}
 
 func readOptionalUint64(reader *bufio.Reader, prompt string) *uint64 {
 	fmt.Print(prompt)
@@ -220,6 +331,26 @@ func readOptionalBool(reader *bufio.Reader, prompt string) *bool {
 	}
 
 	return &v
+}
+
+func readTime(reader *bufio.Reader, prompt string) time.Time {
+	fmt.Print(prompt)
+
+	text, _ := reader.ReadString('\n')
+	text = strings.TrimSpace(text)
+
+	if text == "" {
+		return time.Time{}
+	}
+
+	// Example format: 2026-05-20T15:04:05
+	t, err := time.Parse("2006-01-02T15:04:05", text)
+	if err != nil {
+		fmt.Println("Invalid time format")
+		return time.Time{}
+	}
+
+	return t
 }
 
 func readOptionalTime(reader *bufio.Reader, prompt string) *time.Time {

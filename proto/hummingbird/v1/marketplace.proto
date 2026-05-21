@@ -83,8 +83,8 @@ message Asset {
     uint64 asset_id = 1;
     uint64 ia = 2;
     AssetType asset_type = 3;
-    uint32 if_id_ingress = 4;
-    uint32 if_id_egress = 5;
+    optional uint32 if_id_ingress = 4;
+    optional uint32 if_id_egress = 5;
     uint64 bw = 6;
     google.protobuf.Timestamp starts_at = 7;
     google.protobuf.Timestamp stops_at = 8;

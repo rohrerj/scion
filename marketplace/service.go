@@ -337,14 +337,14 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 		}
 		if asset.IfIdIngress != nil && asset.IfIdEgress != nil {
 			repAsset.AssetType = hummingbird.AssetType_Interface_Pair
-			repAsset.IfIdIngress = *asset.IfIdIngress
-			repAsset.IfIdEgress = *asset.IfIdEgress
+			repAsset.IfIdIngress = asset.IfIdIngress
+			repAsset.IfIdEgress = asset.IfIdEgress
 		} else if asset.IfIdIngress != nil {
 			repAsset.AssetType = hummingbird.AssetType_Ingress
-			repAsset.IfIdIngress = *asset.IfIdIngress
-		} else if asset.IfIdIngress != nil {
+			repAsset.IfIdIngress = asset.IfIdIngress
+		} else if asset.IfIdEgress != nil {
 			repAsset.AssetType = hummingbird.AssetType_Egress
-			repAsset.IfIdEgress = *asset.IfIdEgress
+			repAsset.IfIdEgress = asset.IfIdEgress
 		}
 		repAssets = append(repAssets, repAsset)
 	}

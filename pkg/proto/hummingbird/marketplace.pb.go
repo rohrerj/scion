@@ -491,8 +491,8 @@ type Asset struct {
 	AssetId         uint64                 `protobuf:"varint,1,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
 	Ia              uint64                 `protobuf:"varint,2,opt,name=ia,proto3" json:"ia,omitempty"`
 	AssetType       AssetType              `protobuf:"varint,3,opt,name=asset_type,json=assetType,proto3,enum=proto.hummingbird.v1.AssetType" json:"asset_type,omitempty"`
-	IfIdIngress     uint32                 `protobuf:"varint,4,opt,name=if_id_ingress,json=ifIdIngress,proto3" json:"if_id_ingress,omitempty"`
-	IfIdEgress      uint32                 `protobuf:"varint,5,opt,name=if_id_egress,json=ifIdEgress,proto3" json:"if_id_egress,omitempty"`
+	IfIdIngress     *uint32                `protobuf:"varint,4,opt,name=if_id_ingress,json=ifIdIngress,proto3,oneof" json:"if_id_ingress,omitempty"`
+	IfIdEgress      *uint32                `protobuf:"varint,5,opt,name=if_id_egress,json=ifIdEgress,proto3,oneof" json:"if_id_egress,omitempty"`
 	Bw              uint64                 `protobuf:"varint,6,opt,name=bw,proto3" json:"bw,omitempty"`
 	StartsAt        *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
 	StopsAt         *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
@@ -554,15 +554,15 @@ func (x *Asset) GetAssetType() AssetType {
 }
 
 func (x *Asset) GetIfIdIngress() uint32 {
-	if x != nil {
-		return x.IfIdIngress
+	if x != nil && x.IfIdIngress != nil {
+		return *x.IfIdIngress
 	}
 	return 0
 }
 
 func (x *Asset) GetIfIdEgress() uint32 {
-	if x != nil {
-		return x.IfIdEgress
+	if x != nil && x.IfIdEgress != nil {
+		return *x.IfIdEgress
 	}
 	return 0
 }
@@ -1221,21 +1221,23 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x06_price\"a\n" +
 	"\x14SearchAssetsResponse\x12\x14\n" +
 	"\x05owned\x18\x01 \x01(\bR\x05owned\x123\n" +
-	"\x06assets\x18\x02 \x03(\v2\x1b.proto.hummingbird.v1.AssetR\x06assets\"\xf9\x02\n" +
+	"\x06assets\x18\x02 \x03(\v2\x1b.proto.hummingbird.v1.AssetR\x06assets\"\xa6\x03\n" +
 	"\x05Asset\x12\x19\n" +
 	"\basset_id\x18\x01 \x01(\x04R\aassetId\x12\x0e\n" +
 	"\x02ia\x18\x02 \x01(\x04R\x02ia\x12>\n" +
 	"\n" +
-	"asset_type\x18\x03 \x01(\x0e2\x1f.proto.hummingbird.v1.AssetTypeR\tassetType\x12\"\n" +
-	"\rif_id_ingress\x18\x04 \x01(\rR\vifIdIngress\x12 \n" +
-	"\fif_id_egress\x18\x05 \x01(\rR\n" +
-	"ifIdEgress\x12\x0e\n" +
+	"asset_type\x18\x03 \x01(\x0e2\x1f.proto.hummingbird.v1.AssetTypeR\tassetType\x12'\n" +
+	"\rif_id_ingress\x18\x04 \x01(\rH\x00R\vifIdIngress\x88\x01\x01\x12%\n" +
+	"\fif_id_egress\x18\x05 \x01(\rH\x01R\n" +
+	"ifIdEgress\x88\x01\x01\x12\x0e\n" +
 	"\x02bw\x18\x06 \x01(\x04R\x02bw\x127\n" +
 	"\tstarts_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
 	"\bstops_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12)\n" +
 	"\x10time_granularity\x18\t \x01(\x04R\x0ftimeGranularity\x12\x14\n" +
 	"\x05price\x18\n" +
-	" \x01(\x04R\x05price\"g\n" +
+	" \x01(\x04R\x05priceB\x10\n" +
+	"\x0e_if_id_ingressB\x0f\n" +
+	"\r_if_id_egress\"g\n" +
 	"\x10BuyAssetsRequest\x126\n" +
 	"\x06assets\x18\x01 \x03(\v2\x1e.proto.hummingbird.v1.BuyAssetR\x06assets\x12\x1b\n" +
 	"\tmax_price\x18\x02 \x01(\x04R\bmaxPrice\"\xce\x01\n" +
@@ -1381,6 +1383,7 @@ func file_proto_hummingbird_v1_marketplace_proto_init() {
 	}
 	file_proto_hummingbird_v1_marketplace_proto_msgTypes[2].OneofWrappers = []any{}
 	file_proto_hummingbird_v1_marketplace_proto_msgTypes[4].OneofWrappers = []any{}
+	file_proto_hummingbird_v1_marketplace_proto_msgTypes[6].OneofWrappers = []any{}
 	file_proto_hummingbird_v1_marketplace_proto_msgTypes[11].OneofWrappers = []any{}
 	file_proto_hummingbird_v1_marketplace_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
