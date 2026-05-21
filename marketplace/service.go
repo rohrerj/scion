@@ -148,30 +148,23 @@ func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hu
 	user := ctx.Value("user").(*User)
 	resp := make([]*hummingbird.Reservation, 0, 1)
 	s.reservationOp(user, func(r *[]*Reservation) error {
-		fmt.Println("R", len(*r))
 		for _, res := range *r {
 			if req.Msg.Ia != nil && uint64(res.Ia) != *req.Msg.Ia {
-				fmt.Println(0)
 				continue
 			}
 			if req.Msg.StartsAt != nil && res.StartsAt.Before(req.Msg.StartsAt.AsTime()) {
-				fmt.Println(1)
 				continue
 			}
 			if req.Msg.StopsAt != nil && res.StopsAt.After(req.Msg.StopsAt.AsTime()) {
-				fmt.Println(2)
 				continue
 			}
 			if req.Msg.Bw != nil && res.Bw < *req.Msg.Bw {
-				fmt.Println(3)
 				continue
 			}
 			if req.Msg.IngressId != nil && res.IngressId != *req.Msg.IngressId {
-				fmt.Println(4)
 				continue
 			}
 			if req.Msg.EgressId != nil && res.EgressId != *req.Msg.EgressId {
-				fmt.Println(5)
 				continue
 			}
 			resp = append(resp, &hummingbird.Reservation{
