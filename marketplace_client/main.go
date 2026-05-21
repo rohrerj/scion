@@ -251,9 +251,9 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 	var stopsAtEarliest *time.Time
 	fmt.Println("Search Query. Owned is mandatory, other filters are ignored if empty.")
 
-	owned = readOptionalBool(reader, "Owned [true/false]: ")
+	owned = readOptionalBool(reader, "Owned (true,false): ")
 	ia = readOptionalIAUint64(reader, "IA: ")
-	assetType = readOptionalAssetType(reader, "Asset Type: ")
+	assetType = readOptionalAssetType(reader, "Asset Type (ingress,egress,pair): ")
 	ingress = readOptionalUint32(reader, "Ingress: ")
 	egress = readOptionalUint32(reader, "Egress: ")
 	minReqBw = readOptionalUint64(reader, "Min Required BW: ")
@@ -325,10 +325,6 @@ func readUint64(reader *bufio.Reader, prompt string) uint64 {
 
 	text, _ := reader.ReadString('\n')
 	text = strings.TrimSpace(text)
-
-	if text == "" {
-		return 0
-	}
 
 	v, err := strconv.ParseUint(text, 10, 64)
 	if err != nil {
