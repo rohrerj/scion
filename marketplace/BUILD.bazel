@@ -9,6 +9,7 @@ go_library(
         "jwt_handler.go",
         "redeem.go",
         "service.go",
+        "split.go",
         "trust_db_wrapper.go",
     ],
     importpath = "github.com/scionproto/scion/marketplace",

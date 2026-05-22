@@ -1198,34 +1198,30 @@ func realMain(ctx context.Context) error {
 		}
 		ifids := topo.IfIDs()
 		assets := []*hummingbird.PublishAssetRequest{}
-		for _, ifid1 := range ifids {
-			for _, ifid2 := range ifids {
-				if ifid1 == ifid2 {
-					continue
-				}
-				ingress := uint32(ifid1)
-				egress := uint32(ifid2)
+		if len(ifids) > 1 {
+			for _, ifid := range ifids {
+				ifidUint32 := uint32(ifid)
 				assets = append(assets, &hummingbird.PublishAssetRequest{
-					Bandwidth:       1000,
+					Bandwidth:       10000000,
 					BandwidthMin:    100,
 					StartAt:         timestamppb.New(time.Now()),
-					StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24)),
+					StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24 * 7)),
 					Price:           100,
 					TimeGranularity: 1,
 					TimeMinDuration: 1,
-					IfIdIngress:     &ingress,
-					IfIdEgress:      &egress,
+					IfIdIngress:     &ifidUint32,
+					IfIdEgress:      nil,
 				})
 				assets = append(assets, &hummingbird.PublishAssetRequest{
-					Bandwidth:       2000,
-					BandwidthMin:    200,
+					Bandwidth:       10000000,
+					BandwidthMin:    100,
 					StartAt:         timestamppb.New(time.Now()),
-					StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24)),
-					Price:           200,
+					StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24 * 7)),
+					Price:           100,
 					TimeGranularity: 1,
 					TimeMinDuration: 1,
-					IfIdIngress:     &ingress,
-					IfIdEgress:      &egress,
+					IfIdIngress:     nil,
+					IfIdEgress:      &ifidUint32,
 				})
 			}
 		}

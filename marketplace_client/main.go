@@ -36,8 +36,13 @@ func printOptions() {
 	fmt.Println("-> exit")
 }
 
-func userInteraction(url string, token string) {
+func userInteraction() {
 	reader := bufio.NewReader(os.Stdin)
+	defaultMarketplaceAddr := "https://localhost:8888"
+	url := *readOptionalString(reader, "marketplace_api: ", &defaultMarketplaceAddr)
+	defaultJWT := ""
+	token := *readOptionalString(reader, "jwt_token: ", &defaultJWT)
+
 	client := hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -229,9 +234,14 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 			})
 			if err != nil {
 				fmt.Println(err)
-				return
+				continue
 			}
 			fmt.Printf("Bought assets for a total cost of %d\n", rep.Msg.Cost)
+			fmt.Print("[")
+			for _, boughtAsset := range rep.Msg.Assets {
+				fmt.Printf("%d,", boughtAsset.AssetId)
+			}
+			fmt.Print("]\n")
 			return
 		case option == "cancel":
 			return
@@ -296,8 +306,8 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 			StartAt:         asset.StartsAt.AsTime(),
 			StopsAt:         asset.StopsAt.AsTime(),
 			Price:           asset.Price,
-			IfIdIngress:     asset.IfIdEgress,
-			IfIdEgress:      asset.IfIdIngress,
+			IfIdIngress:     asset.IfIdIngress,
+			IfIdEgress:      asset.IfIdEgress,
 			TimeGranularity: asset.TimeGranularity,
 		})
 	}
@@ -352,6 +362,19 @@ func readOptionalIAUint64(reader *bufio.Reader, prompt string) *uint64 {
 	v := uint64(ia)
 
 	return &v
+}
+
+func readOptionalString(reader *bufio.Reader, prompt string, defaultStr *string) *string {
+	fmt.Print(prompt)
+
+	text, _ := reader.ReadString('\n')
+	text = strings.TrimSpace(text)
+
+	if text == "" {
+		return defaultStr
+	}
+
+	return &text
 }
 
 func readOptionalUint64(reader *bufio.Reader, prompt string) *uint64 {
@@ -474,15 +497,7 @@ func readOptionalAssetType(reader *bufio.Reader, prompt string) *hummingbird.Ass
 }
 
 func main() {
-	args := os.Args
-	if len(args) != 3 {
-		fmt.Printf("%s <marketplace_api_url> <jwt_token>\n", args[0])
-		return
-	}
-	url := args[1]
-	jwtToken := args[2]
-	//marketUrl := "https://localhost:8888"
-	userInteraction(url, jwtToken)
+	userInteraction()
 }
 
 type Asset struct {

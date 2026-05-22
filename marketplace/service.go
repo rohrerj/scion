@@ -28,6 +28,15 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+type assetState int
+
+const (
+	Listed assetState = iota
+	CheckedOut
+	Bought
+	BeingRedeemed
+)
+
 type Asset struct {
 	Owner           string
 	IA              addr.IA
@@ -41,7 +50,7 @@ type Asset struct {
 	IfIdIngress     *uint32
 	IfIdEgress      *uint32
 	mtx             sync.Mutex
-	redeemed        bool
+	state           assetState
 }
 
 type Reservation struct {
@@ -70,6 +79,11 @@ func NewService() *Service {
 		assets:                make(map[uint64]*Asset),
 		currentAssetID:        atomic.Uint64{},
 	}
+}
+
+func (s *Asset) TotalPrice() uint64 {
+	splitDuration := uint64(s.StopsAt.Sub(s.StartAt).Seconds())
+	return s.Price * splitDuration * s.Bandwidth
 }
 
 // locks the user and its reservations
@@ -104,40 +118,127 @@ func (s *Service) assetOp(assetID uint64, f func(*Asset) error) error {
 func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbird.BuyAssetsRequest]) (*connect.Response[hummingbird.BuyAssetsResponse], error) {
 	fmt.Println("BuyAssets")
 	user := ctx.Value("user").(*User)
+	checkedOutAsset := make([]uint64, 0, 1)
 	boughtAssets := make([]*hummingbird.BoughtAsset, 0, 1)
 	accCost := uint64(0)
-	undoPurchase := func() {
-		for _, asset := range boughtAssets {
-			s.assetOp(asset.AssetId, func(a *Asset) error {
+	undoCheckout := func() {
+		for _, assetID := range checkedOutAsset {
+			s.assetOp(assetID, func(a *Asset) error {
+				a.state = Listed
 				a.Owner = ""
 				return nil
 			})
 		}
 	}
+	assetSplits := make(map[uint64][]RequestedSplit)
 	for _, reqAsset := range req.Msg.Assets {
 		err := s.assetOp(reqAsset.AssetId, func(a *Asset) error {
-			if reqAsset.StartsAtExactly.AsTime().Before(a.StartAt) {
+			if a.Owner != user.Username && a.state != Listed {
+				return serrors.New("asset can currently not be bought")
+			}
+			if reqAsset.StartsAtExactly.AsTime().Truncate(time.Second).Before(a.StartAt) {
 				return serrors.New("invalid validity")
 			}
-			if reqAsset.StopsAtExactly.AsTime().After(a.StopsAt) {
+			if reqAsset.StopsAtExactly.AsTime().Truncate(time.Second).After(a.StopsAt) {
 				return serrors.New("invalid validity")
 			}
-			a.Owner = user.Username
-			accCost += a.Price
-			boughtAssets = append(boughtAssets, &hummingbird.BoughtAsset{
-				AssetId: reqAsset.AssetId,
+			a.state = CheckedOut
+			a.Owner = user.Username //this is only temporary
+			requestedSplits, found := assetSplits[reqAsset.AssetId]
+			if !found {
+				requestedSplits = make([]RequestedSplit, 0, 1)
+				assetSplits[reqAsset.AssetId] = requestedSplits
+			}
+			assetSplits[reqAsset.AssetId] = append(requestedSplits, RequestedSplit{
+				ExactFrom:      reqAsset.StartsAtExactly.AsTime().Truncate(time.Second),
+				ExactTo:        reqAsset.StopsAtExactly.AsTime().Truncate(time.Second),
+				ExactBandwidth: reqAsset.BwExact,
 			})
+			checkedOutAsset = append(checkedOutAsset, reqAsset.AssetId)
 			return nil
 		})
 		if err != nil {
-			undoPurchase()
+			undoCheckout()
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
-		if accCost > req.Msg.MaxPrice {
-			undoPurchase()
-			return nil, connect.NewError(connect.CodeFailedPrecondition, serrors.New("Insufficient credit"))
+	}
+	var userOwnedAssetsToAdd []*Asset
+	var unusedAssetsToAdd []*Asset
+
+	for assetID, requestedSplits := range assetSplits {
+		err := s.assetOp(assetID, func(a *Asset) error {
+			res, err := SplitAsset(a, requestedSplits)
+			if err != nil {
+				return err
+			}
+			for _, seg := range res.Bought {
+				userOwnedAssetsToAdd = append(userOwnedAssetsToAdd, &Asset{
+					state:           Bought,
+					Owner:           user.Username,
+					IA:              a.IA,
+					IfIdIngress:     a.IfIdIngress,
+					IfIdEgress:      a.IfIdEgress,
+					TimeGranularity: a.TimeGranularity,
+					TimeMinDuration: a.TimeMinDuration,
+					BandwidthMin:    a.BandwidthMin,
+					Bandwidth:       seg.Bandwidth,
+					StartAt:         seg.StartAt,
+					StopsAt:         seg.StopAt,
+					Price:           seg.Price,
+				})
+			}
+			for _, seg := range res.Unused {
+				unusedAssetsToAdd = append(unusedAssetsToAdd, &Asset{
+					state:           Listed,
+					Owner:           "",
+					IA:              a.IA,
+					IfIdIngress:     a.IfIdIngress,
+					IfIdEgress:      a.IfIdEgress,
+					TimeGranularity: a.TimeGranularity,
+					TimeMinDuration: a.TimeMinDuration,
+					BandwidthMin:    a.BandwidthMin,
+					Bandwidth:       seg.Bandwidth,
+					StartAt:         seg.StartAt,
+					StopsAt:         seg.StopAt,
+					Price:           seg.Price,
+				})
+			}
+			for _, seg := range res.Remove {
+				fmt.Println("remove", seg)
+			}
+			return err
+		})
+		if err != nil {
+			undoCheckout()
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
+	costAcc := uint64(0)
+	for _, asset := range userOwnedAssetsToAdd {
+		costAcc += asset.TotalPrice()
+	}
+	if accCost > req.Msg.MaxPrice {
+		undoCheckout()
+		return nil, connect.NewError(connect.CodeFailedPrecondition, serrors.New("Insufficient credit", "cost", accCost))
+	}
+	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
+		for _, assetToAdd := range userOwnedAssetsToAdd {
+			assetID := s.currentAssetID.Add(1)
+			fmt.Println("add user owned asset: ", assetID)
+			boughtAssets = append(boughtAssets, &hummingbird.BoughtAsset{AssetId: assetID})
+			m[assetID] = assetToAdd
+		}
+		for _, assetToAdd := range unusedAssetsToAdd {
+			assetID := s.currentAssetID.Add(1)
+			fmt.Println("add unused asset: ", assetID)
+			m[assetID] = assetToAdd
+		}
+		for _, assetToRemove := range checkedOutAsset {
+			delete(m, assetToRemove)
+			fmt.Println("removed asset: ", assetToRemove)
+		}
+		return nil
+	})
 	return &connect.Response[hummingbird.BuyAssetsResponse]{
 		Msg: &hummingbird.BuyAssetsResponse{
 			Assets: boughtAssets,
@@ -209,13 +310,14 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 		IA:              ia,
 		Bandwidth:       req.Msg.Bandwidth,
 		BandwidthMin:    req.Msg.BandwidthMin,
-		StartAt:         req.Msg.StartAt.AsTime(),
-		StopsAt:         req.Msg.StopsAt.AsTime(),
+		StartAt:         req.Msg.StartAt.AsTime().Truncate(time.Second),
+		StopsAt:         req.Msg.StopsAt.AsTime().Truncate(time.Second),
 		Price:           req.Msg.Price,
 		TimeGranularity: req.Msg.TimeGranularity,
 		TimeMinDuration: req.Msg.TimeMinDuration,
 		IfIdIngress:     req.Msg.IfIdIngress,
 		IfIdEgress:      req.Msg.IfIdEgress,
+		state:           Listed,
 	}
 	assetID := s.currentAssetID.Add(1)
 	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
@@ -245,7 +347,7 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			if pairAsset.Owner != user.Username {
 				return serrors.New("user is not owner of the asset")
 			}
-			if pairAsset.redeemed {
+			if pairAsset.state != Bought {
 				return serrors.New("asset already redeemed")
 			}
 			if pairAsset.IfIdIngress == nil {
@@ -260,7 +362,7 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			startsAt = pairAsset.StartAt
 			stopsAt = pairAsset.StopsAt
 			ia = pairAsset.IA
-			pairAsset.redeemed = true
+			pairAsset.state = BeingRedeemed
 			return nil
 		})
 		if err != nil {
@@ -275,13 +377,13 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			if ingressAsset.Owner != user.Username {
 				return serrors.New("user is not owner of the asset")
 			}
-			if ingressAsset.redeemed {
+			if ingressAsset.state != Bought {
 				return serrors.New("ingress asset already redeemed")
 			}
 			if egressAsset.Owner != user.Username {
 				return serrors.New("user is not owner of the asset")
 			}
-			if egressAsset.redeemed {
+			if egressAsset.state != Bought {
 				return serrors.New("egress asset already redeemed")
 			}
 			if ingressAsset.IA != egressAsset.IA {
@@ -306,8 +408,8 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			if stopsAt.Before(startsAt) {
 				return serrors.New("stopsAt before startsAt")
 			}
-			ingressAsset.redeemed = true
-			egressAsset.redeemed = true
+			ingressAsset.state = BeingRedeemed
+			egressAsset.state = BeingRedeemed
 			return nil
 		}
 		if req.Msg.IngressAssetId < req.Msg.EgressAssetId {
@@ -331,23 +433,23 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	undoRedemption := func() {
 		if isInterfacePair {
 			s.assetOp(*req.Msg.IfPairAssetId, func(a *Asset) error {
-				a.redeemed = false
+				a.state = Bought
 				return nil
 			})
 		} else {
 			if req.Msg.IngressAssetId < req.Msg.EgressAssetId {
 				s.assetOp(req.Msg.IngressAssetId, func(ingressAsset *Asset) error {
 					return s.assetOp(req.Msg.EgressAssetId, func(egressAsset *Asset) error {
-						ingressAsset.redeemed = false
-						egressAsset.redeemed = false
+						ingressAsset.state = Bought
+						egressAsset.state = Bought
 						return nil
 					})
 				})
 			} else {
 				s.assetOp(req.Msg.EgressAssetId, func(egressAsset *Asset) error {
 					return s.assetOp(req.Msg.IngressAssetId, func(ingressAsset *Asset) error {
-						ingressAsset.redeemed = false
-						egressAsset.redeemed = false
+						ingressAsset.state = Bought
+						egressAsset.state = Bought
 						return nil
 					})
 				})
