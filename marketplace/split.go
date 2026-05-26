@@ -32,7 +32,6 @@ type AssetSegment struct {
 	StopAt    time.Time
 	Bandwidth uint64
 	Used      bool
-	Price     uint64
 
 	requestIndex *int
 }
@@ -243,7 +242,6 @@ func SplitAsset(
 				StopAt:       segTo,
 				Bandwidth:    p.ExactBandwidth,
 				Used:         true,
-				Price:        asset.Price,
 				requestIndex: &reqCopy,
 			}
 
@@ -263,7 +261,6 @@ func SplitAsset(
 				StopAt:    segTo,
 				Bandwidth: remaining,
 				Used:      false,
-				Price:     asset.Price,
 			}
 			if isInvalidDerivedSegment(asset, s) {
 				result.Remove = append(result.Remove, s)

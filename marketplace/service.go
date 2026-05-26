@@ -35,6 +35,7 @@ const (
 	CheckedOut
 	Bought
 	BeingRedeemed
+	BeingSplit
 )
 
 type Asset struct {
@@ -114,6 +115,224 @@ func (s *Service) assetOp(assetID uint64, f func(*Asset) error) error {
 	asset = s.assets[assetID]
 	return f(asset)
 }
+func (a *Asset) assetType() hummingbird.AssetType {
+	if a.IfIdIngress != nil {
+		if a.IfIdEgress != nil {
+			return hummingbird.AssetType_Interface_Pair
+		}
+		return hummingbird.AssetType_Ingress
+	}
+	return hummingbird.AssetType_Egress
+}
+
+func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error) {
+	user := ctx.Value("user").(*User)
+	if req.Msg.AssetId_1 == req.Msg.AssetId_2 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("cannot combine asset with itself"))
+	}
+	var combinedAsset *Asset
+	combineAsset := func(a1 *Asset, a2 *Asset) error {
+		if a1.Owner != user.Username || a2.Owner != user.Username {
+			return serrors.New("can only combine owned assets")
+		}
+		if a1.state != Bought || a2.state != Bought {
+			return serrors.New("assets in wrong state for combining")
+		}
+		if a1.IA != a2.IA {
+			return serrors.New("asset must have same IA")
+		}
+		if a1.assetType() != a2.assetType() {
+			return serrors.New("asset must have same asset type")
+		}
+		if a1.IfIdIngress != nil && *a1.IfIdIngress != *a2.IfIdIngress {
+			return serrors.New("asset must have same ingress")
+		}
+		if a1.IfIdEgress != nil && *a1.IfIdEgress != *a2.IfIdEgress {
+			return serrors.New("asset must have same egress")
+		}
+		if a1.StartAt.Equal(a2.StartAt) && a1.StopsAt.Equal(a2.StopsAt) {
+			combinedAsset = &Asset{
+				state:           Bought,
+				Owner:           user.Username,
+				IA:              a1.IA,
+				Bandwidth:       a1.Bandwidth + a2.Bandwidth,
+				BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
+				StartAt:         a1.StartAt,
+				StopsAt:         a1.StopsAt,
+				Price:           0,
+				TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
+				TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
+				IfIdIngress:     a1.IfIdIngress,
+				IfIdEgress:      a1.IfIdEgress,
+			}
+			return nil
+		} else if a1.Bandwidth == a2.Bandwidth {
+			if a1.StartAt.Equal(a2.StopsAt) {
+				combinedAsset = &Asset{
+					state:           Bought,
+					Owner:           user.Username,
+					IA:              a1.IA,
+					Bandwidth:       a1.Bandwidth,
+					BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
+					StartAt:         a2.StartAt,
+					StopsAt:         a1.StopsAt,
+					Price:           0,
+					TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
+					TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
+					IfIdIngress:     a1.IfIdIngress,
+					IfIdEgress:      a1.IfIdEgress,
+				}
+				return nil
+			} else if a2.StartAt.Equal(a1.StopsAt) {
+				combinedAsset = &Asset{
+					state:           Bought,
+					Owner:           user.Username,
+					IA:              a1.IA,
+					Bandwidth:       a1.Bandwidth,
+					BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
+					StartAt:         a1.StartAt,
+					StopsAt:         a2.StopsAt,
+					Price:           0,
+					TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
+					TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
+					IfIdIngress:     a1.IfIdIngress,
+					IfIdEgress:      a1.IfIdEgress,
+				}
+				return nil
+			}
+		}
+		return serrors.New("asset cannot be combined")
+	}
+	var err error
+	if req.Msg.AssetId_1 < req.Msg.AssetId_2 {
+		err = s.assetOp(req.Msg.AssetId_1, func(ingressAsset *Asset) error {
+			return s.assetOp(req.Msg.AssetId_2, func(egressAsset *Asset) error {
+				return combineAsset(ingressAsset, egressAsset)
+			})
+		})
+	} else {
+		err = s.assetOp(req.Msg.AssetId_2, func(egressAsset *Asset) error {
+			return s.assetOp(req.Msg.AssetId_1, func(ingressAsset *Asset) error {
+				return combineAsset(ingressAsset, egressAsset)
+			})
+		})
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	assetID := s.currentAssetID.Add(1)
+	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
+		m[assetID] = combinedAsset
+		delete(m, req.Msg.AssetId_1)
+		delete(m, req.Msg.AssetId_2)
+		return nil
+	})
+	return &connect.Response[hummingbird.CombineAssetResponse]{
+		Msg: &hummingbird.CombineAssetResponse{
+			AssetId: assetID,
+		},
+	}, nil
+}
+
+func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbird.SplitAssetRequest]) (*connect.Response[hummingbird.SplitAssetResponse], error) {
+	user := ctx.Value("user").(*User)
+	var asset1, asset2 *Asset
+	err := s.assetOp(req.Msg.AssetId, func(a *Asset) error {
+		if a.Owner != user.Username {
+			return serrors.New("splitting is only possible for owned assets")
+		}
+		if a.state != Bought {
+			return serrors.New("splitting not possible in current asset state")
+		}
+		var requestedSplit []RequestedSplit
+		switch req.Msg.SplitOption.(type) {
+		case *hummingbird.SplitAssetRequest_BwSplit:
+			reqBW := req.Msg.GetBwSplit()
+			requestedSplit = []RequestedSplit{
+				{
+					ExactBandwidth: reqBW,
+					ExactFrom:      a.StartAt,
+					ExactTo:        a.StopsAt,
+				},
+				{
+					ExactBandwidth: a.Bandwidth - reqBW,
+					ExactFrom:      a.StartAt,
+					ExactTo:        a.StopsAt,
+				},
+			}
+		case *hummingbird.SplitAssetRequest_TimeSplit:
+			reqTime := req.Msg.GetTimeSplit().AsTime()
+			requestedSplit = []RequestedSplit{
+				{
+					ExactBandwidth: a.Bandwidth,
+					ExactFrom:      a.StartAt,
+					ExactTo:        reqTime,
+				},
+				{
+					ExactBandwidth: a.Bandwidth,
+					ExactFrom:      reqTime,
+					ExactTo:        a.StopsAt,
+				},
+			}
+		default:
+			return serrors.New("invalid split request")
+		}
+		splitResult, err := SplitAsset(a, requestedSplit)
+		if err != nil {
+			return err
+		}
+		if !(len(splitResult.Bought) == 2 && len(splitResult.Unused) == 0 && len(splitResult.Remove) == 0) {
+			return serrors.New("invalid split result")
+		}
+		a.state = BeingSplit
+		asset1 = &Asset{
+			state:           Bought,
+			Owner:           a.Owner,
+			IA:              a.IA,
+			BandwidthMin:    a.BandwidthMin,
+			Price:           a.Price,
+			TimeGranularity: a.TimeGranularity,
+			TimeMinDuration: a.TimeMinDuration,
+			IfIdIngress:     a.IfIdIngress,
+			IfIdEgress:      a.IfIdEgress,
+			Bandwidth:       splitResult.Bought[0].Bandwidth,
+			StartAt:         splitResult.Bought[0].StartAt,
+			StopsAt:         splitResult.Bought[0].StopAt,
+		}
+		asset2 = &Asset{
+			state:           Bought,
+			Owner:           a.Owner,
+			IA:              a.IA,
+			BandwidthMin:    a.BandwidthMin,
+			Price:           a.Price,
+			TimeGranularity: a.TimeGranularity,
+			TimeMinDuration: a.TimeMinDuration,
+			IfIdIngress:     a.IfIdIngress,
+			IfIdEgress:      a.IfIdEgress,
+			Bandwidth:       splitResult.Bought[1].Bandwidth,
+			StartAt:         splitResult.Bought[1].StartAt,
+			StopsAt:         splitResult.Bought[1].StopAt,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	assetID1 := s.currentAssetID.Add(1)
+	assetID2 := s.currentAssetID.Add(1)
+	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
+		m[assetID1] = asset1
+		m[assetID2] = asset2
+		delete(m, req.Msg.AssetId)
+		return nil
+	})
+	return &connect.Response[hummingbird.SplitAssetResponse]{
+		Msg: &hummingbird.SplitAssetResponse{
+			AssetId_1: assetID1,
+			AssetId_2: assetID2,
+		},
+	}, nil
+}
 
 func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbird.BuyAssetsRequest]) (*connect.Response[hummingbird.BuyAssetsResponse], error) {
 	fmt.Println("BuyAssets")
@@ -184,7 +403,7 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 					Bandwidth:       seg.Bandwidth,
 					StartAt:         seg.StartAt,
 					StopsAt:         seg.StopAt,
-					Price:           seg.Price,
+					Price:           a.Price,
 				})
 			}
 			for _, seg := range res.Unused {
@@ -200,7 +419,7 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 					Bandwidth:       seg.Bandwidth,
 					StartAt:         seg.StartAt,
 					StopsAt:         seg.StopAt,
-					Price:           seg.Price,
+					Price:           a.Price,
 				})
 			}
 			for _, seg := range res.Remove {

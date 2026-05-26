@@ -31,6 +31,8 @@ func printOptions() {
 	fmt.Println("-> info")
 	fmt.Println("-> search")
 	fmt.Println("-> buy")
+	fmt.Println("-> split")
+	fmt.Println("-> combine")
 	fmt.Println("-> redeem")
 	fmt.Println("-> reservation")
 	fmt.Println("-> exit")
@@ -66,6 +68,10 @@ func userInteraction() {
 			handleSearch(ctx, reader, client)
 		case option == "buy":
 			handleBuy(ctx, reader, client)
+		case option == "split":
+			handleSplit(ctx, reader, client)
+		case option == "combine":
+			handleCombine(ctx, reader, client)
 		case option == "redeem":
 			handleRedeem(ctx, reader, client)
 		case option == "reservation":
@@ -75,6 +81,55 @@ func userInteraction() {
 		}
 		fmt.Println("----------")
 	}
+}
+func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	assetID := readUint64(reader, "assetID: ")
+	splitOption := readOptionalString(reader, "spit using axis [bw,time]: ", nil)
+	if splitOption == nil {
+		fmt.Println("invalid split option.")
+		return
+	}
+	req := &hummingbird.SplitAssetRequest{
+		AssetId: assetID,
+	}
+	switch *splitOption {
+	case "bw":
+		bwSplit := readUint64(reader, "bw split: ")
+		req.SplitOption = &hummingbird.SplitAssetRequest_BwSplit{
+			BwSplit: bwSplit,
+		}
+	case "time":
+		timeSplit := readTime(reader, "time split (2006-01-02T15:04:05): ")
+		req.SplitOption = &hummingbird.SplitAssetRequest_TimeSplit{
+			TimeSplit: timestamppb.New(timeSplit),
+		}
+	default:
+		fmt.Println("invalid split option.")
+		return
+	}
+	resp, err := c.SplitAsset(ctx, &connect.Request[hummingbird.SplitAssetRequest]{
+		Msg: req,
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("asset split into %d and %d\n", resp.Msg.AssetId_1, resp.Msg.AssetId_2)
+}
+func handleCombine(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	asset1 := readUint64(reader, "asset 1: ")
+	asset2 := readUint64(reader, "asset 2: ")
+	resp, err := c.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
+		Msg: &hummingbird.CombineAssetRequest{
+			AssetId_1: asset1,
+			AssetId_2: asset2,
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("assets combined into %d\n", resp.Msg.AssetId)
 }
 func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	var ia *uint64

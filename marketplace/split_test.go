@@ -144,22 +144,20 @@ func TestSplit(t *testing.T) {
 	fmt.Println("=== BOUGHT ===")
 	for _, s := range result.Bought {
 		fmt.Printf(
-			"%s -> %s bw=%d, price=%d\n",
+			"%s -> %s bw=%d\n",
 			s.StartAt.Format(time.RFC3339),
 			s.StopAt.Format(time.RFC3339),
 			s.Bandwidth,
-			s.Price,
 		)
 	}
 
 	fmt.Println("\n=== UNUSED ===")
 	for _, s := range result.Unused {
 		fmt.Printf(
-			"%s -> %s bw=%d, price=%d\n",
+			"%s -> %s bw=%d\n",
 			s.StartAt.Format(time.RFC3339),
 			s.StopAt.Format(time.RFC3339),
 			s.Bandwidth,
-			s.Price,
 		)
 	}
 

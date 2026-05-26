@@ -27,6 +27,34 @@ service MarketplaceService {
     rpc BuyAssets(BuyAssetsRequest) returns (BuyAssetsResponse) {}
     rpc RedeemAsset(RedeemAssetRequest) returns (RedeemAssetResponse) {}
     rpc FetchReservations(FetchReservationsRequest) returns (FetchReservationsResponse) {}
+    rpc SplitAsset(SplitAssetRequest) returns (SplitAssetResponse) {}
+    rpc CombineAssets(CombineAssetRequest) returns (CombineAssetResponse) {}
+}
+
+// Split assets splits an asset either by defining the bandwidth to split, or the time it should split.
+message SplitAssetRequest {
+    uint64 asset_id = 1;
+    oneof split_option {
+        uint64 bw_split = 2;
+        google.protobuf.Timestamp time_split = 3;
+    }
+}
+// Returns the two asset IDs created from the split.
+message SplitAssetResponse {
+    uint64 asset_id_1 = 1;
+    uint64 asset_id_2 = 2;
+}
+// When combining assets, both assets must have the same IA, asset_type, ingress and egress.enum
+// Additionally, both assets must either:
+// a) have adjacent validity with same bandwidth, or
+// b) same validity with different bandwidth
+message CombineAssetRequest {
+    uint64 asset_id_1 = 1;
+    uint64 asset_id_2 = 2;
+}
+// Returns the the asset ID created from combining the two assets.
+message CombineAssetResponse {
+    uint64 asset_id = 1;
 }
 
 message MarketplaceInfoRequest {
