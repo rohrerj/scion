@@ -748,6 +748,66 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
+		"reservation exceeds bandwidth": {
+			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1},
+					map[uint16]topology.LinkType{
+						1: topology.Child,
+					},
+					nil, // No special connOpener.
+					mockInternalNextHops,
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+				spkt, dpath := prepHbirdMsg(now)
+				spkt.SrcIA = addr.MustParseIA("1-ff00:0:110")
+				largePayload := bytes.Repeat([]byte{0xab}, 512)
+				spkt.PayloadLen = uint16(8 + len(largePayload)) // udp header + payload
+				dpath.HopFields = []hummingbird.FlyoverHopField{
+					{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1},
+						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 1},
+					{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30},
+						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 16},
+					{HopField: path.HopField{ConsIngress: 41, ConsEgress: 40},
+						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 16},
+				}
+				dpath.Base.PathMeta.CurrHF = 0
+				dpath.Base.PathMeta.SegLen[0] = 5 * 3 // 3 flyovers
+				dpath.NumLines = 15
+				dpath.HopFields[0].HopField.Mac = computeAggregateMac(t, key, hbirdKey, spkt, dpath,
+					dpath.InfoFields[0], dpath.HopFields[0], dpath.Base.PathMeta)
+
+				serializeLargePayload := func(spkt *slayers.SCION, dpath path.Path) []byte {
+					spkt.Path = dpath
+					buffer := gopacket.NewSerializeBuffer()
+					scionudpLayer := &slayers.UDP{}
+					scionudpLayer.SrcPort = uint16(srcUDPPort)
+					scionudpLayer.DstPort = uint16(dstUDPPort)
+					scionudpLayer.SetNetworkLayerForChecksum(spkt)
+					err := gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true},
+						spkt, scionudpLayer, gopacket.Payload(largePayload))
+					require.NoError(t, err)
+					return buffer.Bytes()
+				}
+
+				ingress := uint16(0)
+				egress := uint16(0)
+				var pkt *router.Packet
+				if afterProcessing {
+					dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
+						dpath.HopFields[0].HopField)
+					assert.NoError(t, dpath.IncPath(hummingbird.FlyoverLines))
+					dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
+					egress = 1
+					pkt = router.NewPacket(serializeLargePayload(spkt, dpath), nil, nil, ingress, egress)
+					pkt.PriorityLabel = pr.WithBestEffort
+					return pkt
+				}
+				return router.NewPacket(serializeLargePayload(spkt, dpath), nil, nil, ingress, egress)
+			},
+			assertFunc: notDiscarded,
+		},
 		"brtransit flyover": {
 			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
