@@ -1165,14 +1165,15 @@ func realMain(ctx context.Context) error {
 		<-errCtx.Done()
 		return cleanup.Do()
 	})
-	jwtToken := &marketplace.JwtToken{}
+	publisherToken := &marketplace.JwtToken{}
+	redemptionToken := &marketplace.JwtToken{}
 
 	g.Go(func() error {
 		defer log.HandlePanic()
 		getClientCert := cs.NewTLSCertificateLoader(
 			topo.IA(), x509.ExtKeyUsageClientAuth, trustDB, globalCfg.General.ConfigDir,
 		).GetClientCertificate
-		tokenRenewer := marketplace.NewTokenRenwer(globalCfg.Marketplace.AccountApi, getClientCert, jwtToken)
+		tokenRenewer := marketplace.NewTokenRenwer(globalCfg.Marketplace.AccountApi, getClientCert, publisherToken, redemptionToken)
 		return tokenRenewer.InitTokenRenewer()
 	})
 
@@ -1181,7 +1182,7 @@ func realMain(ctx context.Context) error {
 		redemptionClient := marketplace.RedemptionClient{
 			MarketplaceUrl: globalCfg.Marketplace.MarketplaceApi,
 			IA:             topo.IA(),
-			Token:          jwtToken,
+			Token:          redemptionToken,
 		}
 		if err := redemptionClient.Init(); err != nil {
 			log.Error("redemtpion service", "err", err)
@@ -1194,7 +1195,7 @@ func realMain(ctx context.Context) error {
 		assetPublisher := marketplace.PublishAssetsClient{
 			MarketplaceUrl: globalCfg.Marketplace.MarketplaceApi,
 			IA:             topo.IA(),
-			Token:          jwtToken,
+			Token:          publisherToken,
 		}
 		ifids := topo.IfIDs()
 		assets := []*hummingbird.PublishAssetRequest{}

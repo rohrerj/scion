@@ -147,21 +147,33 @@ func (s *ASTokenManager) IssueJWT(ctx context.Context, req *connect.Request[humm
 		}
 	}
 
-	claims := jwt.MapClaims{
+	publisherClaims := jwt.MapClaims{
 		"sub":   name.String(),
-		"scope": "AS",
+		"scope": "AssetPublisher",
 		"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
 		"iat":   time.Now().Unix(),
 		"ver":   user.TokenVersion,
 	}
-	token, err := s.signer.GenerateToken(claims)
+	publisherToken, err := s.signer.GenerateToken(publisherClaims)
+	if err != nil {
+		return nil, err
+	}
+	redemptionClaims := jwt.MapClaims{
+		"sub":   name.String(),
+		"scope": "RedemptionService",
+		"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
+		"iat":   time.Now().Unix(),
+		"ver":   user.TokenVersion,
+	}
+	redemptionToken, err := s.signer.GenerateToken(redemptionClaims)
 	if err != nil {
 		return nil, err
 	}
 
 	return &connect.Response[hummingbird.JWTIssuanceResponse]{
 		Msg: &hummingbird.JWTIssuanceResponse{
-			Jwt: token,
+			JwtPublisher:  publisherToken,
+			JwtRedemption: redemptionToken,
 		},
 	}, nil
 }

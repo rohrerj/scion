@@ -26,7 +26,8 @@ service AccountService {
 message JWTIssuanceRequest {}
 
 message JWTIssuanceResponse {
-    string jwt = 1;
+    string jwt_publisher = 1;
+    string jwt_redemption = 2;
 }
 
 message JWTResetRequest {}

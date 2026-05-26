@@ -25,14 +25,14 @@ import (
 )
 
 var methodScopes = map[string]string{
-	"/proto.hummingbird.v1.MarketplaceService/PublishAsset":      "AS",
+	"/proto.hummingbird.v1.MarketplaceService/PublishAsset":      "AssetPublisher",
 	"/proto.hummingbird.v1.MarketplaceService/SearchAssets":      "User",
 	"/proto.hummingbird.v1.MarketplaceService/SplitAsset":        "User",
 	"/proto.hummingbird.v1.MarketplaceService/CombineAssets":     "User",
 	"/proto.hummingbird.v1.MarketplaceService/BuyAssets":         "User",
 	"/proto.hummingbird.v1.MarketplaceService/FetchReservations": "User",
 	"/proto.hummingbird.v1.MarketplaceService/RedeemAsset":       "User",
-	"/proto.hummingbird.v1.RedemptionService/RedeemASAsset":      "AS",
+	"/proto.hummingbird.v1.RedemptionService/RedeemASAsset":      "RedemptionService",
 }
 
 type AuthInterceptor struct {
@@ -49,7 +49,7 @@ func NewAuthInterceptor(v *Verifier, accountDB *AccountDB) *AuthInterceptor {
 
 func (a *AuthInterceptor) verifyTokenVersion(user string, claims jwt.MapClaims, scopes map[string]bool) error {
 	tokenVersion := uint64(0)
-	if scopes["AS"] {
+	if scopes["AssetPublisher"] || scopes["RedemptionService"] {
 		ia, err := addr.ParseIA(user)
 		if err != nil {
 			return connect.NewError(

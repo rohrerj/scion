@@ -33,15 +33,17 @@ func (t *JwtToken) Set(token string) {
 type TokenRenewer struct {
 	accountAPIUrl       string
 	getClientCertifcate func(reqInfo *tls.CertificateRequestInfo) (*tls.Certificate, error)
-	token               *JwtToken
+	publisherToken      *JwtToken
+	redemptionToken     *JwtToken
 }
 
 func NewTokenRenwer(accountApiUrl string, getClientCertifcate func(reqInfo *tls.CertificateRequestInfo) (*tls.Certificate, error),
-	token *JwtToken) *TokenRenewer {
+	publisherToken *JwtToken, redemptionToken *JwtToken) *TokenRenewer {
 	return &TokenRenewer{
 		accountAPIUrl:       accountApiUrl,
 		getClientCertifcate: getClientCertifcate,
-		token:               token,
+		publisherToken:      publisherToken,
+		redemptionToken:     redemptionToken,
 	}
 }
 
@@ -56,31 +58,37 @@ func (t *TokenRenewer) InitTokenRenewer() error {
 	}, t.accountAPIUrl)
 	parser := jwt.Parser{}
 
-	renewToken := func() (string, error) {
+	renewToken := func() (string, string, error) {
 		ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancelF()
 		resp, err := client.IssueJWT(ctx, &connect.Request[hummingbird.JWTIssuanceRequest]{})
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
-		tokenString := resp.Msg.Jwt
-
-		claims := jwt.MapClaims{}
-
-		_, _, err = parser.ParseUnverified(tokenString, claims)
+		publisherTokenString := resp.Msg.JwtPublisher
+		publisherClaims := jwt.MapClaims{}
+		_, _, err = parser.ParseUnverified(publisherTokenString, publisherClaims)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
-		return tokenString, nil
+
+		redemptionTokenString := resp.Msg.JwtRedemption
+		redemptionClaims := jwt.MapClaims{}
+		_, _, err = parser.ParseUnverified(redemptionTokenString, redemptionClaims)
+		if err != nil {
+			return "", "", err
+		}
+		return publisherTokenString, redemptionTokenString, nil
 	}
 	for {
-		tokenString, err := renewToken()
+		publisherToken, redemptionToken, err := renewToken()
 		if err != nil {
 			log.Debug("Error while requesting JWT token from marketplace", "err", err)
 			time.Sleep(time.Second * 10)
 			continue
 		}
-		t.token.Set(tokenString)
+		t.publisherToken.Set(publisherToken)
+		t.redemptionToken.Set(redemptionToken)
 		time.Sleep(time.Minute * 10)
 	}
 }

@@ -63,7 +63,8 @@ func (*JWTIssuanceRequest) Descriptor() ([]byte, []int) {
 
 type JWTIssuanceResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Jwt           string                 `protobuf:"bytes,1,opt,name=jwt,proto3" json:"jwt,omitempty"`
+	JwtPublisher  string                 `protobuf:"bytes,1,opt,name=jwt_publisher,json=jwtPublisher,proto3" json:"jwt_publisher,omitempty"`
+	JwtRedemption string                 `protobuf:"bytes,2,opt,name=jwt_redemption,json=jwtRedemption,proto3" json:"jwt_redemption,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -98,9 +99,16 @@ func (*JWTIssuanceResponse) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *JWTIssuanceResponse) GetJwt() string {
+func (x *JWTIssuanceResponse) GetJwtPublisher() string {
 	if x != nil {
-		return x.Jwt
+		return x.JwtPublisher
+	}
+	return ""
+}
+
+func (x *JWTIssuanceResponse) GetJwtRedemption() string {
+	if x != nil {
+		return x.JwtRedemption
 	}
 	return ""
 }
@@ -182,9 +190,10 @@ var File_proto_hummingbird_v1_account_proto protoreflect.FileDescriptor
 const file_proto_hummingbird_v1_account_proto_rawDesc = "" +
 	"\n" +
 	"\"proto/hummingbird/v1/account.proto\x12\x14proto.hummingbird.v1\"\x14\n" +
-	"\x12JWTIssuanceRequest\"'\n" +
-	"\x13JWTIssuanceResponse\x12\x10\n" +
-	"\x03jwt\x18\x01 \x01(\tR\x03jwt\"\x11\n" +
+	"\x12JWTIssuanceRequest\"a\n" +
+	"\x13JWTIssuanceResponse\x12#\n" +
+	"\rjwt_publisher\x18\x01 \x01(\tR\fjwtPublisher\x12%\n" +
+	"\x0ejwt_redemption\x18\x02 \x01(\tR\rjwtRedemption\"\x11\n" +
 	"\x0fJWTResetRequest\"\x12\n" +
 	"\x10JWTResetResponse2\xd0\x01\n" +
 	"\x0eAccountService\x12a\n" +
