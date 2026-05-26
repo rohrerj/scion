@@ -339,7 +339,6 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 	user := ctx.Value("user").(*User)
 	checkedOutAsset := make([]uint64, 0, 1)
 	boughtAssets := make([]*hummingbird.BoughtAsset, 0, 1)
-	accCost := uint64(0)
 	undoCheckout := func() {
 		for _, assetID := range checkedOutAsset {
 			s.assetOp(assetID, func(a *Asset) error {
@@ -436,9 +435,9 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 	for _, asset := range userOwnedAssetsToAdd {
 		costAcc += asset.TotalPrice()
 	}
-	if accCost > req.Msg.MaxPrice {
+	if costAcc > req.Msg.MaxPrice {
 		undoCheckout()
-		return nil, connect.NewError(connect.CodeFailedPrecondition, serrors.New("Insufficient credit", "cost", accCost))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, serrors.New("Insufficient credit", "cost", costAcc))
 	}
 	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
 		for _, assetToAdd := range userOwnedAssetsToAdd {
@@ -461,7 +460,7 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 	return &connect.Response[hummingbird.BuyAssetsResponse]{
 		Msg: &hummingbird.BuyAssetsResponse{
 			Assets: boughtAssets,
-			Cost:   accCost,
+			Cost:   costAcc,
 		},
 	}, nil
 }
@@ -620,9 +619,13 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			ia = ingressAsset.IA
 			if ingressAsset.StartAt.Before(egressAsset.StartAt) {
 				startsAt = egressAsset.StartAt
+			} else {
+				startsAt = ingressAsset.StartAt
 			}
 			if ingressAsset.StopsAt.Before(egressAsset.StopsAt) {
 				stopsAt = ingressAsset.StopsAt
+			} else {
+				stopsAt = egressAsset.StopsAt
 			}
 			if stopsAt.Before(startsAt) {
 				return serrors.New("stopsAt before startsAt")
