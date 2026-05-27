@@ -84,6 +84,7 @@ func userInteraction() {
 	}
 }
 func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	fmt.Println("Handle split asset query.")
 	assetID := readUint64(reader, "assetID: ")
 	splitOption := readOptionalString(reader, "spit using axis [bw,time]: ", nil)
 	if splitOption == nil {
@@ -118,6 +119,7 @@ func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect
 	fmt.Printf("asset split into %d and %d\n", resp.Msg.AssetId_1, resp.Msg.AssetId_2)
 }
 func handleCombine(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	fmt.Println("Handle combine assets query.")
 	asset1 := readUint64(reader, "asset 1: ")
 	asset2 := readUint64(reader, "asset 2: ")
 	resp, err := c.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{

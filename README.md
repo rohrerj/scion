@@ -1,7 +1,6 @@
 # How to set up the marketplace
-The code for the marketplace can be found in the *marketplace* folder.
+The code for the marketplace can be found in the [marketplace](./marketplace) folder.
 The topology generator scripts do not set up a marketplace, this has to be done manually:
-
 
 0. Create your topology like normally, e.g. `./scion.sh topology -c topology/default.topo`
 1. Inside the [gen](./gen/) folder, create a folder called `marketplace` and inside of it a file `marketplace.toml` and a folder called `certs`.
@@ -46,8 +45,7 @@ Only hardcoded assets are published.
 # Connect as an endhost
 1. You need a JWT token, while the topology is running, open in the webbrowser [https://localhost:8889](https://localhost:8889), register using a new user and password. (accounts are in-memory, restarting the topology will delete the account)
 2. Click on the "Create new Token" button.
-3. Now run the command `./bin/marketplace_client XXX`
-where XXX is your token. The tokens have a validity of 1 week.
+3. Now run the command `./bin/marketplace_client`
 
 # Folder description:
 - [marketplace](./marketplace) Contains the marketplace server logic.
