@@ -149,7 +149,7 @@ func validateFlags() {
 	if hummingbird != "" {
 		// Parse bandwidth and duration.
 
-		re := regexp.MustCompile(`(\d),(.+)`)
+		re := regexp.MustCompile(`(\d+),(.+)`)
 		matches := re.FindSubmatch([]byte(hummingbird))
 		if len(matches) != 3 {
 			integration.LogFatal("bad BW,duration in hummingbird flag")
@@ -520,6 +520,7 @@ func (c *client) buildReservationWithSecretValues(
 		"duration", hummDurationSeconds,
 		"bandwidth", hummBandwidth,
 		"res_id", hummReservationID)
+	// TODO use a randomly generated reservation ID or a parameter based one
 	for _, baseHop := range baseHops {
 		block, ok := aesByIA[baseHop.IA]
 		if !ok {

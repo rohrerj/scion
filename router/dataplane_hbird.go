@@ -372,6 +372,7 @@ func (p *scionPacketProcessor) checkReservationBandwidth() disposition {
 	// Only check bandwidth if packet is given priority.
 	// Bandwidth check is NOT performed for late packets that have flyover but no priority.
 	if p.pkt.PriorityLabel != pr.WithPriority {
+		log.Debug("hummingbird packet is best-effort. Not checking BW")
 		return pForward
 	}
 	// resID only has to be unique per interface pair
@@ -385,6 +386,9 @@ func (p *scionPacketProcessor) checkReservationBandwidth() disposition {
 	resKey := uint64(p.flyoverField.ResID) + uint64(ingress)<<22 + uint64(egress)<<38
 	resBw := tokenbucket.ConvertBW(p.flyoverField.Bw)
 	now := time.Now()
+	log.Debug("hummingbird checking BW via token bucket",
+		"bw", p.flyoverField.Bw,
+		"real_bw", resBw)
 	v, _ := p.d.tokenBuckets.LoadOrStore(
 		resKey,
 		tokenbucket.NewTokenBucket(now, resBw, resBw))
@@ -397,15 +401,26 @@ func (p *scionPacketProcessor) checkReservationBandwidth() disposition {
 
 	// Check bandwidth
 	if tb.CIR != resBw {
+		log.Debug("hummingbird checking BW: reconfiguring bucket",
+			"CIR", tb.CIR,
+			"ResBW", resBw)
 		// It is possible for different reservations to share a resID
 		// if they do not overlap in time.
 		tb.SetRate(resBw)
 		tb.SetBurstSize(resBw)
 	}
 
+	log.Debug("hummingbird checking BW token bucket status",
+		"current_tokens", tb.CurrentTokens,
+		"last_used", tb.LastTimeApplied)
+
 	// Up to this point the packet is flagged with priority. Remove the priority if too much BW:
 	if !tb.Apply(int(p.scionLayer.PayloadLen), time.Now()) {
+		log.Debug("hummingbird packet exceeding allowed bandwidth token bucket",
+			"resID", fmt.Sprintf("%x", p.flyoverField.ResID))
 		p.pkt.PriorityLabel = pr.WithBestEffort
+	} else {
+		log.Debug("hummingbird checking BW: packet fits into bucket")
 	}
 	return pForward
 }
