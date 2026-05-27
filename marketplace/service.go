@@ -534,7 +534,7 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 		IA:              ia,
 		Bandwidth:       req.Msg.Bandwidth,
 		BandwidthMin:    req.Msg.BandwidthMin,
-		StartAt:         req.Msg.StartAt.AsTime().Truncate(time.Second),
+		StartAt:         req.Msg.StartsAt.AsTime().Truncate(time.Second),
 		StopsAt:         req.Msg.StopsAt.AsTime().Truncate(time.Second),
 		Price:           req.Msg.Price,
 		TimeGranularity: req.Msg.TimeGranularity,

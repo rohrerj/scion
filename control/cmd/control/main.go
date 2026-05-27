@@ -1205,7 +1205,7 @@ func realMain(ctx context.Context) error {
 				assets = append(assets, &hummingbird.PublishAssetRequest{
 					Bandwidth:       10000000,
 					BandwidthMin:    100,
-					StartAt:         timestamppb.New(time.Now()),
+					StartsAt:        timestamppb.New(time.Now()),
 					StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24 * 7)),
 					Price:           1,
 					TimeGranularity: 1,
@@ -1216,7 +1216,7 @@ func realMain(ctx context.Context) error {
 				assets = append(assets, &hummingbird.PublishAssetRequest{
 					Bandwidth:       10000000,
 					BandwidthMin:    100,
-					StartAt:         timestamppb.New(time.Now()),
+					StartsAt:        timestamppb.New(time.Now()),
 					StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24 * 7)),
 					Price:           2,
 					TimeGranularity: 1,

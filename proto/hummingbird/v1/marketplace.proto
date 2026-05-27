@@ -70,7 +70,7 @@ message MarketplaceInfoResponse {
 message PublishAssetRequest {
     uint64 bandwidth = 1;
     uint64 bandwidth_min = 2;
-    google.protobuf.Timestamp start_at = 3;
+    google.protobuf.Timestamp starts_at = 3;
     google.protobuf.Timestamp stops_at = 4;
     uint64 price = 5;
     uint64 time_granularity = 6;
@@ -150,7 +150,7 @@ message RedeemAssetResponse {
     string ak = 1;
     uint64 res_id = 2;
     uint64 bw_rounded = 3;
-    uint32  bw_dataplane_encoding = 4;
+    uint32 bw_dataplane_encoding = 4;
 }
 
 message FetchReservationsRequest {

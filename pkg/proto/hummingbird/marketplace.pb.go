@@ -413,7 +413,7 @@ type PublishAssetRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Bandwidth       uint64                 `protobuf:"varint,1,opt,name=bandwidth,proto3" json:"bandwidth,omitempty"`
 	BandwidthMin    uint64                 `protobuf:"varint,2,opt,name=bandwidth_min,json=bandwidthMin,proto3" json:"bandwidth_min,omitempty"`
-	StartAt         *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"`
+	StartsAt        *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
 	StopsAt         *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
 	Price           uint64                 `protobuf:"varint,5,opt,name=price,proto3" json:"price,omitempty"`
 	TimeGranularity uint64                 `protobuf:"varint,6,opt,name=time_granularity,json=timeGranularity,proto3" json:"time_granularity,omitempty"`
@@ -468,9 +468,9 @@ func (x *PublishAssetRequest) GetBandwidthMin() uint64 {
 	return 0
 }
 
-func (x *PublishAssetRequest) GetStartAt() *timestamppb.Timestamp {
+func (x *PublishAssetRequest) GetStartsAt() *timestamppb.Timestamp {
 	if x != nil {
-		return x.StartAt
+		return x.StartsAt
 	}
 	return nil
 }
@@ -1436,11 +1436,11 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x17MarketplaceInfoResponse\x12*\n" +
 	"\x11api_major_version\x18\x01 \x01(\x04R\x0fapiMajorVersion\x12*\n" +
 	"\x11api_minor_version\x18\x02 \x01(\x04R\x0fapiMinorVersion\x12\x1a\n" +
-	"\bcurrency\x18\x03 \x01(\tR\bcurrency\"\xa6\x03\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency\"\xa8\x03\n" +
 	"\x13PublishAssetRequest\x12\x1c\n" +
 	"\tbandwidth\x18\x01 \x01(\x04R\tbandwidth\x12#\n" +
-	"\rbandwidth_min\x18\x02 \x01(\x04R\fbandwidthMin\x125\n" +
-	"\bstart_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\astartAt\x125\n" +
+	"\rbandwidth_min\x18\x02 \x01(\x04R\fbandwidthMin\x127\n" +
+	"\tstarts_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
 	"\bstops_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12\x14\n" +
 	"\x05price\x18\x05 \x01(\x04R\x05price\x12)\n" +
 	"\x10time_granularity\x18\x06 \x01(\x04R\x0ftimeGranularity\x12*\n" +
@@ -1599,7 +1599,7 @@ var file_proto_hummingbird_v1_marketplace_proto_goTypes = []any{
 }
 var file_proto_hummingbird_v1_marketplace_proto_depIdxs = []int32{
 	21, // 0: proto.hummingbird.v1.SplitAssetRequest.time_split:type_name -> google.protobuf.Timestamp
-	21, // 1: proto.hummingbird.v1.PublishAssetRequest.start_at:type_name -> google.protobuf.Timestamp
+	21, // 1: proto.hummingbird.v1.PublishAssetRequest.starts_at:type_name -> google.protobuf.Timestamp
 	21, // 2: proto.hummingbird.v1.PublishAssetRequest.stops_at:type_name -> google.protobuf.Timestamp
 	0,  // 3: proto.hummingbird.v1.SearchAssetsRequest.asset_type:type_name -> proto.hummingbird.v1.AssetType
 	21, // 4: proto.hummingbird.v1.SearchAssetsRequest.starts_at_latest:type_name -> google.protobuf.Timestamp
