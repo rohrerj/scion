@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Token Generation</title>
+    <title>Deposit Money</title>
 </head>
 
 <body>
@@ -14,15 +14,16 @@
     {{if .Error}}
     <p style="color:red;">{{.Error}}</p>
     {{end}}
-    {{if .Token}}
-    <h4>Your token:</h4>
-    <p style="color:blue;">{{.Token}}</p>
-    {{else}}
-    <form method="POST" action="/token">
-        <button type="submit">Create new Token</button>
-    </form>
+    <h4>Current balance:</h4>
+    <p style="color:blue;">
+    {{if .Balance}}
+    {{.Balance}}
     {{end}}
-
+    </p>
+    <form method="POST" action="/balance">
+        <input name="deposit" type="text">
+        <button type="submit">Deposit</button>
+    </form>
 </body>
 
 </html>

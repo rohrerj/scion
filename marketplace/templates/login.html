@@ -7,7 +7,10 @@
 </head>
 
 <body>
+    <a href="/login">Login with existing account</a><br>
     <a href="/register">Register new account</a><br>
+    <a href="/token">Request new token</a><br>
+    <a href="/balance">Check your balance</a><br>
     {{if .Error}}
     <p style="color:red;">{{.Error}}</p>
     {{end}}

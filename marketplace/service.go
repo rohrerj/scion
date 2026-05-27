@@ -439,6 +439,12 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 		undoCheckout()
 		return nil, connect.NewError(connect.CodeFailedPrecondition, serrors.New("Insufficient credit", "cost", costAcc))
 	}
+	user.mtx.Lock()
+	defer user.mtx.Unlock()
+	if user.Balance < costAcc {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, serrors.New("Insufficient credit", "cost", costAcc, "balance", user.Balance))
+	}
+	user.Balance -= costAcc
 	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
 		for _, assetToAdd := range userOwnedAssetsToAdd {
 			assetID := s.currentAssetID.Add(1)

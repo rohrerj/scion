@@ -22,6 +22,15 @@ type User struct {
 	TokenVersion uint64
 	Reservations *[]*Reservation
 	mtx          sync.RWMutex
+	Balance      uint64
+}
+
+func (u *User) AddBalance(b uint64) {
+	u.mtx.Lock()
+	defer u.mtx.Unlock()
+	if u.Balance+b > u.Balance {
+		u.Balance += b
+	}
 }
 
 type ASUser struct {

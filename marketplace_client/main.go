@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -366,6 +367,9 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 			TimeGranularity: asset.TimeGranularity,
 		})
 	}
+	sort.Slice(transformed, func(i, j int) bool {
+		return transformed[i].ID < transformed[j].ID
+	})
 	j, err := json.MarshalIndent(transformed, "", "\t")
 	if err != nil {
 		fmt.Println(err)

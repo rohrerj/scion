@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"html/template"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -21,8 +22,10 @@ func Init(signer *marketplace.Signer, accountDB *marketplace.AccountDB, mux *htt
 		accountDB: accountDB,
 	}
 	mux.HandleFunc("/", h.tokenHandler)
+	mux.HandleFunc("/token", h.tokenHandler)
 	mux.HandleFunc("/login", h.loginHandler)
 	mux.HandleFunc("/register", h.registerHandler)
+	mux.HandleFunc("/balance", h.balanceHandler)
 }
 
 type Handler struct {
@@ -43,6 +46,39 @@ func (h *Handler) getSessionUser(r *http.Request) (string, bool) {
 
 	username, ok := h.sessions[cookie.Value]
 	return username, ok
+}
+
+func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
+	username, ok := h.getSessionUser(r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	user := h.accountDB.GetUser(username)
+	if user == nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	if r.Method == http.MethodGet {
+		templates.ExecuteTemplate(w, "balance.html", map[string]any{
+			"Balance": strconv.Itoa(int(user.Balance)),
+		})
+		return
+	}
+	r.ParseForm()
+	deposit := r.FormValue("deposit")
+	depositInt, err := strconv.Atoi(deposit)
+	if err != nil || depositInt < 0 {
+		templates.ExecuteTemplate(w, "balance.html", map[string]any{
+			"Error":   "Invalid deposit amount",
+			"Balance": strconv.Itoa(int(user.Balance)),
+		})
+		return
+	}
+	user.AddBalance(uint64(depositInt))
+	templates.ExecuteTemplate(w, "balance.html", map[string]any{
+		"Balance": strconv.Itoa(int(user.Balance)),
+	})
 }
 
 func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
