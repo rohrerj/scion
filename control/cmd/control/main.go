@@ -1242,16 +1242,20 @@ func realMain(ctx context.Context) error {
 			start := time.Now()
 			stop := start.Add(time.Minute)
 			stat, err := assetPublisher.FetchStatistics(ctx, &hummingbird.StatisticsRequest{
-				IntervalStart: timestamppb.New(start),
-				IntervalEnd:   timestamppb.New(stop),
+				Start: timestamppb.New(start),
+				End:   timestamppb.New(stop),
+				Step:  10,
 			})
 			if err != nil {
 				log.Error("error fetching statistics", "err", err)
 			} else {
-				fmt.Printf("stat %v-%v, Income: %d, Utilization %f\n", start, stop, stat.Income, stat.BandwidthUtilization)
+				fmt.Println("Statistics:")
+				for i, stat := range stat.Statistics {
+					fmt.Printf("index: %d, Income: %d, Utilization %f\n", i, stat.Income, stat.BandwidthUtilization)
+				}
 			}
 
-			time.Sleep(time.Second * 10)
+			time.Sleep(time.Minute * 1)
 		}
 	})
 

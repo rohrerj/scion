@@ -35,11 +35,16 @@ service MarketplaceService {
 message StatisticsRequest {
     optional uint32 if_id_ingress = 1;
     optional uint32 if_id_egress = 2;
-    google.protobuf.Timestamp interval_start = 3;
-    google.protobuf.Timestamp interval_end = 4;
+    google.protobuf.Timestamp start = 3;
+    google.protobuf.Timestamp end = 4;
+    uint64 step = 5;
 }
 
 message StatisticsResponse {
+    repeated StatisticsResponseEntry statistics = 1;
+}
+
+message StatisticsResponseEntry {
     uint64 income = 1;
     double bandwidth_utilization = 2;
 }

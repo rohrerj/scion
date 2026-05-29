@@ -773,11 +773,16 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 	user := ctx.Value("user").(*ASUser)
 	s.assetMtx.RLock()
 	defer s.assetMtx.RUnlock()
-	income := uint64(0)
-	bwBought := uint64(0)
-	bwListed := uint64(0)
-	intervalStartTime := req.Msg.IntervalStart.AsTime().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
-	intervalEndTime := req.Msg.IntervalEnd.AsTime().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
+
+	step := time.Duration(req.Msg.Step) * time.Second
+	step.Truncate(s.info.StatisticsTimeGranularity)
+	windowStart := req.Msg.Start.AsTime().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
+	windowEnd := req.Msg.End.AsTime().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
+	num_intervals := int(windowEnd.Sub(windowStart) / step)
+	income := make([]uint64, num_intervals)
+	bwBought := make([]uint64, num_intervals)
+	bwListed := make([]uint64, num_intervals)
+
 	for _, asset := range s.assets {
 		if asset.IA != user.IA {
 			continue
@@ -788,34 +793,55 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 		if req.Msg.IfIdEgress != nil && asset.IfIdEgress != req.Msg.IfIdEgress {
 			continue
 		}
-		if asset.StartAt.After(intervalEndTime) {
-			continue
-		}
-		if asset.StopsAt.Before(intervalStartTime) {
-			continue
-		}
 		start := asset.StartAt
 		stop := asset.StopsAt
-		if asset.StartAt.Before(intervalStartTime) {
-			start = intervalStartTime
+		if asset.StartAt.Before(windowStart) {
+			start = windowStart
 		}
-		if asset.StopsAt.After(intervalEndTime) {
-			stop = intervalEndTime
+		if asset.StopsAt.After(windowEnd) {
+			stop = windowEnd
 		}
-		duration := uint64(stop.Sub(start).Seconds())
-		bwTimesDuration := asset.Bandwidth * duration
-		switch asset.state {
-		case Listed, CheckedOut:
-			bwListed += bwTimesDuration
-		case Bought, BeingSplit, BeingRedeemed, Redeemed:
-			bwBought += bwTimesDuration
-			income += bwTimesDuration * asset.Price
+		first := int(start.Sub(windowStart) / step)
+
+		last := int(stop.Sub(windowStart) / step)
+		if first < 0 || last > num_intervals {
+			continue
+		}
+		if stop.Equal(windowStart.Add(time.Duration(last) * step)) {
+			last--
+		}
+		for i := first; i <= last && i < num_intervals; i++ {
+			intervalStart := windowStart.Add(time.Duration(i) * step)
+			intervalEnd := intervalStart.Add(step)
+			overlapStart := start
+			overlapEnd := stop
+			if asset.StartAt.Before(intervalStart) {
+				overlapStart = intervalStart
+			}
+			if asset.StopsAt.After(intervalEnd) {
+				overlapEnd = intervalEnd
+			}
+			duration := uint64(overlapEnd.Sub(overlapStart).Seconds())
+			bwTimesDuration := asset.Bandwidth * duration
+			switch asset.state {
+			case Listed, CheckedOut:
+				bwListed[i] += bwTimesDuration
+			case Bought, BeingSplit, BeingRedeemed, Redeemed:
+				bwBought[i] += bwTimesDuration
+				income[i] += bwTimesDuration * asset.Price
+			}
+		}
+	}
+	respEntries := make([]*hummingbird.StatisticsResponseEntry, num_intervals)
+	for i := 0; i < num_intervals; i++ {
+		respEntries[i] = &hummingbird.StatisticsResponseEntry{
+			Income:               income[i],
+			BandwidthUtilization: float64(bwBought[i]) / float64(bwBought[i]+bwListed[i]),
 		}
 	}
 	return &connect.Response[hummingbird.StatisticsResponse]{
 		Msg: &hummingbird.StatisticsResponse{
-			Income:               income,
-			BandwidthUtilization: float64(bwBought) / float64(bwListed+bwBought),
+			Statistics: respEntries,
 		},
 	}, nil
 }
