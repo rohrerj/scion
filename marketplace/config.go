@@ -47,8 +47,10 @@ func (cfg *Config) Sample(dst io.Writer, path config.Path, _ config.CtxMap) {
 }
 
 type MarketplaceConfig struct {
-	APIAddr     string `toml:"api_addr,omitempty"`
-	AccountAddr string `toml:"account_addr,omitempty"`
+	APIAddr                   string `toml:"api_addr,omitempty"`
+	AccountAddr               string `toml:"account_addr,omitempty"`
+	Currency                  string `toml:"currency,omitempty"`
+	StatisticsTimeGranularity uint64 `toml:"statistics_time_granularity,omitempty"`
 }
 
 func (cfg *MarketplaceConfig) InitDefaults() {
@@ -57,6 +59,12 @@ func (cfg *MarketplaceConfig) InitDefaults() {
 	}
 	if cfg.AccountAddr == "" {
 		cfg.AccountAddr = "localhost:8889"
+	}
+	if cfg.Currency == "" {
+		cfg.Currency = "CHF"
+	}
+	if cfg.StatisticsTimeGranularity == 0 {
+		cfg.StatisticsTimeGranularity = 1
 	}
 }
 func (cfg *MarketplaceConfig) Validate() error {

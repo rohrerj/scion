@@ -45,6 +45,9 @@ import (
 	"github.com/scionproto/scion/private/trust"
 )
 
+const APIMajorVersion = uint64(0)
+const APIMinorVersion = uint64(1)
+
 var globalCfg marketplace.Config
 
 func main() {
@@ -100,7 +103,12 @@ func realMain(ctx context.Context) error {
 
 	trustVerifer := trust.NewTLSCryptoVerifier(trustDB)
 
-	service := marketplace.NewService()
+	service := marketplace.NewService(&marketplace.MarketplaceInfo{
+		ApiMajorVersion:           APIMajorVersion,
+		ApiMinorVersion:           APIMinorVersion,
+		Currency:                  globalCfg.Marketplace.Currency,
+		StatisticsTimeGranularity: time.Duration(globalCfg.Marketplace.StatisticsTimeGranularity) * time.Second,
+	})
 
 	mux := http.NewServeMux()
 	path, handler := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier, accountDB)))

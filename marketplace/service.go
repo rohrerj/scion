@@ -32,13 +32,16 @@ type assetState int
 
 const (
 	Listed assetState = iota
-	CheckedOut
 	Bought
+	Redeemed
+	CheckedOut
 	BeingRedeemed
 	BeingSplit
 )
 
 type Asset struct {
+	// the asset ID under which the original asset was published
+	OriginalAsset   uint64
 	Owner           string
 	IA              addr.IA
 	Bandwidth       uint64
@@ -72,13 +75,22 @@ type Service struct {
 	mtx                   sync.Mutex
 	assetMtx              sync.RWMutex
 	reservationMtx        sync.RWMutex
+	info                  *MarketplaceInfo
 }
 
-func NewService() *Service {
+type MarketplaceInfo struct {
+	ApiMajorVersion           uint64
+	ApiMinorVersion           uint64
+	Currency                  string
+	StatisticsTimeGranularity time.Duration
+}
+
+func NewService(info *MarketplaceInfo) *Service {
 	return &Service{
 		redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
 		assets:                make(map[uint64]*Asset),
 		currentAssetID:        atomic.Uint64{},
+		info:                  info,
 	}
 }
 
@@ -298,6 +310,7 @@ func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbi
 			Bandwidth:       splitResult.Bought[0].Bandwidth,
 			StartAt:         splitResult.Bought[0].StartAt,
 			StopsAt:         splitResult.Bought[0].StopAt,
+			OriginalAsset:   a.OriginalAsset,
 		}
 		asset2 = &Asset{
 			state:           Bought,
@@ -312,6 +325,7 @@ func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbi
 			Bandwidth:       splitResult.Bought[1].Bandwidth,
 			StartAt:         splitResult.Bought[1].StartAt,
 			StopsAt:         splitResult.Bought[1].StopAt,
+			OriginalAsset:   a.OriginalAsset,
 		}
 		return nil
 	})
@@ -403,6 +417,7 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 					StartAt:         seg.StartAt,
 					StopsAt:         seg.StopAt,
 					Price:           a.Price,
+					OriginalAsset:   a.OriginalAsset,
 				})
 			}
 			for _, seg := range res.Unused {
@@ -419,6 +434,7 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 					StartAt:         seg.StartAt,
 					StopsAt:         seg.StopAt,
 					Price:           a.Price,
+					OriginalAsset:   a.OriginalAsset,
 				})
 			}
 			for _, seg := range res.Remove {
@@ -519,9 +535,10 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 	fmt.Println("Info")
 	return &connect.Response[hummingbird.MarketplaceInfoResponse]{
 		Msg: &hummingbird.MarketplaceInfoResponse{
-			ApiMajorVersion: 0,
-			ApiMinorVersion: 1,
-			Currency:        "CHF",
+			ApiMajorVersion:           s.info.ApiMajorVersion,
+			ApiMinorVersion:           s.info.ApiMinorVersion,
+			Currency:                  s.info.Currency,
+			StatisticsTimeGranularity: uint64(s.info.StatisticsTimeGranularity),
 		},
 	}, nil
 }
@@ -530,6 +547,7 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 	fmt.Println("PublishAsset")
 	user := ctx.Value("user").(*ASUser)
 	ia := user.IA
+	assetID := s.currentAssetID.Add(1)
 	asset := &Asset{
 		IA:              ia,
 		Bandwidth:       req.Msg.Bandwidth,
@@ -542,8 +560,9 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 		IfIdIngress:     req.Msg.IfIdIngress,
 		IfIdEgress:      req.Msg.IfIdEgress,
 		state:           Listed,
+		OriginalAsset:   assetID,
 	}
-	assetID := s.currentAssetID.Add(1)
+
 	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
 		m[assetID] = asset
 		return nil
@@ -682,7 +701,6 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 					})
 				})
 			}
-
 		}
 	}
 	peer, found := s.redemptionServerPeers[ia]
@@ -712,15 +730,30 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			*r = append(*r, res)
 			return nil
 		})
-		s.globalAssetsModOp(func(m map[uint64]*Asset) error {
-			if isInterfacePair {
-				delete(m, *req.Msg.IfPairAssetId)
+		if isInterfacePair {
+			s.assetOp(*req.Msg.IfPairAssetId, func(a *Asset) error {
+				a.state = Redeemed
+				return nil
+			})
+		} else {
+			if req.Msg.IngressAssetId < req.Msg.EgressAssetId {
+				s.assetOp(req.Msg.IngressAssetId, func(ingressAsset *Asset) error {
+					return s.assetOp(req.Msg.EgressAssetId, func(egressAsset *Asset) error {
+						ingressAsset.state = Redeemed
+						egressAsset.state = Redeemed
+						return nil
+					})
+				})
 			} else {
-				delete(m, req.Msg.IngressAssetId)
-				delete(m, req.Msg.EgressAssetId)
+				s.assetOp(req.Msg.EgressAssetId, func(egressAsset *Asset) error {
+					return s.assetOp(req.Msg.IngressAssetId, func(ingressAsset *Asset) error {
+						ingressAsset.state = Redeemed
+						egressAsset.state = Redeemed
+						return nil
+					})
+				})
 			}
-			return nil
-		})
+		}
 		return &connect.Response[hummingbird.RedeemAssetResponse]{
 			Msg: &hummingbird.RedeemAssetResponse{
 				Ak:                  resp.Ak,
@@ -733,6 +766,58 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 		undoRedemption()
 		return nil, serrors.New("timeout")
 	}
+}
+
+func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error) {
+	fmt.Println("Statistics")
+	user := ctx.Value("user").(*ASUser)
+	s.assetMtx.RLock()
+	defer s.assetMtx.RUnlock()
+	income := uint64(0)
+	bwBought := uint64(0)
+	bwListed := uint64(0)
+	intervalStartTime := req.Msg.IntervalStart.AsTime().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
+	intervalEndTime := req.Msg.IntervalEnd.AsTime().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
+	for _, asset := range s.assets {
+		if asset.IA != user.IA {
+			continue
+		}
+		if req.Msg.IfIdIngress != nil && asset.IfIdIngress != req.Msg.IfIdIngress {
+			continue
+		}
+		if req.Msg.IfIdEgress != nil && asset.IfIdEgress != req.Msg.IfIdEgress {
+			continue
+		}
+		if asset.StartAt.After(intervalEndTime) {
+			continue
+		}
+		if asset.StopsAt.Before(intervalStartTime) {
+			continue
+		}
+		start := asset.StartAt
+		stop := asset.StopsAt
+		if asset.StartAt.Before(intervalStartTime) {
+			start = intervalStartTime
+		}
+		if asset.StopsAt.After(intervalEndTime) {
+			stop = intervalEndTime
+		}
+		duration := uint64(stop.Sub(start).Seconds())
+		bwTimesDuration := asset.Bandwidth * duration
+		switch asset.state {
+		case Listed, CheckedOut:
+			bwListed += bwTimesDuration
+		case Bought, BeingSplit, BeingRedeemed, Redeemed:
+			bwBought += bwTimesDuration
+			income += bwTimesDuration * asset.Price
+		}
+	}
+	return &connect.Response[hummingbird.StatisticsResponse]{
+		Msg: &hummingbird.StatisticsResponse{
+			Income:               income,
+			BandwidthUtilization: float64(bwBought) / float64(bwListed+bwBought),
+		},
+	}, nil
 }
 
 func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[hummingbird.SearchAssetsRequest]) (*connect.Response[hummingbird.SearchAssetsResponse], error) {

@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -1237,8 +1238,21 @@ func realMain(ctx context.Context) error {
 				break
 			}
 		}
+		for {
+			start := time.Now()
+			stop := start.Add(time.Minute)
+			stat, err := assetPublisher.FetchStatistics(ctx, &hummingbird.StatisticsRequest{
+				IntervalStart: timestamppb.New(start),
+				IntervalEnd:   timestamppb.New(stop),
+			})
+			if err != nil {
+				log.Error("error fetching statistics", "err", err)
+			} else {
+				fmt.Printf("stat %v-%v, Income: %d, Utilization %f\n", start, stop, stat.Income, stat.BandwidthUtilization)
+			}
 
-		return nil
+			time.Sleep(time.Second * 10)
+		}
 	})
 
 	return g.Wait()

@@ -29,6 +29,19 @@ service MarketplaceService {
     rpc FetchReservations(FetchReservationsRequest) returns (FetchReservationsResponse) {}
     rpc SplitAsset(SplitAssetRequest) returns (SplitAssetResponse) {}
     rpc CombineAssets(CombineAssetRequest) returns (CombineAssetResponse) {}
+    rpc Statistics(StatisticsRequest) returns (StatisticsResponse) {}
+}
+
+message StatisticsRequest {
+    optional uint32 if_id_ingress = 1;
+    optional uint32 if_id_egress = 2;
+    google.protobuf.Timestamp interval_start = 3;
+    google.protobuf.Timestamp interval_end = 4;
+}
+
+message StatisticsResponse {
+    uint64 income = 1;
+    double bandwidth_utilization = 2;
 }
 
 // Split assets splits an asset either by defining the bandwidth to split, or the time it should split.
@@ -65,6 +78,7 @@ message MarketplaceInfoResponse {
     uint64 api_major_version = 1;
     uint64 api_minor_version = 2;
     string currency = 3;
+    uint64 statistics_time_granularity = 4;
 }
 
 message PublishAssetRequest {

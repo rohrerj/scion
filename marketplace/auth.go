@@ -26,6 +26,7 @@ import (
 
 var methodScopes = map[string]string{
 	"/proto.hummingbird.v1.MarketplaceService/PublishAsset":      "AssetPublisher",
+	"/proto.hummingbird.v1.MarketplaceService/Statistics":        "AssetPublisher",
 	"/proto.hummingbird.v1.MarketplaceService/SearchAssets":      "User",
 	"/proto.hummingbird.v1.MarketplaceService/SplitAsset":        "User",
 	"/proto.hummingbird.v1.MarketplaceService/CombineAssets":     "User",

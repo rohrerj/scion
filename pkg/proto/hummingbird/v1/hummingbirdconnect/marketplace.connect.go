@@ -56,6 +56,9 @@ const (
 	// MarketplaceServiceCombineAssetsProcedure is the fully-qualified name of the MarketplaceService's
 	// CombineAssets RPC.
 	MarketplaceServiceCombineAssetsProcedure = "/proto.hummingbird.v1.MarketplaceService/CombineAssets"
+	// MarketplaceServiceStatisticsProcedure is the fully-qualified name of the MarketplaceService's
+	// Statistics RPC.
+	MarketplaceServiceStatisticsProcedure = "/proto.hummingbird.v1.MarketplaceService/Statistics"
 )
 
 // MarketplaceServiceClient is a client for the proto.hummingbird.v1.MarketplaceService service.
@@ -68,6 +71,7 @@ type MarketplaceServiceClient interface {
 	FetchReservations(context.Context, *connect.Request[hummingbird.FetchReservationsRequest]) (*connect.Response[hummingbird.FetchReservationsResponse], error)
 	SplitAsset(context.Context, *connect.Request[hummingbird.SplitAssetRequest]) (*connect.Response[hummingbird.SplitAssetResponse], error)
 	CombineAssets(context.Context, *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error)
+	Statistics(context.Context, *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error)
 }
 
 // NewMarketplaceServiceClient constructs a client for the proto.hummingbird.v1.MarketplaceService
@@ -129,6 +133,12 @@ func NewMarketplaceServiceClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(marketplaceServiceMethods.ByName("CombineAssets")),
 			connect.WithClientOptions(opts...),
 		),
+		statistics: connect.NewClient[hummingbird.StatisticsRequest, hummingbird.StatisticsResponse](
+			httpClient,
+			baseURL+MarketplaceServiceStatisticsProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("Statistics")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -142,6 +152,7 @@ type marketplaceServiceClient struct {
 	fetchReservations *connect.Client[hummingbird.FetchReservationsRequest, hummingbird.FetchReservationsResponse]
 	splitAsset        *connect.Client[hummingbird.SplitAssetRequest, hummingbird.SplitAssetResponse]
 	combineAssets     *connect.Client[hummingbird.CombineAssetRequest, hummingbird.CombineAssetResponse]
+	statistics        *connect.Client[hummingbird.StatisticsRequest, hummingbird.StatisticsResponse]
 }
 
 // Info calls proto.hummingbird.v1.MarketplaceService.Info.
@@ -184,6 +195,11 @@ func (c *marketplaceServiceClient) CombineAssets(ctx context.Context, req *conne
 	return c.combineAssets.CallUnary(ctx, req)
 }
 
+// Statistics calls proto.hummingbird.v1.MarketplaceService.Statistics.
+func (c *marketplaceServiceClient) Statistics(ctx context.Context, req *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error) {
+	return c.statistics.CallUnary(ctx, req)
+}
+
 // MarketplaceServiceHandler is an implementation of the proto.hummingbird.v1.MarketplaceService
 // service.
 type MarketplaceServiceHandler interface {
@@ -195,6 +211,7 @@ type MarketplaceServiceHandler interface {
 	FetchReservations(context.Context, *connect.Request[hummingbird.FetchReservationsRequest]) (*connect.Response[hummingbird.FetchReservationsResponse], error)
 	SplitAsset(context.Context, *connect.Request[hummingbird.SplitAssetRequest]) (*connect.Response[hummingbird.SplitAssetResponse], error)
 	CombineAssets(context.Context, *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error)
+	Statistics(context.Context, *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error)
 }
 
 // NewMarketplaceServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -252,6 +269,12 @@ func NewMarketplaceServiceHandler(svc MarketplaceServiceHandler, opts ...connect
 		connect.WithSchema(marketplaceServiceMethods.ByName("CombineAssets")),
 		connect.WithHandlerOptions(opts...),
 	)
+	marketplaceServiceStatisticsHandler := connect.NewUnaryHandler(
+		MarketplaceServiceStatisticsProcedure,
+		svc.Statistics,
+		connect.WithSchema(marketplaceServiceMethods.ByName("Statistics")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/proto.hummingbird.v1.MarketplaceService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case MarketplaceServiceInfoProcedure:
@@ -270,6 +293,8 @@ func NewMarketplaceServiceHandler(svc MarketplaceServiceHandler, opts ...connect
 			marketplaceServiceSplitAssetHandler.ServeHTTP(w, r)
 		case MarketplaceServiceCombineAssetsProcedure:
 			marketplaceServiceCombineAssetsHandler.ServeHTTP(w, r)
+		case MarketplaceServiceStatisticsProcedure:
+			marketplaceServiceStatisticsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -309,4 +334,8 @@ func (UnimplementedMarketplaceServiceHandler) SplitAsset(context.Context, *conne
 
 func (UnimplementedMarketplaceServiceHandler) CombineAssets(context.Context, *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.hummingbird.v1.MarketplaceService.CombineAssets is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) Statistics(context.Context, *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.hummingbird.v1.MarketplaceService.Statistics is not implemented"))
 }
