@@ -1251,7 +1251,7 @@ func realMain(ctx context.Context) error {
 			} else {
 				fmt.Println("Statistics:")
 				for i, stat := range stat.Statistics {
-					fmt.Printf("index: %d, Income: %d, Utilization %f\n", i, stat.Income, stat.BandwidthUtilization)
+					fmt.Printf("index: %d, Revenue: %d, Utilization %f\n", i, stat.Revenue, stat.BandwidthUtilization)
 				}
 			}
 

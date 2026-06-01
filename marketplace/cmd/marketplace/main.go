@@ -24,21 +24,32 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
-	"log"
 	"math/big"
+	"net"
 	"net/http"
+	"net/netip"
 	"os"
-	"sync"
+	"path"
 	"time"
 
 	"connectrpc.com/connect"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/marketplace"
 	"github.com/scionproto/scion/marketplace/webapp"
 	libconnect "github.com/scionproto/scion/pkg/connect"
+	libgrpc "github.com/scionproto/scion/pkg/grpc"
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
+	"github.com/scionproto/scion/pkg/segment/iface"
+	"github.com/scionproto/scion/pkg/snet"
+	"github.com/scionproto/scion/pkg/snet/squic"
+	"github.com/scionproto/scion/private/app/appnet"
 	"github.com/scionproto/scion/private/app/launcher"
 	"github.com/scionproto/scion/private/storage"
 	"github.com/scionproto/scion/private/topology"
@@ -71,11 +82,11 @@ func realMain(ctx context.Context) error {
 	}
 	cert, err := generateSelfSignedCert()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	signingPubKey, signingPrivKey, err := getJwtKeys()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	jwtSigner := marketplace.NewSigner(signingPrivKey)
 	jwtVerifier := marketplace.NewVerifier(signingPubKey)
@@ -83,7 +94,7 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = trust.LoadTRCs(context.Background(), "gen/marketplace/certs", trustDB)
+	_, err = trust.LoadTRCs(context.Background(), path.Join(globalCfg.General.ConfigDir, "certs"), trustDB)
 	if err != nil {
 		return err
 	}
@@ -111,11 +122,11 @@ func realMain(ctx context.Context) error {
 	})
 
 	mux := http.NewServeMux()
-	path, handler := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier, accountDB)))
-	path2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier, accountDB)))
+	apiPath1, handler1 := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier, accountDB)))
+	apiPath2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier, accountDB)))
 
-	mux.Handle(path, handler)
-	mux.Handle(path2, handler2)
+	mux.Handle(apiPath1, handler1)
+	mux.Handle(apiPath2, handler2)
 
 	server := &http.Server{
 		Addr:    globalCfg.Marketplace.APIAddr,
@@ -145,15 +156,122 @@ func realMain(ctx context.Context) error {
 			},
 		},
 	}
-	g := sync.WaitGroup{}
-	g.Go(func() {
-		fmt.Println(server.ListenAndServeTLS("", ""))
+	g := &errgroup.Group{}
+	g.Go(func() error {
+		return server.ListenAndServeTLS("", "")
 	})
-	g.Go(func() {
-		fmt.Println(accountServer.ListenAndServeTLS("", ""))
+	g.Go(func() error {
+		return accountServer.ListenAndServeTLS("", "")
 	})
-	log.Printf("HTTPS server running on %s and AS user creation on %s\n", ":8888", ":8889")
+	log.Info(fmt.Sprintf("HTTPS server running on %s and account management on %s\n", globalCfg.Marketplace.APIAddr, globalCfg.Marketplace.AccountAddr))
+	err = func() error {
+		if globalCfg.Marketplace.SCIONAPIAddr != "" {
+			err = StartSCIONServer(ctx, globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux)
+			if err != nil {
+				return err
+			}
+		}
+		if globalCfg.Marketplace.SCIONAccountAddr != "" {
+			// TODO: this part does not fully work yet, investigate what additional changes are necessary
+			err = StartSCIONServer(ctx, globalCfg.Marketplace.SCIONAccountAddr, g, trustVerifer, &cert, accountMux)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}()
+	if err != nil {
+		log.Error("Error starting SCION server", "err", err)
+	}
+
 	g.Wait()
+	return nil
+}
+
+func StartSCIONServer(ctx context.Context, addrString string, g *errgroup.Group, trustVerifier *trust.TLSCryptoVerifier, cert *tls.Certificate, mux *http.ServeMux) error {
+	topoFile := path.Join(globalCfg.General.ConfigDir, "topology.json")
+	addr, err := net.ResolveUDPAddr("udp", addrString)
+	if err != nil {
+		return err
+	}
+
+	topoLoader, err := topology.NewLoader(topology.LoaderCfg{
+		File: topoFile,
+	})
+	if err != nil {
+		return err
+	}
+	portRangeStart, portRangeEnd := topoLoader.PortRange()
+
+	nc := appnet.NetworkConfig{
+		Topology: snet.Topology{
+			LocalIA: topoLoader.IA(),
+			Interface: func(u uint16) (netip.AddrPort, bool) {
+				ifid, found := topoLoader.InterfaceInfoMap()[iface.ID(u)]
+				if !found {
+					return netip.AddrPort{}, false
+				}
+				return ifid.InternalAddr, true
+			},
+			PortRange: snet.TopologyPortRange{
+				Start: portRangeStart,
+				End:   portRangeEnd,
+			},
+		},
+		IA: topoLoader.IA(),
+		QUIC: appnet.QUIC{
+			TLSVerifier: trustVerifier,
+			GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				return cert, nil
+			},
+		},
+		Public: addr,
+		MTU:    topoLoader.MTU(),
+	}
+	quicStack, err := nc.QUICStack(ctx)
+	if err != nil {
+		return err
+	}
+	quicServer := grpc.NewServer(
+		grpc.Creds(libgrpc.PassThroughCredentials{}),
+		libgrpc.UnaryServerInterceptor(),
+		libgrpc.DefaultMaxConcurrentStreams(),
+	)
+	grpcConns := make(chan *quic.Conn)
+	g.Go(func() error {
+		defer log.HandlePanic()
+		listener := quicStack.Listener
+		for {
+			conn, err := listener.Accept(context.Background())
+			if err == quic.ErrServerClosed {
+				return http.ErrServerClosed
+			}
+			if err != nil {
+				return err
+			}
+			go func() {
+				defer log.HandlePanic()
+				if conn.ConnectionState().TLS.NegotiatedProtocol != "h3" {
+					grpcConns <- conn
+					return
+				}
+				connectServer := http3.Server{
+					Handler: libconnect.AttachPeer(mux),
+				}
+				if err := connectServer.ServeQUICConn(conn); err != nil {
+					log.Debug("Error handling connectrpc connection", "err", err)
+				}
+			}()
+		}
+	})
+	g.Go(func() error {
+		defer log.HandlePanic()
+		grpcListener := squic.NewConnListener(grpcConns, quicStack.Listener.Addr())
+		if err := quicServer.Serve(grpcListener); err != nil {
+			return serrors.Wrap("serving gRPC/SCION API", err)
+		}
+		return nil
+	})
 	return nil
 }
 

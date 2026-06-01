@@ -197,7 +197,7 @@ func (x *StatisticsResponse) GetStatistics() []*StatisticsResponseEntry {
 
 type StatisticsResponseEntry struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
-	Income               uint64                 `protobuf:"varint,1,opt,name=income,proto3" json:"income,omitempty"`
+	Revenue              uint64                 `protobuf:"varint,1,opt,name=revenue,proto3" json:"revenue,omitempty"`
 	BandwidthUtilization float64                `protobuf:"fixed64,2,opt,name=bandwidth_utilization,json=bandwidthUtilization,proto3" json:"bandwidth_utilization,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
@@ -233,9 +233,9 @@ func (*StatisticsResponseEntry) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *StatisticsResponseEntry) GetIncome() uint64 {
+func (x *StatisticsResponseEntry) GetRevenue() uint64 {
 	if x != nil {
-		return x.Income
+		return x.Revenue
 	}
 	return 0
 }
@@ -1606,9 +1606,9 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x12StatisticsResponse\x12M\n" +
 	"\n" +
 	"statistics\x18\x01 \x03(\v2-.proto.hummingbird.v1.StatisticsResponseEntryR\n" +
-	"statistics\"f\n" +
-	"\x17StatisticsResponseEntry\x12\x16\n" +
-	"\x06income\x18\x01 \x01(\x04R\x06income\x123\n" +
+	"statistics\"h\n" +
+	"\x17StatisticsResponseEntry\x12\x18\n" +
+	"\arevenue\x18\x01 \x01(\x04R\arevenue\x123\n" +
 	"\x15bandwidth_utilization\x18\x02 \x01(\x01R\x14bandwidthUtilization\"\x98\x01\n" +
 	"\x11SplitAssetRequest\x12\x19\n" +
 	"\basset_id\x18\x01 \x01(\x04R\aassetId\x12\x1b\n" +

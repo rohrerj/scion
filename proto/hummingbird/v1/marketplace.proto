@@ -45,7 +45,7 @@ message StatisticsResponse {
 }
 
 message StatisticsResponseEntry {
-    uint64 income = 1;
+    uint64 revenue = 1;
     double bandwidth_utilization = 2;
 }
 

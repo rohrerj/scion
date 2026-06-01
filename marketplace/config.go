@@ -49,6 +49,8 @@ func (cfg *Config) Sample(dst io.Writer, path config.Path, _ config.CtxMap) {
 type MarketplaceConfig struct {
 	APIAddr                   string `toml:"api_addr,omitempty"`
 	AccountAddr               string `toml:"account_addr,omitempty"`
+	SCIONAPIAddr              string `toml:"scion_api_addr,omitempty"`
+	SCIONAccountAddr          string `toml:"scion_account_addr,omitempty"`
 	Currency                  string `toml:"currency,omitempty"`
 	StatisticsTimeGranularity uint64 `toml:"statistics_time_granularity,omitempty"`
 }

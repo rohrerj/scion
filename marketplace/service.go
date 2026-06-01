@@ -835,7 +835,7 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 	respEntries := make([]*hummingbird.StatisticsResponseEntry, num_intervals)
 	for i := 0; i < num_intervals; i++ {
 		respEntries[i] = &hummingbird.StatisticsResponseEntry{
-			Income:               income[i],
+			Revenue:              income[i],
 			BandwidthUtilization: float64(bwBought[i]) / float64(bwBought[i]+bwListed[i]),
 		}
 	}
