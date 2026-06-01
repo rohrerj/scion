@@ -289,7 +289,7 @@ func saveSignatureKeys(pubKey ed25519.PublicKey, privKey ed25519.PrivateKey) err
 		Bytes: privBytes,
 	}
 
-	if err := os.WriteFile("gen/marketplace/signature_priv.pem", pem.EncodeToMemory(privBlock), 0644); err != nil {
+	if err := os.WriteFile(path.Join(globalCfg.General.ConfigDir, "signature_priv.pem"), pem.EncodeToMemory(privBlock), 0644); err != nil {
 		return err
 	}
 
@@ -302,8 +302,7 @@ func saveSignatureKeys(pubKey ed25519.PublicKey, privKey ed25519.PrivateKey) err
 		Type:  "PUBLIC KEY",
 		Bytes: pubBytes,
 	}
-
-	if err := os.WriteFile("gen/marketplace/signature_pub.pem", pem.EncodeToMemory(pubBlock), 0644); err != nil {
+	if err := os.WriteFile(path.Join(globalCfg.General.ConfigDir, "signature_pub.pem"), pem.EncodeToMemory(pubBlock), 0644); err != nil {
 		return err
 	}
 
@@ -311,14 +310,16 @@ func saveSignatureKeys(pubKey ed25519.PublicKey, privKey ed25519.PrivateKey) err
 }
 
 func getJwtKeys() (ed25519.PublicKey, ed25519.PrivateKey, error) {
-	if _, err := os.Stat("gen/marketplace/signature_priv.pem"); os.IsNotExist(err) {
+	pubFile := path.Join(globalCfg.General.ConfigDir, "signature_pub.pem")
+	privFile := path.Join(globalCfg.General.ConfigDir, "signature_priv.pem")
+	if _, err := os.Stat(privFile); os.IsNotExist(err) {
 		signingPubKey, signingPrivKey, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
 			return nil, nil, err
 		}
 		return signingPubKey, signingPrivKey, saveSignatureKeys(signingPubKey, signingPrivKey)
 	}
-	privData, err := os.ReadFile("gen/marketplace/signature_priv.pem")
+	privData, err := os.ReadFile(privFile)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -337,7 +338,7 @@ func getJwtKeys() (ed25519.PublicKey, ed25519.PrivateKey, error) {
 		return nil, nil, fmt.Errorf("not an Ed25519 private key")
 	}
 
-	pubData, err := os.ReadFile("gen/marketplace/signature_pub.pem")
+	pubData, err := os.ReadFile(pubFile)
 	if err != nil {
 		return nil, nil, err
 	}

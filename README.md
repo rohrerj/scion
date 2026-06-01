@@ -3,7 +3,7 @@ The code for the marketplace can be found in the [marketplace](./marketplace) fo
 The topology generator scripts do not set up a marketplace, this has to be done manually:
 
 1. Create your topology like normally, e.g. `./scion.sh topology -c topology/default.topo`
-2. Run `python setup_marketplace.py <AS>`, where AS is in the format `ff00_0_111`, which configures the marketplace to be run inside that AS. This setup script currently supports only a single marketplace per topology.
+2. Run `python setup_marketplace.py <IA>`, where AS is in the format `1-ff00_0_111`, which configures the marketplace to be run inside that AS. This setup script currently supports only a single marketplace per topology.
 3. Start using `./scion.sh start`
 
 # Configure ASes to sell assets on marketplace

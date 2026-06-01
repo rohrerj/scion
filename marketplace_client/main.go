@@ -156,13 +156,93 @@ func withSCION(ctx context.Context, endhostAPI string, remote *snet.UDPAddr, tok
 	return client, nil
 }
 
+type HummingbirdNotes struct {
+	Hummingbird []HummingbirdNoteEntry `json:"hummingbird,omitempty"`
+}
+
+type HummingbirdNoteEntry struct {
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+	Api      string `json:"api"`
+	Website  string `json:"website"`
+}
+
+func discoverMarketplaces(ctx context.Context, reader *bufio.Reader, endhostApi string) (*HummingbirdNoteEntry, error) {
+	fmt.Println("Discovery will return a list of marketplaces that offer hummingbird reservations for a given AS.")
+	targetIA := readString(reader, "Reservation ISD-AS: ")
+	ia, err := addr.ParseIA(targetIA)
+	if err != nil {
+		return nil, err
+	}
+	connector, err := endhost.NewConnector(ctx, endhostApi)
+	if err != nil {
+		return nil, err
+	}
+	paths, err := connector.PathService.Paths(ctx, ia, connector.Topology.LocalIA)
+	if err != nil {
+		return nil, err
+	}
+	marketplacesSet := map[HummingbirdNoteEntry]int{}
+	for _, path := range paths {
+		for _, note := range path.Metadata().Notes {
+			if note == "" {
+				continue
+			}
+			fmt.Println(marketplacesSet)
+			hummingbirdNotes := &HummingbirdNotes{}
+			err = json.Unmarshal([]byte(note), hummingbirdNotes)
+			if err != nil {
+				fmt.Println(err, note)
+				continue
+			}
+			for _, entry := range hummingbirdNotes.Hummingbird {
+				marketplacesSet[entry]++
+			}
+		}
+	}
+	if len(marketplacesSet) == 0 {
+		return nil, serrors.New("No marketplaces found")
+	}
+	marketplaces := make([]HummingbirdNoteEntry, 0, len(marketplacesSet))
+	for marketplace := range marketplacesSet {
+		marketplaces = append(marketplaces, marketplace)
+	}
+	sort.Slice(marketplaces, func(i, j int) bool {
+		return marketplacesSet[marketplaces[i]] < marketplacesSet[marketplaces[j]]
+	})
+	fmt.Println("Found marketplaces:")
+
+	for i, marketplace := range marketplaces {
+		fmt.Printf("%d: %s with website %s using protocol %s\n", i, marketplace.Name, marketplace.Website, marketplace.Protocol)
+	}
+	index := readUint64(reader, "Select marketplace: ")
+	if index >= uint64(len(marketplaces)) {
+		return nil, serrors.New("index out of range")
+	}
+	return &marketplaces[index], nil
+}
+
 func userInteraction() {
+	ctx := context.Background()
 	reader := bufio.NewReader(os.Stdin)
-	defaultMarketplaceAddr := "https://localhost:8888"
-	url := *readOptionalString(reader, "marketplace_api: ", &defaultMarketplaceAddr)
+	url := readString(reader, "marketplace_api (leave empty to start discovery): ")
+	var err error
+	var endhostApi string
+	if url == "" {
+		endhostApi = readString(reader, "endhostAPI: ")
+		if endhostApi == "" {
+			fmt.Println("invalid endhost API")
+			return
+		}
+		marketplace, err := discoverMarketplaces(ctx, reader, endhostApi)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		url = marketplace.Api
+	}
 	defaultJWT := ""
 	token := *readOptionalString(reader, "jwt_token: ", &defaultJWT)
-	ctx := context.Background()
 	var client hummingbirdconnect.MarketplaceServiceClient
 	urlSplit := strings.Split(url, "://")
 	api := ""
@@ -180,12 +260,14 @@ func userInteraction() {
 			IA:   scionAddr.IA,
 			Host: net.UDPAddrFromAddrPort(netip.AddrPortFrom(scionAddr.Host.IP(), port)),
 		}
-		endhostApi := readOptionalString(reader, "endhostAPI: ", nil)
-		if endhostApi == nil {
-			fmt.Println("invalid endhost API")
-			return
+		if endhostApi == "" {
+			endhostApi := readString(reader, "endhostAPI: ")
+			if endhostApi == "" {
+				fmt.Println("invalid endhost API")
+				return
+			}
 		}
-		client, err = withSCION(ctx, *endhostApi, remote, token)
+		client, err = withSCION(ctx, endhostApi, remote, token)
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -570,6 +652,15 @@ func readOptionalIAUint64(reader *bufio.Reader, prompt string) *uint64 {
 	v := uint64(ia)
 
 	return &v
+}
+
+func readString(reader *bufio.Reader, prompt string) string {
+	fmt.Print(prompt)
+
+	text, _ := reader.ReadString('\n')
+	text = strings.TrimSpace(text)
+
+	return text
 }
 
 func readOptionalString(reader *bufio.Reader, prompt string, defaultStr *string) *string {
