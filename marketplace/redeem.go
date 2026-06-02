@@ -22,6 +22,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 )
 
@@ -61,6 +62,10 @@ func (c *RedemptionServerPeer) Send(req *hummingbird.RedeemAssetFromASRequest) <
 	c.sendCh <- req
 
 	return respCh
+}
+
+func (s *Service) DelegateRedemption(ctx context.Context, req *connect.Request[hummingbird.DelegateRedemptionRequest]) (*connect.Response[hummingbird.DelegateRedemptionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, serrors.New("Not implemented"))
 }
 
 func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {

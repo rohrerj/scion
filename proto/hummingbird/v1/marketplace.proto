@@ -83,7 +83,7 @@ message MarketplaceInfoResponse {
     uint64 api_major_version = 1;
     uint64 api_minor_version = 2;
     string currency = 3;
-    uint64 statistics_time_granularity = 4;
+    uint64 max_statistics_granularity = 4;
 }
 
 message PublishAssetRequest {

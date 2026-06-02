@@ -535,10 +535,10 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 	fmt.Println("Info")
 	return &connect.Response[hummingbird.MarketplaceInfoResponse]{
 		Msg: &hummingbird.MarketplaceInfoResponse{
-			ApiMajorVersion:           s.info.ApiMajorVersion,
-			ApiMinorVersion:           s.info.ApiMinorVersion,
-			Currency:                  s.info.Currency,
-			StatisticsTimeGranularity: uint64(s.info.StatisticsTimeGranularity),
+			ApiMajorVersion:          s.info.ApiMajorVersion,
+			ApiMinorVersion:          s.info.ApiMinorVersion,
+			Currency:                 s.info.Currency,
+			MaxStatisticsGranularity: uint64(s.info.StatisticsTimeGranularity),
 		},
 	}, nil
 }

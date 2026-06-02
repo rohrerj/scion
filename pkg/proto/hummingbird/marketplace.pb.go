@@ -522,13 +522,13 @@ func (*MarketplaceInfoRequest) Descriptor() ([]byte, []int) {
 }
 
 type MarketplaceInfoResponse struct {
-	state                     protoimpl.MessageState `protogen:"open.v1"`
-	ApiMajorVersion           uint64                 `protobuf:"varint,1,opt,name=api_major_version,json=apiMajorVersion,proto3" json:"api_major_version,omitempty"`
-	ApiMinorVersion           uint64                 `protobuf:"varint,2,opt,name=api_minor_version,json=apiMinorVersion,proto3" json:"api_minor_version,omitempty"`
-	Currency                  string                 `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
-	StatisticsTimeGranularity uint64                 `protobuf:"varint,4,opt,name=statistics_time_granularity,json=statisticsTimeGranularity,proto3" json:"statistics_time_granularity,omitempty"`
-	unknownFields             protoimpl.UnknownFields
-	sizeCache                 protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	ApiMajorVersion          uint64                 `protobuf:"varint,1,opt,name=api_major_version,json=apiMajorVersion,proto3" json:"api_major_version,omitempty"`
+	ApiMinorVersion          uint64                 `protobuf:"varint,2,opt,name=api_minor_version,json=apiMinorVersion,proto3" json:"api_minor_version,omitempty"`
+	Currency                 string                 `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
+	MaxStatisticsGranularity uint64                 `protobuf:"varint,4,opt,name=max_statistics_granularity,json=maxStatisticsGranularity,proto3" json:"max_statistics_granularity,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *MarketplaceInfoResponse) Reset() {
@@ -582,9 +582,9 @@ func (x *MarketplaceInfoResponse) GetCurrency() string {
 	return ""
 }
 
-func (x *MarketplaceInfoResponse) GetStatisticsTimeGranularity() uint64 {
+func (x *MarketplaceInfoResponse) GetMaxStatisticsGranularity() uint64 {
 	if x != nil {
-		return x.StatisticsTimeGranularity
+		return x.MaxStatisticsGranularity
 	}
 	return 0
 }
@@ -1628,12 +1628,12 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"asset_id_2\x18\x02 \x01(\x04R\bassetId2\"1\n" +
 	"\x14CombineAssetResponse\x12\x19\n" +
 	"\basset_id\x18\x01 \x01(\x04R\aassetId\"\x18\n" +
-	"\x16MarketplaceInfoRequest\"\xcd\x01\n" +
+	"\x16MarketplaceInfoRequest\"\xcb\x01\n" +
 	"\x17MarketplaceInfoResponse\x12*\n" +
 	"\x11api_major_version\x18\x01 \x01(\x04R\x0fapiMajorVersion\x12*\n" +
 	"\x11api_minor_version\x18\x02 \x01(\x04R\x0fapiMinorVersion\x12\x1a\n" +
-	"\bcurrency\x18\x03 \x01(\tR\bcurrency\x12>\n" +
-	"\x1bstatistics_time_granularity\x18\x04 \x01(\x04R\x19statisticsTimeGranularity\"\xa8\x03\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency\x12<\n" +
+	"\x1amax_statistics_granularity\x18\x04 \x01(\x04R\x18maxStatisticsGranularity\"\xa8\x03\n" +
 	"\x13PublishAssetRequest\x12\x1c\n" +
 	"\tbandwidth\x18\x01 \x01(\x04R\tbandwidth\x12#\n" +
 	"\rbandwidth_min\x18\x02 \x01(\x04R\fbandwidthMin\x127\n" +

@@ -36,11 +36,15 @@ const (
 	// RedemptionServiceRedeemASAssetProcedure is the fully-qualified name of the RedemptionService's
 	// RedeemASAsset RPC.
 	RedemptionServiceRedeemASAssetProcedure = "/proto.hummingbird.v1.RedemptionService/RedeemASAsset"
+	// RedemptionServiceDelegateRedemptionProcedure is the fully-qualified name of the
+	// RedemptionService's DelegateRedemption RPC.
+	RedemptionServiceDelegateRedemptionProcedure = "/proto.hummingbird.v1.RedemptionService/DelegateRedemption"
 )
 
 // RedemptionServiceClient is a client for the proto.hummingbird.v1.RedemptionService service.
 type RedemptionServiceClient interface {
 	RedeemASAsset(context.Context) *connect.BidiStreamForClient[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]
+	DelegateRedemption(context.Context, *connect.Request[hummingbird.DelegateRedemptionRequest]) (*connect.Response[hummingbird.DelegateRedemptionResponse], error)
 }
 
 // NewRedemptionServiceClient constructs a client for the proto.hummingbird.v1.RedemptionService
@@ -60,12 +64,19 @@ func NewRedemptionServiceClient(httpClient connect.HTTPClient, baseURL string, o
 			connect.WithSchema(redemptionServiceMethods.ByName("RedeemASAsset")),
 			connect.WithClientOptions(opts...),
 		),
+		delegateRedemption: connect.NewClient[hummingbird.DelegateRedemptionRequest, hummingbird.DelegateRedemptionResponse](
+			httpClient,
+			baseURL+RedemptionServiceDelegateRedemptionProcedure,
+			connect.WithSchema(redemptionServiceMethods.ByName("DelegateRedemption")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // redemptionServiceClient implements RedemptionServiceClient.
 type redemptionServiceClient struct {
-	redeemASAsset *connect.Client[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]
+	redeemASAsset      *connect.Client[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]
+	delegateRedemption *connect.Client[hummingbird.DelegateRedemptionRequest, hummingbird.DelegateRedemptionResponse]
 }
 
 // RedeemASAsset calls proto.hummingbird.v1.RedemptionService.RedeemASAsset.
@@ -73,10 +84,16 @@ func (c *redemptionServiceClient) RedeemASAsset(ctx context.Context) *connect.Bi
 	return c.redeemASAsset.CallBidiStream(ctx)
 }
 
+// DelegateRedemption calls proto.hummingbird.v1.RedemptionService.DelegateRedemption.
+func (c *redemptionServiceClient) DelegateRedemption(ctx context.Context, req *connect.Request[hummingbird.DelegateRedemptionRequest]) (*connect.Response[hummingbird.DelegateRedemptionResponse], error) {
+	return c.delegateRedemption.CallUnary(ctx, req)
+}
+
 // RedemptionServiceHandler is an implementation of the proto.hummingbird.v1.RedemptionService
 // service.
 type RedemptionServiceHandler interface {
 	RedeemASAsset(context.Context, *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error
+	DelegateRedemption(context.Context, *connect.Request[hummingbird.DelegateRedemptionRequest]) (*connect.Response[hummingbird.DelegateRedemptionResponse], error)
 }
 
 // NewRedemptionServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -92,10 +109,18 @@ func NewRedemptionServiceHandler(svc RedemptionServiceHandler, opts ...connect.H
 		connect.WithSchema(redemptionServiceMethods.ByName("RedeemASAsset")),
 		connect.WithHandlerOptions(opts...),
 	)
+	redemptionServiceDelegateRedemptionHandler := connect.NewUnaryHandler(
+		RedemptionServiceDelegateRedemptionProcedure,
+		svc.DelegateRedemption,
+		connect.WithSchema(redemptionServiceMethods.ByName("DelegateRedemption")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/proto.hummingbird.v1.RedemptionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RedemptionServiceRedeemASAssetProcedure:
 			redemptionServiceRedeemASAssetHandler.ServeHTTP(w, r)
+		case RedemptionServiceDelegateRedemptionProcedure:
+			redemptionServiceDelegateRedemptionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -107,4 +132,8 @@ type UnimplementedRedemptionServiceHandler struct{}
 
 func (UnimplementedRedemptionServiceHandler) RedeemASAsset(context.Context, *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("proto.hummingbird.v1.RedemptionService.RedeemASAsset is not implemented"))
+}
+
+func (UnimplementedRedemptionServiceHandler) DelegateRedemption(context.Context, *connect.Request[hummingbird.DelegateRedemptionRequest]) (*connect.Response[hummingbird.DelegateRedemptionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.hummingbird.v1.RedemptionService.DelegateRedemption is not implemented"))
 }

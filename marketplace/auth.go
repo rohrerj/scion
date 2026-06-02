@@ -34,6 +34,7 @@ var methodScopes = map[string]string{
 	"/proto.hummingbird.v1.MarketplaceService/FetchReservations": "User",
 	"/proto.hummingbird.v1.MarketplaceService/RedeemAsset":       "User",
 	"/proto.hummingbird.v1.RedemptionService/RedeemASAsset":      "RedemptionService",
+	"/proto.hummingbird.v1.RedemptionService/DelegateRedemption": "RedemptionService",
 }
 
 type AuthInterceptor struct {
