@@ -17,6 +17,7 @@ package marketplace
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -139,7 +140,15 @@ func (a *Asset) assetType() hummingbird.AssetType {
 
 func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error) {
 	user := ctx.Value("user").(*User)
-	if req.Msg.AssetId_1 == req.Msg.AssetId_2 {
+	assetId1, err := strconv.ParseUint(req.Msg.AssetId_1, 10, 64)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	assetId2, err := strconv.ParseUint(req.Msg.AssetId_2, 10, 64)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	if assetId1 == assetId2 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("cannot combine asset with itself"))
 	}
 	var combinedAsset *Asset
@@ -215,16 +224,15 @@ func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummin
 		}
 		return serrors.New("asset cannot be combined")
 	}
-	var err error
-	if req.Msg.AssetId_1 < req.Msg.AssetId_2 {
-		err = s.assetOp(req.Msg.AssetId_1, func(ingressAsset *Asset) error {
-			return s.assetOp(req.Msg.AssetId_2, func(egressAsset *Asset) error {
+	if assetId1 < assetId2 {
+		err = s.assetOp(assetId1, func(ingressAsset *Asset) error {
+			return s.assetOp(assetId2, func(egressAsset *Asset) error {
 				return combineAsset(ingressAsset, egressAsset)
 			})
 		})
 	} else {
-		err = s.assetOp(req.Msg.AssetId_2, func(egressAsset *Asset) error {
-			return s.assetOp(req.Msg.AssetId_1, func(ingressAsset *Asset) error {
+		err = s.assetOp(assetId2, func(egressAsset *Asset) error {
+			return s.assetOp(assetId1, func(ingressAsset *Asset) error {
 				return combineAsset(ingressAsset, egressAsset)
 			})
 		})
@@ -235,21 +243,25 @@ func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummin
 	assetID := s.currentAssetID.Add(1)
 	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
 		m[assetID] = combinedAsset
-		delete(m, req.Msg.AssetId_1)
-		delete(m, req.Msg.AssetId_2)
+		delete(m, assetId1)
+		delete(m, assetId2)
 		return nil
 	})
 	return &connect.Response[hummingbird.CombineAssetResponse]{
 		Msg: &hummingbird.CombineAssetResponse{
-			AssetId: assetID,
+			AssetId: strconv.FormatUint(assetID, 10),
 		},
 	}, nil
 }
 
 func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbird.SplitAssetRequest]) (*connect.Response[hummingbird.SplitAssetResponse], error) {
 	user := ctx.Value("user").(*User)
+	assetId, err := strconv.ParseUint(req.Msg.AssetId, 10, 64)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
 	var asset1, asset2 *Asset
-	err := s.assetOp(req.Msg.AssetId, func(a *Asset) error {
+	err = s.assetOp(assetId, func(a *Asset) error {
 		if a.Owner != user.Username {
 			return serrors.New("splitting is only possible for owned assets")
 		}
@@ -337,13 +349,13 @@ func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbi
 	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
 		m[assetID1] = asset1
 		m[assetID2] = asset2
-		delete(m, req.Msg.AssetId)
+		delete(m, assetId)
 		return nil
 	})
 	return &connect.Response[hummingbird.SplitAssetResponse]{
 		Msg: &hummingbird.SplitAssetResponse{
-			AssetId_1: assetID1,
-			AssetId_2: assetID2,
+			AssetId_1: strconv.FormatUint(assetID1, 10),
+			AssetId_2: strconv.FormatUint(assetID2, 10),
 		},
 	}, nil
 }
@@ -364,7 +376,12 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 	}
 	assetSplits := make(map[uint64][]RequestedSplit)
 	for _, reqAsset := range req.Msg.Assets {
-		err := s.assetOp(reqAsset.AssetId, func(a *Asset) error {
+		assetId, err := strconv.ParseUint(reqAsset.AssetId, 10, 64)
+		if err != nil {
+			undoCheckout()
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		err = s.assetOp(assetId, func(a *Asset) error {
 			if a.Owner != user.Username && a.state != Listed {
 				return serrors.New("asset can currently not be bought")
 			}
@@ -376,17 +393,17 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 			}
 			a.state = CheckedOut
 			a.Owner = user.Username //this is only temporary
-			requestedSplits, found := assetSplits[reqAsset.AssetId]
+			requestedSplits, found := assetSplits[assetId]
 			if !found {
 				requestedSplits = make([]RequestedSplit, 0, 1)
-				assetSplits[reqAsset.AssetId] = requestedSplits
+				assetSplits[assetId] = requestedSplits
 			}
-			assetSplits[reqAsset.AssetId] = append(requestedSplits, RequestedSplit{
+			assetSplits[assetId] = append(requestedSplits, RequestedSplit{
 				ExactFrom:      reqAsset.StartsAtExactly.AsTime().Truncate(time.Second),
 				ExactTo:        reqAsset.StopsAtExactly.AsTime().Truncate(time.Second),
 				ExactBandwidth: reqAsset.BwExact,
 			})
-			checkedOutAsset = append(checkedOutAsset, reqAsset.AssetId)
+			checkedOutAsset = append(checkedOutAsset, assetId)
 			return nil
 		})
 		if err != nil {
@@ -465,7 +482,7 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 		for _, assetToAdd := range userOwnedAssetsToAdd {
 			assetID := s.currentAssetID.Add(1)
 			fmt.Println("add user owned asset: ", assetID)
-			boughtAssets = append(boughtAssets, &hummingbird.BoughtAsset{AssetId: assetID})
+			boughtAssets = append(boughtAssets, &hummingbird.BoughtAsset{AssetId: strconv.FormatUint(assetID, 10)})
 			m[assetID] = assetToAdd
 		}
 		for _, assetToAdd := range unusedAssetsToAdd {
@@ -569,7 +586,7 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 	})
 	return &connect.Response[hummingbird.PublishAssetResponse]{
 		Msg: &hummingbird.PublishAssetResponse{
-			AssetId: assetID,
+			AssetId: strconv.FormatUint(assetID, 10),
 		},
 	}, nil
 }
@@ -584,9 +601,14 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	var stopsAt time.Time
 	var ia addr.IA
 	isInterfacePair := false
+	var ifPairAssetId, ingressAssetId, egressAssetId uint64
 	if req.Msg.IfPairAssetId != nil {
 		isInterfacePair = true
-		err := s.assetOp(*req.Msg.IfPairAssetId, func(pairAsset *Asset) error {
+		ifPairAssetId, err := strconv.ParseUint(*req.Msg.IfPairAssetId, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		err = s.assetOp(ifPairAssetId, func(pairAsset *Asset) error {
 			if pairAsset.Owner != user.Username {
 				return serrors.New("user is not owner of the asset")
 			}
@@ -612,10 +634,17 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			return nil, err
 		}
 	} else {
-		if req.Msg.IngressAssetId == req.Msg.EgressAssetId {
+		ingressAssetId, err := strconv.ParseUint(req.Msg.IngressAssetId, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		egressAssetId, err = strconv.ParseUint(req.Msg.EgressAssetId, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		if ingressAssetId == egressAssetId {
 			return nil, serrors.New("Cannot use same asset ID for ingress and egress asset")
 		}
-		var err error
 		verifyAssets := func(ingressAsset *Asset, egressAsset *Asset) error {
 			if ingressAsset.Owner != user.Username {
 				return serrors.New("user is not owner of the asset")
@@ -659,15 +688,15 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			egressAsset.state = BeingRedeemed
 			return nil
 		}
-		if req.Msg.IngressAssetId < req.Msg.EgressAssetId {
-			err = s.assetOp(req.Msg.IngressAssetId, func(ingressAsset *Asset) error {
-				return s.assetOp(req.Msg.EgressAssetId, func(egressAsset *Asset) error {
+		if ingressAssetId < egressAssetId {
+			err = s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
+				return s.assetOp(egressAssetId, func(egressAsset *Asset) error {
 					return verifyAssets(ingressAsset, egressAsset)
 				})
 			})
 		} else {
-			err = s.assetOp(req.Msg.EgressAssetId, func(egressAsset *Asset) error {
-				return s.assetOp(req.Msg.IngressAssetId, func(ingressAsset *Asset) error {
+			err = s.assetOp(egressAssetId, func(egressAsset *Asset) error {
+				return s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
 					return verifyAssets(ingressAsset, egressAsset)
 				})
 			})
@@ -679,22 +708,22 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	}
 	undoRedemption := func() {
 		if isInterfacePair {
-			s.assetOp(*req.Msg.IfPairAssetId, func(a *Asset) error {
+			s.assetOp(ifPairAssetId, func(a *Asset) error {
 				a.state = Bought
 				return nil
 			})
 		} else {
 			if req.Msg.IngressAssetId < req.Msg.EgressAssetId {
-				s.assetOp(req.Msg.IngressAssetId, func(ingressAsset *Asset) error {
-					return s.assetOp(req.Msg.EgressAssetId, func(egressAsset *Asset) error {
+				s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
+					return s.assetOp(egressAssetId, func(egressAsset *Asset) error {
 						ingressAsset.state = Bought
 						egressAsset.state = Bought
 						return nil
 					})
 				})
 			} else {
-				s.assetOp(req.Msg.EgressAssetId, func(egressAsset *Asset) error {
-					return s.assetOp(req.Msg.IngressAssetId, func(ingressAsset *Asset) error {
+				s.assetOp(egressAssetId, func(egressAsset *Asset) error {
+					return s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
 						ingressAsset.state = Bought
 						egressAsset.state = Bought
 						return nil
@@ -731,22 +760,22 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			return nil
 		})
 		if isInterfacePair {
-			s.assetOp(*req.Msg.IfPairAssetId, func(a *Asset) error {
+			s.assetOp(ifPairAssetId, func(a *Asset) error {
 				a.state = Redeemed
 				return nil
 			})
 		} else {
-			if req.Msg.IngressAssetId < req.Msg.EgressAssetId {
-				s.assetOp(req.Msg.IngressAssetId, func(ingressAsset *Asset) error {
-					return s.assetOp(req.Msg.EgressAssetId, func(egressAsset *Asset) error {
+			if ingressAssetId < egressAssetId {
+				s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
+					return s.assetOp(egressAssetId, func(egressAsset *Asset) error {
 						ingressAsset.state = Redeemed
 						egressAsset.state = Redeemed
 						return nil
 					})
 				})
 			} else {
-				s.assetOp(req.Msg.EgressAssetId, func(egressAsset *Asset) error {
-					return s.assetOp(req.Msg.IngressAssetId, func(ingressAsset *Asset) error {
+				s.assetOp(egressAssetId, func(egressAsset *Asset) error {
+					return s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
 						ingressAsset.state = Redeemed
 						egressAsset.state = Redeemed
 						return nil
@@ -887,7 +916,7 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 			continue
 		}
 		repAsset := &hummingbird.Asset{
-			AssetId:         id,
+			AssetId:         strconv.FormatUint(id, 10),
 			Ia:              uint64(asset.IA),
 			Bw:              asset.Bandwidth,
 			StartsAt:        timestamppb.New(asset.StartAt),

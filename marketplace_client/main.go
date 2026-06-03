@@ -314,7 +314,7 @@ func userInteraction() {
 }
 func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	fmt.Println("Handle split asset query.")
-	assetID := readUint64(reader, "assetID: ")
+	assetID := readString(reader, "assetID: ")
 	splitOption := readOptionalString(reader, "spit using axis [bw,time]: ", nil)
 	if splitOption == nil {
 		fmt.Println("invalid split option.")
@@ -345,12 +345,12 @@ func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("asset split into %d and %d\n", resp.Msg.AssetId_1, resp.Msg.AssetId_2)
+	fmt.Printf("asset split into %s and %s\n", resp.Msg.AssetId_1, resp.Msg.AssetId_2)
 }
 func handleCombine(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	fmt.Println("Handle combine assets query.")
-	asset1 := readUint64(reader, "asset 1: ")
-	asset2 := readUint64(reader, "asset 2: ")
+	asset1 := readString(reader, "asset 1: ")
+	asset2 := readString(reader, "asset 2: ")
 	resp, err := c.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
 		Msg: &hummingbird.CombineAssetRequest{
 			AssetId_1: asset1,
@@ -361,7 +361,7 @@ func handleCombine(ctx context.Context, reader *bufio.Reader, c hummingbirdconne
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("assets combined into %d\n", resp.Msg.AssetId)
+	fmt.Printf("assets combined into %s\n", resp.Msg.AssetId)
 }
 func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	var ia *uint64
@@ -435,8 +435,8 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 	if option == nil {
 		return
 	} else if *option == 0 {
-		ingressAssetID := readUint64(reader, "Ingress Asset ID: ")
-		egressAssetID := readUint64(reader, "Egress Asset ID: ")
+		ingressAssetID := readString(reader, "Ingress Asset ID: ")
+		egressAssetID := readString(reader, "Egress Asset ID: ")
 		b := readOptionalBool(reader, "Confirm redemption? [true,false]: ")
 		if b != nil && *b == false {
 			fmt.Println("cancel redemption")
@@ -449,7 +449,7 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 			},
 		})
 	} else if *option == 1 {
-		assetID := readUint64(reader, "Interface-pair Asset ID: ")
+		assetID := readString(reader, "Interface-pair Asset ID: ")
 		b := readOptionalBool(reader, "Confirm redemption? [true,false]: ")
 		if b != nil && *b == false {
 			fmt.Println("cancel redemption")
@@ -493,7 +493,7 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 		switch {
 		case option == "add":
 			buyAsset := &hummingbird.BuyAsset{
-				AssetId:         readUint64(reader, "AssetID: "),
+				AssetId:         readString(reader, "AssetID: "),
 				StartsAtExactly: timestamppb.New(readTime(reader, "Starts at exactly (2006-01-02T15:04:05): ")),
 				StopsAtExactly:  timestamppb.New(readTime(reader, "Stops at exactly (2006-01-02T15:04:05): ")),
 				BwExact:         readUint64(reader, "BW exact: "),
@@ -526,7 +526,7 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 			fmt.Printf("Bought assets for a total cost of %d\n", rep.Msg.Cost)
 			fmt.Print("[")
 			for _, boughtAsset := range rep.Msg.Assets {
-				fmt.Printf("%d,", boughtAsset.AssetId)
+				fmt.Printf("%s,", boughtAsset.AssetId)
 			}
 			fmt.Print("]\n")
 			return
@@ -800,7 +800,7 @@ func main() {
 }
 
 type Asset struct {
-	ID              uint64
+	ID              string
 	AssetType       hummingbird.AssetType
 	IA              addr.IA
 	Bandwidth       uint64

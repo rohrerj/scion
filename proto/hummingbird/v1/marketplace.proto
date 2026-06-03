@@ -51,7 +51,7 @@ message StatisticsResponseEntry {
 
 // Split assets splits an asset either by defining the bandwidth to split, or the time it should split.
 message SplitAssetRequest {
-    uint64 asset_id = 1;
+    string asset_id = 1;
     oneof split_option {
         uint64 bw_split = 2;
         google.protobuf.Timestamp time_split = 3;
@@ -59,20 +59,20 @@ message SplitAssetRequest {
 }
 // Returns the two asset IDs created from the split.
 message SplitAssetResponse {
-    uint64 asset_id_1 = 1;
-    uint64 asset_id_2 = 2;
+    string asset_id_1 = 1;
+    string asset_id_2 = 2;
 }
 // When combining assets, both assets must have the same IA, asset_type, ingress and egress.enum
 // Additionally, both assets must either:
 // a) have adjacent validity with same bandwidth, or
 // b) same validity with different bandwidth
 message CombineAssetRequest {
-    uint64 asset_id_1 = 1;
-    uint64 asset_id_2 = 2;
+    string asset_id_1 = 1;
+    string asset_id_2 = 2;
 }
 // Returns the the asset ID created from combining the two assets.
 message CombineAssetResponse {
-    uint64 asset_id = 1;
+    string asset_id = 1;
 }
 
 message MarketplaceInfoRequest {
@@ -99,7 +99,7 @@ message PublishAssetRequest {
 }
 
 message PublishAssetResponse {
-    uint64 asset_id = 1;
+    string asset_id = 1;
 }
 
 enum AssetType {
@@ -126,7 +126,7 @@ message SearchAssetsResponse {
 }
 
 message Asset {
-    uint64 asset_id = 1;
+    string asset_id = 1;
     uint64 ia = 2;
     AssetType asset_type = 3;
     optional uint32 if_id_ingress = 4;
@@ -144,7 +144,7 @@ message BuyAssetsRequest {
 }
 
 message BuyAsset {
-    uint64 asset_id = 1;
+    string asset_id = 1;
     google.protobuf.Timestamp starts_at_exactly = 2;
     google.protobuf.Timestamp stops_at_exactly = 3;
     uint64 bw_exact = 4;
@@ -156,13 +156,13 @@ message BuyAssetsResponse {
 }
 
 message BoughtAsset {
-    uint64 asset_id = 1;
+    string asset_id = 1;
 }
 
 message RedeemAssetRequest {
-    uint64 ingress_asset_id = 1;
-    uint64 egress_asset_id = 2;
-    optional uint64 if_pair_asset_id = 3;
+    string ingress_asset_id = 1;
+    string egress_asset_id = 2;
+    optional string if_pair_asset_id = 3;
 }
 
 message RedeemAssetResponse {
