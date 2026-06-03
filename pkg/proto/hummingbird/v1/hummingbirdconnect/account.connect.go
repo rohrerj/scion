@@ -33,16 +33,21 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
-	// AccountServiceIssueJWTProcedure is the fully-qualified name of the AccountService's IssueJWT RPC.
-	AccountServiceIssueJWTProcedure = "/proto.hummingbird.v1.AccountService/IssueJWT"
 	// AccountServiceResetJWTProcedure is the fully-qualified name of the AccountService's ResetJWT RPC.
 	AccountServiceResetJWTProcedure = "/proto.hummingbird.v1.AccountService/ResetJWT"
+	// AccountServiceCreateChallengeProcedure is the fully-qualified name of the AccountService's
+	// CreateChallenge RPC.
+	AccountServiceCreateChallengeProcedure = "/proto.hummingbird.v1.AccountService/CreateChallenge"
+	// AccountServiceRegisterASProcedure is the fully-qualified name of the AccountService's RegisterAS
+	// RPC.
+	AccountServiceRegisterASProcedure = "/proto.hummingbird.v1.AccountService/RegisterAS"
 )
 
 // AccountServiceClient is a client for the proto.hummingbird.v1.AccountService service.
 type AccountServiceClient interface {
-	IssueJWT(context.Context, *connect.Request[hummingbird.JWTIssuanceRequest]) (*connect.Response[hummingbird.JWTIssuanceResponse], error)
 	ResetJWT(context.Context, *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error)
+	CreateChallenge(context.Context, *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error)
+	RegisterAS(context.Context, *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error)
 }
 
 // NewAccountServiceClient constructs a client for the proto.hummingbird.v1.AccountService service.
@@ -56,16 +61,22 @@ func NewAccountServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 	baseURL = strings.TrimRight(baseURL, "/")
 	accountServiceMethods := hummingbird.File_proto_hummingbird_v1_account_proto.Services().ByName("AccountService").Methods()
 	return &accountServiceClient{
-		issueJWT: connect.NewClient[hummingbird.JWTIssuanceRequest, hummingbird.JWTIssuanceResponse](
-			httpClient,
-			baseURL+AccountServiceIssueJWTProcedure,
-			connect.WithSchema(accountServiceMethods.ByName("IssueJWT")),
-			connect.WithClientOptions(opts...),
-		),
 		resetJWT: connect.NewClient[hummingbird.JWTResetRequest, hummingbird.JWTResetResponse](
 			httpClient,
 			baseURL+AccountServiceResetJWTProcedure,
 			connect.WithSchema(accountServiceMethods.ByName("ResetJWT")),
+			connect.WithClientOptions(opts...),
+		),
+		createChallenge: connect.NewClient[hummingbird.CreateChallengeRequest, hummingbird.CreateChallengeResponse](
+			httpClient,
+			baseURL+AccountServiceCreateChallengeProcedure,
+			connect.WithSchema(accountServiceMethods.ByName("CreateChallenge")),
+			connect.WithClientOptions(opts...),
+		),
+		registerAS: connect.NewClient[hummingbird.RegisterASRequest, hummingbird.RegisterASResponse](
+			httpClient,
+			baseURL+AccountServiceRegisterASProcedure,
+			connect.WithSchema(accountServiceMethods.ByName("RegisterAS")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -73,13 +84,9 @@ func NewAccountServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 
 // accountServiceClient implements AccountServiceClient.
 type accountServiceClient struct {
-	issueJWT *connect.Client[hummingbird.JWTIssuanceRequest, hummingbird.JWTIssuanceResponse]
-	resetJWT *connect.Client[hummingbird.JWTResetRequest, hummingbird.JWTResetResponse]
-}
-
-// IssueJWT calls proto.hummingbird.v1.AccountService.IssueJWT.
-func (c *accountServiceClient) IssueJWT(ctx context.Context, req *connect.Request[hummingbird.JWTIssuanceRequest]) (*connect.Response[hummingbird.JWTIssuanceResponse], error) {
-	return c.issueJWT.CallUnary(ctx, req)
+	resetJWT        *connect.Client[hummingbird.JWTResetRequest, hummingbird.JWTResetResponse]
+	createChallenge *connect.Client[hummingbird.CreateChallengeRequest, hummingbird.CreateChallengeResponse]
+	registerAS      *connect.Client[hummingbird.RegisterASRequest, hummingbird.RegisterASResponse]
 }
 
 // ResetJWT calls proto.hummingbird.v1.AccountService.ResetJWT.
@@ -87,10 +94,21 @@ func (c *accountServiceClient) ResetJWT(ctx context.Context, req *connect.Reques
 	return c.resetJWT.CallUnary(ctx, req)
 }
 
+// CreateChallenge calls proto.hummingbird.v1.AccountService.CreateChallenge.
+func (c *accountServiceClient) CreateChallenge(ctx context.Context, req *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error) {
+	return c.createChallenge.CallUnary(ctx, req)
+}
+
+// RegisterAS calls proto.hummingbird.v1.AccountService.RegisterAS.
+func (c *accountServiceClient) RegisterAS(ctx context.Context, req *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error) {
+	return c.registerAS.CallUnary(ctx, req)
+}
+
 // AccountServiceHandler is an implementation of the proto.hummingbird.v1.AccountService service.
 type AccountServiceHandler interface {
-	IssueJWT(context.Context, *connect.Request[hummingbird.JWTIssuanceRequest]) (*connect.Response[hummingbird.JWTIssuanceResponse], error)
 	ResetJWT(context.Context, *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error)
+	CreateChallenge(context.Context, *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error)
+	RegisterAS(context.Context, *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error)
 }
 
 // NewAccountServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -100,24 +118,32 @@ type AccountServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewAccountServiceHandler(svc AccountServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	accountServiceMethods := hummingbird.File_proto_hummingbird_v1_account_proto.Services().ByName("AccountService").Methods()
-	accountServiceIssueJWTHandler := connect.NewUnaryHandler(
-		AccountServiceIssueJWTProcedure,
-		svc.IssueJWT,
-		connect.WithSchema(accountServiceMethods.ByName("IssueJWT")),
-		connect.WithHandlerOptions(opts...),
-	)
 	accountServiceResetJWTHandler := connect.NewUnaryHandler(
 		AccountServiceResetJWTProcedure,
 		svc.ResetJWT,
 		connect.WithSchema(accountServiceMethods.ByName("ResetJWT")),
 		connect.WithHandlerOptions(opts...),
 	)
+	accountServiceCreateChallengeHandler := connect.NewUnaryHandler(
+		AccountServiceCreateChallengeProcedure,
+		svc.CreateChallenge,
+		connect.WithSchema(accountServiceMethods.ByName("CreateChallenge")),
+		connect.WithHandlerOptions(opts...),
+	)
+	accountServiceRegisterASHandler := connect.NewUnaryHandler(
+		AccountServiceRegisterASProcedure,
+		svc.RegisterAS,
+		connect.WithSchema(accountServiceMethods.ByName("RegisterAS")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/proto.hummingbird.v1.AccountService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case AccountServiceIssueJWTProcedure:
-			accountServiceIssueJWTHandler.ServeHTTP(w, r)
 		case AccountServiceResetJWTProcedure:
 			accountServiceResetJWTHandler.ServeHTTP(w, r)
+		case AccountServiceCreateChallengeProcedure:
+			accountServiceCreateChallengeHandler.ServeHTTP(w, r)
+		case AccountServiceRegisterASProcedure:
+			accountServiceRegisterASHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -127,10 +153,14 @@ func NewAccountServiceHandler(svc AccountServiceHandler, opts ...connect.Handler
 // UnimplementedAccountServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedAccountServiceHandler struct{}
 
-func (UnimplementedAccountServiceHandler) IssueJWT(context.Context, *connect.Request[hummingbird.JWTIssuanceRequest]) (*connect.Response[hummingbird.JWTIssuanceResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.hummingbird.v1.AccountService.IssueJWT is not implemented"))
-}
-
 func (UnimplementedAccountServiceHandler) ResetJWT(context.Context, *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.hummingbird.v1.AccountService.ResetJWT is not implemented"))
+}
+
+func (UnimplementedAccountServiceHandler) CreateChallenge(context.Context, *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.hummingbird.v1.AccountService.CreateChallenge is not implemented"))
+}
+
+func (UnimplementedAccountServiceHandler) RegisterAS(context.Context, *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.hummingbird.v1.AccountService.RegisterAS is not implemented"))
 }

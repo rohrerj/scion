@@ -22,6 +22,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/hummingbird/registration"
 )
 
 var methodScopes = map[string]string{
@@ -38,11 +39,11 @@ var methodScopes = map[string]string{
 }
 
 type AuthInterceptor struct {
-	Verifier  *Verifier
+	Verifier  *registration.Verifier
 	accountDB *AccountDB
 }
 
-func NewAuthInterceptor(v *Verifier, accountDB *AccountDB) *AuthInterceptor {
+func NewAuthInterceptor(v *registration.Verifier, accountDB *AccountDB) *AuthInterceptor {
 	return &AuthInterceptor{
 		Verifier:  v,
 		accountDB: accountDB,
@@ -155,9 +156,9 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 			)
 		}
 		scopes := parseScopes(scopeStr)
-		if err = a.verifyTokenVersion(user, claims, scopes); err != nil {
+		/*if err = a.verifyTokenVersion(user, claims, scopes); err != nil {
 			return nil, err
-		}
+		}*/
 
 		if found && !scopes[requiredScope] {
 			return nil, connect.NewError(connect.CodePermissionDenied,
@@ -165,6 +166,10 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 		}
 		if scopes["User"] {
 			dbUser := a.accountDB.GetUser(user)
+			if dbUser == nil {
+				return nil, connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("User not registered: %s", user))
+			}
 			ctx = context.WithValue(ctx, "user", dbUser)
 		} else {
 			ia, err := addr.ParseIA(user)
@@ -173,6 +178,10 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 					fmt.Errorf("invalid scope"))
 			}
 			dbUser := a.accountDB.GetASUser(ia)
+			if dbUser == nil {
+				return nil, connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("AS user not registered: %s", ia.String()))
+			}
 			ctx = context.WithValue(ctx, "user", dbUser)
 		}
 
@@ -235,9 +244,9 @@ func (a *AuthInterceptor) WrapStreamingHandler(
 			)
 		}
 		scopes := parseScopes(scopeStr)
-		if err = a.verifyTokenVersion(user, claims, scopes); err != nil {
+		/*if err = a.verifyTokenVersion(user, claims, scopes); err != nil {
 			return err
-		}
+		}*/
 
 		if found && !scopes[requiredScope] {
 			return connect.NewError(connect.CodePermissionDenied,

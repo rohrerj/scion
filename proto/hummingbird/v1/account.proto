@@ -18,16 +18,34 @@ option go_package = "github.com/scionproto/scion/pkg/proto/hummingbird";
 
 package proto.hummingbird.v1;
 
+import "proto/crypto/v1/signed.proto";
+
 service AccountService {
-    rpc IssueJWT(JWTIssuanceRequest) returns (JWTIssuanceResponse) {}
     rpc ResetJWT(JWTResetRequest) returns (JWTResetResponse) {}
+    rpc CreateChallenge(CreateChallengeRequest) returns (CreateChallengeResponse) {}
+    rpc RegisterAS(RegisterASRequest) returns (RegisterASResponse) {}
 }
 
-message JWTIssuanceRequest {}
-
-message JWTIssuanceResponse {
+message RegisterASRequest {
+    string id = 1;
+    proto.crypto.v1.SignedMessage signed_challenge = 2;
+}
+message RegisterASResponse {
     string jwt_publisher = 1;
     string jwt_redemption = 2;
+}
+
+message CreateChallengeRequest {
+    uint64 ia = 1;
+}
+
+message CreateChallengeResponse {
+    ASChallenge challenge = 1;
+}
+
+message ASChallenge {
+    string id = 1;
+    bytes value = 2;
 }
 
 message JWTResetRequest {}

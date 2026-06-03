@@ -1171,10 +1171,10 @@ func realMain(ctx context.Context) error {
 
 	g.Go(func() error {
 		defer log.HandlePanic()
-		getClientCert := cs.NewTLSCertificateLoader(
+		tlsCertLoader := cs.NewTLSCertificateLoader(
 			topo.IA(), x509.ExtKeyUsageClientAuth, trustDB, globalCfg.General.ConfigDir,
-		).GetClientCertificate
-		tokenRenewer := marketplace.NewTokenRenwer(globalCfg.Marketplace.AccountApi, getClientCert, publisherToken, redemptionToken)
+		)
+		tokenRenewer := marketplace.NewTokenRenwer(globalCfg.Marketplace.AccountApi, topo.IA(), tlsCertLoader, publisherToken, redemptionToken)
 		return tokenRenewer.InitTokenRenewer()
 	})
 

@@ -18,11 +18,10 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"connectrpc.com/connect"
-	"github.com/golang-jwt/jwt"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
@@ -142,66 +141,105 @@ func subjectFromCtx(ctx context.Context) (addr.IA, error) {
 	return ia, nil
 }
 
-type ASTokenManager struct {
-	signer *Signer
-	db     *AccountDB
+type ASAccountManager struct {
+	db                  *AccountDB
+	registrationService *registration.Service
 }
 
-func NewASTokenManager(signer *Signer, db *AccountDB) *ASTokenManager {
-	return &ASTokenManager{
-		signer: signer,
-		db:     db,
-	}
-}
-
-func (s *ASTokenManager) IssueJWT(ctx context.Context, req *connect.Request[hummingbird.JWTIssuanceRequest]) (*connect.Response[hummingbird.JWTIssuanceResponse], error) {
-	name, err := subjectFromCtx(ctx)
+func (s *ASAccountManager) CreateChallenge(ctx context.Context, req *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error) {
+	id, challenge, err := s.registrationService.CreateChallenge(ctx, addr.IA(req.Msg.Ia))
 	if err != nil {
-		return nil, err
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	user := s.db.GetASUser(name)
+	return &connect.Response[hummingbird.CreateChallengeResponse]{
+		Msg: &hummingbird.CreateChallengeResponse{
+			Challenge: &hummingbird.ASChallenge{
+				Id:    id,
+				Value: challenge,
+			},
+		},
+	}, nil
+}
+
+func (s *ASAccountManager) RegisterAS(ctx context.Context, req *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error) {
+	publisherToken, redemptionToken, ia, err := s.registrationService.RegisterAS(ctx, req.Msg.Id, req.Msg.SignedChallenge)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	user := s.db.GetASUser(ia)
 	if user == nil {
 		user = &ASUser{
-			IA:           name,
+			IA:           ia,
 			TokenVersion: 0,
 		}
 		if !s.db.CreateNonExistingASUser(user) {
 			return nil, serrors.New("register failed")
 		}
 	}
-
-	publisherClaims := jwt.MapClaims{
-		"sub":   name.String(),
-		"scope": "AssetPublisher",
-		"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
-		"iat":   time.Now().Unix(),
-		"ver":   user.TokenVersion,
-	}
-	publisherToken, err := s.signer.GenerateToken(publisherClaims)
-	if err != nil {
-		return nil, err
-	}
-	redemptionClaims := jwt.MapClaims{
-		"sub":   name.String(),
-		"scope": "RedemptionService",
-		"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
-		"iat":   time.Now().Unix(),
-		"ver":   user.TokenVersion,
-	}
-	redemptionToken, err := s.signer.GenerateToken(redemptionClaims)
-	if err != nil {
-		return nil, err
-	}
-
-	return &connect.Response[hummingbird.JWTIssuanceResponse]{
-		Msg: &hummingbird.JWTIssuanceResponse{
+	return &connect.Response[hummingbird.RegisterASResponse]{
+		Msg: &hummingbird.RegisterASResponse{
 			JwtPublisher:  publisherToken,
 			JwtRedemption: redemptionToken,
 		},
 	}, nil
 }
 
-func (s *ASTokenManager) ResetJWT(ctx context.Context, req *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error) {
+func NewASAccountManager(db *AccountDB, regService *registration.Service) *ASAccountManager {
+	return &ASAccountManager{
+		db:                  db,
+		registrationService: regService,
+	}
+}
+
+/*
+	func (s *ASTokenManager) IssueJWT(ctx context.Context, req *connect.Request[hummingbird.JWTIssuanceRequest]) (*connect.Response[hummingbird.JWTIssuanceResponse], error) {
+		name, err := subjectFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		user := s.db.GetASUser(name)
+		if user == nil {
+			user = &ASUser{
+				IA:           name,
+				TokenVersion: 0,
+			}
+			if !s.db.CreateNonExistingASUser(user) {
+				return nil, serrors.New("register failed")
+			}
+		}
+
+		publisherClaims := jwt.MapClaims{
+			"sub":   name.String(),
+			"scope": "AssetPublisher",
+			"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
+			"iat":   time.Now().Unix(),
+			"ver":   user.TokenVersion,
+		}
+		publisherToken, err := s.signer.GenerateToken(publisherClaims)
+		if err != nil {
+			return nil, err
+		}
+		redemptionClaims := jwt.MapClaims{
+			"sub":   name.String(),
+			"scope": "RedemptionService",
+			"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
+			"iat":   time.Now().Unix(),
+			"ver":   user.TokenVersion,
+		}
+		redemptionToken, err := s.signer.GenerateToken(redemptionClaims)
+		if err != nil {
+			return nil, err
+		}
+
+		return &connect.Response[hummingbird.JWTIssuanceResponse]{
+			Msg: &hummingbird.JWTIssuanceResponse{
+				JwtPublisher:  publisherToken,
+				JwtRedemption: redemptionToken,
+			},
+		}, nil
+	}
+*/
+func (s *ASAccountManager) ResetJWT(ctx context.Context, req *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error) {
 	name, err := subjectFromCtx(ctx)
 	if err != nil {
 		return nil, err

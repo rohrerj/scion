@@ -10,5 +10,6 @@ proto_library(
     visibility = ["//visibility:public"],
     deps = [
         "@protobuf//:timestamp_proto",
+        "//proto/crypto/v1:crypto",
     ],
 )

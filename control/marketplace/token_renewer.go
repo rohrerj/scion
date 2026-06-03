@@ -7,11 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt"
+	cstrust "github.com/scionproto/scion/control/trust"
+	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/log"
-	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
+	"github.com/scionproto/scion/pkg/scrypto/cppki"
+	"github.com/scionproto/scion/private/trust"
 )
 
 type JwtToken struct {
@@ -31,19 +34,22 @@ func (t *JwtToken) Set(token string) {
 }
 
 type TokenRenewer struct {
-	accountAPIUrl       string
-	getClientCertifcate func(reqInfo *tls.CertificateRequestInfo) (*tls.Certificate, error)
-	publisherToken      *JwtToken
-	redemptionToken     *JwtToken
+	accountAPIUrl   string
+	tlsCertLoader   cstrust.TLSCertificateLoader
+	cert            *tls.Certificate
+	publisherToken  *JwtToken
+	redemptionToken *JwtToken
+	ia              addr.IA
 }
 
-func NewTokenRenwer(accountApiUrl string, getClientCertifcate func(reqInfo *tls.CertificateRequestInfo) (*tls.Certificate, error),
+func NewTokenRenwer(accountApiUrl string, ia addr.IA, tlsCertLoader cstrust.TLSCertificateLoader,
 	publisherToken *JwtToken, redemptionToken *JwtToken) *TokenRenewer {
 	return &TokenRenewer{
-		accountAPIUrl:       accountApiUrl,
-		getClientCertifcate: getClientCertifcate,
-		publisherToken:      publisherToken,
-		redemptionToken:     redemptionToken,
+		accountAPIUrl:   accountApiUrl,
+		tlsCertLoader:   tlsCertLoader,
+		publisherToken:  publisherToken,
+		redemptionToken: redemptionToken,
+		ia:              ia,
 	}
 }
 
@@ -51,28 +57,36 @@ func (t *TokenRenewer) InitTokenRenewer() error {
 	client := hummingbirdconnect.NewAccountServiceClient(&http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				GetClientCertificate: t.getClientCertifcate,
-				InsecureSkipVerify:   true,
+				InsecureSkipVerify: true,
 			},
 		},
 	}, t.accountAPIUrl)
 	parser := jwt.Parser{}
-
 	renewToken := func() (string, string, error) {
 		ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancelF()
-		resp, err := client.IssueJWT(ctx, &connect.Request[hummingbird.JWTIssuanceRequest]{})
+		regClient := registration.NewClient(client)
+		signers, err := t.tlsCertLoader.SignerGen.Generate(ctx)
 		if err != nil {
 			return "", "", err
 		}
-		publisherTokenString := resp.Msg.JwtPublisher
+		now := time.Now()
+		signer, err := trust.LastExpiring(signers, cppki.Validity{
+			NotBefore: now,
+			NotAfter:  now,
+		})
+		if err != nil {
+			return "", "", err
+		}
+		publisherTokenString, redemptionTokenString, err := regClient.Register(ctx, signer)
+		if err != nil {
+			return "", "", err
+		}
 		publisherClaims := jwt.MapClaims{}
 		_, _, err = parser.ParseUnverified(publisherTokenString, publisherClaims)
 		if err != nil {
 			return "", "", err
 		}
-
-		redemptionTokenString := resp.Msg.JwtRedemption
 		redemptionClaims := jwt.MapClaims{}
 		_, _, err = parser.ParseUnverified(redemptionTokenString, redemptionClaims)
 		if err != nil {

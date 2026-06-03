@@ -27,7 +27,6 @@ import (
 	"math/big"
 	"net"
 	"net/http"
-	"net/netip"
 	"os"
 	"path"
 	"time"
@@ -41,12 +40,13 @@ import (
 	"github.com/scionproto/scion/marketplace"
 	"github.com/scionproto/scion/marketplace/webapp"
 	libconnect "github.com/scionproto/scion/pkg/connect"
+	"github.com/scionproto/scion/pkg/endhost"
 	libgrpc "github.com/scionproto/scion/pkg/grpc"
+	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
-	"github.com/scionproto/scion/pkg/segment/iface"
 	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/pkg/snet/squic"
 	"github.com/scionproto/scion/private/app/appnet"
@@ -88,8 +88,8 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	jwtSigner := marketplace.NewSigner(signingPrivKey)
-	jwtVerifier := marketplace.NewVerifier(signingPubKey)
+	jwtSigner := registration.NewSigner(signingPrivKey)
+	jwtVerifier := registration.NewVerifier(signingPubKey)
 	trustDB, err := storage.NewInMemoryTrustStorage()
 	if err != nil {
 		return err
@@ -135,8 +135,20 @@ func realMain(ctx context.Context) error {
 			Certificates: []tls.Certificate{cert},
 		},
 	}
+	topoFile := path.Join(globalCfg.General.ConfigDir, "topology.json")
 
-	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(marketplace.NewASTokenManager(jwtSigner, accountDB))
+	topoLoader, err := topology.NewLoader(topology.LoaderCfg{
+		File: topoFile,
+	})
+	if err != nil {
+		return err
+	}
+	connector, err := endhost.NewConnector(ctx, endhostAPI, endhost.WithTRCDir(path.Join(globalCfg.General.ConfigDir, "certs")))
+	if err != nil {
+		return err
+	}
+	regService := registration.NewService(connector, trustDB, jwtSigner)
+	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(marketplace.NewASAccountManager(accountDB, regService))
 
 	accountMux := http.NewServeMux()
 	webapp.Init(jwtSigner, accountDB, accountMux)
@@ -146,14 +158,14 @@ func realMain(ctx context.Context) error {
 		Addr:    globalCfg.Marketplace.AccountAddr,
 		Handler: accountMux,
 		TLSConfig: &tls.Config{
-			ClientAuth:   tls.RequestClientCert,
+			//ClientAuth:   tls.RequestClientCert,
 			Certificates: []tls.Certificate{cert},
-			VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			/*VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 				if len(rawCerts) == 0 {
 					return nil
 				}
 				return trustVerifer.VerifyClientCertificate(rawCerts, verifiedChains)
-			},
+			},*/
 		},
 	}
 	g := &errgroup.Group{}
@@ -166,14 +178,14 @@ func realMain(ctx context.Context) error {
 	log.Info(fmt.Sprintf("HTTPS server running on %s and account management on %s\n", globalCfg.Marketplace.APIAddr, globalCfg.Marketplace.AccountAddr))
 	err = func() error {
 		if globalCfg.Marketplace.SCIONAPIAddr != "" {
-			err = StartSCIONServer(ctx, globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux)
+			err = StartSCIONServer(ctx, connector.Topology, topoLoader.MTU(), globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux)
 			if err != nil {
 				return err
 			}
 		}
 		if globalCfg.Marketplace.SCIONAccountAddr != "" {
 			// TODO: this part does not fully work yet, investigate what additional changes are necessary
-			err = StartSCIONServer(ctx, globalCfg.Marketplace.SCIONAccountAddr, g, trustVerifer, &cert, accountMux)
+			err = StartSCIONServer(ctx, connector.Topology, topoLoader.MTU(), globalCfg.Marketplace.SCIONAccountAddr, g, trustVerifer, &cert, accountMux)
 			if err != nil {
 				return err
 			}
@@ -188,37 +200,14 @@ func realMain(ctx context.Context) error {
 	return nil
 }
 
-func StartSCIONServer(ctx context.Context, addrString string, g *errgroup.Group, trustVerifier *trust.TLSCryptoVerifier, cert *tls.Certificate, mux *http.ServeMux) error {
-	topoFile := path.Join(globalCfg.General.ConfigDir, "topology.json")
+func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrString string, g *errgroup.Group, trustVerifier *trust.TLSCryptoVerifier, cert *tls.Certificate, mux *http.ServeMux) error {
 	addr, err := net.ResolveUDPAddr("udp", addrString)
 	if err != nil {
 		return err
 	}
-
-	topoLoader, err := topology.NewLoader(topology.LoaderCfg{
-		File: topoFile,
-	})
-	if err != nil {
-		return err
-	}
-	portRangeStart, portRangeEnd := topoLoader.PortRange()
-
 	nc := appnet.NetworkConfig{
-		Topology: snet.Topology{
-			LocalIA: topoLoader.IA(),
-			Interface: func(u uint16) (netip.AddrPort, bool) {
-				ifid, found := topoLoader.InterfaceInfoMap()[iface.ID(u)]
-				if !found {
-					return netip.AddrPort{}, false
-				}
-				return ifid.InternalAddr, true
-			},
-			PortRange: snet.TopologyPortRange{
-				Start: portRangeStart,
-				End:   portRangeEnd,
-			},
-		},
-		IA: topoLoader.IA(),
+		Topology: topo,
+		IA:       topo.LocalIA,
 		QUIC: appnet.QUIC{
 			TLSVerifier: trustVerifier,
 			GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -226,7 +215,7 @@ func StartSCIONServer(ctx context.Context, addrString string, g *errgroup.Group,
 			},
 		},
 		Public: addr,
-		MTU:    topoLoader.MTU(),
+		MTU:    mtu,
 	}
 	quicStack, err := nc.QUICStack(ctx)
 	if err != nil {

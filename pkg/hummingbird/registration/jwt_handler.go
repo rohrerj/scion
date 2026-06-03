@@ -12,13 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package marketplace
+package registration
 
 import (
 	"crypto/ed25519"
 	"fmt"
 
 	"github.com/golang-jwt/jwt"
+)
+
+const (
+	ScopeUser              = "User"
+	ScopeAssetPublisher    = "AssetPublisher"
+	ScopeRedemptionService = "RedemptionService"
 )
 
 type Signer struct {

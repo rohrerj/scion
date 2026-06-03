@@ -25,11 +25,12 @@ import (
 
 	"github.com/golang-jwt/jwt"
 	"github.com/scionproto/scion/marketplace"
+	"github.com/scionproto/scion/pkg/hummingbird/registration"
 )
 
 var templates = template.Must(template.ParseGlob("marketplace/templates/*.html"))
 
-func Init(signer *marketplace.Signer, accountDB *marketplace.AccountDB, mux *http.ServeMux) {
+func Init(signer *registration.Signer, accountDB *marketplace.AccountDB, mux *http.ServeMux) {
 	h := &Handler{
 		sessions:  make(map[string]string),
 		signer:    signer,
@@ -46,7 +47,7 @@ type Handler struct {
 	accountDB *marketplace.AccountDB
 	sessions  map[string]string
 	mu        sync.Mutex
-	signer    *marketplace.Signer
+	signer    *registration.Signer
 }
 
 func (h *Handler) getSessionUser(r *http.Request) (string, bool) {
