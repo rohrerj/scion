@@ -33,12 +33,18 @@ import (
 	"github.com/scionproto/scion/private/trust"
 )
 
+var ChallengeLifetime = int64(10) //time in seconds
+
 type Service struct {
-	challenges        map[string]Challenge
-	challengeLifetime time.Duration
+	buckets           [3]*bucket
+	challengeLifetime int64
 	trustProvider     trust.Provider
 	jwtSigner         *Signer
 	mtx               sync.RWMutex
+}
+type bucket struct {
+	challenges map[string]Challenge
+	mtx        sync.RWMutex
 }
 type fetcher struct {
 	trustService *endhost.TrustService
@@ -96,9 +102,15 @@ func (r *recurser) AllowRecursion(peer net.Addr) error {
 }
 
 func NewService(connector *endhost.Connector, trustDB trust.DB, signer *Signer) *Service {
-	return &Service{
-		challenges:        make(map[string]Challenge),
-		challengeLifetime: time.Minute,
+	buckets := [3]*bucket{}
+	for i := range 3 {
+		buckets[i] = &bucket{
+			challenges: make(map[string]Challenge),
+		}
+	}
+	s := &Service{
+		buckets:           buckets,
+		challengeLifetime: max(10, ChallengeLifetime),
 		trustProvider: trust.FetchingProvider{
 			DB: trustDB,
 			Fetcher: &fetcher{
@@ -111,12 +123,28 @@ func NewService(connector *endhost.Connector, trustDB trust.DB, signer *Signer) 
 		},
 		jwtSigner: signer,
 	}
+	s.startCleanupRoutine()
+	return s
 }
 
 type Challenge struct {
 	ID    string
 	IA    addr.IA
 	Nonce []byte
+}
+
+func (s *Service) startCleanupRoutine() {
+	go func() {
+		now := time.Now()
+		next := now.Truncate(time.Duration(s.challengeLifetime) * time.Second).Add(time.Duration(s.challengeLifetime+s.challengeLifetime/2) * time.Second)
+		sleepDuration := next.Sub(now)
+		time.Sleep(sleepDuration)
+		tick := time.NewTicker(time.Duration(s.challengeLifetime) * time.Second)
+		for {
+			t := <-tick.C
+			s.clear(t)
+		}
+	}()
 }
 
 func (s *Service) CreateChallenge(ctx context.Context, ia addr.IA) (string, []byte, error) {
@@ -131,19 +159,64 @@ func (s *Service) CreateChallenge(ctx context.Context, ia addr.IA) (string, []by
 		IA:    ia,
 		Nonce: nonce,
 	}
-	s.challengeMapOp(func(m map[string]Challenge) error {
-		m[c.ID] = c
-		return nil
-	})
+	s.insert(time.Now(), c)
 	return challengeIDString, nonce, nil
 }
 
-func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg *cryptopb.SignedMessage) (string, string, addr.IA, error) {
-	c, found := s.challengeGet(challengeID)
+// get searches for the challenge in both current and previous bucket (validity might overlap)
+func (s *Service) get(now time.Time, id string) (Challenge, bool) {
+	bucketIndex := (now.Unix() % (3 * s.challengeLifetime)) / s.challengeLifetime
+	bucket := s.buckets[bucketIndex]
+	bucket.mtx.RLock()
+	defer bucket.mtx.RUnlock()
+	c, found := bucket.challenges[id]
 	if !found {
-		return "", "", 0, serrors.New("no challenge found for provided ID")
+		bucketIndex = (bucketIndex + 2) % 3
+		bucket = s.buckets[bucketIndex]
+		bucket.mtx.RLock()
+		defer bucket.mtx.RUnlock()
+		c, found = bucket.challenges[id]
+		return c, found
 	}
+	return c, true
+}
+
+// insert inserts challenge in current bucket
+func (s *Service) insert(now time.Time, c Challenge) {
+	bucketIndex := (now.Unix() % (3 * s.challengeLifetime)) / s.challengeLifetime
+	bucket := s.buckets[bucketIndex]
+	bucket.mtx.Lock()
+	defer bucket.mtx.Unlock()
+	bucket.challenges[c.ID] = c
+}
+
+// delete tries to delete challenge in both current and previous bucket (validity might overlap bucket)
+func (s *Service) delete(now time.Time, id string) {
+	bucketIndex := (now.Unix() % (3 * s.challengeLifetime)) / s.challengeLifetime
+	bucket := s.buckets[bucketIndex]
+	bucket.mtx.Lock()
+	delete(bucket.challenges, id)
+	bucket.mtx.Unlock()
+	bucketIndex = (bucketIndex + 2) % 3
+	bucket = s.buckets[bucketIndex]
+	bucket.mtx.Lock()
+	delete(bucket.challenges, id)
+	bucket.mtx.Unlock()
+}
+func (s *Service) clear(now time.Time) {
+	bucketIndex := (((now.Unix() % (3 * s.challengeLifetime)) / s.challengeLifetime) + 1) % 3
+	bucket := s.buckets[bucketIndex]
+	bucket.mtx.Lock()
+	defer bucket.mtx.Unlock()
+	clear(bucket.challenges)
+}
+
+func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg *cryptopb.SignedMessage) (string, string, addr.IA, error) {
 	now := time.Now()
+	c, found := s.get(now, challengeID)
+	if !found {
+		return "", "", 0, serrors.New("challenge not found")
+	}
 	verifier := &trust.Verifier{
 		BoundIA: c.IA,
 		Engine:  s.trustProvider,
@@ -159,6 +232,7 @@ func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg 
 	if slices.Compare(msg.Body, c.Nonce) != 0 {
 		return "", "", 0, serrors.New("wrong challenge")
 	}
+	s.delete(now, c.ID)
 	publisherToken, err := s.jwtSigner.GenerateToken(jwt.MapClaims{
 		"sub":   c.IA.String(),
 		"scope": ScopeAssetPublisher,
@@ -178,17 +252,4 @@ func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg 
 		return "", "", 0, err
 	}
 	return publisherToken, redemptionToken, c.IA, nil
-}
-
-func (s *Service) challengeGet(id string) (Challenge, bool) {
-	s.mtx.RLock()
-	defer s.mtx.RUnlock()
-	c, ok := s.challenges[id]
-	return c, ok
-}
-
-func (s *Service) challengeMapOp(f func(map[string]Challenge) error) error {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	return f(s.challenges)
 }
