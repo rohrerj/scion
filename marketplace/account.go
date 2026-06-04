@@ -146,6 +146,20 @@ type ASAccountManager struct {
 	registrationService *registration.Service
 }
 
+func ASAccountManagerInterceptor() connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			authority := req.Header().Get(":authority")
+			if authority == "" {
+				authority = req.Header().Get("host")
+			}
+
+			ctx = context.WithValue(ctx, "authority", authority)
+			return next(ctx, req)
+		}
+	}
+}
+
 func (s *ASAccountManager) CreateChallenge(ctx context.Context, req *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error) {
 	id, challenge, err := s.registrationService.CreateChallenge(ctx, addr.IA(req.Msg.Ia))
 	if err != nil {
@@ -162,7 +176,8 @@ func (s *ASAccountManager) CreateChallenge(ctx context.Context, req *connect.Req
 }
 
 func (s *ASAccountManager) RegisterAS(ctx context.Context, req *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error) {
-	publisherToken, redemptionToken, ia, err := s.registrationService.RegisterAS(ctx, req.Msg.Id, req.Msg.SignedChallenge)
+	authority := ctx.Value("authority").(string)
+	publisherToken, redemptionToken, ia, err := s.registrationService.RegisterAS(ctx, req.Msg.Id, req.Msg.SignedChallenge, authority)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}

@@ -211,7 +211,7 @@ func (s *Service) clear(now time.Time) {
 	clear(bucket.challenges)
 }
 
-func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg *cryptopb.SignedMessage) (string, string, addr.IA, error) {
+func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg *cryptopb.SignedMessage, name string) (string, string, addr.IA, error) {
 	now := time.Now()
 	c, found := s.get(now, challengeID)
 	if !found {
@@ -225,7 +225,7 @@ func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg 
 			NotAfter:  now,
 		},
 	}
-	msg, err := verifier.Verify(ctx, signedMsg)
+	msg, err := verifier.Verify(ctx, signedMsg, []byte(name))
 	if err != nil {
 		return "", "", 0, err
 	}

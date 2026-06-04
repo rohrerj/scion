@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -61,11 +62,15 @@ func (t *TokenRenewer) InitTokenRenewer() error {
 			},
 		},
 	}, t.accountAPIUrl)
+	u, err := url.Parse(t.accountAPIUrl)
+	if err != nil {
+		return err
+	}
 	parser := jwt.Parser{}
 	renewToken := func() (string, string, error) {
 		ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancelF()
-		regClient := registration.NewClient(client)
+		regClient := registration.NewClient(client, u.Host)
 		signers, err := t.tlsCertLoader.SignerGen.Generate(ctx)
 		if err != nil {
 			return "", "", err

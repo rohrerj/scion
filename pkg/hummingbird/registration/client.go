@@ -26,11 +26,13 @@ import (
 
 type Client struct {
 	accountClient hummingbirdconnect.AccountServiceClient
+	name          string
 }
 
-func NewClient(c hummingbirdconnect.AccountServiceClient) *Client {
+func NewClient(c hummingbirdconnect.AccountServiceClient, name string) *Client {
 	return &Client{
 		accountClient: c,
+		name:          name,
 	}
 }
 
@@ -43,7 +45,7 @@ func (c *Client) Register(ctx context.Context, signer trust.Signer) (string, str
 	if err != nil {
 		return "", "", err
 	}
-	signedMsg, err := signer.Sign(ctx, challengeResponse.Msg.Challenge.Value)
+	signedMsg, err := signer.Sign(ctx, challengeResponse.Msg.Challenge.Value, []byte(c.name))
 	if err != nil {
 		return "", "", err
 	}

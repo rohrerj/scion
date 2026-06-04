@@ -148,7 +148,7 @@ func realMain(ctx context.Context) error {
 		return err
 	}
 	regService := registration.NewService(connector, trustDB, jwtSigner)
-	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(marketplace.NewASAccountManager(accountDB, regService))
+	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(marketplace.NewASAccountManager(accountDB, regService), connect.WithInterceptors(marketplace.ASAccountManagerInterceptor()))
 
 	accountMux := http.NewServeMux()
 	webapp.Init(jwtSigner, accountDB, accountMux)
