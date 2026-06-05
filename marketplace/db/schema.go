@@ -1,0 +1,61 @@
+// Copyright 2026 ETH Zurich
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package db
+
+const (
+	SchemaVersion = 1
+	Schema        = `CREATE TABLE Assets(
+		id INTEGER PRIMARY KEY,
+		owner_id INTEGER,
+		ia INTEGER NOT NULL,
+		bandwidth INTEGER NOT NULL,
+		bandwidth_min INTEGER NOT NULL,
+		price INTEGER NOT NULL,
+		time_granularity INTEGER NOT NULL,
+		time_min_duration INTEGER NOT NULL,
+		starts_at TEXT NOT NULL,
+		stops_at TEXT NOT NULL,
+		ingress INTEGER,
+		egress INTEGER,
+		FOREIGN KEY (owner_id) REFERENCES Users(id)
+	);
+	CREATE INDEX idx_asset_owner ON Assets(owner_id);
+	CREATE INDEX idx_asset_ia ON Assets(ia);
+	CREATE INDEX idx_asset_validity ON Assets(starts_at, stops_at);
+	CREATE INDEX idx_assets_ia_validity ON Assets(ia, starts_at, stops_at);
+	CREATE TABLE Reservations(
+		id INTEGER PRIMARY KEY,
+		owner_id INTEGER NOT NULL,
+		ia INTEGER NOT NULL,
+		ingress INTEGER NOT NULL,
+		egress INTEGER NOT NULL,
+		bandwidth INTEGER NOT NULL,
+		starts_at TEXT NOT NULL,
+		stops_at TEXT NOT NULL,
+		key BLOB NOT NULL,
+		FOREIGN KEY (owner_id) REFERENCES Users(id)
+	);
+	CREATE INDEX idx_reservations_owner ON Reservations(owner_id);
+	CREATE TABLE Users(
+		id INTEGER PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE,
+		pw_hash TEXT NOT NULL,
+		balance INTEGER
+	);
+	CREATE INDEX idx_users_name ON Users(name);
+	CREATE TABLE Ases(
+		ia INTEGER PRIMARY KEY
+	);`
+)

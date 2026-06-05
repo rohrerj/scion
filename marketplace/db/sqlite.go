@@ -1,0 +1,260 @@
+// Copyright 2026 ETH Zurich
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package db
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/private/storage/db"
+)
+
+type MarketplaceDB interface {
+	io.Closer
+	PublishAsset(ctx context.Context, a *DBAsset) (int64, error)
+	Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, error)
+	GetUser(ctx context.Context, name string) (*DBUser, error)
+	CreateUser(ctx context.Context, user *DBUser) (int64, error)
+	CreateASUser(ctx context.Context, user *DBASUser) (int64, error)
+	DepositMoney(ctx context.Context, name string, amount int64) (int64, error)
+	BeginTransaction(ctx context.Context, opts *sql.TxOptions) (*transaction, error)
+}
+
+type Backend struct {
+	db *db.Sqlite
+	*executor
+}
+
+type executor struct {
+	write db.Sqler
+	read  interface {
+		QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+		QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	}
+}
+
+func New(path string, cfg *db.SqliteConfig) (*Backend, error) {
+	db, err := db.NewSqlite(path, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Setup(Schema, SchemaVersion); err != nil {
+		return nil, err
+	}
+	return &Backend{
+		executor: &executor{
+			write: db.Full,
+			read:  db.ReadOnly,
+		},
+		db: db,
+	}, nil
+}
+
+func (b *Backend) Close() error {
+	return b.db.Close()
+}
+
+func (b *Backend) BeginTransaction(ctx context.Context, opts *sql.TxOptions) (*transaction, error) {
+	tx, err := b.db.Full.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &transaction{
+		executor: &executor{
+			write: tx,
+			read:  tx,
+		},
+		tx: tx,
+	}, nil
+}
+
+type transaction struct {
+	*executor
+	tx *sql.Tx
+}
+
+func (tx *transaction) Commit() error {
+	return tx.tx.Commit()
+}
+
+func (tx *transaction) Rollback() error {
+	return tx.tx.Rollback()
+}
+
+func (e *executor) Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	stmt, args := e.buildSearchQuery(params)
+	rows, err := e.read.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
+	}
+	defer rows.Close()
+	var res []*DBAsset
+	for rows.Next() {
+		a := &DBAsset{}
+		err = rows.Scan(&a.ID, &a.Owner, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &a.StartAt, &a.StopsAt, &a.IfIdIngress, &a.IfIdEgress)
+		if err != nil {
+			return nil, serrors.Wrap("Error reading DB response", err)
+		}
+		res = append(res, a)
+	}
+	return res, nil
+}
+
+func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
+	var args []any
+	query := []string{
+		"SELECT id, u.name, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets a",
+		"JOIN Users u ON u.id=a.owner_id",
+	}
+	where := []string{}
+	if params.Owner != nil {
+		where = append(where, "(owner=?)")
+		args = append(args, *params.Owner)
+	}
+	if params.IA != nil {
+		where = append(where, "(ia=?)")
+		args = append(args, *params.IA)
+	}
+	if params.StartsAt != nil {
+		where = append(where, "(starts_at<?)")
+		args = append(args, *params.StartsAt)
+	}
+	if params.StopsAt != nil {
+		where = append(where, "(stops_at>=?)")
+		args = append(args, *params.StopsAt)
+	}
+	if params.Price != nil {
+		where = append(where, "(price<=?)")
+		args = append(args, *params.Price)
+	}
+	if params.MinRequiredBandwidth != nil {
+		where = append(where, "(bandwidth>=?)")
+		args = append(args, *params.MinRequiredBandwidth)
+	}
+	if params.Ingress != nil {
+		where = append(where, "(ingress=?)")
+		args = append(args, *params.Ingress)
+	}
+	if params.Egress != nil {
+		where = append(where, "(egress=?)")
+		args = append(args, *params.Egress)
+	}
+	if len(where) > 0 {
+		query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
+	}
+	query = append(query, "ORDER BY id ASC")
+	return strings.Join(query, "\n"), nil
+}
+
+func (e *executor) PublishAsset(ctx context.Context, a *DBAsset) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `INSERT INTO Assets (ia, bandwidth, bandwidth_min, price, time_granularity,
+	time_min_duration, starts_at, stops_at, ingress, egress)
+	VALUES(?,?,?,?,?,?,?,?,?,?)`
+	res, err := e.write.ExecContext(ctx, inst, a.IA, a.Bandwidth, a.BandwidthMin, a.Price, a.TimeGranularity,
+		a.TimeMinDuration, a.StartAt, a.StopsAt, a.IfIdIngress, a.IfIdEgress)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (e *executor) GetUser(ctx context.Context, name string) (*DBUser, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	q := `SELECT name, pw_hash, balance FROM Users WHERE name=?`
+	rows, err := e.read.QueryContext(ctx, q, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, nil
+	}
+	user := &DBUser{}
+	err = rows.Scan(&user.Name, &user.PasswordHash, &user.Balance)
+	if err != nil {
+		return nil, serrors.Wrap("Error reading DB response", err)
+	}
+	return user, nil
+}
+
+func (e *executor) CreateUser(ctx context.Context, user *DBUser) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `INSERT INTO Users (name, pw_hash, balance)
+	VALUES(?,?,?) ON CONFLICT(name) DO NOTHING`
+	res, err := e.write.ExecContext(ctx, inst, user.Name, user.PasswordHash, user.Balance)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (e *executor) CreateASUser(ctx context.Context, user *DBASUser) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `INSERT INTO Ases (ia) VALUES(?) ON CONFLICT(ia) DO NOTHING`
+	res, err := e.write.ExecContext(ctx, inst, user.IA)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (e *executor) GetASUser(ctx context.Context, ia uint64) (*DBASUser, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	q := `SELECT ia FROM Ases WHERE ia=?`
+	rows, err := e.read.QueryContext(ctx, q, ia)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, nil
+	}
+	user := &DBASUser{}
+	err = rows.Scan(&user.IA)
+	if err != nil {
+		return nil, serrors.Wrap("Error reading DB response", err)
+	}
+	return user, nil
+}
+
+func (e *executor) DepositMoney(ctx context.Context, name string, amount int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `UPDATE users SET balance = balance + ? WHERE name = ? `
+	res, err := e.write.ExecContext(ctx, inst, amount, name)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

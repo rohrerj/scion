@@ -16,6 +16,7 @@ package marketplace
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"sync"
@@ -23,6 +24,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/scionproto/scion/marketplace/db"
+	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
@@ -77,6 +80,7 @@ type Service struct {
 	assetMtx              sync.RWMutex
 	reservationMtx        sync.RWMutex
 	info                  *MarketplaceInfo
+	store                 *storage.MarketplaceStorage
 }
 
 type MarketplaceInfo struct {
@@ -86,12 +90,13 @@ type MarketplaceInfo struct {
 	StatisticsTimeGranularity time.Duration
 }
 
-func NewService(info *MarketplaceInfo) *Service {
+func NewService(info *MarketplaceInfo, store *storage.MarketplaceStorage) *Service {
 	return &Service{
 		redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
 		assets:                make(map[uint64]*Asset),
 		currentAssetID:        atomic.Uint64{},
 		info:                  info,
+		store:                 store,
 	}
 }
 
@@ -562,10 +567,8 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 
 func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[hummingbird.PublishAssetRequest]) (*connect.Response[hummingbird.PublishAssetResponse], error) {
 	fmt.Println("PublishAsset")
-	user := ctx.Value("user").(*ASUser)
-	ia := user.IA
-	assetID := s.currentAssetID.Add(1)
-	asset := &Asset{
+	ia := ctx.Value("user").(addr.IA)
+	dbAsset := &db.DBAsset{
 		IA:              ia,
 		Bandwidth:       req.Msg.Bandwidth,
 		BandwidthMin:    req.Msg.BandwidthMin,
@@ -574,19 +577,23 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 		Price:           req.Msg.Price,
 		TimeGranularity: req.Msg.TimeGranularity,
 		TimeMinDuration: req.Msg.TimeMinDuration,
-		IfIdIngress:     req.Msg.IfIdIngress,
-		IfIdEgress:      req.Msg.IfIdEgress,
-		state:           Listed,
-		OriginalAsset:   assetID,
+		IfIdIngress:     sql.NullInt64{},
+		IfIdEgress:      sql.NullInt64{},
+	}
+	if req.Msg.IfIdIngress != nil {
+		dbAsset.IfIdIngress.Int64 = int64(*req.Msg.IfIdIngress)
+	}
+	if req.Msg.IfIdEgress != nil {
+		dbAsset.IfIdEgress.Int64 = int64(*req.Msg.IfIdEgress)
+	}
+	assetID, err := s.store.PublishAsset(ctx, dbAsset)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
-		m[assetID] = asset
-		return nil
-	})
 	return &connect.Response[hummingbird.PublishAssetResponse]{
 		Msg: &hummingbird.PublishAssetResponse{
-			AssetId: strconv.FormatUint(assetID, 10),
+			AssetId: strconv.FormatInt(assetID, 10),
 		},
 	}, nil
 }
@@ -799,7 +806,7 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 
 func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error) {
 	fmt.Println("Statistics")
-	user := ctx.Value("user").(*ASUser)
+	ia := ctx.Value("user").(addr.IA)
 	s.assetMtx.RLock()
 	defer s.assetMtx.RUnlock()
 
@@ -813,7 +820,7 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 	bwListed := make([]uint64, num_intervals)
 
 	for _, asset := range s.assets {
-		if asset.IA != user.IA {
+		if asset.IA != ia {
 			continue
 		}
 		if req.Msg.IfIdIngress != nil && asset.IfIdIngress != req.Msg.IfIdIngress {

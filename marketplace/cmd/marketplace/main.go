@@ -38,6 +38,7 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/marketplace"
+	marketplacestorage "github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/marketplace/webapp"
 	libconnect "github.com/scionproto/scion/pkg/connect"
 	"github.com/scionproto/scion/pkg/endhost"
@@ -80,6 +81,10 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return serrors.Wrap("creating topology loader", err)
 	}
+	store, err := marketplacestorage.NewStorage(globalCfg.MarketplaceDB)
+	if err != nil {
+		return err
+	}
 	cert, err := generateSelfSignedCert()
 	if err != nil {
 		return err
@@ -103,7 +108,11 @@ func realMain(ctx context.Context) error {
 		endhostAPI = k.Url
 		break
 	}
-	accountDB := marketplace.NewAccountDB()
+	time.Sleep(5 * time.Second)
+	connector, err := endhost.NewConnector(ctx, endhostAPI, endhost.WithTRCDir(path.Join(globalCfg.General.ConfigDir, "certs")))
+	if err != nil {
+		return err
+	}
 	trustDB = marketplace.FromTrustDB(trustDB, endhostconnect.NewTrustServiceClient(&http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -119,11 +128,11 @@ func realMain(ctx context.Context) error {
 		ApiMinorVersion:           APIMinorVersion,
 		Currency:                  globalCfg.Marketplace.Currency,
 		StatisticsTimeGranularity: time.Duration(globalCfg.Marketplace.StatisticsTimeGranularity) * time.Second,
-	})
+	}, store)
 
 	mux := http.NewServeMux()
-	apiPath1, handler1 := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier, accountDB)))
-	apiPath2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier, accountDB)))
+	apiPath1, handler1 := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier)))
+	apiPath2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier)))
 
 	mux.Handle(apiPath1, handler1)
 	mux.Handle(apiPath2, handler2)
@@ -135,23 +144,12 @@ func realMain(ctx context.Context) error {
 			Certificates: []tls.Certificate{cert},
 		},
 	}
-	topoFile := path.Join(globalCfg.General.ConfigDir, "topology.json")
 
-	topoLoader, err := topology.NewLoader(topology.LoaderCfg{
-		File: topoFile,
-	})
-	if err != nil {
-		return err
-	}
-	connector, err := endhost.NewConnector(ctx, endhostAPI, endhost.WithTRCDir(path.Join(globalCfg.General.ConfigDir, "certs")))
-	if err != nil {
-		return err
-	}
 	regService := registration.NewService(connector, trustDB, jwtSigner)
-	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(marketplace.NewASAccountManager(accountDB, regService), connect.WithInterceptors(marketplace.ASAccountManagerInterceptor()))
+	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(marketplace.NewASAccountManager(store, regService), connect.WithInterceptors(marketplace.ASAccountManagerInterceptor()))
 
 	accountMux := http.NewServeMux()
-	webapp.Init(jwtSigner, accountDB, accountMux)
+	webapp.Init(jwtSigner, store, accountMux)
 	accountMux.Handle(accountPath, libconnect.AttachPeer(accountHandler))
 
 	accountServer := &http.Server{
@@ -178,14 +176,14 @@ func realMain(ctx context.Context) error {
 	log.Info(fmt.Sprintf("HTTPS server running on %s and account management on %s\n", globalCfg.Marketplace.APIAddr, globalCfg.Marketplace.AccountAddr))
 	err = func() error {
 		if globalCfg.Marketplace.SCIONAPIAddr != "" {
-			err = StartSCIONServer(ctx, connector.Topology, topoLoader.MTU(), globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux)
+			err = StartSCIONServer(ctx, connector.Topology, topo.MTU(), globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux)
 			if err != nil {
 				return err
 			}
 		}
 		if globalCfg.Marketplace.SCIONAccountAddr != "" {
 			// TODO: this part does not fully work yet, investigate what additional changes are necessary
-			err = StartSCIONServer(ctx, connector.Topology, topoLoader.MTU(), globalCfg.Marketplace.SCIONAccountAddr, g, trustVerifer, &cert, accountMux)
+			err = StartSCIONServer(ctx, connector.Topology, topo.MTU(), globalCfg.Marketplace.SCIONAccountAddr, g, trustVerifer, &cert, accountMux)
 			if err != nil {
 				return err
 			}

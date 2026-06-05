@@ -1,0 +1,17 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "query.go",
+        "schema.go",
+        "sqlite.go",
+    ],
+    importpath = "github.com/scionproto/scion/marketplace/db",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/addr:go_default_library",
+        "//pkg/private/serrors:go_default_library",
+        "//private/storage/db:go_default_library",
+    ],
+)

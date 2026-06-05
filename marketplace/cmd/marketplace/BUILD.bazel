@@ -7,6 +7,7 @@ go_library(
     visibility = ["//visibility:private"],
     deps = [
         "//marketplace:go_default_library",
+        "//marketplace/storage:go_default_library",
         "//marketplace/webapp:go_default_library",
         "//pkg/connect:go_default_library",
         "//pkg/endhost:go_default_library",

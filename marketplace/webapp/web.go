@@ -17,6 +17,7 @@ package webapp
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -24,17 +25,19 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt"
-	"github.com/scionproto/scion/marketplace"
+	"github.com/scionproto/scion/marketplace/db"
+	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var templates = template.Must(template.ParseGlob("marketplace/templates/*.html"))
 
-func Init(signer *registration.Signer, accountDB *marketplace.AccountDB, mux *http.ServeMux) {
+func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *http.ServeMux) {
 	h := &Handler{
-		sessions:  make(map[string]string),
-		signer:    signer,
-		accountDB: accountDB,
+		sessions: make(map[string]string),
+		signer:   signer,
+		store:    store,
 	}
 	mux.HandleFunc("/", h.tokenHandler)
 	mux.HandleFunc("/token", h.tokenHandler)
@@ -44,10 +47,10 @@ func Init(signer *registration.Signer, accountDB *marketplace.AccountDB, mux *ht
 }
 
 type Handler struct {
-	accountDB *marketplace.AccountDB
-	sessions  map[string]string
-	mu        sync.Mutex
-	signer    *registration.Signer
+	store    *storage.MarketplaceStorage
+	sessions map[string]string
+	mu       sync.Mutex
+	signer   *registration.Signer
 }
 
 func (h *Handler) getSessionUser(r *http.Request) (string, bool) {
@@ -69,14 +72,16 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	user := h.accountDB.GetUser(username)
-	if user == nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
+	//h.store.DepositMoney(r.Context(), username)
+
 	if r.Method == http.MethodGet {
+		dbUser, err := h.store.GetUser(r.Context(), username)
+		if err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
 		templates.ExecuteTemplate(w, "balance.html", map[string]any{
-			"Balance": strconv.Itoa(int(user.Balance)),
+			"Balance": strconv.Itoa(int(dbUser.Balance)),
 		})
 		return
 	}
@@ -84,13 +89,22 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 	deposit := r.FormValue("deposit")
 	depositInt, err := strconv.Atoi(deposit)
 	if err != nil || depositInt < 0 {
+		user, err := h.store.GetUser(r.Context(), username)
+		if err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
 		templates.ExecuteTemplate(w, "balance.html", map[string]any{
 			"Error":   "Invalid deposit amount",
 			"Balance": strconv.Itoa(int(user.Balance)),
 		})
 		return
 	}
-	user.AddBalance(uint64(depositInt))
+	user, err := h.store.DepositMoneyAndGet(r.Context(), username, int64(depositInt))
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
 	templates.ExecuteTemplate(w, "balance.html", map[string]any{
 		"Balance": strconv.Itoa(int(user.Balance)),
 	})
@@ -106,19 +120,38 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	u := &marketplace.User{
-		Username: username,
-		Password: password,
+	user, err := h.store.GetUser(r.Context(), username)
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
 	}
-	if !h.accountDB.CreateNonExistingUser(u) {
+	if user != nil {
 		templates.ExecuteTemplate(w, "register.html", map[string]any{
 			"Error": "Username already exists",
 		})
 		return
 	}
+	hash, err := bcrypt.GenerateFromPassword(
+		[]byte(password),
+		12,
+	)
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	_, err = h.store.CreateUser(r.Context(), &db.DBUser{
+		Name:         username,
+		PasswordHash: string(hash),
+	})
+	if err != nil {
+		fmt.Println("Error creating user", "err", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
 
 	sessionID := h.generateSessionID()
-	h.sessions[sessionID] = u.Username
+	h.sessions[sessionID] = username
 
 	http.SetCookie(w, &http.Cookie{
 		Name:  "session_id",
@@ -145,13 +178,22 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	u := &marketplace.User{
-		Username: username,
-		Password: password,
+	dbUser, err := h.store.GetUser(r.Context(), username)
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
 	}
-
-	dbUser := h.accountDB.GetUser(u.Username)
-	if dbUser == nil || dbUser.Password != u.Password {
+	if dbUser == nil {
+		templates.ExecuteTemplate(w, "login.html", map[string]any{
+			"Error": "invalid credentials",
+		})
+		return
+	}
+	err = bcrypt.CompareHashAndPassword(
+		[]byte(dbUser.PasswordHash),
+		[]byte(password),
+	)
+	if err != nil {
 		templates.ExecuteTemplate(w, "login.html", map[string]any{
 			"Error": "invalid credentials",
 		})
@@ -159,7 +201,7 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := h.generateSessionID()
-	h.sessions[sessionID] = u.Username
+	h.sessions[sessionID] = username
 
 	http.SetCookie(w, &http.Cookie{
 		Name:  "session_id",
@@ -170,7 +212,6 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/token", http.StatusSeeOther)
 }
 
-// GET /request-token
 func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 	username, ok := h.getSessionUser(r)
 	if !ok {
@@ -181,12 +222,7 @@ func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 		templates.ExecuteTemplate(w, "token.html", map[string]any{})
 		return
 	}
-	dbUser := h.accountDB.GetUser(username)
-	if dbUser == nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	token, err := h.createToken(dbUser)
+	token, err := h.createToken(username)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -197,13 +233,13 @@ func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) createToken(user *marketplace.User) (string, error) {
+func (h *Handler) createToken(user string) (string, error) {
 	claims := jwt.MapClaims{
-		"sub":   user.Username,
+		"sub":   user,
 		"scope": "User",
 		"exp":   time.Now().Add(time.Hour).Unix(),
 		"iat":   time.Now().Unix(),
-		"ver":   user.TokenVersion,
+		//"ver":   user.TokenVersion,
 	}
 	return h.signer.GenerateToken(claims)
 }

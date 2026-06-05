@@ -20,9 +20,10 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
+	"github.com/scionproto/scion/marketplace/db"
+	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
-	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	"google.golang.org/grpc/credentials"
@@ -51,6 +52,7 @@ type ASUser struct {
 	TokenVersion uint64
 }
 
+/*
 type AccountDB struct {
 	users map[string]*User
 	ases  map[addr.IA]*ASUser
@@ -106,7 +108,7 @@ func (db *AccountDB) CreateNonExistingASUser(user *ASUser) bool {
 		return true
 	}
 	return false
-}
+}*/
 
 func subjectFromCtx(ctx context.Context) (addr.IA, error) {
 	p, ok := peer.FromContext(ctx)
@@ -142,7 +144,7 @@ func subjectFromCtx(ctx context.Context) (addr.IA, error) {
 }
 
 type ASAccountManager struct {
-	db                  *AccountDB
+	store               *storage.MarketplaceStorage
 	registrationService *registration.Service
 }
 
@@ -181,15 +183,12 @@ func (s *ASAccountManager) RegisterAS(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	user := s.db.GetASUser(ia)
-	if user == nil {
-		user = &ASUser{
-			IA:           ia,
-			TokenVersion: 0,
-		}
-		if !s.db.CreateNonExistingASUser(user) {
-			return nil, serrors.New("register failed")
-		}
+	_, err = s.store.CreateASUser(ctx, &db.DBASUser{
+		IA: uint64(ia),
+	})
+	if err != nil {
+		fmt.Println(err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	return &connect.Response[hummingbird.RegisterASResponse]{
 		Msg: &hummingbird.RegisterASResponse{
@@ -199,9 +198,9 @@ func (s *ASAccountManager) RegisterAS(ctx context.Context, req *connect.Request[
 	}, nil
 }
 
-func NewASAccountManager(db *AccountDB, regService *registration.Service) *ASAccountManager {
+func NewASAccountManager(store *storage.MarketplaceStorage, regService *registration.Service) *ASAccountManager {
 	return &ASAccountManager{
-		db:                  db,
+		store:               store,
 		registrationService: regService,
 	}
 }
@@ -255,13 +254,13 @@ func NewASAccountManager(db *AccountDB, regService *registration.Service) *ASAcc
 	}
 */
 func (s *ASAccountManager) ResetJWT(ctx context.Context, req *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error) {
-	name, err := subjectFromCtx(ctx)
+	/*name, err := subjectFromCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	user := s.db.GetASUser(name)
 	if user != nil {
 		user.TokenVersion++
-	}
+	}*/
 	return &connect.Response[hummingbird.JWTResetResponse]{Msg: &hummingbird.JWTResetResponse{}}, nil
 }

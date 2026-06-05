@@ -39,60 +39,59 @@ var methodScopes = map[string]string{
 }
 
 type AuthInterceptor struct {
-	Verifier  *registration.Verifier
-	accountDB *AccountDB
+	Verifier *registration.Verifier
 }
 
-func NewAuthInterceptor(v *registration.Verifier, accountDB *AccountDB) *AuthInterceptor {
+func NewAuthInterceptor(v *registration.Verifier) *AuthInterceptor {
 	return &AuthInterceptor{
-		Verifier:  v,
-		accountDB: accountDB,
+		Verifier: v,
 	}
 }
 
-func (a *AuthInterceptor) verifyTokenVersion(user string, claims jwt.MapClaims, scopes map[string]bool) error {
-	tokenVersion := uint64(0)
-	if scopes["AssetPublisher"] || scopes["RedemptionService"] {
-		ia, err := addr.ParseIA(user)
-		if err != nil {
+/*
+	func (a *AuthInterceptor) verifyTokenVersion(user string, claims jwt.MapClaims, scopes map[string]bool) error {
+		tokenVersion := uint64(0)
+		if scopes["AssetPublisher"] || scopes["RedemptionService"] {
+			ia, err := addr.ParseIA(user)
+			if err != nil {
+				return connect.NewError(
+					connect.CodeUnauthenticated,
+					fmt.Errorf("invalid token"),
+				)
+			}
+			dbUser := a.accountDB.GetASUser(ia)
+			if dbUser == nil {
+				return connect.NewError(
+					connect.CodeUnauthenticated,
+					fmt.Errorf("invalid token"),
+				)
+			}
+			tokenVersion = dbUser.TokenVersion
+		} else if scopes["User"] {
+			dbUser := a.accountDB.GetUser(user)
+			if dbUser == nil {
+				return connect.NewError(
+					connect.CodeUnauthenticated,
+					fmt.Errorf("invalid token"),
+				)
+			}
+			tokenVersion = dbUser.TokenVersion
+		} else {
 			return connect.NewError(
 				connect.CodeUnauthenticated,
 				fmt.Errorf("invalid token"),
 			)
 		}
-		dbUser := a.accountDB.GetASUser(ia)
-		if dbUser == nil {
+		versionClaim, ok := claims["ver"].(float64)
+		if !ok || uint64(versionClaim) < tokenVersion {
 			return connect.NewError(
 				connect.CodeUnauthenticated,
 				fmt.Errorf("invalid token"),
 			)
 		}
-		tokenVersion = dbUser.TokenVersion
-	} else if scopes["User"] {
-		dbUser := a.accountDB.GetUser(user)
-		if dbUser == nil {
-			return connect.NewError(
-				connect.CodeUnauthenticated,
-				fmt.Errorf("invalid token"),
-			)
-		}
-		tokenVersion = dbUser.TokenVersion
-	} else {
-		return connect.NewError(
-			connect.CodeUnauthenticated,
-			fmt.Errorf("invalid token"),
-		)
+		return nil
 	}
-	versionClaim, ok := claims["ver"].(float64)
-	if !ok || uint64(versionClaim) < tokenVersion {
-		return connect.NewError(
-			connect.CodeUnauthenticated,
-			fmt.Errorf("invalid token"),
-		)
-	}
-	return nil
-}
-
+*/
 func (a *AuthInterceptor) WrapStreamingClient(
 	next connect.StreamingClientFunc,
 ) connect.StreamingClientFunc {
@@ -165,24 +164,14 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 				fmt.Errorf("missing scope: %s", requiredScope))
 		}
 		if scopes["User"] {
-			dbUser := a.accountDB.GetUser(user)
-			if dbUser == nil {
-				return nil, connect.NewError(connect.CodePermissionDenied,
-					fmt.Errorf("User not registered: %s", user))
-			}
-			ctx = context.WithValue(ctx, "user", dbUser)
+			ctx = context.WithValue(ctx, "user", user)
 		} else {
 			ia, err := addr.ParseIA(user)
 			if err != nil {
 				return nil, connect.NewError(connect.CodePermissionDenied,
 					fmt.Errorf("invalid scope"))
 			}
-			dbUser := a.accountDB.GetASUser(ia)
-			if dbUser == nil {
-				return nil, connect.NewError(connect.CodePermissionDenied,
-					fmt.Errorf("AS user not registered: %s", ia.String()))
-			}
-			ctx = context.WithValue(ctx, "user", dbUser)
+			ctx = context.WithValue(ctx, "user", ia)
 		}
 
 		return next(ctx, req)
