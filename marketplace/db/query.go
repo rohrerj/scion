@@ -32,6 +32,18 @@ type AssetQuery struct {
 	Price                *uint64
 }
 
+type DBReservation struct {
+	ID        int64
+	IA        addr.IA
+	Ingress   int64
+	Egress    int64
+	Bandwidth int64
+	StartsAt  time.Time
+	StopsAt   time.Time
+	Owner     string
+	Key       string
+}
+
 type DBAsset struct {
 	ID              int64
 	Owner           sql.NullString

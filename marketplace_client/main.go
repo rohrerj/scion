@@ -444,8 +444,8 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 		}
 		rep, err = c.RedeemAsset(ctx, &connect.Request[hummingbird.RedeemAssetRequest]{
 			Msg: &hummingbird.RedeemAssetRequest{
-				IngressAssetId: ingressAssetID,
-				EgressAssetId:  egressAssetID,
+				IngressAssetId: &ingressAssetID,
+				EgressAssetId:  &egressAssetID,
 			},
 		})
 	} else if *option == 1 {

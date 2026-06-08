@@ -1162,8 +1162,8 @@ func (x *BoughtAsset) GetAssetId() string {
 
 type RedeemAssetRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	IngressAssetId string                 `protobuf:"bytes,1,opt,name=ingress_asset_id,json=ingressAssetId,proto3" json:"ingress_asset_id,omitempty"`
-	EgressAssetId  string                 `protobuf:"bytes,2,opt,name=egress_asset_id,json=egressAssetId,proto3" json:"egress_asset_id,omitempty"`
+	IngressAssetId *string                `protobuf:"bytes,1,opt,name=ingress_asset_id,json=ingressAssetId,proto3,oneof" json:"ingress_asset_id,omitempty"`
+	EgressAssetId  *string                `protobuf:"bytes,2,opt,name=egress_asset_id,json=egressAssetId,proto3,oneof" json:"egress_asset_id,omitempty"`
 	IfPairAssetId  *string                `protobuf:"bytes,3,opt,name=if_pair_asset_id,json=ifPairAssetId,proto3,oneof" json:"if_pair_asset_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -1200,15 +1200,15 @@ func (*RedeemAssetRequest) Descriptor() ([]byte, []int) {
 }
 
 func (x *RedeemAssetRequest) GetIngressAssetId() string {
-	if x != nil {
-		return x.IngressAssetId
+	if x != nil && x.IngressAssetId != nil {
+		return *x.IngressAssetId
 	}
 	return ""
 }
 
 func (x *RedeemAssetRequest) GetEgressAssetId() string {
-	if x != nil {
-		return x.EgressAssetId
+	if x != nil && x.EgressAssetId != nil {
+		return *x.EgressAssetId
 	}
 	return ""
 }
@@ -1620,11 +1620,13 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x06assets\x18\x01 \x03(\v2!.proto.hummingbird.v1.BoughtAssetR\x06assets\x12\x12\n" +
 	"\x04cost\x18\x02 \x01(\x04R\x04cost\"(\n" +
 	"\vBoughtAsset\x12\x19\n" +
-	"\basset_id\x18\x01 \x01(\tR\aassetId\"\xa9\x01\n" +
-	"\x12RedeemAssetRequest\x12(\n" +
-	"\x10ingress_asset_id\x18\x01 \x01(\tR\x0eingressAssetId\x12&\n" +
-	"\x0fegress_asset_id\x18\x02 \x01(\tR\regressAssetId\x12,\n" +
-	"\x10if_pair_asset_id\x18\x03 \x01(\tH\x00R\rifPairAssetId\x88\x01\x01B\x13\n" +
+	"\basset_id\x18\x01 \x01(\tR\aassetId\"\xdc\x01\n" +
+	"\x12RedeemAssetRequest\x12-\n" +
+	"\x10ingress_asset_id\x18\x01 \x01(\tH\x00R\x0eingressAssetId\x88\x01\x01\x12+\n" +
+	"\x0fegress_asset_id\x18\x02 \x01(\tH\x01R\regressAssetId\x88\x01\x01\x12,\n" +
+	"\x10if_pair_asset_id\x18\x03 \x01(\tH\x02R\rifPairAssetId\x88\x01\x01B\x13\n" +
+	"\x11_ingress_asset_idB\x12\n" +
+	"\x10_egress_asset_idB\x13\n" +
 	"\x11_if_pair_asset_id\"\x8f\x01\n" +
 	"\x13RedeemAssetResponse\x12\x0e\n" +
 	"\x02ak\x18\x01 \x01(\tR\x02ak\x12\x15\n" +

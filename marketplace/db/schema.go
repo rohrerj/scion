@@ -29,6 +29,7 @@ const (
 		stops_at TEXT NOT NULL,
 		ingress INTEGER,
 		egress INTEGER,
+		state INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY (owner_id) REFERENCES Users(id)
 	);
 	CREATE INDEX idx_asset_owner ON Assets(owner_id);
@@ -36,7 +37,7 @@ const (
 	CREATE INDEX idx_asset_validity ON Assets(starts_at, stops_at);
 	CREATE INDEX idx_assets_ia_validity ON Assets(ia, starts_at, stops_at);
 	CREATE TABLE Reservations(
-		id INTEGER PRIMARY KEY,
+		id INTEGER,
 		owner_id INTEGER NOT NULL,
 		ia INTEGER NOT NULL,
 		ingress INTEGER NOT NULL,
@@ -44,7 +45,7 @@ const (
 		bandwidth INTEGER NOT NULL,
 		starts_at TEXT NOT NULL,
 		stops_at TEXT NOT NULL,
-		key BLOB NOT NULL,
+		key TEXT NOT NULL,
 		FOREIGN KEY (owner_id) REFERENCES Users(id)
 	);
 	CREATE INDEX idx_reservations_owner ON Reservations(owner_id);

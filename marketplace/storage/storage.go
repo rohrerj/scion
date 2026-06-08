@@ -99,7 +99,7 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user string, assets 
 		if err != nil {
 			return nil, 0, serrors.Join(err, tx.Rollback())
 		}
-		dbAsset, err := tx.AssetByID(ctx, assetId)
+		dbAsset, err := tx.CheckoutAsset(ctx, assetId)
 		if err != nil {
 			return nil, 0, serrors.Join(err, tx.Rollback())
 		}
@@ -128,6 +128,7 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user string, assets 
 				Bandwidth:       segment.Bandwidth,
 				StartAt:         segment.StartAt,
 				StopsAt:         segment.StopAt,
+				Price:           dbAsset.Price,
 			}
 			id, err := tx.InsertAsset(ctx, newAsset)
 			if err != nil {
@@ -171,6 +172,110 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user string, assets 
 		return nil, 0, serrors.Join(err, tx.Rollback())
 	}
 	return boughtAssets, costAcc, nil
+}
+
+func (s *MarketplaceStorage) InsertReservation(ctx context.Context, user string, r *marketplacedb.DBReservation) (int64, error) {
+	return s.db.InsertReservation(ctx, r)
+}
+
+func (s *MarketplaceStorage) UndoRedemption(ctx context.Context, user string, ingressIDString *string, egressIDString *string, pairIDString *string) error {
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return err
+	}
+	if ingressIDString != nil && egressIDString != nil {
+		ingressID, err := strconv.ParseInt(*ingressIDString, 10, 64)
+		if err != nil {
+			return serrors.Join(err, tx.Rollback())
+		}
+		egressID, err := strconv.ParseInt(*egressIDString, 10, 64)
+		if err != nil {
+			return serrors.Join(err, tx.Rollback())
+		}
+		n, err := tx.UndoRedemption(ctx, user, ingressID)
+		if err != nil {
+			return serrors.Join(err, tx.Rollback())
+		}
+		if n != 1 {
+			return serrors.Join(serrors.New("asset not found"), tx.Rollback())
+		}
+		n, err = tx.UndoRedemption(ctx, user, egressID)
+		if err != nil {
+			return serrors.Join(err, tx.Rollback())
+		}
+		if n != 1 {
+			return serrors.Join(serrors.New("asset not found"), tx.Rollback())
+		}
+		return tx.Commit()
+	} else if ingressIDString == nil && egressIDString == nil && pairIDString != nil {
+		pairID, err := strconv.ParseInt(*pairIDString, 10, 64)
+		if err != nil {
+			return serrors.Join(err, tx.Rollback())
+		}
+		n, err := tx.UndoRedemption(ctx, user, pairID)
+		if err != nil {
+			return serrors.Join(err, tx.Rollback())
+		}
+		if n != 1 {
+			return serrors.Join(serrors.New("asset not found"), tx.Rollback())
+		}
+		return tx.Commit()
+	}
+	return serrors.Join(serrors.New("invalid asset IDs"), tx.Rollback())
+}
+func (s *MarketplaceStorage) PrepareRedemption(ctx context.Context, user string, ingressIDString *string, egressIDString *string, pairIDString *string) ([]*marketplacedb.DBAsset, error) {
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if ingressIDString != nil && egressIDString != nil {
+		ingressID, err := strconv.ParseInt(*ingressIDString, 10, 64)
+		if err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
+		}
+		egressID, err := strconv.ParseInt(*egressIDString, 10, 64)
+		if err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
+		}
+		ingressAsset, err := tx.PrepareRedemption(ctx, user, ingressID)
+		if err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
+		}
+		if !ingressAsset.IfIdIngress.Valid || ingressAsset.IfIdEgress.Valid {
+			return nil, serrors.Join(serrors.New("ingress asset is not an ingress asset"), tx.Rollback())
+		}
+		egressAsset, err := tx.PrepareRedemption(ctx, user, egressID)
+		if err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
+		}
+		if !egressAsset.IfIdEgress.Valid || egressAsset.IfIdIngress.Valid {
+			return nil, serrors.Join(serrors.New("egress asset is not an egress asset"), tx.Rollback())
+		}
+		err = tx.Commit()
+		if err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
+		}
+		return []*marketplacedb.DBAsset{ingressAsset, egressAsset}, nil
+	} else if ingressIDString == nil && egressIDString == nil && pairIDString != nil {
+		pairID, err := strconv.ParseInt(*pairIDString, 10, 64)
+		if err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
+		}
+		pairAsset, err := tx.PrepareRedemption(ctx, user, pairID)
+		if err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
+		}
+		if !pairAsset.IfIdIngress.Valid || !pairAsset.IfIdEgress.Valid {
+			return nil, serrors.Join(serrors.New("pair asset is not a pair asset"), tx.Rollback())
+		}
+		err = tx.Commit()
+		if err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
+		}
+		return []*marketplacedb.DBAsset{pairAsset}, nil
+	}
+	return nil, serrors.Join(serrors.New("invalid asset IDs"), tx.Rollback())
+
 }
 
 func (s *MarketplaceStorage) DepositMoneyAndGet(ctx context.Context, name string, amount int64) (*marketplacedb.DBUser, error) {

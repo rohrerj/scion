@@ -151,8 +151,8 @@ message BoughtAsset {
 }
 
 message RedeemAssetRequest {
-    string ingress_asset_id = 1;
-    string egress_asset_id = 2;
+    optional string ingress_asset_id = 1;
+    optional string egress_asset_id = 2;
     optional string if_pair_asset_id = 3;
 }
 

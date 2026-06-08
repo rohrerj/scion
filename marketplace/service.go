@@ -27,6 +27,7 @@ import (
 	"github.com/scionproto/scion/marketplace/db"
 	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -359,13 +360,6 @@ func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbi
 func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbird.BuyAssetsRequest]) (*connect.Response[hummingbird.BuyAssetsResponse], error) {
 	fmt.Println("BuyAssets")
 	user := ctx.Value("user").(string)
-	uniqueCheck := make(map[string]bool)
-	for _, asset := range req.Msg.Assets {
-		if uniqueCheck[asset.AssetId] {
-			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("Only a single split per asset per buy request allowed"))
-		}
-		uniqueCheck[asset.AssetId] = true
-	}
 	boughtAssetIDs, totalCost, err := s.store.BuyAssets(ctx, user, req.Msg.Assets, req.Msg.MaxPrice)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -477,150 +471,63 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 
 func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingbird.RedeemAssetRequest]) (*connect.Response[hummingbird.RedeemAssetResponse], error) {
 	fmt.Println("RedeemAsset")
-	user := ctx.Value("user").(*User)
+	user := ctx.Value("user").(string)
+	assets, err := s.store.PrepareRedemption(ctx, user, req.Msg.IngressAssetId, req.Msg.EgressAssetId, req.Msg.IfPairAssetId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
 	var bw uint64
 	var ingressID uint32
 	var egressID uint32
 	var startsAt time.Time
 	var stopsAt time.Time
 	var ia addr.IA
-	isInterfacePair := false
-	var ifPairAssetId, ingressAssetId, egressAssetId uint64
-	if req.Msg.IfPairAssetId != nil {
-		isInterfacePair = true
-		ifPairAssetId, err := strconv.ParseUint(*req.Msg.IfPairAssetId, 10, 64)
-		if err != nil {
-			return nil, err
+	if len(assets) == 1 {
+		// interface pair
+		pairAsset := assets[0]
+		bw = pairAsset.Bandwidth
+		ingressID = uint32(pairAsset.IfIdIngress.Int64)
+		egressID = uint32(pairAsset.IfIdEgress.Int64)
+		startsAt = pairAsset.StartAt
+		stopsAt = pairAsset.StopsAt
+		ia = pairAsset.IA
+	} else if len(assets) == 2 {
+		// ingress and egress assets
+		ingressAsset := assets[0]
+		egressAsset := assets[1]
+		bw = min(ingressAsset.Bandwidth, egressAsset.Bandwidth)
+		ingressID = uint32(ingressAsset.IfIdIngress.Int64)
+		egressID = uint32(egressAsset.IfIdEgress.Int64)
+		ia = ingressAsset.IA
+		if ingressAsset.StartAt.Before(egressAsset.StartAt) {
+			startsAt = egressAsset.StartAt
+		} else {
+			startsAt = ingressAsset.StartAt
 		}
-		err = s.assetOp(ifPairAssetId, func(pairAsset *Asset) error {
-			if pairAsset.Owner != user.Username {
-				return serrors.New("user is not owner of the asset")
-			}
-			if pairAsset.state != Bought {
-				return serrors.New("asset already redeemed")
-			}
-			if pairAsset.IfIdIngress == nil {
-				return serrors.New("pair asset requires ingress interface")
-			}
-			if pairAsset.IfIdEgress == nil {
-				return serrors.New("pair asset requires egress interface")
-			}
-			bw = pairAsset.Bandwidth
-			ingressID = *pairAsset.IfIdIngress
-			egressID = *pairAsset.IfIdEgress
-			startsAt = pairAsset.StartAt
-			stopsAt = pairAsset.StopsAt
-			ia = pairAsset.IA
-			pairAsset.state = BeingRedeemed
-			return nil
-		})
-		if err != nil {
-			return nil, err
+		if ingressAsset.StopsAt.Before(egressAsset.StopsAt) {
+			stopsAt = ingressAsset.StopsAt
+		} else {
+			stopsAt = egressAsset.StopsAt
 		}
 	} else {
-		ingressAssetId, err := strconv.ParseUint(req.Msg.IngressAssetId, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		egressAssetId, err = strconv.ParseUint(req.Msg.EgressAssetId, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		if ingressAssetId == egressAssetId {
-			return nil, serrors.New("Cannot use same asset ID for ingress and egress asset")
-		}
-		verifyAssets := func(ingressAsset *Asset, egressAsset *Asset) error {
-			if ingressAsset.Owner != user.Username {
-				return serrors.New("user is not owner of the asset")
-			}
-			if ingressAsset.state != Bought {
-				return serrors.New("ingress asset already redeemed")
-			}
-			if egressAsset.Owner != user.Username {
-				return serrors.New("user is not owner of the asset")
-			}
-			if egressAsset.state != Bought {
-				return serrors.New("egress asset already redeemed")
-			}
-			if ingressAsset.IA != egressAsset.IA {
-				return serrors.New("ingress and egress asset have to belong to same IA")
-			}
-			if ingressAsset.IfIdIngress == nil {
-				return serrors.New("ingress asset requires ingress interface")
-			}
-			if egressAsset.IfIdEgress == nil {
-				return serrors.New("egress asset requires egress interface")
-			}
-			bw = min(ingressAsset.Bandwidth, egressAsset.Bandwidth)
-			ingressID = *ingressAsset.IfIdIngress
-			egressID = *egressAsset.IfIdEgress
-			ia = ingressAsset.IA
-			if ingressAsset.StartAt.Before(egressAsset.StartAt) {
-				startsAt = egressAsset.StartAt
-			} else {
-				startsAt = ingressAsset.StartAt
-			}
-			if ingressAsset.StopsAt.Before(egressAsset.StopsAt) {
-				stopsAt = ingressAsset.StopsAt
-			} else {
-				stopsAt = egressAsset.StopsAt
-			}
-			if stopsAt.Before(startsAt) {
-				return serrors.New("stopsAt before startsAt")
-			}
-			ingressAsset.state = BeingRedeemed
-			egressAsset.state = BeingRedeemed
-			return nil
-		}
-		if ingressAssetId < egressAssetId {
-			err = s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
-				return s.assetOp(egressAssetId, func(egressAsset *Asset) error {
-					return verifyAssets(ingressAsset, egressAsset)
-				})
-			})
-		} else {
-			err = s.assetOp(egressAssetId, func(egressAsset *Asset) error {
-				return s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
-					return verifyAssets(ingressAsset, egressAsset)
-				})
-			})
-		}
-
-		if err != nil {
-			return nil, err
-		}
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
 	}
-	undoRedemption := func() {
-		if isInterfacePair {
-			s.assetOp(ifPairAssetId, func(a *Asset) error {
-				a.state = Bought
-				return nil
-			})
-		} else {
-			if req.Msg.IngressAssetId < req.Msg.EgressAssetId {
-				s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
-					return s.assetOp(egressAssetId, func(egressAsset *Asset) error {
-						ingressAsset.state = Bought
-						egressAsset.state = Bought
-						return nil
-					})
-				})
-			} else {
-				s.assetOp(egressAssetId, func(egressAsset *Asset) error {
-					return s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
-						ingressAsset.state = Bought
-						egressAsset.state = Bought
-						return nil
-					})
-				})
-			}
+	undoRedemption := func() error {
+		err = s.store.UndoRedemption(ctx, user, req.Msg.IngressAssetId, req.Msg.EgressAssetId, req.Msg.IfPairAssetId)
+		if err != nil {
+			log.Error("Error while undoing redemption", "err", err)
 		}
+		return err
+	}
+	if stopsAt.Before(startsAt) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.Join(serrors.New("stops at before starts at"), undoRedemption()))
 	}
 	peer, found := s.redemptionServerPeers[ia]
 	if !found {
-		undoRedemption()
-		return nil, serrors.New("peer not found", "key", ia)
+		return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not reachable"), undoRedemption()))
 	}
+	// after this line we cannot safely undo the redemption anymore because the redemption server
+	// might have already received the request
 	respCh := peer.Send(&hummingbird.RedeemAssetFromASRequest{
 		Bw:        bw,
 		IngressId: ingressID,
@@ -630,42 +537,23 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	})
 	select {
 	case resp := <-respCh:
-		res := &Reservation{
-			ResId:     resp.ResInfo.ResId,
-			Ia:        ia,
-			IngressId: ingressID,
-			EgressId:  egressID,
-			Bw:        bw,
+		n, err := s.store.InsertReservation(ctx, user, &db.DBReservation{
+			ID:        int64(resp.ResInfo.ResId),
+			IA:        ia,
+			Ingress:   int64(ingressID),
+			Egress:    int64(egressID),
+			Bandwidth: int64(resp.ResInfo.BwRounded),
 			StartsAt:  startsAt,
 			StopsAt:   stopsAt,
-		}
-		s.reservationOp(user, func(r *[]*Reservation) error {
-			*r = append(*r, res)
-			return nil
+			Owner:     user,
+			Key:       resp.Ak,
 		})
-		if isInterfacePair {
-			s.assetOp(ifPairAssetId, func(a *Asset) error {
-				a.state = Redeemed
-				return nil
-			})
-		} else {
-			if ingressAssetId < egressAssetId {
-				s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
-					return s.assetOp(egressAssetId, func(egressAsset *Asset) error {
-						ingressAsset.state = Redeemed
-						egressAsset.state = Redeemed
-						return nil
-					})
-				})
-			} else {
-				s.assetOp(egressAssetId, func(egressAsset *Asset) error {
-					return s.assetOp(ingressAssetId, func(ingressAsset *Asset) error {
-						ingressAsset.state = Redeemed
-						egressAsset.state = Redeemed
-						return nil
-					})
-				})
-			}
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		if n != 1 {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+
 		}
 		return &connect.Response[hummingbird.RedeemAssetResponse]{
 			Msg: &hummingbird.RedeemAssetResponse{
@@ -675,9 +563,8 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 				BwDataplaneEncoding: resp.ResInfo.BwDataplaneEncoding,
 			},
 		}, nil
-	case <-time.After(10 * time.Second):
-		undoRedemption()
-		return nil, serrors.New("timeout")
+	case <-time.After(30 * time.Second):
+		return nil, connect.NewError(connect.CodeUnavailable, serrors.New("Redemption service not available"))
 	}
 }
 
