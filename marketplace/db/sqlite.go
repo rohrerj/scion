@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/private/storage/db"
@@ -110,9 +111,19 @@ func (e *executor) Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, 
 	var res []*DBAsset
 	for rows.Next() {
 		a := &DBAsset{}
-		err = rows.Scan(&a.ID, &a.Owner, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &a.StartAt, &a.StopsAt, &a.IfIdIngress, &a.IfIdEgress)
+		var startsAtString string
+		var stopsAtString string
+		err = rows.Scan(&a.ID, &a.Owner, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 		if err != nil {
 			return nil, serrors.Wrap("Error reading DB response", err)
+		}
+		a.StartAt, err = time.Parse(time.RFC3339, startsAtString)
+		if err != nil {
+			return nil, err
+		}
+		a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
+		if err != nil {
+			return nil, err
 		}
 		res = append(res, a)
 	}
@@ -121,12 +132,18 @@ func (e *executor) Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, 
 
 func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 	var args []any
-	query := []string{
-		"SELECT id, u.name, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets a",
-		"JOIN Users u ON u.id=a.owner_id",
-	}
+	var query []string
 	where := []string{}
-	if params.Owner != nil {
+	if params.Owner == nil {
+		query = []string{
+			"SELECT a.id, NULL AS owner, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets a",
+		}
+		where = append(where, "owner IS NULL\n")
+	} else {
+		query = []string{
+			"SELECT a.id, u.name AS owner, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets a",
+			"JOIN Users u ON u.id=a.owner_id",
+		}
 		where = append(where, "(owner=?)")
 		args = append(args, *params.Owner)
 	}
@@ -161,19 +178,20 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 	if len(where) > 0 {
 		query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
 	}
-	query = append(query, "ORDER BY id ASC")
-	return strings.Join(query, "\n"), nil
+	query = append(query, "ORDER BY LENGTH(a.id) ASC, a.id ASC")
+	return strings.Join(query, "\n"), args
 }
 
 func (e *executor) PublishAsset(ctx context.Context, a *DBAsset) (int64, error) {
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
+	fmt.Println("sqlite.PublishAsset", a.IfIdIngress, a.IfIdEgress)
 	inst := `INSERT INTO Assets (ia, bandwidth, bandwidth_min, price, time_granularity,
 	time_min_duration, starts_at, stops_at, ingress, egress)
 	VALUES(?,?,?,?,?,?,?,?,?,?)`
 	res, err := e.write.ExecContext(ctx, inst, a.IA, a.Bandwidth, a.BandwidthMin, a.Price, a.TimeGranularity,
-		a.TimeMinDuration, a.StartAt, a.StopsAt, a.IfIdIngress, a.IfIdEgress)
+		a.TimeMinDuration, a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.IfIdIngress, a.IfIdEgress)
 	if err != nil {
 		return 0, err
 	}

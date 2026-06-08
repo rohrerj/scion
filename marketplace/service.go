@@ -133,15 +133,6 @@ func (s *Service) assetOp(assetID uint64, f func(*Asset) error) error {
 	asset = s.assets[assetID]
 	return f(asset)
 }
-func (a *Asset) assetType() hummingbird.AssetType {
-	if a.IfIdIngress != nil {
-		if a.IfIdEgress != nil {
-			return hummingbird.AssetType_Interface_Pair
-		}
-		return hummingbird.AssetType_Ingress
-	}
-	return hummingbird.AssetType_Egress
-}
 
 func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error) {
 	user := ctx.Value("user").(*User)
@@ -167,9 +158,9 @@ func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummin
 		if a1.IA != a2.IA {
 			return serrors.New("asset must have same IA")
 		}
-		if a1.assetType() != a2.assetType() {
+		/*if a1.assetType() != a2.assetType() {
 			return serrors.New("asset must have same asset type")
-		}
+		}*/
 		if a1.IfIdIngress != nil && *a1.IfIdIngress != *a2.IfIdIngress {
 			return serrors.New("asset must have same ingress")
 		}
@@ -582,9 +573,11 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 	}
 	if req.Msg.IfIdIngress != nil {
 		dbAsset.IfIdIngress.Int64 = int64(*req.Msg.IfIdIngress)
+		dbAsset.IfIdIngress.Valid = true
 	}
 	if req.Msg.IfIdEgress != nil {
 		dbAsset.IfIdEgress.Int64 = int64(*req.Msg.IfIdEgress)
+		dbAsset.IfIdEgress.Valid = true
 	}
 	assetID, err := s.store.PublishAsset(ctx, dbAsset)
 	if err != nil {
@@ -884,70 +877,58 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 
 func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[hummingbird.SearchAssetsRequest]) (*connect.Response[hummingbird.SearchAssetsResponse], error) {
 	fmt.Println("SearchAssets")
-	user := ctx.Value("user").(*User)
-	repAssets := make([]*hummingbird.Asset, 0, 1)
-	s.assetMtx.RLock()
-	defer s.assetMtx.RUnlock()
-	for id, asset := range s.assets {
-		if req.Msg.Owned {
-			if asset.Owner != user.Username {
-				continue
-			}
-		} else if asset.Owner != "" {
-			continue
-		}
-		if req.Msg.Ia != nil && *req.Msg.Ia != uint64(asset.IA) {
-			continue
-		}
-		if req.Msg.AssetType != nil {
-			if *req.Msg.AssetType == hummingbird.AssetType_Interface_Pair && (asset.IfIdIngress == nil || asset.IfIdEgress == nil) {
-				continue
-			}
-			if *req.Msg.AssetType == hummingbird.AssetType_Ingress && (asset.IfIdIngress == nil || asset.IfIdEgress != nil) {
-				continue
-			}
-			if *req.Msg.AssetType == hummingbird.AssetType_Egress && (asset.IfIdEgress == nil || asset.IfIdIngress != nil) {
-				continue
-			}
-		}
-		if req.Msg.MinRequiredBw != nil && asset.Bandwidth < *req.Msg.MinRequiredBw {
-			continue
-		}
-		if req.Msg.Price != nil && asset.Price > *req.Msg.Price {
-			continue
-		}
-		if req.Msg.StartsAtLatest != nil && asset.StartAt.After(req.Msg.StartsAtLatest.AsTime()) {
-			continue
-		}
-		if req.Msg.StopsAtEarliest != nil && asset.StopsAt.Before(req.Msg.StopsAtEarliest.AsTime()) {
-			continue
-		}
-		repAsset := &hummingbird.Asset{
-			AssetId:         strconv.FormatUint(id, 10),
+	user := ctx.Value("user").(string)
+	var owner *string
+	var startsAt *string
+	var stopsAt *string
+	if req.Msg.Owned {
+		owner = &user
+	}
+	if req.Msg.StartsAtLatest != nil {
+		start := req.Msg.StartsAtLatest.AsTime().UTC().Format(time.RFC3339)
+		startsAt = &start
+	}
+	if req.Msg.StopsAtEarliest != nil {
+		stop := req.Msg.StopsAtEarliest.AsTime().UTC().Format(time.RFC3339)
+		stopsAt = &stop
+	}
+
+	assets, err := s.store.Search(ctx, &db.AssetQuery{
+		Owner:                owner,
+		IA:                   req.Msg.Ia,
+		Ingress:              req.Msg.IfIdIngress,
+		Egress:               req.Msg.IfIdEgress,
+		MinRequiredBandwidth: req.Msg.MinRequiredBw,
+		Price:                req.Msg.Price,
+		StartsAt:             startsAt,
+		StopsAt:              stopsAt,
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	repAssets := make([]*hummingbird.Asset, 0, len(assets))
+	for _, asset := range assets {
+		a := &hummingbird.Asset{
+			AssetId:         strconv.FormatUint(asset.ID, 10),
 			Ia:              uint64(asset.IA),
 			Bw:              asset.Bandwidth,
 			StartsAt:        timestamppb.New(asset.StartAt),
 			StopsAt:         timestamppb.New(asset.StopsAt),
-			Price:           asset.Price,
 			TimeGranularity: asset.TimeGranularity,
+			Price:           asset.Price,
 		}
-		if asset.IfIdIngress != nil && asset.IfIdEgress != nil {
-			repAsset.AssetType = hummingbird.AssetType_Interface_Pair
-			repAsset.IfIdIngress = asset.IfIdIngress
-			repAsset.IfIdEgress = asset.IfIdEgress
-		} else if asset.IfIdIngress != nil {
-			repAsset.AssetType = hummingbird.AssetType_Ingress
-			repAsset.IfIdIngress = asset.IfIdIngress
-		} else if asset.IfIdEgress != nil {
-			repAsset.AssetType = hummingbird.AssetType_Egress
-			repAsset.IfIdEgress = asset.IfIdEgress
+		if asset.IfIdIngress.Valid {
+			ingress := uint32(asset.IfIdIngress.Int64)
+			a.IfIdIngress = &ingress
 		}
-		repAssets = append(repAssets, repAsset)
+		if asset.IfIdEgress.Valid {
+			egress := uint32(asset.IfIdEgress.Int64)
+			a.IfIdEgress = &egress
+		}
+		repAssets = append(repAssets, a)
 	}
-
 	return &connect.Response[hummingbird.SearchAssetsResponse]{
 		Msg: &hummingbird.SearchAssetsResponse{
-			Owned:  req.Msg.Owned,
 			Assets: repAssets,
 		},
 	}, nil

@@ -539,7 +539,6 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	var owned *bool
 	var ia *uint64
-	var assetType *hummingbird.AssetType
 	var ingress *uint32
 	var egress *uint32
 	var minReqBw *uint64
@@ -550,7 +549,6 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 
 	owned = readOptionalBool(reader, "Owned (true,false): ")
 	ia = readOptionalIAUint64(reader, "IA: ")
-	assetType = readOptionalAssetType(reader, "Asset Type (ingress,egress,pair): ")
 	ingress = readOptionalUint32(reader, "Ingress: ")
 	egress = readOptionalUint32(reader, "Egress: ")
 	minReqBw = readOptionalUint64(reader, "Min Required BW: ")
@@ -564,7 +562,6 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 	msg := &hummingbird.SearchAssetsRequest{
 		Owned:         *owned,
 		Ia:            ia,
-		AssetType:     assetType,
 		IfIdIngress:   ingress,
 		IfIdEgress:    egress,
 		MinRequiredBw: minReqBw,
@@ -589,7 +586,6 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 			ID:              asset.AssetId,
 			IA:              addr.IA(asset.Ia),
 			Bandwidth:       asset.Bw,
-			AssetType:       asset.AssetType,
 			StartAt:         asset.StartsAt.AsTime(),
 			StopsAt:         asset.StopsAt.AsTime(),
 			Price:           asset.Price,
@@ -774,34 +770,12 @@ func readOptionalTime(reader *bufio.Reader, prompt string) *time.Time {
 	return &t
 }
 
-func readOptionalAssetType(reader *bufio.Reader, prompt string) *hummingbird.AssetType {
-	fmt.Print(prompt)
-
-	text, _ := reader.ReadString('\n')
-	text = strings.TrimSpace(text)
-
-	if text == "" {
-		return nil
-	}
-	var assetType hummingbird.AssetType
-	switch text {
-	case "ingress":
-		assetType = hummingbird.AssetType_Ingress
-	case "egress":
-		assetType = hummingbird.AssetType_Egress
-	case "pair":
-		assetType = hummingbird.AssetType_Interface_Pair
-	}
-	return &assetType
-}
-
 func main() {
 	userInteraction()
 }
 
 type Asset struct {
 	ID              string
-	AssetType       hummingbird.AssetType
 	IA              addr.IA
 	Bandwidth       uint64
 	StartAt         time.Time
