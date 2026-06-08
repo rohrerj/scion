@@ -28,12 +28,12 @@ import (
 
 type MarketplaceDB interface {
 	io.Closer
-	PublishAsset(ctx context.Context, a *DBAsset) (int64, error)
+	InsertAsset(ctx context.Context, a *DBAsset) (int64, error)
 	Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, error)
 	GetUser(ctx context.Context, name string) (*DBUser, error)
 	CreateUser(ctx context.Context, user *DBUser) (int64, error)
 	CreateASUser(ctx context.Context, user *DBASUser) (int64, error)
-	DepositMoney(ctx context.Context, name string, amount int64) (int64, error)
+	UpdateMoney(ctx context.Context, name string, amount int64) (int64, error)
 	BeginTransaction(ctx context.Context, opts *sql.TxOptions) (*transaction, error)
 }
 
@@ -136,13 +136,12 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 	where := []string{}
 	if params.Owner == nil {
 		query = []string{
-			"SELECT a.id, NULL AS owner, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets a",
+			"SELECT a.id, owner_id, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets a",
 		}
-		where = append(where, "owner IS NULL\n")
+		where = append(where, "owner_id IS NULL\n")
 	} else {
 		query = []string{
-			"SELECT a.id, u.name AS owner, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets a",
-			"JOIN Users u ON u.id=a.owner_id",
+			"SELECT a.id, u.name AS owner, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets a JOIN Users u ON u.id=a.owner_id",
 		}
 		where = append(where, "(owner=?)")
 		args = append(args, *params.Owner)
@@ -182,6 +181,7 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 	return strings.Join(query, "\n"), args
 }
 
+/*
 func (e *executor) PublishAsset(ctx context.Context, a *DBAsset) (int64, error) {
 	if e.write == nil {
 		return 0, serrors.New("No database open")
@@ -196,6 +196,71 @@ func (e *executor) PublishAsset(ctx context.Context, a *DBAsset) (int64, error) 
 		return 0, err
 	}
 	return res.LastInsertId()
+}*/
+
+func (e *executor) AssetByID(ctx context.Context, id int64) (*DBAsset, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	q := "SELECT a.id, u.name AS owner, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets a LEFT JOIN Users u ON u.id=a.owner_id WHERE (a.id=?)"
+	rows, err := e.read.QueryContext(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, serrors.New("asset not found", "id", id)
+	}
+	a := &DBAsset{}
+	var startsAtString string
+	var stopsAtString string
+	err = rows.Scan(&a.ID, &a.Owner, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	if err != nil {
+		return nil, serrors.Wrap("Error reading DB response", err)
+	}
+	a.StartAt, err = time.Parse(time.RFC3339, startsAtString)
+	if err != nil {
+		return nil, err
+	}
+	a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	var res sql.Result
+	var err error
+	if a.Owner.Valid {
+		inst := `INSERT INTO Assets (ia, bandwidth, bandwidth_min, price, time_granularity,
+	time_min_duration, starts_at, stops_at, ingress, egress, owner_id)
+	VALUES(?,?,?,?,?,?,?,?,?,?,(SELECT id FROM users WHERE name = ?))`
+		res, err = e.write.ExecContext(ctx, inst, a.IA, a.Bandwidth, a.BandwidthMin, a.Price, a.TimeGranularity,
+			a.TimeMinDuration, a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.IfIdIngress, a.IfIdEgress, a.Owner.String)
+	} else {
+		inst := `INSERT INTO Assets (ia, bandwidth, bandwidth_min, price, time_granularity,
+	time_min_duration, starts_at, stops_at, ingress, egress)
+	VALUES(?,?,?,?,?,?,?,?,?,?)`
+		res, err = e.write.ExecContext(ctx, inst, a.IA, a.Bandwidth, a.BandwidthMin, a.Price, a.TimeGranularity,
+			a.TimeMinDuration, a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.IfIdIngress, a.IfIdEgress)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (e *executor) RemoveAsset(ctx context.Context, assetID int64) error {
+	if e.write == nil {
+		return serrors.New("No database open")
+	}
+	inst := `DELETE FROM Assets WHERE id = ?`
+	_, err := e.write.ExecContext(ctx, inst, assetID)
+	return err
 }
 
 func (e *executor) GetUser(ctx context.Context, name string) (*DBUser, error) {
@@ -265,12 +330,12 @@ func (e *executor) GetASUser(ctx context.Context, ia uint64) (*DBASUser, error) 
 	return user, nil
 }
 
-func (e *executor) DepositMoney(ctx context.Context, name string, amount int64) (int64, error) {
+func (e *executor) UpdateMoney(ctx context.Context, name string, amount int64) (int64, error) {
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	inst := `UPDATE users SET balance = balance + ? WHERE name = ? `
-	res, err := e.write.ExecContext(ctx, inst, amount, name)
+	inst := `UPDATE users SET balance = balance + ? WHERE name = ?`
+	res, err := e.write.ExecContext(ctx, inst, amount, name, amount)
 	if err != nil {
 		return 0, err
 	}

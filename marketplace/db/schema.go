@@ -52,7 +52,7 @@ const (
 		id INTEGER PRIMARY KEY,
 		name TEXT NOT NULL UNIQUE,
 		pw_hash TEXT NOT NULL,
-		balance INTEGER
+		balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0)
 	);
 	CREATE INDEX idx_users_name ON Users(name);
 	CREATE TABLE Ases(

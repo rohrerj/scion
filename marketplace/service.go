@@ -358,144 +358,28 @@ func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbi
 
 func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbird.BuyAssetsRequest]) (*connect.Response[hummingbird.BuyAssetsResponse], error) {
 	fmt.Println("BuyAssets")
-	user := ctx.Value("user").(*User)
-	checkedOutAsset := make([]uint64, 0, 1)
-	boughtAssets := make([]*hummingbird.BoughtAsset, 0, 1)
-	undoCheckout := func() {
-		for _, assetID := range checkedOutAsset {
-			s.assetOp(assetID, func(a *Asset) error {
-				a.state = Listed
-				a.Owner = ""
-				return nil
-			})
+	user := ctx.Value("user").(string)
+	uniqueCheck := make(map[string]bool)
+	for _, asset := range req.Msg.Assets {
+		if uniqueCheck[asset.AssetId] {
+			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("Only a single split per asset per buy request allowed"))
 		}
+		uniqueCheck[asset.AssetId] = true
 	}
-	assetSplits := make(map[uint64][]RequestedSplit)
-	for _, reqAsset := range req.Msg.Assets {
-		assetId, err := strconv.ParseUint(reqAsset.AssetId, 10, 64)
-		if err != nil {
-			undoCheckout()
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-		}
-		err = s.assetOp(assetId, func(a *Asset) error {
-			if a.Owner != user.Username && a.state != Listed {
-				return serrors.New("asset can currently not be bought")
-			}
-			if reqAsset.StartsAtExactly.AsTime().Truncate(time.Second).Before(a.StartAt) {
-				return serrors.New("invalid validity")
-			}
-			if reqAsset.StopsAtExactly.AsTime().Truncate(time.Second).After(a.StopsAt) {
-				return serrors.New("invalid validity")
-			}
-			a.state = CheckedOut
-			a.Owner = user.Username //this is only temporary
-			requestedSplits, found := assetSplits[assetId]
-			if !found {
-				requestedSplits = make([]RequestedSplit, 0, 1)
-				assetSplits[assetId] = requestedSplits
-			}
-			assetSplits[assetId] = append(requestedSplits, RequestedSplit{
-				ExactFrom:      reqAsset.StartsAtExactly.AsTime().Truncate(time.Second),
-				ExactTo:        reqAsset.StopsAtExactly.AsTime().Truncate(time.Second),
-				ExactBandwidth: reqAsset.BwExact,
-			})
-			checkedOutAsset = append(checkedOutAsset, assetId)
-			return nil
+	boughtAssetIDs, totalCost, err := s.store.BuyAssets(ctx, user, req.Msg.Assets, req.Msg.MaxPrice)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	boughtAssets := make([]*hummingbird.BoughtAsset, 0, len(boughtAssetIDs))
+	for _, a := range boughtAssetIDs {
+		boughtAssets = append(boughtAssets, &hummingbird.BoughtAsset{
+			AssetId: strconv.FormatInt(a, 10),
 		})
-		if err != nil {
-			undoCheckout()
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-		}
 	}
-	var userOwnedAssetsToAdd []*Asset
-	var unusedAssetsToAdd []*Asset
-
-	for assetID, requestedSplits := range assetSplits {
-		err := s.assetOp(assetID, func(a *Asset) error {
-			res, err := SplitAsset(a, requestedSplits)
-			if err != nil {
-				return err
-			}
-			for _, seg := range res.Bought {
-				userOwnedAssetsToAdd = append(userOwnedAssetsToAdd, &Asset{
-					state:           Bought,
-					Owner:           user.Username,
-					IA:              a.IA,
-					IfIdIngress:     a.IfIdIngress,
-					IfIdEgress:      a.IfIdEgress,
-					TimeGranularity: a.TimeGranularity,
-					TimeMinDuration: a.TimeMinDuration,
-					BandwidthMin:    a.BandwidthMin,
-					Bandwidth:       seg.Bandwidth,
-					StartAt:         seg.StartAt,
-					StopsAt:         seg.StopAt,
-					Price:           a.Price,
-					OriginalAsset:   a.OriginalAsset,
-				})
-			}
-			for _, seg := range res.Unused {
-				unusedAssetsToAdd = append(unusedAssetsToAdd, &Asset{
-					state:           Listed,
-					Owner:           "",
-					IA:              a.IA,
-					IfIdIngress:     a.IfIdIngress,
-					IfIdEgress:      a.IfIdEgress,
-					TimeGranularity: a.TimeGranularity,
-					TimeMinDuration: a.TimeMinDuration,
-					BandwidthMin:    a.BandwidthMin,
-					Bandwidth:       seg.Bandwidth,
-					StartAt:         seg.StartAt,
-					StopsAt:         seg.StopAt,
-					Price:           a.Price,
-					OriginalAsset:   a.OriginalAsset,
-				})
-			}
-			for _, seg := range res.Remove {
-				fmt.Println("remove", seg)
-			}
-			return err
-		})
-		if err != nil {
-			undoCheckout()
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-		}
-	}
-	costAcc := uint64(0)
-	for _, asset := range userOwnedAssetsToAdd {
-		costAcc += asset.TotalPrice()
-	}
-	if costAcc > req.Msg.MaxPrice {
-		undoCheckout()
-		return nil, connect.NewError(connect.CodeFailedPrecondition, serrors.New("Insufficient credit", "cost", costAcc))
-	}
-	user.mtx.Lock()
-	defer user.mtx.Unlock()
-	if user.Balance < costAcc {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, serrors.New("Insufficient credit", "cost", costAcc, "balance", user.Balance))
-	}
-	user.Balance -= costAcc
-	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
-		for _, assetToAdd := range userOwnedAssetsToAdd {
-			assetID := s.currentAssetID.Add(1)
-			fmt.Println("add user owned asset: ", assetID)
-			boughtAssets = append(boughtAssets, &hummingbird.BoughtAsset{AssetId: strconv.FormatUint(assetID, 10)})
-			m[assetID] = assetToAdd
-		}
-		for _, assetToAdd := range unusedAssetsToAdd {
-			assetID := s.currentAssetID.Add(1)
-			fmt.Println("add unused asset: ", assetID)
-			m[assetID] = assetToAdd
-		}
-		for _, assetToRemove := range checkedOutAsset {
-			delete(m, assetToRemove)
-			fmt.Println("removed asset: ", assetToRemove)
-		}
-		return nil
-	})
 	return &connect.Response[hummingbird.BuyAssetsResponse]{
 		Msg: &hummingbird.BuyAssetsResponse{
 			Assets: boughtAssets,
-			Cost:   costAcc,
+			Cost:   uint64(totalCost),
 		},
 	}, nil
 }
@@ -909,7 +793,7 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 	repAssets := make([]*hummingbird.Asset, 0, len(assets))
 	for _, asset := range assets {
 		a := &hummingbird.Asset{
-			AssetId:         strconv.FormatUint(asset.ID, 10),
+			AssetId:         strconv.FormatInt(asset.ID, 10),
 			Ia:              uint64(asset.IA),
 			Bw:              asset.Bandwidth,
 			StartsAt:        timestamppb.New(asset.StartAt),

@@ -33,7 +33,7 @@ type AssetQuery struct {
 }
 
 type DBAsset struct {
-	ID              uint64
+	ID              int64
 	Owner           sql.NullString
 	IA              addr.IA
 	Bandwidth       uint64

@@ -17,9 +17,12 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"strconv"
+	"time"
 
 	marketplacedb "github.com/scionproto/scion/marketplace/db"
 	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/private/config"
 	"github.com/scionproto/scion/private/storage/db"
 )
@@ -54,7 +57,7 @@ func (s *MarketplaceStorage) Search(ctx context.Context, params *marketplacedb.A
 }
 
 func (s *MarketplaceStorage) PublishAsset(ctx context.Context, a *marketplacedb.DBAsset) (int64, error) {
-	return s.db.PublishAsset(ctx, a)
+	return s.db.InsertAsset(ctx, a)
 }
 
 func (s *MarketplaceStorage) GetUser(ctx context.Context, name string) (*marketplacedb.DBUser, error) {
@@ -69,12 +72,113 @@ func (s *MarketplaceStorage) CreateASUser(ctx context.Context, user *marketplace
 	return s.db.CreateASUser(ctx, user)
 }
 
+func totalPrice(price uint64, bw uint64, startsAt time.Time, stopsAt time.Time) int64 {
+	splitDuration := uint64(stopsAt.Sub(startsAt).Seconds())
+	return int64(price * splitDuration * bw)
+}
+
+func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user string, assets []*hummingbird.BuyAsset, maxPrice uint64) ([]int64, int64, error) {
+	uniqueCheck := make(map[string]bool)
+	for _, asset := range assets {
+		if uniqueCheck[asset.AssetId] {
+			return nil, 0, serrors.New("Only a single split per asset per buy request allowed")
+		}
+		if asset.StopsAtExactly.AsTime().Before(asset.StartsAtExactly.AsTime()) {
+			return nil, 0, serrors.New("End of validity must come after start of validity")
+		}
+		uniqueCheck[asset.AssetId] = true
+	}
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return nil, 0, err
+	}
+	boughtAssets := make([]int64, 0, 1)
+	costAcc := int64(0)
+	for _, asset := range assets {
+		assetId, err := strconv.ParseInt(asset.AssetId, 10, 64)
+		if err != nil {
+			return nil, 0, serrors.Join(err, tx.Rollback())
+		}
+		dbAsset, err := tx.AssetByID(ctx, assetId)
+		if err != nil {
+			return nil, 0, serrors.Join(err, tx.Rollback())
+		}
+		split, err := SplitAsset(dbAsset, []RequestedSplit{
+			{
+				ExactFrom:      asset.StartsAtExactly.AsTime(),
+				ExactTo:        asset.StopsAtExactly.AsTime(),
+				ExactBandwidth: asset.BwExact,
+			},
+		})
+		if err != nil {
+			return nil, 0, serrors.Join(err, tx.Rollback())
+		}
+		for _, segment := range split.Bought {
+			newAsset := &marketplacedb.DBAsset{
+				Owner: sql.NullString{
+					String: user,
+					Valid:  true,
+				},
+				IA:              dbAsset.IA,
+				BandwidthMin:    dbAsset.BandwidthMin,
+				TimeGranularity: dbAsset.TimeGranularity,
+				TimeMinDuration: dbAsset.TimeMinDuration,
+				IfIdIngress:     dbAsset.IfIdIngress,
+				IfIdEgress:      dbAsset.IfIdEgress,
+				Bandwidth:       segment.Bandwidth,
+				StartAt:         segment.StartAt,
+				StopsAt:         segment.StopAt,
+			}
+			id, err := tx.InsertAsset(ctx, newAsset)
+			if err != nil {
+				return nil, 0, serrors.Join(err, tx.Rollback())
+			}
+			costAcc += totalPrice(dbAsset.Price, segment.Bandwidth, segment.StartAt, segment.StopAt)
+			boughtAssets = append(boughtAssets, id)
+		}
+		for _, segment := range split.Unused {
+			newAsset := &marketplacedb.DBAsset{
+				IA:              dbAsset.IA,
+				BandwidthMin:    dbAsset.BandwidthMin,
+				TimeGranularity: dbAsset.TimeGranularity,
+				TimeMinDuration: dbAsset.TimeMinDuration,
+				IfIdIngress:     dbAsset.IfIdIngress,
+				IfIdEgress:      dbAsset.IfIdEgress,
+				Bandwidth:       segment.Bandwidth,
+				StartAt:         segment.StartAt,
+				StopsAt:         segment.StopAt,
+				Price:           dbAsset.Price,
+			}
+			_, err := tx.InsertAsset(ctx, newAsset)
+			if err != nil {
+				return nil, 0, serrors.Join(err, tx.Rollback())
+			}
+		}
+		err = tx.RemoveAsset(ctx, int64(dbAsset.ID))
+		if err != nil {
+			return nil, 0, serrors.Join(err, tx.Rollback())
+		}
+	}
+	if uint64(costAcc) > maxPrice {
+		return nil, 0, serrors.Join(serrors.New("cost higher than max price"), tx.Rollback())
+	}
+	_, err = tx.UpdateMoney(ctx, user, -costAcc)
+	if err != nil {
+		return nil, 0, serrors.Join(err, tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return nil, 0, serrors.Join(err, tx.Rollback())
+	}
+	return boughtAssets, costAcc, nil
+}
+
 func (s *MarketplaceStorage) DepositMoneyAndGet(ctx context.Context, name string, amount int64) (*marketplacedb.DBUser, error) {
 	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
 	if err != nil {
 		return nil, err
 	}
-	_, err = tx.DepositMoney(ctx, name, amount)
+	_, err = tx.UpdateMoney(ctx, name, amount)
 	if err != nil {
 		return nil, serrors.Join(err, tx.Rollback())
 	}
