@@ -72,12 +72,14 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	//h.store.DepositMoney(r.Context(), username)
-
 	if r.Method == http.MethodGet {
 		dbUser, err := h.store.GetUser(r.Context(), username)
 		if err != nil {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		if dbUser == nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 		templates.ExecuteTemplate(w, "balance.html", map[string]any{
@@ -89,14 +91,18 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 	deposit := r.FormValue("deposit")
 	depositInt, err := strconv.Atoi(deposit)
 	if err != nil || depositInt < 0 {
-		user, err := h.store.GetUser(r.Context(), username)
+		dbUser, err := h.store.GetUser(r.Context(), username)
 		if err != nil {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
+		if dbUser == nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
 		templates.ExecuteTemplate(w, "balance.html", map[string]any{
 			"Error":   "Invalid deposit amount",
-			"Balance": strconv.Itoa(int(user.Balance)),
+			"Balance": strconv.Itoa(int(dbUser.Balance)),
 		})
 		return
 	}

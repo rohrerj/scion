@@ -31,6 +31,7 @@ type MarketplaceDB interface {
 	InsertAsset(ctx context.Context, a *DBAsset) (int64, error)
 	InsertReservation(ctx context.Context, r *DBReservation) (int64, error)
 	Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, error)
+	FetchReservations(ctx context.Context, params *ReservationQuery) ([]*DBReservation, error)
 	GetUser(ctx context.Context, id int64) (*DBUser, error)
 	GetUserByName(ctx context.Context, name string) (*DBUser, error)
 	CreateUser(ctx context.Context, user *DBUser) (int64, error)
@@ -98,6 +99,71 @@ func (tx *transaction) Commit() error {
 
 func (tx *transaction) Rollback() error {
 	return tx.tx.Rollback()
+}
+
+func (e *executor) FetchReservations(ctx context.Context, params *ReservationQuery) ([]*DBReservation, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	stmt, args := e.buildReservationQuery(params)
+	rows, err := e.read.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
+	}
+	defer rows.Close()
+	var res []*DBReservation
+	for rows.Next() {
+		a := &DBReservation{}
+		var startsAtString string
+		var stopsAtString string
+		err = rows.Scan(&a.ID, &a.IA, &a.Ingress, &a.Egress, &a.Bandwidth, &startsAtString, &stopsAtString, &a.Key)
+		if err != nil {
+			return nil, serrors.Wrap("Error reading DB response", err)
+		}
+		a.StartsAt, err = time.Parse(time.RFC3339, startsAtString)
+		if err != nil {
+			return nil, err
+		}
+		a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, a)
+	}
+	return res, nil
+}
+
+func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []any) {
+	var args []any
+	where := []string{}
+	query := []string{
+		"SELECT id, ia, ingress, egress, bandwidth, starts_at, stops_at, key FROM Reservations",
+	}
+	where = append(where, "(owner_id = ?)")
+	args = append(args, params.OwnerId)
+	if params.IA != nil {
+		where = append(where, "(ia=?)")
+		args = append(args, *params.IA)
+	}
+	if params.StartsAt != nil {
+		where = append(where, "(starts_at<?)")
+		args = append(args, *params.StartsAt)
+	}
+	if params.StopsAt != nil {
+		where = append(where, "(stops_at>=?)")
+		args = append(args, *params.StopsAt)
+	}
+	if params.Ingress != nil {
+		where = append(where, "(ingress=?)")
+		args = append(args, *params.Ingress)
+	}
+	if params.Egress != nil {
+		where = append(where, "(egress=?)")
+		args = append(args, *params.Egress)
+	}
+	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
+	query = append(query, "ORDER BY LENGTH(id) ASC, id ASC")
+	return strings.Join(query, "\n"), args
 }
 
 func (e *executor) Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, error) {
@@ -297,9 +363,9 @@ func (e *executor) InsertReservation(ctx context.Context, r *DBReservation) (int
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	q := `INSERT INTO Reservations (ia, ingress, egress, bandwidth, starts_at, stops_at, key, owner_id)
-		VALUES(?,?,?,?,?,?,?,?)`
-	res, err := e.write.ExecContext(ctx, q, r.IA, r.Ingress, r.Egress, r.Bandwidth,
+	q := `INSERT INTO Reservations (id, ia, ingress, egress, bandwidth, starts_at, stops_at, key, owner_id)
+		VALUES(?,?,?,?,?,?,?,?,?)`
+	res, err := e.write.ExecContext(ctx, q, r.ID, r.IA, r.Ingress, r.Egress, r.Bandwidth,
 		r.StartsAt.UTC().Format(time.RFC3339), r.StopsAt.UTC().Format(time.RFC3339),
 		r.Key, r.OwnerId)
 	if err != nil {
@@ -346,7 +412,7 @@ func (e *executor) GetUser(ctx context.Context, id int64) (*DBUser, error) {
 	if e.read == nil {
 		return nil, serrors.New("No database open")
 	}
-	q := `SELECT name, pw_hash, balance FROM Users WHERE id=?`
+	q := `SELECT id, name, pw_hash, balance FROM Users WHERE id=?`
 	rows, err := e.read.QueryContext(ctx, q, id)
 	if err != nil {
 		return nil, err
@@ -356,7 +422,7 @@ func (e *executor) GetUser(ctx context.Context, id int64) (*DBUser, error) {
 		return nil, nil
 	}
 	user := &DBUser{}
-	err = rows.Scan(&user.Name, &user.PasswordHash, &user.Balance)
+	err = rows.Scan(&user.ID, &user.Name, &user.PasswordHash, &user.Balance)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
@@ -366,7 +432,7 @@ func (e *executor) GetUserByName(ctx context.Context, name string) (*DBUser, err
 	if e.read == nil {
 		return nil, serrors.New("No database open")
 	}
-	q := `SELECT name, pw_hash, balance FROM Users WHERE name=?`
+	q := `SELECT id, name, pw_hash, balance FROM Users WHERE name=?`
 	rows, err := e.read.QueryContext(ctx, q, name)
 	if err != nil {
 		return nil, err
@@ -376,7 +442,7 @@ func (e *executor) GetUserByName(ctx context.Context, name string) (*DBUser, err
 		return nil, nil
 	}
 	user := &DBUser{}
-	err = rows.Scan(&user.Name, &user.PasswordHash, &user.Balance)
+	err = rows.Scan(&user.ID, &user.Name, &user.PasswordHash, &user.Balance)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}

@@ -56,6 +56,10 @@ func (s *MarketplaceStorage) Search(ctx context.Context, params *marketplacedb.A
 	return s.db.Search(ctx, params)
 }
 
+func (s *MarketplaceStorage) FetchReservations(ctx context.Context, params *marketplacedb.ReservationQuery) ([]*marketplacedb.DBReservation, error) {
+	return s.db.FetchReservations(ctx, params)
+}
+
 func (s *MarketplaceStorage) PublishAsset(ctx context.Context, a *marketplacedb.DBAsset) (int64, error) {
 	return s.db.InsertAsset(ctx, a)
 }

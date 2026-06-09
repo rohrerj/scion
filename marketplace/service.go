@@ -379,42 +379,41 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 }
 
 func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hummingbird.FetchReservationsRequest]) (*connect.Response[hummingbird.FetchReservationsResponse], error) {
-	user := ctx.Value("user").(*User)
-	resp := make([]*hummingbird.Reservation, 0, 1)
-	s.reservationOp(user, func(r *[]*Reservation) error {
-		for _, res := range *r {
-			if req.Msg.Ia != nil && uint64(res.Ia) != *req.Msg.Ia {
-				continue
-			}
-			if req.Msg.StartsAt != nil && res.StartsAt.Before(req.Msg.StartsAt.AsTime()) {
-				continue
-			}
-			if req.Msg.StopsAt != nil && res.StopsAt.After(req.Msg.StopsAt.AsTime()) {
-				continue
-			}
-			if req.Msg.Bw != nil && res.Bw < *req.Msg.Bw {
-				continue
-			}
-			if req.Msg.IngressId != nil && res.IngressId != *req.Msg.IngressId {
-				continue
-			}
-			if req.Msg.EgressId != nil && res.EgressId != *req.Msg.EgressId {
-				continue
-			}
-			resp = append(resp, &hummingbird.Reservation{
-				ResId:     res.ResId,
-				Ia:        uint64(res.Ia),
-				IngressId: res.IngressId,
-				EgressId:  res.EgressId,
-				Bw:        res.Bw,
-				StartsAt:  timestamppb.New(res.StartsAt),
-				StopsAt:   timestamppb.New(res.StopsAt),
-				Ak:        res.Ak,
-			})
-		}
-		return nil
+	user := ctx.Value("user").(int64)
+	var startsAt *string
+	var stopsAt *string
+	if req.Msg.StartsAt != nil {
+		start := req.Msg.StartsAt.AsTime().UTC().Format(time.RFC3339)
+		startsAt = &start
+	}
+	if req.Msg.StopsAt != nil {
+		stop := req.Msg.StopsAt.AsTime().UTC().Format(time.RFC3339)
+		stopsAt = &stop
+	}
+	reservations, err := s.store.FetchReservations(ctx, &db.ReservationQuery{
+		IA:       req.Msg.Ia,
+		Ingress:  req.Msg.IngressId,
+		Egress:   req.Msg.EgressId,
+		StartsAt: startsAt,
+		StopsAt:  stopsAt,
+		OwnerId:  user,
 	})
-
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	resp := make([]*hummingbird.Reservation, 0, len(reservations))
+	for _, reservation := range reservations {
+		resp = append(resp, &hummingbird.Reservation{
+			ResId:     uint64(reservation.ID),
+			Ia:        uint64(reservation.IA),
+			IngressId: uint32(reservation.Ingress),
+			EgressId:  uint32(reservation.Egress),
+			Bw:        uint64(reservation.Bandwidth),
+			StartsAt:  timestamppb.New(reservation.StartsAt),
+			StopsAt:   timestamppb.New(reservation.StopsAt),
+			Ak:        reservation.Key,
+		})
+	}
 	return &connect.Response[hummingbird.FetchReservationsResponse]{
 		Msg: &hummingbird.FetchReservationsResponse{
 			Reservations: resp,

@@ -31,6 +31,14 @@ type AssetQuery struct {
 	StopsAt              *string
 	Price                *uint64
 }
+type ReservationQuery struct {
+	OwnerId  int64
+	IA       *uint64
+	Ingress  *uint32
+	Egress   *uint32
+	StartsAt *string
+	StopsAt  *string
+}
 
 type DBReservation struct {
 	ID        int64

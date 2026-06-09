@@ -37,7 +37,7 @@ const (
 	CREATE INDEX idx_asset_validity ON Assets(starts_at, stops_at);
 	CREATE INDEX idx_assets_ia_validity ON Assets(ia, starts_at, stops_at);
 	CREATE TABLE Reservations(
-		id INTEGER,
+		id INTEGER NOT NULL,
 		owner_id INTEGER NOT NULL,
 		ia INTEGER NOT NULL,
 		ingress INTEGER NOT NULL,
