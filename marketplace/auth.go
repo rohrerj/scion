@@ -247,8 +247,21 @@ func (a *AuthInterceptor) WrapStreamingHandler(
 			return connect.NewError(connect.CodePermissionDenied,
 				fmt.Errorf("missing scope: %s", requiredScope))
 		}
-
-		ctx = context.WithValue(ctx, "user", user)
+		if scopes["User"] {
+			userid, err := strconv.ParseInt(user, 10, 64)
+			if err != nil {
+				return connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("invalid token"))
+			}
+			ctx = context.WithValue(ctx, "user", userid)
+		} else {
+			ia, err := addr.ParseIA(user)
+			if err != nil {
+				return connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("invalid scope"))
+			}
+			ctx = context.WithValue(ctx, "user", ia)
+		}
 
 		return next(ctx, conn)
 	}

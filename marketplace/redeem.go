@@ -70,10 +70,9 @@ func (s *Service) DelegateRedemption(ctx context.Context, req *connect.Request[h
 
 func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
 	fmt.Println("RedeemAsset (AS)")
-	user := ctx.Value("user").(string)
-	clientID, err := addr.ParseIA(user)
-	if err != nil {
-		return err
+	clientID, ok := ctx.Value("user").(addr.IA)
+	if !ok {
+		return connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
 	}
 	stream.Receive()
 	s.mtx.Lock()
@@ -81,11 +80,10 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 	if !found {
 		client = s.newRedemptionServerPeer(clientID)
 		s.redemptionServerPeers[clientID] = client
-		fmt.Println("AS client newely registered", "clientID", clientID)
 	}
 	s.mtx.Unlock()
 
-	fmt.Println("AS client connected:", clientID)
+	fmt.Println("AS redemption service connected:", clientID)
 
 	go func() {
 		for req := range client.sendCh {

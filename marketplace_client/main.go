@@ -417,6 +417,7 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 			Bw:        res.Bw,
 			StartsAt:  res.StartsAt.AsTime(),
 			StopsAt:   res.StopsAt.AsTime(),
+			Ak:        res.Ak,
 		})
 	}
 	j, err := json.MarshalIndent(transformed, "", "\t")

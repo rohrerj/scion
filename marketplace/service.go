@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect"
@@ -44,42 +43,9 @@ const (
 	BeingSplit
 )
 
-type Asset struct {
-	// the asset ID under which the original asset was published
-	OriginalAsset   uint64
-	Owner           string
-	IA              addr.IA
-	Bandwidth       uint64
-	BandwidthMin    uint64
-	StartAt         time.Time
-	StopsAt         time.Time
-	Price           uint64
-	TimeGranularity uint64
-	TimeMinDuration uint64
-	IfIdIngress     *uint32
-	IfIdEgress      *uint32
-	mtx             sync.Mutex
-	state           assetState
-}
-
-type Reservation struct {
-	ResId     uint64
-	Ia        addr.IA
-	IngressId uint32
-	EgressId  uint32
-	Bw        uint64
-	StartsAt  time.Time
-	StopsAt   time.Time
-	Ak        string
-}
-
 type Service struct {
 	redemptionServerPeers map[addr.IA]*RedemptionServerPeer
-	assets                map[uint64]*Asset
-	currentAssetID        atomic.Uint64
 	mtx                   sync.Mutex
-	assetMtx              sync.RWMutex
-	reservationMtx        sync.RWMutex
 	info                  *MarketplaceInfo
 	store                 *storage.MarketplaceStorage
 }
@@ -94,20 +60,16 @@ type MarketplaceInfo struct {
 func NewService(info *MarketplaceInfo, store *storage.MarketplaceStorage) *Service {
 	return &Service{
 		redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
-		assets:                make(map[uint64]*Asset),
-		currentAssetID:        atomic.Uint64{},
 		info:                  info,
 		store:                 store,
 	}
 }
 
-func (s *Asset) TotalPrice() uint64 {
-	splitDuration := uint64(s.StopsAt.Sub(s.StartAt).Seconds())
-	return s.Price * splitDuration * s.Bandwidth
-}
-
 func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error) {
-	user_id := ctx.Value("user").(int64)
+	user_id, ok := ctx.Value("user").(int64)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
+	}
 	assetId1, err := strconv.ParseInt(req.Msg.AssetId_1, 10, 64)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -131,7 +93,10 @@ func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummin
 }
 
 func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbird.SplitAssetRequest]) (*connect.Response[hummingbird.SplitAssetResponse], error) {
-	userId := ctx.Value("user").(int64)
+	userId, ok := ctx.Value("user").(int64)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
+	}
 	assetId, err := strconv.ParseInt(req.Msg.AssetId, 10, 64)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -160,7 +125,10 @@ func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbi
 
 func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbird.BuyAssetsRequest]) (*connect.Response[hummingbird.BuyAssetsResponse], error) {
 	fmt.Println("BuyAssets")
-	user := ctx.Value("user").(int64)
+	user, ok := ctx.Value("user").(int64)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
+	}
 	boughtAssetIDs, totalCost, err := s.store.BuyAssets(ctx, user, req.Msg.Assets, req.Msg.MaxPrice)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -180,7 +148,10 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 }
 
 func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hummingbird.FetchReservationsRequest]) (*connect.Response[hummingbird.FetchReservationsResponse], error) {
-	user := ctx.Value("user").(int64)
+	user, ok := ctx.Value("user").(int64)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
+	}
 	var startsAt *string
 	var stopsAt *string
 	if req.Msg.StartsAt != nil {
@@ -236,7 +207,10 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 
 func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[hummingbird.PublishAssetRequest]) (*connect.Response[hummingbird.PublishAssetResponse], error) {
 	fmt.Println("PublishAsset")
-	ia := ctx.Value("user").(addr.IA)
+	ia, ok := ctx.Value("user").(addr.IA)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
+	}
 	dbAsset := &db.DBAsset{
 		IA:              ia,
 		Bandwidth:       req.Msg.Bandwidth,
@@ -271,7 +245,10 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 
 func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingbird.RedeemAssetRequest]) (*connect.Response[hummingbird.RedeemAssetResponse], error) {
 	fmt.Println("RedeemAsset")
-	user := ctx.Value("user").(int64)
+	user, ok := ctx.Value("user").(int64)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
+	}
 	assets, err := s.store.PrepareRedemption(ctx, user, req.Msg.IngressAssetId, req.Msg.EgressAssetId, req.Msg.IfPairAssetId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -370,9 +347,10 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 
 func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error) {
 	fmt.Println("Statistics")
-	ia := ctx.Value("user").(addr.IA)
-	s.assetMtx.RLock()
-	defer s.assetMtx.RUnlock()
+	ia, ok := ctx.Value("user").(addr.IA)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
+	}
 	step := time.Duration(req.Msg.Step) * time.Second
 	step.Truncate(s.info.StatisticsTimeGranularity)
 	windowStart := req.Msg.Start.AsTime().UTC().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
@@ -447,7 +425,10 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 
 func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[hummingbird.SearchAssetsRequest]) (*connect.Response[hummingbird.SearchAssetsResponse], error) {
 	fmt.Println("SearchAssets")
-	user := ctx.Value("user").(int64)
+	user, ok := ctx.Value("user").(int64)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
+	}
 	var owner_id *int64
 	var startsAt *string
 	var stopsAt *string

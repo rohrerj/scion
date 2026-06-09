@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package marketplace
+package storage
 
 import (
 	"fmt"
@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scionproto/scion/marketplace/db"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -30,7 +31,7 @@ func BenchmarkSplit(b *testing.B) {
 		return t.UTC()
 	}
 
-	asset := &Asset{
+	asset := &db.DBAsset{
 		StartAt:         parse("2026-01-01T00:00:00"),
 		StopsAt:         parse("2026-12-31T23:59:59"),
 		Bandwidth:       2000,
@@ -106,7 +107,7 @@ func TestSplit(t *testing.T) {
 		return t.UTC()
 	}
 
-	asset := &Asset{
+	asset := &db.DBAsset{
 		StartAt:   parse("2026-05-22T10:13:57"),
 		StopsAt:   parse("2026-05-23T10:13:57"),
 		Bandwidth: 2000,
@@ -184,7 +185,7 @@ func FuzzSplitAsset(f *testing.F) {
 
 		base := time.Unix(0, 0).UTC()
 
-		asset := &Asset{
+		asset := &db.DBAsset{
 			StartAt:         base,
 			StopsAt:         base.Add(24 * time.Hour),
 			Bandwidth:       1000,
@@ -244,7 +245,7 @@ func FuzzSplitAsset(f *testing.F) {
 
 func verifyNoOverbooking(
 	t *testing.T,
-	asset *Asset,
+	asset *db.DBAsset,
 	result *SplitResult,
 ) {
 
