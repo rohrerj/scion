@@ -22,7 +22,7 @@ import (
 )
 
 type AssetQuery struct {
-	Owner                *string
+	OwnerId              *int64
 	IA                   *uint64
 	Ingress              *uint32
 	Egress               *uint32
@@ -40,13 +40,13 @@ type DBReservation struct {
 	Bandwidth int64
 	StartsAt  time.Time
 	StopsAt   time.Time
-	Owner     string
+	OwnerId   int64
 	Key       string
 }
 
 type DBAsset struct {
 	ID              int64
-	Owner           sql.NullString
+	OwnerId         sql.NullInt64
 	IA              addr.IA
 	Bandwidth       uint64
 	BandwidthMin    uint64

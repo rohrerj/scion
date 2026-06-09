@@ -60,8 +60,11 @@ func (s *MarketplaceStorage) PublishAsset(ctx context.Context, a *marketplacedb.
 	return s.db.InsertAsset(ctx, a)
 }
 
-func (s *MarketplaceStorage) GetUser(ctx context.Context, name string) (*marketplacedb.DBUser, error) {
-	return s.db.GetUser(ctx, name)
+func (s *MarketplaceStorage) GetUser(ctx context.Context, id int64) (*marketplacedb.DBUser, error) {
+	return s.db.GetUser(ctx, id)
+}
+func (s *MarketplaceStorage) GetUserByName(ctx context.Context, name string) (*marketplacedb.DBUser, error) {
+	return s.db.GetUserByName(ctx, name)
 }
 
 func (s *MarketplaceStorage) CreateUser(ctx context.Context, user *marketplacedb.DBUser) (int64, error) {
@@ -77,7 +80,7 @@ func totalPrice(price uint64, bw uint64, startsAt time.Time, stopsAt time.Time) 
 	return int64(price * splitDuration * bw)
 }
 
-func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user string, assets []*hummingbird.BuyAsset, maxPrice uint64) ([]int64, int64, error) {
+func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, assets []*hummingbird.BuyAsset, maxPrice uint64) ([]int64, int64, error) {
 	uniqueCheck := make(map[string]bool)
 	for _, asset := range assets {
 		if uniqueCheck[asset.AssetId] {
@@ -115,9 +118,9 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user string, assets 
 		}
 		for _, segment := range split.Bought {
 			newAsset := &marketplacedb.DBAsset{
-				Owner: sql.NullString{
-					String: user,
-					Valid:  true,
+				OwnerId: sql.NullInt64{
+					Int64: user_id,
+					Valid: true,
 				},
 				IA:              dbAsset.IA,
 				BandwidthMin:    dbAsset.BandwidthMin,
@@ -163,7 +166,7 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user string, assets 
 	if uint64(costAcc) > maxPrice {
 		return nil, 0, serrors.Join(serrors.New("cost higher than max price"), tx.Rollback())
 	}
-	_, err = tx.UpdateMoney(ctx, user, -costAcc)
+	_, err = tx.UpdateMoney(ctx, user_id, -costAcc)
 	if err != nil {
 		return nil, 0, serrors.Join(err, tx.Rollback())
 	}
@@ -174,11 +177,11 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user string, assets 
 	return boughtAssets, costAcc, nil
 }
 
-func (s *MarketplaceStorage) InsertReservation(ctx context.Context, user string, r *marketplacedb.DBReservation) (int64, error) {
+func (s *MarketplaceStorage) InsertReservation(ctx context.Context, r *marketplacedb.DBReservation) (int64, error) {
 	return s.db.InsertReservation(ctx, r)
 }
 
-func (s *MarketplaceStorage) UndoRedemption(ctx context.Context, user string, ingressIDString *string, egressIDString *string, pairIDString *string) error {
+func (s *MarketplaceStorage) UndoRedemption(ctx context.Context, user_id int64, ingressIDString *string, egressIDString *string, pairIDString *string) error {
 	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
@@ -192,14 +195,14 @@ func (s *MarketplaceStorage) UndoRedemption(ctx context.Context, user string, in
 		if err != nil {
 			return serrors.Join(err, tx.Rollback())
 		}
-		n, err := tx.UndoRedemption(ctx, user, ingressID)
+		n, err := tx.UndoRedemption(ctx, user_id, ingressID)
 		if err != nil {
 			return serrors.Join(err, tx.Rollback())
 		}
 		if n != 1 {
 			return serrors.Join(serrors.New("asset not found"), tx.Rollback())
 		}
-		n, err = tx.UndoRedemption(ctx, user, egressID)
+		n, err = tx.UndoRedemption(ctx, user_id, egressID)
 		if err != nil {
 			return serrors.Join(err, tx.Rollback())
 		}
@@ -212,7 +215,7 @@ func (s *MarketplaceStorage) UndoRedemption(ctx context.Context, user string, in
 		if err != nil {
 			return serrors.Join(err, tx.Rollback())
 		}
-		n, err := tx.UndoRedemption(ctx, user, pairID)
+		n, err := tx.UndoRedemption(ctx, user_id, pairID)
 		if err != nil {
 			return serrors.Join(err, tx.Rollback())
 		}
@@ -223,7 +226,7 @@ func (s *MarketplaceStorage) UndoRedemption(ctx context.Context, user string, in
 	}
 	return serrors.Join(serrors.New("invalid asset IDs"), tx.Rollback())
 }
-func (s *MarketplaceStorage) PrepareRedemption(ctx context.Context, user string, ingressIDString *string, egressIDString *string, pairIDString *string) ([]*marketplacedb.DBAsset, error) {
+func (s *MarketplaceStorage) PrepareRedemption(ctx context.Context, user_id int64, ingressIDString *string, egressIDString *string, pairIDString *string) ([]*marketplacedb.DBAsset, error) {
 	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
 	if err != nil {
 		return nil, err
@@ -237,14 +240,14 @@ func (s *MarketplaceStorage) PrepareRedemption(ctx context.Context, user string,
 		if err != nil {
 			return nil, serrors.Join(err, tx.Rollback())
 		}
-		ingressAsset, err := tx.PrepareRedemption(ctx, user, ingressID)
+		ingressAsset, err := tx.PrepareRedemption(ctx, user_id, ingressID)
 		if err != nil {
 			return nil, serrors.Join(err, tx.Rollback())
 		}
 		if !ingressAsset.IfIdIngress.Valid || ingressAsset.IfIdEgress.Valid {
 			return nil, serrors.Join(serrors.New("ingress asset is not an ingress asset"), tx.Rollback())
 		}
-		egressAsset, err := tx.PrepareRedemption(ctx, user, egressID)
+		egressAsset, err := tx.PrepareRedemption(ctx, user_id, egressID)
 		if err != nil {
 			return nil, serrors.Join(err, tx.Rollback())
 		}
@@ -261,7 +264,7 @@ func (s *MarketplaceStorage) PrepareRedemption(ctx context.Context, user string,
 		if err != nil {
 			return nil, serrors.Join(err, tx.Rollback())
 		}
-		pairAsset, err := tx.PrepareRedemption(ctx, user, pairID)
+		pairAsset, err := tx.PrepareRedemption(ctx, user_id, pairID)
 		if err != nil {
 			return nil, serrors.Join(err, tx.Rollback())
 		}
@@ -278,16 +281,16 @@ func (s *MarketplaceStorage) PrepareRedemption(ctx context.Context, user string,
 
 }
 
-func (s *MarketplaceStorage) DepositMoneyAndGet(ctx context.Context, name string, amount int64) (*marketplacedb.DBUser, error) {
+func (s *MarketplaceStorage) DepositMoneyAndGet(ctx context.Context, id int64, amount int64) (*marketplacedb.DBUser, error) {
 	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
 	if err != nil {
 		return nil, err
 	}
-	_, err = tx.UpdateMoney(ctx, name, amount)
+	_, err = tx.UpdateMoney(ctx, id, amount)
 	if err != nil {
 		return nil, serrors.Join(err, tx.Rollback())
 	}
-	user, err := tx.GetUser(ctx, name)
+	user, err := tx.GetUser(ctx, id)
 	if err != nil {
 		return nil, serrors.Join(err, tx.Rollback())
 	}

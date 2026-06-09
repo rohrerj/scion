@@ -359,7 +359,7 @@ func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbi
 
 func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbird.BuyAssetsRequest]) (*connect.Response[hummingbird.BuyAssetsResponse], error) {
 	fmt.Println("BuyAssets")
-	user := ctx.Value("user").(string)
+	user := ctx.Value("user").(int64)
 	boughtAssetIDs, totalCost, err := s.store.BuyAssets(ctx, user, req.Msg.Assets, req.Msg.MaxPrice)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -471,7 +471,7 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 
 func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingbird.RedeemAssetRequest]) (*connect.Response[hummingbird.RedeemAssetResponse], error) {
 	fmt.Println("RedeemAsset")
-	user := ctx.Value("user").(string)
+	user := ctx.Value("user").(int64)
 	assets, err := s.store.PrepareRedemption(ctx, user, req.Msg.IngressAssetId, req.Msg.EgressAssetId, req.Msg.IfPairAssetId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -537,7 +537,7 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	})
 	select {
 	case resp := <-respCh:
-		n, err := s.store.InsertReservation(ctx, user, &db.DBReservation{
+		n, err := s.store.InsertReservation(ctx, &db.DBReservation{
 			ID:        int64(resp.ResInfo.ResId),
 			IA:        ia,
 			Ingress:   int64(ingressID),
@@ -545,7 +545,7 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			Bandwidth: int64(resp.ResInfo.BwRounded),
 			StartsAt:  startsAt,
 			StopsAt:   stopsAt,
-			Owner:     user,
+			OwnerId:   user,
 			Key:       resp.Ak,
 		})
 		if err != nil {
@@ -648,12 +648,12 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 
 func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[hummingbird.SearchAssetsRequest]) (*connect.Response[hummingbird.SearchAssetsResponse], error) {
 	fmt.Println("SearchAssets")
-	user := ctx.Value("user").(string)
-	var owner *string
+	user := ctx.Value("user").(int64)
+	var owner_id *int64
 	var startsAt *string
 	var stopsAt *string
 	if req.Msg.Owned {
-		owner = &user
+		owner_id = &user
 	}
 	if req.Msg.StartsAtLatest != nil {
 		start := req.Msg.StartsAtLatest.AsTime().UTC().Format(time.RFC3339)
@@ -665,7 +665,7 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 	}
 
 	assets, err := s.store.Search(ctx, &db.AssetQuery{
-		Owner:                owner,
+		OwnerId:              owner_id,
 		IA:                   req.Msg.Ia,
 		Ingress:              req.Msg.IfIdIngress,
 		Egress:               req.Msg.IfIdEgress,

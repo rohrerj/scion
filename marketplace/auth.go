@@ -17,6 +17,7 @@ package marketplace
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -164,7 +165,12 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 				fmt.Errorf("missing scope: %s", requiredScope))
 		}
 		if scopes["User"] {
-			ctx = context.WithValue(ctx, "user", user)
+			userid, err := strconv.ParseInt(user, 10, 64)
+			if err != nil {
+				return nil, connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("invalid token"))
+			}
+			ctx = context.WithValue(ctx, "user", userid)
 		} else {
 			ia, err := addr.ParseIA(user)
 			if err != nil {

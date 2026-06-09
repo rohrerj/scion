@@ -35,7 +35,7 @@ var templates = template.Must(template.ParseGlob("marketplace/templates/*.html")
 
 func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *http.ServeMux) {
 	h := &Handler{
-		sessions: make(map[string]string),
+		sessions: make(map[string]int64),
 		signer:   signer,
 		store:    store,
 	}
@@ -48,22 +48,22 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 
 type Handler struct {
 	store    *storage.MarketplaceStorage
-	sessions map[string]string
+	sessions map[string]int64
 	mu       sync.Mutex
 	signer   *registration.Signer
 }
 
-func (h *Handler) getSessionUser(r *http.Request) (string, bool) {
+func (h *Handler) getSessionUser(r *http.Request) (int64, bool) {
 	cookie, err := r.Cookie("session_id")
 	if err != nil {
-		return "", false
+		return 0, false
 	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	username, ok := h.sessions[cookie.Value]
-	return username, ok
+	userId, ok := h.sessions[cookie.Value]
+	return userId, ok
 }
 
 func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +120,7 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	user, err := h.store.GetUser(r.Context(), username)
+	user, err := h.store.GetUserByName(r.Context(), username)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -140,7 +140,7 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.store.CreateUser(r.Context(), &db.DBUser{
+	userId, err := h.store.CreateUser(r.Context(), &db.DBUser{
 		Name:         username,
 		PasswordHash: string(hash),
 	})
@@ -151,7 +151,7 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := h.generateSessionID()
-	h.sessions[sessionID] = username
+	h.sessions[sessionID] = userId
 
 	http.SetCookie(w, &http.Cookie{
 		Name:  "session_id",
@@ -178,7 +178,7 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	dbUser, err := h.store.GetUser(r.Context(), username)
+	dbUser, err := h.store.GetUserByName(r.Context(), username)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -201,7 +201,7 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := h.generateSessionID()
-	h.sessions[sessionID] = username
+	h.sessions[sessionID] = dbUser.ID
 
 	http.SetCookie(w, &http.Cookie{
 		Name:  "session_id",
@@ -213,7 +213,7 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
-	username, ok := h.getSessionUser(r)
+	userId, ok := h.getSessionUser(r)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
@@ -222,7 +222,7 @@ func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 		templates.ExecuteTemplate(w, "token.html", map[string]any{})
 		return
 	}
-	token, err := h.createToken(username)
+	token, err := h.createToken(strconv.FormatInt(userId, 10))
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
