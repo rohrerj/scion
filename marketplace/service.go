@@ -373,29 +373,29 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 	ia := ctx.Value("user").(addr.IA)
 	s.assetMtx.RLock()
 	defer s.assetMtx.RUnlock()
-
 	step := time.Duration(req.Msg.Step) * time.Second
 	step.Truncate(s.info.StatisticsTimeGranularity)
-	windowStart := req.Msg.Start.AsTime().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
-	windowEnd := req.Msg.End.AsTime().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
+	windowStart := req.Msg.Start.AsTime().UTC().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
+	windowEnd := req.Msg.End.AsTime().UTC().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
 	num_intervals := int(windowEnd.Sub(windowStart) / step)
 	income := make([]uint64, num_intervals)
 	bwBought := make([]uint64, num_intervals)
 	bwListed := make([]uint64, num_intervals)
+	assets, err := s.store.Statistics(ctx, &db.StatisticsQuery{
+		IA:          uint64(ia),
+		WindowStart: windowStart.Format(time.RFC3339),
+		WindowEnd:   windowEnd.Format(time.RFC3339),
+		Ingress:     req.Msg.IfIdIngress,
+		Egress:      req.Msg.IfIdEgress,
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
 
-	for _, asset := range s.assets {
-		if asset.IA != ia {
-			continue
-		}
-		if req.Msg.IfIdIngress != nil && asset.IfIdIngress != req.Msg.IfIdIngress {
-			continue
-		}
-		if req.Msg.IfIdEgress != nil && asset.IfIdEgress != req.Msg.IfIdEgress {
-			continue
-		}
-		start := asset.StartAt
+	for _, asset := range assets {
+		start := asset.StartsAt
 		stop := asset.StopsAt
-		if asset.StartAt.Before(windowStart) {
+		if asset.StartsAt.Before(windowStart) {
 			start = windowStart
 		}
 		if asset.StopsAt.After(windowEnd) {
@@ -415,20 +415,19 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 			intervalEnd := intervalStart.Add(step)
 			overlapStart := start
 			overlapEnd := stop
-			if asset.StartAt.Before(intervalStart) {
+			if asset.StartsAt.Before(intervalStart) {
 				overlapStart = intervalStart
 			}
 			if asset.StopsAt.After(intervalEnd) {
 				overlapEnd = intervalEnd
 			}
 			duration := uint64(overlapEnd.Sub(overlapStart).Seconds())
-			bwTimesDuration := asset.Bandwidth * duration
-			switch asset.state {
-			case Listed, CheckedOut:
+			bwTimesDuration := uint64(asset.Bandwidth) * duration
+			if !asset.OwnerId.Valid {
 				bwListed[i] += bwTimesDuration
-			case Bought, BeingSplit, BeingRedeemed, Redeemed:
+			} else {
 				bwBought[i] += bwTimesDuration
-				income[i] += bwTimesDuration * asset.Price
+				income[i] += bwTimesDuration * uint64(asset.Price)
 			}
 		}
 	}

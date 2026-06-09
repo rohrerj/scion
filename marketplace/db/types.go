@@ -39,6 +39,20 @@ type ReservationQuery struct {
 	StartsAt *string
 	StopsAt  *string
 }
+type StatisticsQuery struct {
+	IA          uint64
+	WindowStart string
+	WindowEnd   string
+	Ingress     *uint32
+	Egress      *uint32
+}
+type DBStat struct {
+	Price     int64
+	Bandwidth int64
+	StartsAt  time.Time
+	StopsAt   time.Time
+	OwnerId   sql.NullInt64
+}
 
 type DBReservation struct {
 	ID        int64

@@ -37,6 +37,7 @@ type MarketplaceDB interface {
 	CreateUser(ctx context.Context, user *DBUser) (int64, error)
 	CreateASUser(ctx context.Context, user *DBASUser) (int64, error)
 	UpdateMoney(ctx context.Context, id int64, amount int64) (int64, error)
+	SearchAssetsForStatistics(ctx context.Context, params *StatisticsQuery) ([]*DBStat, error)
 	BeginTransaction(ctx context.Context, opts *sql.TxOptions) (*transaction, error)
 }
 
@@ -162,7 +163,58 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 		args = append(args, *params.Egress)
 	}
 	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
-	query = append(query, "ORDER BY LENGTH(id) ASC, id ASC")
+	return strings.Join(query, "\n"), args
+}
+
+func (e *executor) SearchAssetsForStatistics(ctx context.Context, params *StatisticsQuery) ([]*DBStat, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	stmt, args := e.buildStatisticsQuery(params)
+	rows, err := e.read.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
+	}
+	defer rows.Close()
+	var res []*DBStat
+	for rows.Next() {
+		a := &DBStat{}
+		var startsAtString string
+		var stopsAtString string
+		err = rows.Scan(&a.OwnerId, &a.Bandwidth, &a.Price, &startsAtString, &stopsAtString)
+		if err != nil {
+			return nil, serrors.Wrap("Error reading DB response", err)
+		}
+		a.StartsAt, err = time.Parse(time.RFC3339, startsAtString)
+		if err != nil {
+			return nil, err
+		}
+		a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, a)
+	}
+	return res, nil
+}
+
+func (e *executor) buildStatisticsQuery(params *StatisticsQuery) (string, []any) {
+	var args []any
+	where := []string{}
+	query := []string{
+		"SELECT owner_id, bandwidth, price, starts_at, stops_at FROM Assets",
+	}
+	where = append(where, "(ia=?) AND (stops_at > ?) AND (starts_at <= ?)")
+	args = append(args, int64(params.IA), params.WindowStart, params.WindowEnd)
+	if params.Ingress != nil {
+		where = append(where, "(ingress=?)")
+		args = append(args, *params.Ingress)
+	}
+	if params.Egress != nil {
+		where = append(where, "(egress=?)")
+		args = append(args, *params.Egress)
+	}
+	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
 	return strings.Join(query, "\n"), args
 }
 

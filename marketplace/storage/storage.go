@@ -267,6 +267,10 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 	return assetId1, assetId2, nil
 }
 
+func (s *MarketplaceStorage) Statistics(ctx context.Context, params *marketplacedb.StatisticsQuery) ([]*marketplacedb.DBStat, error) {
+	return s.db.SearchAssetsForStatistics(ctx, params)
+}
+
 func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, assets []*hummingbird.BuyAsset, maxPrice uint64) ([]int64, int64, error) {
 	uniqueCheck := make(map[string]bool)
 	for _, asset := range assets {

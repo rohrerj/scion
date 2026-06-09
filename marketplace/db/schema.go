@@ -16,8 +16,9 @@ package db
 
 const (
 	SchemaVersion = 1
-	Schema        = `CREATE TABLE Assets(
-		id INTEGER PRIMARY KEY,
+	Schema        = `
+	CREATE TABLE Assets(
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		owner_id INTEGER,
 		ia INTEGER NOT NULL,
 		bandwidth INTEGER NOT NULL,
@@ -33,9 +34,9 @@ const (
 		FOREIGN KEY (owner_id) REFERENCES Users(id)
 	);
 	CREATE INDEX idx_asset_owner ON Assets(owner_id);
-	CREATE INDEX idx_asset_ia ON Assets(ia);
 	CREATE INDEX idx_asset_validity ON Assets(starts_at, stops_at);
-	CREATE INDEX idx_assets_ia_validity ON Assets(ia, starts_at, stops_at);
+	CREATE INDEX idx_assets_ia_validity_start ON Assets(ia, starts_at, stops_at);
+	CREATE INDEX idx_assets_ia_validity_end ON Assets(ia, stops_at, starts_at);
 	CREATE TABLE Reservations(
 		id INTEGER NOT NULL,
 		owner_id INTEGER NOT NULL,
@@ -58,5 +59,6 @@ const (
 	CREATE INDEX idx_users_name ON Users(name);
 	CREATE TABLE Ases(
 		ia INTEGER PRIMARY KEY
-	);`
+	);
+	`
 )
