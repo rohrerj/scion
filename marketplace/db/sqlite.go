@@ -204,6 +204,7 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 	query := []string{
 		"SELECT id, owner_id, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets",
 	}
+	where = append(where, "(state = 0)")
 	if params.OwnerId == nil {
 		where = append(where, "(owner_id IS NULL)")
 	} else {
@@ -238,11 +239,107 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 		where = append(where, "(egress=?)")
 		args = append(args, *params.Egress)
 	}
-	if len(where) > 0 {
-		query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
-	}
+	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
 	query = append(query, "ORDER BY LENGTH(id) ASC, id ASC")
 	return strings.Join(query, "\n"), args
+}
+
+func (e *executor) PrepareCombine(ctx context.Context, id int64, userId int64) (*DBAsset, error) {
+	if e.write == nil {
+		return nil, serrors.New("No database open")
+	}
+	q := `
+	UPDATE assets
+	SET state = 4
+	WHERE id = ?
+	AND state = 0
+	AND owner_id = ?
+	RETURNING
+		id,
+		owner_id,
+		ia,
+		bandwidth,
+		bandwidth_min,
+		price,
+		time_granularity,
+		time_min_duration,
+		starts_at,
+		stops_at,
+		ingress,
+		egress;`
+	rows, err := e.write.QueryContext(ctx, q, id, userId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, serrors.New("asset not found", "id", id)
+	}
+	a := &DBAsset{}
+	var startsAtString string
+	var stopsAtString string
+	err = rows.Scan(&a.ID, &a.OwnerId, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	if err != nil {
+		return nil, serrors.Wrap("Error reading DB response", err)
+	}
+	a.StartAt, err = time.Parse(time.RFC3339, startsAtString)
+	if err != nil {
+		return nil, err
+	}
+	a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+func (e *executor) PrepareSplit(ctx context.Context, id int64, userId int64) (*DBAsset, error) {
+	if e.write == nil {
+		return nil, serrors.New("No database open")
+	}
+	q := `
+	UPDATE assets
+	SET state = 3
+	WHERE id = ?
+	AND state = 0
+	AND owner_id = ?
+	RETURNING
+		id,
+		owner_id,
+		ia,
+		bandwidth,
+		bandwidth_min,
+		price,
+		time_granularity,
+		time_min_duration,
+		starts_at,
+		stops_at,
+		ingress,
+		egress;`
+	rows, err := e.write.QueryContext(ctx, q, id, userId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, serrors.New("asset not found", "id", id)
+	}
+	a := &DBAsset{}
+	var startsAtString string
+	var stopsAtString string
+	err = rows.Scan(&a.ID, &a.OwnerId, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	if err != nil {
+		return nil, serrors.Wrap("Error reading DB response", err)
+	}
+	a.StartAt, err = time.Parse(time.RFC3339, startsAtString)
+	if err != nil {
+		return nil, err
+	}
+	a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 func (e *executor) CheckoutAsset(ctx context.Context, id int64) (*DBAsset, error) {

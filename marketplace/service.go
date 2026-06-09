@@ -106,253 +106,54 @@ func (s *Asset) TotalPrice() uint64 {
 	return s.Price * splitDuration * s.Bandwidth
 }
 
-// locks the user and its reservations
-func (s *Service) reservationOp(user *User, f func(*[]*Reservation) error) error {
-	user.mtx.Lock()
-	defer user.mtx.Unlock()
-	return f(user.Reservations)
-}
-
-// requests global write lock for assets map, then runs provided function
-func (s *Service) globalAssetsModOp(f func(map[uint64]*Asset) error) error {
-	s.assetMtx.Lock()
-	defer s.assetMtx.Unlock()
-	return f(s.assets)
-}
-
-// requests a read lock for the global asset map, and a write lock
-// for the specific asset, then performs provided function
-func (s *Service) assetOp(assetID uint64, f func(*Asset) error) error {
-	s.assetMtx.RLock()
-	defer s.assetMtx.RUnlock()
-	asset, found := s.assets[assetID]
-	if !found {
-		return serrors.New("asset not found")
-	}
-	asset.mtx.Lock()
-	defer asset.mtx.Unlock()
-	asset = s.assets[assetID]
-	return f(asset)
-}
-
 func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error) {
-	user := ctx.Value("user").(*User)
-	assetId1, err := strconv.ParseUint(req.Msg.AssetId_1, 10, 64)
+	user_id := ctx.Value("user").(int64)
+	assetId1, err := strconv.ParseInt(req.Msg.AssetId_1, 10, 64)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	assetId2, err := strconv.ParseUint(req.Msg.AssetId_2, 10, 64)
+	assetId2, err := strconv.ParseInt(req.Msg.AssetId_2, 10, 64)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	if assetId1 == assetId2 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("cannot combine asset with itself"))
 	}
-	var combinedAsset *Asset
-	combineAsset := func(a1 *Asset, a2 *Asset) error {
-		if a1.Owner != user.Username || a2.Owner != user.Username {
-			return serrors.New("can only combine owned assets")
-		}
-		if a1.state != Bought || a2.state != Bought {
-			return serrors.New("assets in wrong state for combining")
-		}
-		if a1.IA != a2.IA {
-			return serrors.New("asset must have same IA")
-		}
-		/*if a1.assetType() != a2.assetType() {
-			return serrors.New("asset must have same asset type")
-		}*/
-		if a1.IfIdIngress != nil && *a1.IfIdIngress != *a2.IfIdIngress {
-			return serrors.New("asset must have same ingress")
-		}
-		if a1.IfIdEgress != nil && *a1.IfIdEgress != *a2.IfIdEgress {
-			return serrors.New("asset must have same egress")
-		}
-		if a1.StartAt.Equal(a2.StartAt) && a1.StopsAt.Equal(a2.StopsAt) {
-			combinedAsset = &Asset{
-				state:           Bought,
-				Owner:           user.Username,
-				IA:              a1.IA,
-				Bandwidth:       a1.Bandwidth + a2.Bandwidth,
-				BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
-				StartAt:         a1.StartAt,
-				StopsAt:         a1.StopsAt,
-				Price:           0,
-				TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
-				TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
-				IfIdIngress:     a1.IfIdIngress,
-				IfIdEgress:      a1.IfIdEgress,
-			}
-			return nil
-		} else if a1.Bandwidth == a2.Bandwidth {
-			if a1.StartAt.Equal(a2.StopsAt) {
-				combinedAsset = &Asset{
-					state:           Bought,
-					Owner:           user.Username,
-					IA:              a1.IA,
-					Bandwidth:       a1.Bandwidth,
-					BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
-					StartAt:         a2.StartAt,
-					StopsAt:         a1.StopsAt,
-					Price:           0,
-					TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
-					TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
-					IfIdIngress:     a1.IfIdIngress,
-					IfIdEgress:      a1.IfIdEgress,
-				}
-				return nil
-			} else if a2.StartAt.Equal(a1.StopsAt) {
-				combinedAsset = &Asset{
-					state:           Bought,
-					Owner:           user.Username,
-					IA:              a1.IA,
-					Bandwidth:       a1.Bandwidth,
-					BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
-					StartAt:         a1.StartAt,
-					StopsAt:         a2.StopsAt,
-					Price:           0,
-					TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
-					TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
-					IfIdIngress:     a1.IfIdIngress,
-					IfIdEgress:      a1.IfIdEgress,
-				}
-				return nil
-			}
-		}
-		return serrors.New("asset cannot be combined")
-	}
-	if assetId1 < assetId2 {
-		err = s.assetOp(assetId1, func(ingressAsset *Asset) error {
-			return s.assetOp(assetId2, func(egressAsset *Asset) error {
-				return combineAsset(ingressAsset, egressAsset)
-			})
-		})
-	} else {
-		err = s.assetOp(assetId2, func(egressAsset *Asset) error {
-			return s.assetOp(assetId1, func(ingressAsset *Asset) error {
-				return combineAsset(ingressAsset, egressAsset)
-			})
-		})
-	}
+	combinedId, err := s.store.CombineAssets(ctx, user_id, assetId1, assetId2)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	assetID := s.currentAssetID.Add(1)
-	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
-		m[assetID] = combinedAsset
-		delete(m, assetId1)
-		delete(m, assetId2)
-		return nil
-	})
 	return &connect.Response[hummingbird.CombineAssetResponse]{
 		Msg: &hummingbird.CombineAssetResponse{
-			AssetId: strconv.FormatUint(assetID, 10),
+			AssetId: strconv.FormatInt(combinedId, 10),
 		},
 	}, nil
 }
 
 func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbird.SplitAssetRequest]) (*connect.Response[hummingbird.SplitAssetResponse], error) {
-	user := ctx.Value("user").(*User)
-	assetId, err := strconv.ParseUint(req.Msg.AssetId, 10, 64)
+	userId := ctx.Value("user").(int64)
+	assetId, err := strconv.ParseInt(req.Msg.AssetId, 10, 64)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	var asset1, asset2 *Asset
-	err = s.assetOp(assetId, func(a *Asset) error {
-		if a.Owner != user.Username {
-			return serrors.New("splitting is only possible for owned assets")
-		}
-		if a.state != Bought {
-			return serrors.New("splitting not possible in current asset state")
-		}
-		var requestedSplit []RequestedSplit
-		switch req.Msg.SplitOption.(type) {
-		case *hummingbird.SplitAssetRequest_BwSplit:
-			reqBW := req.Msg.GetBwSplit()
-			requestedSplit = []RequestedSplit{
-				{
-					ExactBandwidth: reqBW,
-					ExactFrom:      a.StartAt,
-					ExactTo:        a.StopsAt,
-				},
-				{
-					ExactBandwidth: a.Bandwidth - reqBW,
-					ExactFrom:      a.StartAt,
-					ExactTo:        a.StopsAt,
-				},
-			}
-		case *hummingbird.SplitAssetRequest_TimeSplit:
-			reqTime := req.Msg.GetTimeSplit().AsTime()
-			requestedSplit = []RequestedSplit{
-				{
-					ExactBandwidth: a.Bandwidth,
-					ExactFrom:      a.StartAt,
-					ExactTo:        reqTime,
-				},
-				{
-					ExactBandwidth: a.Bandwidth,
-					ExactFrom:      reqTime,
-					ExactTo:        a.StopsAt,
-				},
-			}
-		default:
-			return serrors.New("invalid split request")
-		}
-		splitResult, err := SplitAsset(a, requestedSplit)
-		if err != nil {
-			return err
-		}
-		if !(len(splitResult.Bought) == 2 && len(splitResult.Unused) == 0 && len(splitResult.Remove) == 0) {
-			return serrors.New("invalid split result")
-		}
-		a.state = BeingSplit
-		asset1 = &Asset{
-			state:           Bought,
-			Owner:           a.Owner,
-			IA:              a.IA,
-			BandwidthMin:    a.BandwidthMin,
-			Price:           a.Price,
-			TimeGranularity: a.TimeGranularity,
-			TimeMinDuration: a.TimeMinDuration,
-			IfIdIngress:     a.IfIdIngress,
-			IfIdEgress:      a.IfIdEgress,
-			Bandwidth:       splitResult.Bought[0].Bandwidth,
-			StartAt:         splitResult.Bought[0].StartAt,
-			StopsAt:         splitResult.Bought[0].StopAt,
-			OriginalAsset:   a.OriginalAsset,
-		}
-		asset2 = &Asset{
-			state:           Bought,
-			Owner:           a.Owner,
-			IA:              a.IA,
-			BandwidthMin:    a.BandwidthMin,
-			Price:           a.Price,
-			TimeGranularity: a.TimeGranularity,
-			TimeMinDuration: a.TimeMinDuration,
-			IfIdIngress:     a.IfIdIngress,
-			IfIdEgress:      a.IfIdEgress,
-			Bandwidth:       splitResult.Bought[1].Bandwidth,
-			StartAt:         splitResult.Bought[1].StartAt,
-			StopsAt:         splitResult.Bought[1].StopAt,
-			OriginalAsset:   a.OriginalAsset,
-		}
-		return nil
-	})
+	var id1, id2 int64
+	switch req.Msg.SplitOption.(type) {
+	case *hummingbird.SplitAssetRequest_BwSplit:
+		bwSplit := req.Msg.GetBwSplit()
+		id1, id2, err = s.store.SplitAsset(ctx, userId, assetId, &bwSplit, nil)
+	case *hummingbird.SplitAssetRequest_TimeSplit:
+		timeSplit := req.Msg.GetTimeSplit().AsTime()
+		id1, id2, err = s.store.SplitAsset(ctx, userId, assetId, nil, &timeSplit)
+	default:
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid split request"))
+	}
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	assetID1 := s.currentAssetID.Add(1)
-	assetID2 := s.currentAssetID.Add(1)
-	s.globalAssetsModOp(func(m map[uint64]*Asset) error {
-		m[assetID1] = asset1
-		m[assetID2] = asset2
-		delete(m, assetId)
-		return nil
-	})
 	return &connect.Response[hummingbird.SplitAssetResponse]{
 		Msg: &hummingbird.SplitAssetResponse{
-			AssetId_1: strconv.FormatUint(assetID1, 10),
-			AssetId_2: strconv.FormatUint(assetID2, 10),
+			AssetId_1: strconv.FormatInt(id1, 10),
+			AssetId_2: strconv.FormatInt(id2, 10),
 		},
 	}, nil
 }

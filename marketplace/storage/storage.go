@@ -84,6 +84,189 @@ func totalPrice(price uint64, bw uint64, startsAt time.Time, stopsAt time.Time) 
 	return int64(price * splitDuration * bw)
 }
 
+func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, assetId1 int64, assetId2 int64) (int64, error) {
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	a1, err := tx.PrepareCombine(ctx, assetId1, user_id)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	a2, err := tx.PrepareCombine(ctx, assetId2, user_id)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	if a1.IA != a2.IA {
+		return 0, serrors.Join(serrors.New("asset must have same IA"), tx.Rollback())
+	}
+	if a1.IfIdIngress.Valid && a1.IfIdIngress.Int64 != a2.IfIdIngress.Int64 {
+		return 0, serrors.Join(serrors.New("asset must have same ingress"), tx.Rollback())
+	}
+	if a1.IfIdEgress.Valid && a1.IfIdEgress.Int64 != a2.IfIdEgress.Int64 {
+		return 0, serrors.Join(serrors.New("asset must have same egress"), tx.Rollback())
+	}
+	var combinedAsset *marketplacedb.DBAsset
+	if a1.StartAt.Equal(a2.StartAt) && a1.StopsAt.Equal(a2.StopsAt) {
+		combinedAsset = &marketplacedb.DBAsset{
+			OwnerId:         a1.OwnerId,
+			IA:              a1.IA,
+			Bandwidth:       a1.Bandwidth + a2.Bandwidth,
+			BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
+			StartAt:         a1.StartAt,
+			StopsAt:         a1.StopsAt,
+			Price:           0,
+			TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
+			TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
+			IfIdIngress:     a1.IfIdIngress,
+			IfIdEgress:      a1.IfIdEgress,
+		}
+	} else if a1.Bandwidth == a2.Bandwidth {
+		if a1.StartAt.Equal(a2.StopsAt) {
+			combinedAsset = &marketplacedb.DBAsset{
+				OwnerId:         a1.OwnerId,
+				IA:              a1.IA,
+				Bandwidth:       a1.Bandwidth,
+				BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
+				StartAt:         a2.StartAt,
+				StopsAt:         a1.StopsAt,
+				Price:           0,
+				TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
+				TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
+				IfIdIngress:     a1.IfIdIngress,
+				IfIdEgress:      a1.IfIdEgress,
+			}
+		} else if a2.StartAt.Equal(a1.StopsAt) {
+			combinedAsset = &marketplacedb.DBAsset{
+				OwnerId:         a1.OwnerId,
+				IA:              a1.IA,
+				Bandwidth:       a1.Bandwidth,
+				BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
+				StartAt:         a1.StartAt,
+				StopsAt:         a2.StopsAt,
+				Price:           0,
+				TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
+				TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
+				IfIdIngress:     a1.IfIdIngress,
+				IfIdEgress:      a1.IfIdEgress,
+			}
+		} else {
+			return 0, serrors.Join(serrors.New("asset cannot be combined"), tx.Rollback())
+		}
+	} else {
+		return 0, serrors.Join(serrors.New("asset cannot be combined"), tx.Rollback())
+	}
+	err = tx.RemoveAsset(ctx, assetId1)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	err = tx.RemoveAsset(ctx, assetId2)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	newId, err := tx.InsertAsset(ctx, combinedAsset)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	return newId, nil
+}
+
+func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, assetId int64, bwSplit *uint64, timeSplit *time.Time) (int64, int64, error) {
+	if bwSplit == nil && timeSplit == nil {
+		return 0, 0, serrors.New("invalid split request")
+	}
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, 0, err
+	}
+	dbAsset, err := tx.PrepareSplit(ctx, assetId, user_id)
+	var requestedSplit []RequestedSplit
+	if err != nil {
+		return 0, 0, serrors.Join(err, tx.Rollback())
+	}
+	if bwSplit != nil {
+		requestedSplit = []RequestedSplit{
+			{
+				ExactBandwidth: *bwSplit,
+				ExactFrom:      dbAsset.StartAt,
+				ExactTo:        dbAsset.StopsAt,
+			},
+			{
+				ExactBandwidth: dbAsset.Bandwidth - *bwSplit,
+				ExactFrom:      dbAsset.StartAt,
+				ExactTo:        dbAsset.StopsAt,
+			},
+		}
+	} else {
+		requestedSplit = []RequestedSplit{
+			{
+				ExactBandwidth: dbAsset.Bandwidth,
+				ExactFrom:      dbAsset.StartAt,
+				ExactTo:        *timeSplit,
+			},
+			{
+				ExactBandwidth: dbAsset.Bandwidth,
+				ExactFrom:      *timeSplit,
+				ExactTo:        dbAsset.StopsAt,
+			},
+		}
+	}
+	splitResult, err := SplitAsset(dbAsset, requestedSplit)
+	if err != nil {
+		return 0, 0, serrors.Join(err, tx.Rollback())
+	}
+	if !(len(splitResult.Bought) == 2 && len(splitResult.Unused) == 0 && len(splitResult.Remove) == 0) {
+		return 0, 0, serrors.Join(serrors.New("invalid split result"), tx.Rollback())
+	}
+	asset1 := &marketplacedb.DBAsset{
+		OwnerId:         dbAsset.OwnerId,
+		IA:              dbAsset.IA,
+		BandwidthMin:    dbAsset.BandwidthMin,
+		Price:           dbAsset.Price,
+		TimeGranularity: dbAsset.TimeGranularity,
+		TimeMinDuration: dbAsset.TimeMinDuration,
+		IfIdIngress:     dbAsset.IfIdIngress,
+		IfIdEgress:      dbAsset.IfIdEgress,
+		Bandwidth:       splitResult.Bought[0].Bandwidth,
+		StartAt:         splitResult.Bought[0].StartAt,
+		StopsAt:         splitResult.Bought[0].StopAt,
+	}
+	asset2 := &marketplacedb.DBAsset{
+		OwnerId:         dbAsset.OwnerId,
+		IA:              dbAsset.IA,
+		BandwidthMin:    dbAsset.BandwidthMin,
+		Price:           dbAsset.Price,
+		TimeGranularity: dbAsset.TimeGranularity,
+		TimeMinDuration: dbAsset.TimeMinDuration,
+		IfIdIngress:     dbAsset.IfIdIngress,
+		IfIdEgress:      dbAsset.IfIdEgress,
+		Bandwidth:       splitResult.Bought[1].Bandwidth,
+		StartAt:         splitResult.Bought[1].StartAt,
+		StopsAt:         splitResult.Bought[1].StopAt,
+	}
+	err = tx.RemoveAsset(ctx, assetId)
+	if err != nil {
+		return 0, 0, serrors.Join(err, tx.Rollback())
+	}
+	assetId1, err := tx.InsertAsset(ctx, asset1)
+	if err != nil {
+		return 0, 0, serrors.Join(err, tx.Rollback())
+	}
+	assetId2, err := tx.InsertAsset(ctx, asset2)
+	if err != nil {
+		return 0, 0, serrors.Join(err, tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, 0, serrors.Join(err, tx.Rollback())
+	}
+	return assetId1, assetId2, nil
+}
+
 func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, assets []*hummingbird.BuyAsset, maxPrice uint64) ([]int64, int64, error) {
 	uniqueCheck := make(map[string]bool)
 	for _, asset := range assets {
