@@ -162,8 +162,13 @@ func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hu
 		stop := req.Msg.StopsAt.AsTime().UTC().Format(time.RFC3339)
 		stopsAt = &stop
 	}
+	var ia *addr.IA
+	if req.Msg.Ia != nil {
+		tmp := addr.IA(*req.Msg.Ia)
+		ia = &tmp
+	}
 	reservations, err := s.store.FetchReservations(ctx, &db.ReservationQuery{
-		IA:       req.Msg.Ia,
+		IA:       ia,
 		Ingress:  req.Msg.IngressId,
 		Egress:   req.Msg.EgressId,
 		StartsAt: startsAt,
@@ -360,7 +365,7 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 	bwBought := make([]uint64, num_intervals)
 	bwListed := make([]uint64, num_intervals)
 	assets, err := s.store.Statistics(ctx, &db.StatisticsQuery{
-		IA:          uint64(ia),
+		IA:          ia,
 		WindowStart: windowStart.Format(time.RFC3339),
 		WindowEnd:   windowEnd.Format(time.RFC3339),
 		Ingress:     req.Msg.IfIdIngress,
@@ -443,10 +448,14 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 		stop := req.Msg.StopsAtEarliest.AsTime().UTC().Format(time.RFC3339)
 		stopsAt = &stop
 	}
-
+	var ia *addr.IA
+	if req.Msg.Ia != nil {
+		tmp := addr.IA(*req.Msg.Ia)
+		ia = &tmp
+	}
 	assets, err := s.store.Search(ctx, &db.AssetQuery{
 		OwnerId:              owner_id,
-		IA:                   req.Msg.Ia,
+		IA:                   ia,
 		Ingress:              req.Msg.IfIdIngress,
 		Egress:               req.Msg.IfIdEgress,
 		MinRequiredBandwidth: req.Msg.MinRequiredBw,

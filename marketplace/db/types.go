@@ -23,7 +23,7 @@ import (
 
 type AssetQuery struct {
 	OwnerId              *int64
-	IA                   *uint64
+	IA                   *addr.IA
 	Ingress              *uint32
 	Egress               *uint32
 	MinRequiredBandwidth *uint64
@@ -33,14 +33,14 @@ type AssetQuery struct {
 }
 type ReservationQuery struct {
 	OwnerId  int64
-	IA       *uint64
+	IA       *addr.IA
 	Ingress  *uint32
 	Egress   *uint32
 	StartsAt *string
 	StopsAt  *string
 }
 type StatisticsQuery struct {
-	IA          uint64
+	IA          addr.IA
 	WindowStart string
 	WindowEnd   string
 	Ingress     *uint32
@@ -89,5 +89,5 @@ type DBUser struct {
 }
 
 type DBASUser struct {
-	IA uint64
+	IA addr.IA
 }

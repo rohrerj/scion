@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/private/storage/db"
 )
@@ -117,10 +118,13 @@ func (e *executor) FetchReservations(ctx context.Context, params *ReservationQue
 		a := &DBReservation{}
 		var startsAtString string
 		var stopsAtString string
-		err = rows.Scan(&a.ID, &a.IA, &a.Ingress, &a.Egress, &a.Bandwidth, &startsAtString, &stopsAtString, &a.Key)
+		var isd uint16
+		var as uint64
+		err = rows.Scan(&a.ID, &isd, &as, &a.Ingress, &a.Egress, &a.Bandwidth, &startsAtString, &stopsAtString, &a.Key)
 		if err != nil {
 			return nil, serrors.Wrap("Error reading DB response", err)
 		}
+		a.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
 		a.StartsAt, err = time.Parse(time.RFC3339, startsAtString)
 		if err != nil {
 			return nil, err
@@ -138,13 +142,13 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 	var args []any
 	where := []string{}
 	query := []string{
-		"SELECT id, ia, ingress, egress, bandwidth, starts_at, stops_at, key FROM Reservations",
+		"SELECT id, isd_id, as_id, ingress, egress, bandwidth, starts_at, stops_at, key FROM Reservations",
 	}
 	where = append(where, "(owner_id = ?)")
 	args = append(args, params.OwnerId)
 	if params.IA != nil {
-		where = append(where, "(ia=?)")
-		args = append(args, *params.IA)
+		where = append(where, "(isd_id=?) AND (as_id=?)")
+		args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()))
 	}
 	if params.StartsAt != nil {
 		where = append(where, "(starts_at<?)")
@@ -204,8 +208,8 @@ func (e *executor) buildStatisticsQuery(params *StatisticsQuery) (string, []any)
 	query := []string{
 		"SELECT owner_id, bandwidth, price, starts_at, stops_at FROM Assets",
 	}
-	where = append(where, "(ia=?) AND (stops_at > ?) AND (starts_at <= ?)")
-	args = append(args, int64(params.IA), params.WindowStart, params.WindowEnd)
+	where = append(where, "(isd_id=?) AND (as_id=?) AND (stops_at > ?) AND (starts_at <= ?)")
+	args = append(args, args, int64(params.IA.ISD()), int64(params.IA.AS()), params.WindowStart, params.WindowEnd)
 	if params.Ingress != nil {
 		where = append(where, "(ingress=?)")
 		args = append(args, *params.Ingress)
@@ -233,10 +237,13 @@ func (e *executor) Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, 
 		a := &DBAsset{}
 		var startsAtString string
 		var stopsAtString string
-		err = rows.Scan(&a.ID, &a.OwnerId, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+		var isd uint16
+		var as uint64
+		err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 		if err != nil {
 			return nil, serrors.Wrap("Error reading DB response", err)
 		}
+		a.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
 		a.StartAt, err = time.Parse(time.RFC3339, startsAtString)
 		if err != nil {
 			return nil, err
@@ -254,7 +261,7 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 	var args []any
 	where := []string{}
 	query := []string{
-		"SELECT id, owner_id, ia, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets",
+		"SELECT id, owner_id, isd_id, as_id, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets",
 	}
 	where = append(where, "(state = 0)")
 	if params.OwnerId == nil {
@@ -264,8 +271,8 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 		args = append(args, *params.OwnerId)
 	}
 	if params.IA != nil {
-		where = append(where, "(ia=?)")
-		args = append(args, *params.IA)
+		where = append(where, "(isd_id=?) AND (as_id=?)")
+		args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()))
 	}
 	if params.StartsAt != nil {
 		where = append(where, "(starts_at<?)")
@@ -309,7 +316,8 @@ func (e *executor) PrepareCombine(ctx context.Context, id int64, userId int64) (
 	RETURNING
 		id,
 		owner_id,
-		ia,
+		isd_id,
+		as_id,
 		bandwidth,
 		bandwidth_min,
 		price,
@@ -330,10 +338,13 @@ func (e *executor) PrepareCombine(ctx context.Context, id int64, userId int64) (
 	a := &DBAsset{}
 	var startsAtString string
 	var stopsAtString string
-	err = rows.Scan(&a.ID, &a.OwnerId, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	var isd uint16
+	var as uint64
+	err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
+	a.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
 	a.StartAt, err = time.Parse(time.RFC3339, startsAtString)
 	if err != nil {
 		return nil, err
@@ -358,7 +369,8 @@ func (e *executor) PrepareSplit(ctx context.Context, id int64, userId int64) (*D
 	RETURNING
 		id,
 		owner_id,
-		ia,
+		isd_id,
+		as_id,
 		bandwidth,
 		bandwidth_min,
 		price,
@@ -379,10 +391,13 @@ func (e *executor) PrepareSplit(ctx context.Context, id int64, userId int64) (*D
 	a := &DBAsset{}
 	var startsAtString string
 	var stopsAtString string
-	err = rows.Scan(&a.ID, &a.OwnerId, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	var isd uint16
+	var as uint64
+	err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
+	a.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
 	a.StartAt, err = time.Parse(time.RFC3339, startsAtString)
 	if err != nil {
 		return nil, err
@@ -406,7 +421,8 @@ func (e *executor) CheckoutAsset(ctx context.Context, id int64) (*DBAsset, error
 	AND owner_id IS NULL
 	RETURNING
 		id,
-		ia,
+		isd_id,
+		as_id,
 		bandwidth,
 		bandwidth_min,
 		price,
@@ -427,10 +443,13 @@ func (e *executor) CheckoutAsset(ctx context.Context, id int64) (*DBAsset, error
 	a := &DBAsset{}
 	var startsAtString string
 	var stopsAtString string
-	err = rows.Scan(&a.ID, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	var isd uint16
+	var as uint64
+	err = rows.Scan(&a.ID, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
+	a.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
 	a.StartAt, err = time.Parse(time.RFC3339, startsAtString)
 	if err != nil {
 		return nil, err
@@ -472,7 +491,8 @@ func (e *executor) PrepareRedemption(ctx context.Context, user_id int64, id int6
 	AND owner_id = ?
 	RETURNING
 		id,
-		ia,
+		isd_id,
+		as_id,
 		bandwidth,
 		bandwidth_min,
 		price,
@@ -493,10 +513,13 @@ func (e *executor) PrepareRedemption(ctx context.Context, user_id int64, id int6
 	a := &DBAsset{}
 	var startsAtString string
 	var stopsAtString string
-	err = rows.Scan(&a.ID, &a.IA, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	var isd uint16
+	var as uint64
+	err = rows.Scan(&a.ID, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
+	a.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
 	a.StartAt, err = time.Parse(time.RFC3339, startsAtString)
 	if err != nil {
 		return nil, err
@@ -512,9 +535,9 @@ func (e *executor) InsertReservation(ctx context.Context, r *DBReservation) (int
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	q := `INSERT INTO Reservations (id, ia, ingress, egress, bandwidth, starts_at, stops_at, key, owner_id)
-		VALUES(?,?,?,?,?,?,?,?,?)`
-	res, err := e.write.ExecContext(ctx, q, r.ID, r.IA, r.Ingress, r.Egress, r.Bandwidth,
+	q := `INSERT INTO Reservations (id, isd_id, as_id, ingress, egress, bandwidth, starts_at, stops_at, key, owner_id)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`
+	res, err := e.write.ExecContext(ctx, q, r.ID, r.IA.ISD(), r.IA.AS(), r.Ingress, r.Egress, r.Bandwidth,
 		r.StartsAt.UTC().Format(time.RFC3339), r.StopsAt.UTC().Format(time.RFC3339),
 		r.Key, r.OwnerId)
 	if err != nil {
@@ -530,16 +553,16 @@ func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
 	var res sql.Result
 	var err error
 	if a.OwnerId.Valid {
-		inst := `INSERT INTO Assets (ia, bandwidth, bandwidth_min, price, time_granularity,
+		inst := `INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, price, time_granularity,
 	time_min_duration, starts_at, stops_at, ingress, egress, owner_id)
-	VALUES(?,?,?,?,?,?,?,?,?,?,?)`
-		res, err = e.write.ExecContext(ctx, inst, a.IA, a.Bandwidth, a.BandwidthMin, a.Price, a.TimeGranularity,
+	VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`
+		res, err = e.write.ExecContext(ctx, inst, a.IA.ISD(), a.IA.AS(), a.Bandwidth, a.BandwidthMin, a.Price, a.TimeGranularity,
 			a.TimeMinDuration, a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.IfIdIngress, a.IfIdEgress, a.OwnerId.Int64)
 	} else {
-		inst := `INSERT INTO Assets (ia, bandwidth, bandwidth_min, price, time_granularity,
+		inst := `INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, price, time_granularity,
 	time_min_duration, starts_at, stops_at, ingress, egress)
-	VALUES(?,?,?,?,?,?,?,?,?,?)`
-		res, err = e.write.ExecContext(ctx, inst, a.IA, a.Bandwidth, a.BandwidthMin, a.Price, a.TimeGranularity,
+	VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+		res, err = e.write.ExecContext(ctx, inst, a.IA.ISD(), a.IA.AS(), a.Bandwidth, a.BandwidthMin, a.Price, a.TimeGranularity,
 			a.TimeMinDuration, a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.IfIdIngress, a.IfIdEgress)
 	}
 	if err != nil {
@@ -615,20 +638,20 @@ func (e *executor) CreateASUser(ctx context.Context, user *DBASUser) (int64, err
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	inst := `INSERT INTO Ases (ia) VALUES(?) ON CONFLICT(ia) DO NOTHING`
-	res, err := e.write.ExecContext(ctx, inst, user.IA)
+	inst := `INSERT INTO Ases (isd_id, as_id) VALUES(?,?) ON CONFLICT DO NOTHING`
+	res, err := e.write.ExecContext(ctx, inst, user.IA.ISD(), user.IA.AS())
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-func (e *executor) GetASUser(ctx context.Context, ia uint64) (*DBASUser, error) {
+func (e *executor) GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error) {
 	if e.read == nil {
 		return nil, serrors.New("No database open")
 	}
-	q := `SELECT ia FROM Ases WHERE ia=?`
-	rows, err := e.read.QueryContext(ctx, q, ia)
+	q := `SELECT isd_id, as_id FROM Ases WHERE isd_id=? AND as_id=?`
+	rows, err := e.read.QueryContext(ctx, q, ia.ISD(), ia.AS())
 	if err != nil {
 		return nil, err
 	}

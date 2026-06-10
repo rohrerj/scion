@@ -67,7 +67,7 @@ func (s *ASAccountManager) RegisterAS(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	_, err = s.store.CreateASUser(ctx, &db.DBASUser{
-		IA: uint64(ia),
+		IA: ia,
 	})
 	if err != nil {
 		fmt.Println(err)
