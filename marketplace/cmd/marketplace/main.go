@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -46,7 +47,6 @@ import (
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
-	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/pkg/snet/squic"
@@ -66,7 +66,7 @@ func main() {
 	application := launcher.Application{
 		ApplicationBase: launcher.ApplicationBase{
 			TOMLConfig: &globalCfg,
-			ShortName:  "SCION Daemon",
+			ShortName:  "Hummingbird Marketplace",
 			Main:       realMain,
 		},
 	}
@@ -80,6 +80,35 @@ func realMain(ctx context.Context) error {
 	})
 	if err != nil {
 		return serrors.Wrap("creating topology loader", err)
+	}
+	var endhostAPI string
+	for _, k := range topo.EndhostAPI() {
+		endhostAPI = k.Url
+		break
+	}
+	shouldRetry := func(e error) bool {
+		if err == nil {
+			return false
+		}
+		fmt.Println("error connecting to endhost API:", err)
+		var connectErr *connect.Error
+		if errors.As(e, &connectErr) {
+			switch connectErr.Code() {
+			case connect.CodeUnavailable:
+				return true
+			}
+		}
+		return false
+	}
+	connector, err := endhost.NewConnector(ctx, endhostAPI, endhost.WithTRCDir(path.Join(globalCfg.General.ConfigDir, "certs")))
+	if err != nil {
+		for i := 0; i < 120 && shouldRetry(err); i++ {
+			time.Sleep(time.Second)
+			connector, err = endhost.NewConnector(ctx, endhostAPI, endhost.WithTRCDir(path.Join(globalCfg.General.ConfigDir, "certs")))
+		}
+		if err != nil {
+			return err
+		}
 	}
 	store, err := marketplacestorage.NewStorage(globalCfg.MarketplaceDB)
 	if err != nil {
@@ -103,23 +132,8 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var endhostAPI string
-	for _, k := range topo.EndhostAPI() {
-		endhostAPI = k.Url
-		break
-	}
-	time.Sleep(5 * time.Second)
-	connector, err := endhost.NewConnector(ctx, endhostAPI, endhost.WithTRCDir(path.Join(globalCfg.General.ConfigDir, "certs")))
-	if err != nil {
-		return err
-	}
-	trustDB = marketplace.FromTrustDB(trustDB, endhostconnect.NewTrustServiceClient(&http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-	}, endhostAPI))
+
+	trustDB = marketplace.FromTrustDB(trustDB, connector.TrustService)
 
 	trustVerifer := trust.NewTLSCryptoVerifier(trustDB)
 

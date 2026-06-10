@@ -11,7 +11,7 @@ No manual step necessary for connectivity. ASes will use their AS certificate to
 Only hardcoded assets are published.
 
 # Connect as an endhost
-1. You need a JWT token, while the topology is running, open in the webbrowser [https://localhost:8889](https://localhost:8889), register using a new user and password. (accounts are in-memory, restarting the topology will delete the account)
+1. You need a JWT token, while the topology is running, open in the webbrowser [https://localhost:8889](https://localhost:8889), login or register using a new user and password.
 2. Click on the "Create new Token" button.
 3. Now run the command `./bin/marketplace_client`
 4. Now you can either connect over SCION or over TCP. The default address for SCION would be: `[1-ff00:0:111,127.0.0.1]:9888`, and the default address for TCP: `https://localhost:8888`.
