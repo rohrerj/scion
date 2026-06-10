@@ -17,15 +17,17 @@ package marketplace
 import (
 	"io"
 
+	marketplacestorage "github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/private/config"
 	"github.com/scionproto/scion/private/env"
 )
 
 type Config struct {
-	General     env.General       `toml:"general,omitempty"`
-	Logging     log.Config        `toml:"log,omitempty"`
-	Marketplace MarketplaceConfig `toml:"marketplace,omitempty"`
+	General       env.General                 `toml:"general,omitempty"`
+	Logging       log.Config                  `toml:"log,omitempty"`
+	Marketplace   MarketplaceConfig           `toml:"marketplace,omitempty"`
+	MarketplaceDB marketplacestorage.DBConfig `toml:"marketplace_db,omitempty"`
 }
 
 func (cfg *Config) InitDefaults() {

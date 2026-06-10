@@ -17,132 +17,17 @@ package marketplace
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"connectrpc.com/connect"
+	"github.com/scionproto/scion/marketplace/db"
+	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
-	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
-	"github.com/scionproto/scion/pkg/scrypto/cppki"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/peer"
 )
 
-type User struct {
-	Username     string
-	Password     string
-	TokenVersion uint64
-	Reservations *[]*Reservation
-	mtx          sync.RWMutex
-	Balance      uint64
-}
-
-func (u *User) AddBalance(b uint64) {
-	u.mtx.Lock()
-	defer u.mtx.Unlock()
-	if u.Balance+b > u.Balance {
-		u.Balance += b
-	}
-}
-
-type ASUser struct {
-	IA           addr.IA
-	TokenVersion uint64
-}
-
-type AccountDB struct {
-	users map[string]*User
-	ases  map[addr.IA]*ASUser
-	mtx   sync.RWMutex
-}
-
-func NewAccountDB() *AccountDB {
-	return &AccountDB{
-		users: make(map[string]*User),
-		ases:  make(map[addr.IA]*ASUser),
-	}
-}
-func (db *AccountDB) GetUser(name string) *User {
-	db.mtx.RLock()
-	defer db.mtx.RUnlock()
-	return db.users[name]
-}
-func (db *AccountDB) GetASUser(ia addr.IA) *ASUser {
-	db.mtx.RLock()
-	defer db.mtx.RUnlock()
-	return db.ases[ia]
-}
-func (db *AccountDB) CreateNonExistingUser(user *User) bool {
-	if user == nil {
-		return false
-	}
-	db.mtx.RLock()
-	if db.users[user.Username] == nil {
-		db.mtx.RUnlock()
-		db.mtx.Lock()
-		defer db.mtx.Unlock()
-		if db.users[user.Username] == nil {
-			db.users[user.Username] = user
-			if user.Reservations == nil {
-				user.Reservations = &[]*Reservation{}
-			}
-			return true
-		}
-	} else {
-		db.mtx.RUnlock()
-	}
-
-	return false
-}
-func (db *AccountDB) CreateNonExistingASUser(user *ASUser) bool {
-	if user == nil {
-		return false
-	}
-	db.mtx.Lock()
-	defer db.mtx.Unlock()
-	if db.ases[user.IA] == nil {
-		db.ases[user.IA] = user
-		return true
-	}
-	return false
-}
-
-func subjectFromCtx(ctx context.Context) (addr.IA, error) {
-	p, ok := peer.FromContext(ctx)
-	if !ok {
-		return 0, connect.NewError(
-			connect.CodeUnauthenticated,
-			fmt.Errorf("missing peer info"),
-		)
-	}
-	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
-	if !ok {
-		return 0, connect.NewError(
-			connect.CodeUnauthenticated,
-			fmt.Errorf("missing TLS info"),
-		)
-	}
-
-	if len(tlsInfo.State.PeerCertificates) == 0 {
-		return 0, connect.NewError(
-			connect.CodeUnauthenticated,
-			fmt.Errorf("missing client certificate"),
-		)
-	}
-
-	ia, err := cppki.ExtractIA(tlsInfo.State.PeerCertificates[0].Subject)
-	if err != nil {
-		return 0, connect.NewError(
-			connect.CodeInvalidArgument,
-			fmt.Errorf("invalid client certificate"),
-		)
-	}
-	return ia, nil
-}
-
 type ASAccountManager struct {
-	db                  *AccountDB
+	store               *storage.MarketplaceStorage
 	registrationService *registration.Service
 }
 
@@ -181,15 +66,12 @@ func (s *ASAccountManager) RegisterAS(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	user := s.db.GetASUser(ia)
-	if user == nil {
-		user = &ASUser{
-			IA:           ia,
-			TokenVersion: 0,
-		}
-		if !s.db.CreateNonExistingASUser(user) {
-			return nil, serrors.New("register failed")
-		}
+	_, err = s.store.CreateASUser(ctx, &db.DBASUser{
+		IA: ia,
+	})
+	if err != nil {
+		fmt.Println(err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	return &connect.Response[hummingbird.RegisterASResponse]{
 		Msg: &hummingbird.RegisterASResponse{
@@ -199,69 +81,21 @@ func (s *ASAccountManager) RegisterAS(ctx context.Context, req *connect.Request[
 	}, nil
 }
 
-func NewASAccountManager(db *AccountDB, regService *registration.Service) *ASAccountManager {
+func NewASAccountManager(store *storage.MarketplaceStorage, regService *registration.Service) *ASAccountManager {
 	return &ASAccountManager{
-		db:                  db,
+		store:               store,
 		registrationService: regService,
 	}
 }
 
-/*
-	func (s *ASTokenManager) IssueJWT(ctx context.Context, req *connect.Request[hummingbird.JWTIssuanceRequest]) (*connect.Response[hummingbird.JWTIssuanceResponse], error) {
-		name, err := subjectFromCtx(ctx)
-		if err != nil {
-			return nil, err
-		}
-		user := s.db.GetASUser(name)
-		if user == nil {
-			user = &ASUser{
-				IA:           name,
-				TokenVersion: 0,
-			}
-			if !s.db.CreateNonExistingASUser(user) {
-				return nil, serrors.New("register failed")
-			}
-		}
-
-		publisherClaims := jwt.MapClaims{
-			"sub":   name.String(),
-			"scope": "AssetPublisher",
-			"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
-			"iat":   time.Now().Unix(),
-			"ver":   user.TokenVersion,
-		}
-		publisherToken, err := s.signer.GenerateToken(publisherClaims)
-		if err != nil {
-			return nil, err
-		}
-		redemptionClaims := jwt.MapClaims{
-			"sub":   name.String(),
-			"scope": "RedemptionService",
-			"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
-			"iat":   time.Now().Unix(),
-			"ver":   user.TokenVersion,
-		}
-		redemptionToken, err := s.signer.GenerateToken(redemptionClaims)
-		if err != nil {
-			return nil, err
-		}
-
-		return &connect.Response[hummingbird.JWTIssuanceResponse]{
-			Msg: &hummingbird.JWTIssuanceResponse{
-				JwtPublisher:  publisherToken,
-				JwtRedemption: redemptionToken,
-			},
-		}, nil
-	}
-*/
 func (s *ASAccountManager) ResetJWT(ctx context.Context, req *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error) {
-	name, err := subjectFromCtx(ctx)
+	/*name, err := subjectFromCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	user := s.db.GetASUser(name)
 	if user != nil {
 		user.TokenVersion++
-	}
+	}*/
 	return &connect.Response[hummingbird.JWTResetResponse]{Msg: &hummingbird.JWTResetResponse{}}, nil
 }

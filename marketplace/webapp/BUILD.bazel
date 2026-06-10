@@ -6,8 +6,10 @@ go_library(
     importpath = "github.com/scionproto/scion/marketplace/webapp",
     visibility = ["//visibility:public"],
     deps = [
-        "//marketplace:go_default_library",
+        "//marketplace/db:go_default_library",
+        "//marketplace/storage:go_default_library",
         "//pkg/hummingbird/registration:go_default_library",
         "@com_github_golang_jwt_jwt//:go_default_library",
+        "@org_golang_x_crypto//bcrypt:go_default_library",
     ],
 )

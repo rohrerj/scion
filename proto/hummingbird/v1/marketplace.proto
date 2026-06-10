@@ -102,40 +102,31 @@ message PublishAssetResponse {
     string asset_id = 1;
 }
 
-enum AssetType {
-    Ingress = 0;
-    Egress = 1;
-    Interface_Pair = 2;
-}
-
 message SearchAssetsRequest {
     bool owned = 1;
     optional uint64 ia = 2;
-    optional AssetType asset_type = 3;
-    optional uint32 if_id_ingress = 4;
-    optional uint32 if_id_egress = 5;
-    optional uint64 min_required_bw = 6;
-    optional google.protobuf.Timestamp starts_at_latest = 7;
-    optional google.protobuf.Timestamp stops_at_earliest = 8;
-    optional uint64 price = 9;
+    optional uint32 if_id_ingress = 3;
+    optional uint32 if_id_egress = 4;
+    optional uint64 min_required_bw = 5;
+    optional google.protobuf.Timestamp starts_at_latest = 6;
+    optional google.protobuf.Timestamp stops_at_earliest = 7;
+    optional uint64 price = 8;
 }
 
 message SearchAssetsResponse {
-    bool owned = 1;
-    repeated Asset assets = 2;
+    repeated Asset assets = 1;
 }
 
 message Asset {
     string asset_id = 1;
     uint64 ia = 2;
-    AssetType asset_type = 3;
-    optional uint32 if_id_ingress = 4;
-    optional uint32 if_id_egress = 5;
-    uint64 bw = 6;
-    google.protobuf.Timestamp starts_at = 7;
-    google.protobuf.Timestamp stops_at = 8;
-    uint64 time_granularity = 9;
-    uint64 price = 10;
+    optional uint32 if_id_ingress = 3;
+    optional uint32 if_id_egress = 4;
+    uint64 bw = 5;
+    google.protobuf.Timestamp starts_at = 6;
+    google.protobuf.Timestamp stops_at = 7;
+    uint64 time_granularity = 8;
+    uint64 price = 9;
 }
 
 message BuyAssetsRequest {
@@ -160,8 +151,8 @@ message BoughtAsset {
 }
 
 message RedeemAssetRequest {
-    string ingress_asset_id = 1;
-    string egress_asset_id = 2;
+    optional string ingress_asset_id = 1;
+    optional string egress_asset_id = 2;
     optional string if_pair_asset_id = 3;
 }
 

@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package marketplace
+package storage
 
 import (
 	"fmt"
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/scionproto/scion/marketplace/db"
 )
 
 type RequestedSplit struct {
@@ -46,7 +48,7 @@ func overlaps(segFrom time.Time, segTo time.Time, req RequestedSplit) bool {
 	return segFrom.Before(req.ExactTo) && segTo.After(req.ExactFrom)
 }
 
-func validateAsset(asset *Asset) error {
+func validateAsset(asset *db.DBAsset) error {
 	if !asset.StartAt.Before(asset.StopsAt) {
 		return fmt.Errorf("invalid asset range")
 	}
@@ -85,7 +87,7 @@ func validateAsset(asset *Asset) error {
 	return nil
 }
 
-func validatePurchase(asset *Asset, p RequestedSplit) error {
+func validatePurchase(asset *db.DBAsset, p RequestedSplit) error {
 	if p.ExactFrom.Before(asset.StartAt) || p.ExactTo.After(asset.StopsAt) {
 		return fmt.Errorf("purchase outside asset bounds")
 	}
@@ -115,7 +117,7 @@ func validatePurchase(asset *Asset, p RequestedSplit) error {
 	return nil
 }
 
-func isInvalidDerivedSegment(asset *Asset, s AssetSegment) bool {
+func isInvalidDerivedSegment(asset *db.DBAsset, s AssetSegment) bool {
 	duration := int64(s.StopAt.Sub(s.StartAt).Seconds())
 	if s.Bandwidth < asset.BandwidthMin {
 		return true
@@ -192,7 +194,7 @@ func mergeAdjacent(
 }
 
 func SplitAsset(
-	asset *Asset,
+	asset *db.DBAsset,
 	purchases []RequestedSplit,
 ) (*SplitResult, error) {
 

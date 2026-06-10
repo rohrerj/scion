@@ -1,0 +1,29 @@
+load("@rules_go//go:def.bzl", "go_library")
+load("//tools:go.bzl", "go_test")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "split.go",
+        "storage.go",
+    ],
+    importpath = "github.com/scionproto/scion/marketplace/storage",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//marketplace/db:go_default_library",
+        "//pkg/private/serrors:go_default_library",
+        "//pkg/proto/hummingbird:go_default_library",
+        "//private/config:go_default_library",
+        "//private/storage/db:go_default_library",
+    ],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = ["split_test.go"],
+    embed = [":go_default_library"],
+    deps = [
+        "//marketplace/db:go_default_library",
+        "@com_github_stretchr_testify//assert:go_default_library",
+    ],
+)
