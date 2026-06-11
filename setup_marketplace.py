@@ -39,7 +39,6 @@ level = "debug"
 [marketplace]
 api_addr = "localhost:8888"
 scion_api_addr = "localhost:9888"
-account_addr = "localhost:8889"
 
 [marketplace_db]
 connection = "gen-cache/marketplace.db"

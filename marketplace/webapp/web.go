@@ -243,7 +243,7 @@ func (h *Handler) createToken(user string) (string, error) {
 	claims := jwt.MapClaims{
 		"sub":   user,
 		"scope": "User",
-		"exp":   time.Now().Add(time.Hour).Unix(),
+		"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
 		"iat":   time.Now().Unix(),
 		//"ver":   user.TokenVersion,
 	}

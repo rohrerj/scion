@@ -412,7 +412,10 @@ func handlePublish(ctx context.Context, reader *bufio.Reader, c hummingbirdconne
 	price := readUint64(reader, "price per kbit per second: ")
 	bandwidthMin := readUint64(reader, "minimum bandwidth: ")
 	timeMinDuration := readUint64(reader, "minimum time duration: ")
-	timeGranularity := readUint64(reader, "time granularity")
+	timeGranularity := readUint64(reader, "time granularity: ")
+	if !readConfirm(reader) {
+		return
+	}
 	resp, err := c.PublishAsset(ctx, &connect.Request[hummingbird.PublishAssetRequest]{
 		Msg: &hummingbird.PublishAssetRequest{
 			IfIdIngress:     ingress,
@@ -432,17 +435,36 @@ func handlePublish(ctx context.Context, reader *bufio.Reader, c hummingbirdconne
 	}
 	fmt.Printf("Published asset ID %s\n", resp.Msg.AssetId)
 }
+
+func ceilDuration(base time.Duration, multiple time.Duration) time.Duration {
+	truncated := base.Truncate(multiple)
+	if truncated == base {
+		return base
+	}
+	return truncated + multiple
+}
+func ceilTime(base time.Time, multiple time.Duration) time.Time {
+	truncated := base.Truncate(multiple)
+	if truncated.Equal(base) {
+		return base
+	}
+	return truncated.Add(multiple)
+}
+
 func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	infoRep, err := c.Info(ctx, &connect.Request[hummingbird.MarketplaceInfoRequest]{})
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	startsAt := readTime(reader, "Starts at (2006-01-02T15:04:05): ").Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity) * time.Second)
-	stopsAt := readTime(reader, "Stops at (2006-01-02T15:04:05): ").Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity) * time.Second)
+	startsAt := readTime(reader, "Starts at (2006-01-02T15:04:05): ").UTC().Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity))
+	stopsAt := ceilTime(readTime(reader, "Stops at (2006-01-02T15:04:05): ").UTC(), time.Duration(infoRep.Msg.MaxStatisticsGranularity))
 	stepSize := readUint64(reader, "Step size: ")
 	ingress := readOptionalUint32(reader, "Ingress: ")
 	egress := readOptionalUint32(reader, "Egress: ")
+	if !readConfirm(reader) {
+		return
+	}
 	resp, err := c.Statistics(ctx, &connect.Request[hummingbird.StatisticsRequest]{
 		Msg: &hummingbird.StatisticsRequest{
 			Start:       timestamppb.New(startsAt),
@@ -456,8 +478,7 @@ func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdco
 		fmt.Println(err)
 		return
 	}
-	step := time.Duration(stepSize) * time.Second
-	step.Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity) * time.Second)
+	step := ceilDuration(time.Duration(stepSize)*time.Second, time.Duration(infoRep.Msg.MaxStatisticsGranularity))
 	for i, stat := range resp.Msg.Statistics {
 		intervalStart := startsAt.Add(time.Duration(i) * step)
 		intervalEnd := intervalStart.Add(step)
@@ -491,6 +512,9 @@ func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect
 		fmt.Println("invalid split option.")
 		return
 	}
+	if !readConfirm(reader) {
+		return
+	}
 	resp, err := c.SplitAsset(ctx, &connect.Request[hummingbird.SplitAssetRequest]{
 		Msg: req,
 	})
@@ -504,6 +528,9 @@ func handleCombine(ctx context.Context, reader *bufio.Reader, c hummingbirdconne
 	fmt.Println("Handle combine assets query.")
 	asset1 := readString(reader, "asset 1: ")
 	asset2 := readString(reader, "asset 2: ")
+	if !readConfirm(reader) {
+		return
+	}
 	resp, err := c.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
 		Msg: &hummingbird.CombineAssetRequest{
 			AssetId_1: asset1,
@@ -542,6 +569,9 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 	}
 	if stopsAt != nil {
 		req.StopsAt = timestamppb.New(*stopsAt)
+	}
+	if !readConfirm(reader) {
+		return
 	}
 	rep, err := c.FetchReservations(ctx, &connect.Request[hummingbird.FetchReservationsRequest]{
 		Msg: req,
@@ -591,9 +621,7 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 	} else if *option == 0 {
 		ingressAssetID := readString(reader, "Ingress Asset ID: ")
 		egressAssetID := readString(reader, "Egress Asset ID: ")
-		b := readOptionalBool(reader, "Confirm redemption? [true,false]: ")
-		if b != nil && *b == false {
-			fmt.Println("cancel redemption")
+		if !readConfirm(reader) {
 			return
 		}
 		rep, err = c.RedeemAsset(ctx, &connect.Request[hummingbird.RedeemAssetRequest]{
@@ -604,9 +632,7 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 		})
 	} else if *option == 1 {
 		assetID := readString(reader, "Interface-pair Asset ID: ")
-		b := readOptionalBool(reader, "Confirm redemption? [true,false]: ")
-		if b != nil && *b == false {
-			fmt.Println("cancel redemption")
+		if !readConfirm(reader) {
 			return
 		}
 		rep, err = c.RedeemAsset(ctx, &connect.Request[hummingbird.RedeemAssetRequest]{
@@ -667,6 +693,9 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 			}
 		case option == "submit":
 			maxPrice := readUint64(reader, "Max Price: ")
+			if !readConfirm(reader) {
+				continue
+			}
 			rep, err := c.BuyAssets(ctx, &connect.Request[hummingbird.BuyAssetsRequest]{
 				Msg: &hummingbird.BuyAssetsRequest{
 					Assets:   buyAssets,
@@ -766,6 +795,17 @@ func handleInfo(ctx context.Context, c hummingbirdconnect.MarketplaceServiceClie
 		return
 	}
 	fmt.Printf("Version: %d.%d, Currency: %s\n", info.Msg.ApiMajorVersion, info.Msg.ApiMinorVersion, info.Msg.Currency)
+}
+
+func readConfirm(reader *bufio.Reader) bool {
+	fmt.Print("Confirm [yes,no]: ")
+	text, _ := reader.ReadString('\n')
+	text = strings.TrimSpace(text)
+	text = strings.ToLower(text)
+	if text == "yes" {
+		return true
+	}
+	return false
 }
 
 func readUint64(reader *bufio.Reader, prompt string) uint64 {

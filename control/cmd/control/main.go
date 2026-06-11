@@ -20,7 +20,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -42,7 +41,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cs "github.com/scionproto/scion/control"
 	"github.com/scionproto/scion/control/beacon"
@@ -84,7 +82,6 @@ import (
 	dpb "github.com/scionproto/scion/pkg/proto/discovery"
 	dconnect "github.com/scionproto/scion/pkg/proto/discovery/v1/discoveryconnect"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
-	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	discoveryext "github.com/scionproto/scion/pkg/segment/extensions/discovery"
@@ -1166,99 +1163,33 @@ func realMain(ctx context.Context) error {
 		<-errCtx.Done()
 		return cleanup.Do()
 	})
-	publisherToken := &marketplace.JwtToken{}
-	redemptionToken := &marketplace.JwtToken{}
+	if globalCfg.Marketplace.MarketplaceApi != "" {
+		publisherToken := &marketplace.JwtToken{}
+		redemptionToken := &marketplace.JwtToken{}
 
-	g.Go(func() error {
-		defer log.HandlePanic()
-		tlsCertLoader := cs.NewTLSCertificateLoader(
-			topo.IA(), x509.ExtKeyUsageClientAuth, trustDB, globalCfg.General.ConfigDir,
-		)
-		tokenRenewer := marketplace.NewTokenRenwer(globalCfg.Marketplace.AccountApi, topo.IA(), tlsCertLoader, publisherToken, redemptionToken)
-		return tokenRenewer.InitTokenRenewer()
-	})
+		g.Go(func() error {
+			defer log.HandlePanic()
+			tlsCertLoader := cs.NewTLSCertificateLoader(
+				topo.IA(), x509.ExtKeyUsageClientAuth, trustDB, globalCfg.General.ConfigDir,
+			)
+			tokenRenewer := marketplace.NewTokenRenwer(globalCfg.Marketplace.MarketplaceApi, topo.IA(), tlsCertLoader, publisherToken, redemptionToken)
+			return tokenRenewer.InitTokenRenewer()
+		})
 
-	g.Go(func() error {
-		defer log.HandlePanic()
-		redemptionClient := marketplace.RedemptionClient{
-			MarketplaceUrl: globalCfg.Marketplace.MarketplaceApi,
-			IA:             topo.IA(),
-			Token:          redemptionToken,
-		}
-		if err := redemptionClient.Init(); err != nil {
-			log.Error("redemtpion service", "err", err)
-			return err
-		}
-		return nil
-	})
-	g.Go(func() error {
-		defer log.HandlePanic()
-		assetPublisher := marketplace.PublishAssetsClient{
-			MarketplaceUrl: globalCfg.Marketplace.MarketplaceApi,
-			IA:             topo.IA(),
-			Token:          publisherToken,
-		}
-		ifids := topo.IfIDs()
-		assets := []*hummingbird.PublishAssetRequest{}
-		if len(ifids) > 1 {
-			for _, ifid := range ifids {
-				ifidUint32 := uint32(ifid)
-				assets = append(assets, &hummingbird.PublishAssetRequest{
-					Bandwidth:       10000000,
-					BandwidthMin:    100,
-					StartsAt:        timestamppb.New(time.Now()),
-					StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24 * 7)),
-					Price:           1,
-					TimeGranularity: 1,
-					TimeMinDuration: 1,
-					IfIdIngress:     &ifidUint32,
-					IfIdEgress:      nil,
-				})
-				assets = append(assets, &hummingbird.PublishAssetRequest{
-					Bandwidth:       10000000,
-					BandwidthMin:    100,
-					StartsAt:        timestamppb.New(time.Now()),
-					StopsAt:         timestamppb.New(time.Now().Add(time.Hour * 24 * 7)),
-					Price:           2,
-					TimeGranularity: 1,
-					TimeMinDuration: 1,
-					IfIdIngress:     nil,
-					IfIdEgress:      &ifidUint32,
-				})
+		g.Go(func() error {
+			defer log.HandlePanic()
+			redemptionClient := marketplace.RedemptionClient{
+				MarketplaceUrl: globalCfg.Marketplace.MarketplaceApi,
+				IA:             topo.IA(),
+				Token:          redemptionToken,
 			}
-		}
-		for _, asset := range assets {
-			for {
-				_, err := assetPublisher.Publish(ctx, asset)
-				if err != nil {
-					log.Error("error publishing asset", "err", err)
-					time.Sleep(time.Second)
-					continue
-				}
-				break
+			if err := redemptionClient.Init(); err != nil {
+				log.Error("redemption service", "err", err)
+				return err
 			}
-		}
-		for {
-			start := time.Now()
-			stop := start.Add(time.Minute)
-			stat, err := assetPublisher.FetchStatistics(ctx, &hummingbird.StatisticsRequest{
-				Start: timestamppb.New(start),
-				End:   timestamppb.New(stop),
-				Step:  10,
-			})
-			if err != nil {
-				log.Error("error fetching statistics", "err", err)
-			} else {
-				fmt.Println("Statistics:")
-				for i, stat := range stat.Statistics {
-					fmt.Printf("index: %d, Revenue: %d, Utilization %f\n", i, stat.Revenue, stat.BandwidthUtilization)
-				}
-			}
-
-			time.Sleep(time.Minute * 1)
-		}
-	})
-
+			return nil
+		})
+	}
 	return g.Wait()
 }
 

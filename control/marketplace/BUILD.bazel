@@ -5,7 +5,6 @@ go_library(
     srcs = [
         "auth.go",
         "config.go",
-        "publisher.go",
         "redemption_service.go",
         "token_renewer.go",
     ],

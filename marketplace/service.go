@@ -228,6 +228,9 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 		IfIdIngress:     sql.NullInt64{},
 		IfIdEgress:      sql.NullInt64{},
 	}
+	if !dbAsset.StopsAt.After(dbAsset.StartAt) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("stopsAt must come after startsAt"))
+	}
 	if req.Msg.IfIdIngress != nil {
 		dbAsset.IfIdIngress.Int64 = int64(*req.Msg.IfIdIngress)
 		dbAsset.IfIdIngress.Valid = true
@@ -350,17 +353,35 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	}
 }
 
+func ceilDuration(base time.Duration, multiple time.Duration) time.Duration {
+	truncated := base.Truncate(multiple)
+	if truncated == base {
+		return base
+	}
+	return truncated + multiple
+}
+func ceilTime(base time.Time, multiple time.Duration) time.Time {
+	truncated := base.Truncate(multiple)
+	if truncated.Equal(base) {
+		return base
+	}
+	return truncated.Add(multiple)
+}
+
 func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error) {
 	fmt.Println("Statistics")
 	ia, ok := ctx.Value("user").(addr.IA)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
 	}
-	step := time.Duration(req.Msg.Step) * time.Second
-	step.Truncate(s.info.StatisticsTimeGranularity)
+	step := ceilDuration(time.Duration(req.Msg.Step)*time.Second, s.info.StatisticsTimeGranularity)
 	windowStart := req.Msg.Start.AsTime().UTC().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
-	windowEnd := req.Msg.End.AsTime().UTC().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
+	windowEnd := ceilTime(req.Msg.End.AsTime().UTC(), time.Duration(s.info.StatisticsTimeGranularity))
 	num_intervals := int(windowEnd.Sub(windowStart) / step)
+	fmt.Println(step, windowStart, windowEnd)
+	if num_intervals > 1024 {
+		return nil, connect.NewError(connect.CodeResourceExhausted, serrors.New("too many intervals"))
+	}
 	income := make([]uint64, num_intervals)
 	bwBought := make([]uint64, num_intervals)
 	bwListed := make([]uint64, num_intervals)

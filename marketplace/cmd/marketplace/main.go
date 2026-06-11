@@ -162,50 +162,19 @@ func realMain(ctx context.Context) error {
 	regService := registration.NewService(connector, trustDB, jwtSigner)
 	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(marketplace.NewASAccountManager(store, regService), connect.WithInterceptors(marketplace.ASAccountManagerInterceptor()))
 
-	accountMux := http.NewServeMux()
-	webapp.Init(jwtSigner, store, accountMux)
-	accountMux.Handle(accountPath, libconnect.AttachPeer(accountHandler))
+	webapp.Init(jwtSigner, store, mux)
+	mux.Handle(accountPath, accountHandler)
 
-	accountServer := &http.Server{
-		Addr:    globalCfg.Marketplace.AccountAddr,
-		Handler: accountMux,
-		TLSConfig: &tls.Config{
-			//ClientAuth:   tls.RequestClientCert,
-			Certificates: []tls.Certificate{cert},
-			/*VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-				if len(rawCerts) == 0 {
-					return nil
-				}
-				return trustVerifer.VerifyClientCertificate(rawCerts, verifiedChains)
-			},*/
-		},
-	}
 	g := &errgroup.Group{}
 	g.Go(func() error {
 		return server.ListenAndServeTLS("", "")
 	})
-	g.Go(func() error {
-		return accountServer.ListenAndServeTLS("", "")
-	})
-	log.Info(fmt.Sprintf("HTTPS server running on %s and account management on %s\n", globalCfg.Marketplace.APIAddr, globalCfg.Marketplace.AccountAddr))
-	err = func() error {
-		if globalCfg.Marketplace.SCIONAPIAddr != "" {
-			err = StartSCIONServer(ctx, connector.Topology, topo.MTU(), globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux)
-			if err != nil {
-				return err
-			}
+	log.Info(fmt.Sprintf("HTTPS server running on %s\n", globalCfg.Marketplace.APIAddr))
+	if globalCfg.Marketplace.SCIONAPIAddr != "" {
+		err = StartSCIONServer(ctx, connector.Topology, topo.MTU(), globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux)
+		if err != nil {
+			return err
 		}
-		if globalCfg.Marketplace.SCIONAccountAddr != "" {
-			// TODO: this part does not fully work yet, investigate what additional changes are necessary
-			err = StartSCIONServer(ctx, connector.Topology, topo.MTU(), globalCfg.Marketplace.SCIONAccountAddr, g, trustVerifer, &cert, accountMux)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}()
-	if err != nil {
-		log.Error("Error starting SCION server", "err", err)
 	}
 
 	g.Wait()
