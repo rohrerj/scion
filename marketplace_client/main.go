@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -30,10 +31,12 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/golang-jwt/jwt"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/pkg/addr"
 	libconnect "github.com/scionproto/scion/pkg/connect"
 	"github.com/scionproto/scion/pkg/endhost"
+	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
@@ -46,6 +49,14 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+type jwtType int
+
+const (
+	User jwtType = iota
+	Publisher
+	RedemptionService
+)
+
 func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
@@ -54,14 +65,20 @@ func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
 		}
 	}
 }
-func printOptions() {
+func printOptions(t jwtType) {
 	fmt.Println("-> info")
-	fmt.Println("-> search")
-	fmt.Println("-> buy")
-	fmt.Println("-> split")
-	fmt.Println("-> combine")
-	fmt.Println("-> redeem")
-	fmt.Println("-> reservation")
+	switch t {
+	case User:
+		fmt.Println("-> search")
+		fmt.Println("-> buy")
+		fmt.Println("-> split")
+		fmt.Println("-> combine")
+		fmt.Println("-> redeem")
+		fmt.Println("-> reservation")
+	case Publisher:
+		fmt.Println("-> publish")
+		fmt.Println("-> statistics")
+	}
 	fmt.Println("-> exit")
 }
 
@@ -222,6 +239,46 @@ func discoverMarketplaces(ctx context.Context, reader *bufio.Reader, endhostApi 
 	return &marketplaces[index], nil
 }
 
+func tokenType(tokenStr string) (string, jwtType, error) {
+	parseScopes := func(scopeStr string) map[string]bool {
+		scopes := make(map[string]bool)
+		for s := range strings.SplitSeq(scopeStr, ",") {
+			if s != "" {
+				scopes[s] = true
+			}
+		}
+		return scopes
+	}
+	parser := jwt.Parser{}
+	publisherClaims := jwt.MapClaims{}
+	token, _, err := parser.ParseUnverified(tokenStr, publisherClaims)
+	if err != nil {
+		return "", 0, err
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", 0, serrors.New("invalid claims")
+	}
+
+	user, ok := claims["sub"].(string)
+	if !ok || user == "" {
+		return "", 0, serrors.New("missing subject")
+	}
+	scopeStr, ok := claims["scope"].(string)
+	if !ok || scopeStr == "" {
+		return "", 0, serrors.New("missing scope")
+	}
+	scopes := parseScopes(scopeStr)
+	if scopes[registration.ScopeUser] {
+		return user, User, nil
+	} else if scopes[registration.ScopeAssetPublisher] {
+		return user, Publisher, nil
+	} else {
+		return "", 0, serrors.New("unsupported JWT")
+	}
+}
+
 func userInteraction() {
 	ctx := context.Background()
 	reader := bufio.NewReader(os.Stdin)
@@ -261,7 +318,7 @@ func userInteraction() {
 			Host: net.UDPAddrFromAddrPort(netip.AddrPortFrom(scionAddr.Host.IP(), port)),
 		}
 		if endhostApi == "" {
-			endhostApi := readString(reader, "endhostAPI: ")
+			endhostApi = readString(reader, "endhostAPI: ")
 			if endhostApi == "" {
 				fmt.Println("invalid endhost API")
 				return
@@ -274,17 +331,28 @@ func userInteraction() {
 		}
 		fmt.Println("use SCION connection")
 	} else {
-		client = hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true,
+		if insecure {
+			client = hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true,
+					},
 				},
-			},
-		}, url, connect.WithInterceptors(authInterceptor(token)))
+			}, url, connect.WithInterceptors(authInterceptor(token)))
+		} else {
+			client = hummingbirdconnect.NewMarketplaceServiceClient(http.DefaultClient,
+				url, connect.WithInterceptors(authInterceptor(token)))
+		}
+
 		fmt.Println("use TCP connection")
 	}
+	username, t, err := tokenType(token)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Printf("Logged in as %s\n", username)
 	for {
-		printOptions()
+		printOptions(t)
 		option, err := reader.ReadString('\n')
 		option = strings.TrimSpace(option)
 		if err != nil {
@@ -306,10 +374,95 @@ func userInteraction() {
 			handleRedeem(ctx, reader, client)
 		case option == "reservation":
 			handleReservation(ctx, reader, client)
+		case option == "publish":
+			handlePublish(ctx, reader, client)
+		case option == "statistics":
+			handleStatistics(ctx, reader, client)
 		case option == "exit":
 			return
 		}
 		fmt.Println("----------")
+	}
+}
+func handlePublish(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	fmt.Println("Handle publish asset query.")
+	option := readOptionalUint32(reader, "Select option:\n0: ingress asset\n1: egress asset\n2: interface-pair asset:\n")
+	var ingress *uint32
+	var egress *uint32
+	if option == nil {
+		return
+	} else if *option == 0 {
+		tmp := uint32(readUint64(reader, "ingress: "))
+		ingress = &tmp
+	} else if *option == 1 {
+		tmp := uint32(readUint64(reader, "egress: "))
+		egress = &tmp
+	} else if *option == 2 {
+		tmp1 := uint32(readUint64(reader, "ingress: "))
+		ingress = &tmp1
+		tmp2 := uint32(readUint64(reader, "egress: "))
+		egress = &tmp2
+	} else {
+		fmt.Println("invalid option")
+		return
+	}
+	bandwidth := readUint64(reader, "bandwidth: ")
+	startsAt := readTime(reader, "Starts at (2006-01-02T15:04:05): ")
+	stopsAt := readTime(reader, "Stops at (2006-01-02T15:04:05): ")
+	price := readUint64(reader, "price per kbit per second: ")
+	bandwidthMin := readUint64(reader, "minimum bandwidth: ")
+	timeMinDuration := readUint64(reader, "minimum time duration: ")
+	timeGranularity := readUint64(reader, "time granularity")
+	resp, err := c.PublishAsset(ctx, &connect.Request[hummingbird.PublishAssetRequest]{
+		Msg: &hummingbird.PublishAssetRequest{
+			IfIdIngress:     ingress,
+			IfIdEgress:      egress,
+			Bandwidth:       bandwidth,
+			BandwidthMin:    bandwidthMin,
+			StartsAt:        timestamppb.New(startsAt),
+			StopsAt:         timestamppb.New(stopsAt),
+			Price:           price,
+			TimeMinDuration: timeMinDuration,
+			TimeGranularity: timeGranularity,
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("Published asset ID %s\n", resp.Msg.AssetId)
+}
+func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	infoRep, err := c.Info(ctx, &connect.Request[hummingbird.MarketplaceInfoRequest]{})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	startsAt := readTime(reader, "Starts at (2006-01-02T15:04:05): ").Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity) * time.Second)
+	stopsAt := readTime(reader, "Stops at (2006-01-02T15:04:05): ").Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity) * time.Second)
+	stepSize := readUint64(reader, "Step size: ")
+	ingress := readOptionalUint32(reader, "Ingress: ")
+	egress := readOptionalUint32(reader, "Egress: ")
+	resp, err := c.Statistics(ctx, &connect.Request[hummingbird.StatisticsRequest]{
+		Msg: &hummingbird.StatisticsRequest{
+			Start:       timestamppb.New(startsAt),
+			End:         timestamppb.New(stopsAt),
+			Step:        stepSize,
+			IfIdIngress: ingress,
+			IfIdEgress:  egress,
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	step := time.Duration(stepSize) * time.Second
+	step.Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity) * time.Second)
+	for i, stat := range resp.Msg.Statistics {
+		intervalStart := startsAt.Add(time.Duration(i) * step)
+		intervalEnd := intervalStart.Add(step)
+		fmt.Printf("[%s - %s], Revenue: %d, Utilization %f\n", intervalStart.Format(time.RFC3339),
+			intervalEnd.Format(time.RFC3339), stat.Revenue, stat.BandwidthUtilization)
 	}
 }
 func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
@@ -615,8 +768,6 @@ func handleInfo(ctx context.Context, c hummingbirdconnect.MarketplaceServiceClie
 	fmt.Printf("Version: %d.%d, Currency: %s\n", info.Msg.ApiMajorVersion, info.Msg.ApiMinorVersion, info.Msg.Currency)
 }
 
-type AssetType string
-
 func readUint64(reader *bufio.Reader, prompt string) uint64 {
 	fmt.Print(prompt)
 
@@ -771,7 +922,11 @@ func readOptionalTime(reader *bufio.Reader, prompt string) *time.Time {
 	return &t
 }
 
+var insecure bool
+
 func main() {
+	flag.BoolVar(&insecure, "insecure", false, "indicates whether TLS insecure skip verify should be applied")
+	flag.Parse()
 	userInteraction()
 }
 

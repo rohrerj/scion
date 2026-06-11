@@ -209,7 +209,7 @@ func (e *executor) buildStatisticsQuery(params *StatisticsQuery) (string, []any)
 		"SELECT owner_id, bandwidth, price, starts_at, stops_at FROM Assets",
 	}
 	where = append(where, "(isd_id=?) AND (as_id=?) AND (stops_at > ?) AND (starts_at <= ?)")
-	args = append(args, args, int64(params.IA.ISD()), int64(params.IA.AS()), params.WindowStart, params.WindowEnd)
+	args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()), params.WindowStart, params.WindowEnd)
 	if params.Ingress != nil {
 		where = append(where, "(ingress=?)")
 		args = append(args, *params.Ingress)

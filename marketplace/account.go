@@ -23,6 +23,7 @@ import (
 	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
+	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 )
 
@@ -61,7 +62,11 @@ func (s *ASAccountManager) CreateChallenge(ctx context.Context, req *connect.Req
 }
 
 func (s *ASAccountManager) RegisterAS(ctx context.Context, req *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error) {
-	authority := ctx.Value("authority").(string)
+	authority, ok := ctx.Value("authority").(string)
+	if !ok || authority == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("Request must provide HTTP Host or HTTP2 :authority header"))
+	}
+	fmt.Println("Register AS", "Authority", authority)
 	publisherToken, redemptionToken, ia, err := s.registrationService.RegisterAS(ctx, req.Msg.Id, req.Msg.SignedChallenge, authority)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
