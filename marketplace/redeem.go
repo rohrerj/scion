@@ -16,24 +16,24 @@ package marketplace
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"sync"
+	"time"
 
 	"connectrpc.com/connect"
+	redemption "github.com/scionproto/scion/marketplace/redemption_service"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 )
 
 func (s *Service) newRedemptionServerPeer(ia addr.IA) *RedemptionServerPeer {
-	if s.redemptionServerPeers == nil {
-		s.redemptionServerPeers = make(map[addr.IA]*RedemptionServerPeer)
-	}
 	peer := &RedemptionServerPeer{
 		ia:      ia,
-		sendCh:  make(chan *hummingbird.RedeemAssetFromASRequest),
-		recvCh:  make(chan *hummingbird.RedeemAssetFromASResponse),
+		sendCh:  make(chan *hummingbird.RedeemAssetFromASRequest, 64),
 		pending: make(map[uint64]chan *hummingbird.RedeemAssetFromASResponse),
 	}
 	s.redemptionServerPeers[ia] = peer
@@ -41,23 +41,23 @@ func (s *Service) newRedemptionServerPeer(ia addr.IA) *RedemptionServerPeer {
 }
 
 type RedemptionServerPeer struct {
-	ia     addr.IA
-	sendCh chan *hummingbird.RedeemAssetFromASRequest
-	recvCh chan *hummingbird.RedeemAssetFromASResponse
-
-	pending   map[uint64]chan *hummingbird.RedeemAssetFromASResponse
-	requestID uint64
-	mu        sync.Mutex
+	delegatedServer      *redemption.RedemptionService
+	delegationExpiration time.Time
+	ia                   addr.IA
+	sendCh               chan *hummingbird.RedeemAssetFromASRequest
+	pending              map[uint64]chan *hummingbird.RedeemAssetFromASResponse
+	requestID            uint64
+	mtx                  sync.Mutex
 }
 
 func (c *RedemptionServerPeer) Send(req *hummingbird.RedeemAssetFromASRequest) <-chan *hummingbird.RedeemAssetFromASResponse {
 	respCh := make(chan *hummingbird.RedeemAssetFromASResponse, 1)
 
-	c.mu.Lock()
+	c.mtx.Lock()
 	req.RequestId = c.requestID
 	c.requestID++
 	c.pending[req.RequestId] = respCh
-	c.mu.Unlock()
+	c.mtx.Unlock()
 
 	c.sendCh <- req
 
@@ -65,7 +65,54 @@ func (c *RedemptionServerPeer) Send(req *hummingbird.RedeemAssetFromASRequest) <
 }
 
 func (s *Service) DelegateRedemption(ctx context.Context, req *connect.Request[hummingbird.DelegateRedemptionRequest]) (*connect.Response[hummingbird.DelegateRedemptionResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, serrors.New("Not implemented"))
+	fmt.Println("DelegateRedemption")
+	clientID, ok := ctx.Value("user").(addr.IA)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
+	}
+	expTime := req.Msg.ExpirationTime.AsTime()
+	if expTime.Before(time.Now()) {
+		// This is a stop delegate request
+		// TODO:
+		return nil, connect.NewError(connect.CodeUnimplemented, serrors.New("Case stop delegation not implemented"))
+	}
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	client, found := s.redemptionServerPeers[clientID]
+	if !found {
+		// redemption server was nver connected (since the marketplace was started)
+		// which means we have no prior state (except the reservations in the database)
+		client = s.newRedemptionServerPeer(clientID)
+		s.redemptionServerPeers[clientID] = client
+		client.delegatedServer = redemption.NewRedemptionService(client.sendCh, client.pending)
+
+	} else if client.delegatedServer != nil {
+		// the redemption server was already delegated, but we received an update request
+		// TODO:
+		return nil, connect.NewError(connect.CodeUnimplemented, serrors.New("Case redemption delegation update not implemented"))
+	} else {
+		// the redemption server was previously run by the AS, now it is delegated
+		// TODO:
+		return nil, connect.NewError(connect.CodeUnimplemented, serrors.New("Case redemption delegation takeover not implemented"))
+
+	}
+	client.delegationExpiration = req.Msg.ExpirationTime.AsTime()
+
+	return &connect.Response[hummingbird.DelegateRedemptionResponse]{
+		Msg: &hummingbird.DelegateRedemptionResponse{
+			ExpirationTime: req.Msg.ExpirationTime,
+		},
+	}, nil
+}
+
+func (c *RedemptionServerPeer) closeConnection() {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	close(c.sendCh)
+	for _, recvChan := range c.pending {
+		close(recvChan)
+	}
+	c.sendCh = make(chan *hummingbird.RedeemAssetFromASRequest, 64)
 }
 
 func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
@@ -84,7 +131,8 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 	s.mtx.Unlock()
 
 	fmt.Println("AS redemption service connected:", clientID)
-
+	defer client.closeConnection()
+	client.mtx.Lock()
 	go func() {
 		for req := range client.sendCh {
 			if req == nil {
@@ -96,23 +144,27 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 			}
 		}
 	}()
+	client.mtx.Unlock()
 
 	for {
 		msg, err := stream.Receive()
 		if err != nil {
 			log.Println("Receive error:", err)
-			continue
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
 		}
 
 		reqID := msg.RequestId
 
-		client.mu.Lock()
+		client.mtx.Lock()
 		ch, ok := client.pending[reqID]
 		if ok {
 			ch <- msg
 			close(ch)
 			delete(client.pending, reqID)
 		}
-		client.mu.Unlock()
+		client.mtx.Unlock()
 	}
 }
