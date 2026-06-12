@@ -13,8 +13,6 @@ import (
 
 const (
 	// Wire format constants
-	BW_BITS          = 10
-	BW_EXP_BITS      = 5
 	RESID_BITS       = 22
 	MAX_DURATION_SEC = math.MaxUint16
 )

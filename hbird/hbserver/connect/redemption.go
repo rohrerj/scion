@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/bits"
 	"time"
 
 	"connectrpc.com/connect"
@@ -28,8 +27,6 @@ import (
 
 const (
 	// Wire format constants
-	BW_BITS          = 10
-	BW_EXP_BITS      = 5
 	RESID_BITS       = 22
 	MAX_DURATION_SEC = math.MaxUint16
 )
@@ -83,7 +80,7 @@ func (s *HBirdServer) redeem(_ context.Context,
 			isdAs,
 			uint16(redReq.RedInfo.Ingress),
 			uint16(redReq.RedInfo.Egress),
-			FromKbps(uint64(redReq.RedInfo.Bw)),
+			Bandwidth(redReq.RedInfo.Bw),
 			time.Unix(int64(redReq.RedInfo.StartTime), 0),
 			dur,
 		)
@@ -140,60 +137,10 @@ func ClientEncrypt(clientPublicKey []byte, payload []byte) (cipher []byte, err e
 	return cipher, nil
 }
 
-// Bandwidth in kbps
-type Bandwidth struct {
-	kbps uint64
-}
+type Bandwidth uint16 // Data-plane encoded, 10 bits.
 
-// FromKbps
-func FromKbps(kbps uint64) Bandwidth {
-	return Bandwidth{kbps: kbps}
-}
-
-// AsKbps
-func (b Bandwidth) AsKbps() uint64 {
-	return b.kbps
-}
-
-// ToWireFormat convert bandwidth in kbps to wire format encoding
-func (b Bandwidth) ToWireFormat() (uint16, error) {
-	significandBits := BW_BITS - BW_EXP_BITS
-	significandValues := uint64(1 << significandBits)
-	// Special case: exponent = 0
-	if b.kbps < significandValues {
-		return uint16(b.kbps), nil
-	}
-
-	// exponent offset by 1 to account for above case
-	exponent := uint(bits.Len64(b.kbps)) - uint(significandBits)
-	if exponent >= (1 << BW_EXP_BITS) {
-		return 0, fmt.Errorf("bandwidth too large, cannot convert to wire format: %v", b.kbps)
-	}
-
-	// compute significand
-	// shift right by (exponent - 1), then subtract the implicit prepended '1'
-	significand := (b.kbps >> (exponent - 1)) - significandValues
-
-	return (uint16(exponent) << significandBits) | uint16(significand), nil
-}
-
-// FromWireFormat decodes wire format to integer bandwidth in kbps
-func FromWireFormat(wireFormat uint16) (Bandwidth, error) {
-	significandBits := BW_BITS - BW_EXP_BITS
-	// Check total bit-size
-	if (16 - bits.LeadingZeros16(wireFormat)) > BW_BITS {
-		return Bandwidth{}, errors.New("bandwidth could not be converted, value too large")
-	}
-
-	exponent := wireFormat >> significandBits
-	significand := wireFormat & ((1 << significandBits) - 1)
-	if exponent == 0 {
-		return Bandwidth{kbps: uint64(significand)}, nil
-	}
-
-	return Bandwidth{
-		kbps: (uint64(significand) + (1 << significandBits)) << (exponent - 1),
-	}, nil
+func (b Bandwidth) IsValid() bool {
+	return b < 1024
 }
 
 // ResInfo
@@ -240,8 +187,7 @@ func (r ResInfo) Check() error {
 	expired := time.Unix(100_000, 0).After(r.StartTime.Add(r.Duration))
 	identity, _ := addr.ParseIA("1-0:0:0110")
 	validIA := r.IA == identity
-	maxFreeBW := uint64(2000)
-	validBW := r.Bandwidth.AsKbps() < maxFreeBW
+	validBW := r.Bandwidth.IsValid()
 	currIF := uint16(2)
 	validIF := r.EgressInterface == currIF || r.IngressInterface == currIF
 	if expired || !validIA || !validBW || !validIF {
@@ -250,12 +196,6 @@ func (r ResInfo) Check() error {
 		return errors.New("Invalid ResInfo")
 	}
 	return nil
-}
-
-// TimeBandwidthProductKb is the product of bandwidth and duration in kb.
-func (r ResInfo) TimeBandwidthProductKb() uint64 {
-	seconds := uint64(r.Duration.Seconds())
-	return r.Bandwidth.AsKbps() * seconds
 }
 
 // CompleteReservation
@@ -299,11 +239,6 @@ func ComputeAuthenticationKey(r ResInfo, masterKey [16]byte) (*[16]byte, error) 
 		return nil, fmt.Errorf("failed to create AES-128 cipher: %w", err)
 	}
 
-	// BW as 16 bits.
-	bwVal, err := r.Bandwidth.ToWireFormat()
-	if err != nil {
-		return nil, err
-	}
 	// StartTime as 32-bit Unix time
 	unixStart := uint32(r.StartTime.Unix())
 	// Duration in seconds as a 16-bit
@@ -314,7 +249,7 @@ func ComputeAuthenticationKey(r ResInfo, masterKey [16]byte) (*[16]byte, error) 
 	ak := hummlib.DeriveAuthKey(
 		blockCipher,
 		r.ResID,
-		bwVal,
+		uint16(r.Bandwidth),
 		r.IngressInterface,
 		r.EgressInterface,
 		unixStart,

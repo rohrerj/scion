@@ -40,7 +40,7 @@ message RedemptionInfo {
     // Egress ID. 16 bits.
     uint32 egress = 2;
 
-    // Bandwidth. 16 bits.
+    // Bandwidth. 10 bits, hummingbird data-plane encoded (it's not converted)
     uint32 bw = 3;
     // The unix timestamp when the reservation starts. 32 bits.
     uint32 start_time = 4;

@@ -59,39 +59,6 @@ const (
 
 var update = xtest.UpdateGoldenFiles()
 
-func TestBwToWireFormatConversion(t *testing.T) {
-	testCases := []struct {
-		kbps       uint64
-		wireFormat uint16
-	}{
-		{624, 0x0a7},
-		{184549376, 0x2ec},
-		{32, 0x20},
-		{31, 0x1f},
-		{63, 0x3f},
-		{7113539584, 0x395},
-		{12058624, 0x26e},
-		{148, 0x65},
-		{573440, 0x1e3},
-		{416, 0x94},
-		{92274688, 0x2cc},
-		{159744, 0x1a7},
-		{7247757312, 0x396},
-		{2885681152, 0x36b},
-	}
-
-	for _, tc := range testCases {
-		got, err := connect.FromKbps(tc.kbps).ToWireFormat()
-		require.NoError(t, err)
-		require.Equal(t, tc.wireFormat, got)
-
-		gotBW, err := connect.FromWireFormat(tc.wireFormat)
-		require.NoError(t, err)
-		expected := connect.FromKbps(tc.kbps)
-		require.Equal(t, expected, gotBW)
-	}
-}
-
 func TestResIDBoundCheck(t *testing.T) {
 	testCases := []struct {
 		resID uint32
@@ -114,40 +81,6 @@ func TestResIDBoundCheck(t *testing.T) {
 		} else {
 			require.Error(t, err)
 		}
-	}
-}
-
-func TestBandwidthEncodingOverflow(t *testing.T) {
-	testCases := []struct {
-		bw    uint64
-		valid bool
-	}{
-		{0, true},
-		{1, true},
-		{1<<connect.BW_EXP_BITS - 1, true},
-		{1 << (connect.BW_EXP_BITS * 8), false},
-	}
-	for _, tc := range testCases {
-		bandwidth := connect.FromKbps(tc.bw)
-		wf, err := bandwidth.ToWireFormat()
-		if !tc.valid {
-			require.Error(t, err)
-			_, err = connect.FromWireFormat(1<<16 - 1)
-			require.Error(t, err)
-			// Catch invalid BW in Ak computation
-			masterKey, err := base64.StdEncoding.DecodeString(dummy_keys_master0)
-			require.NoError(t, err)
-			_, err = connect.ComputeAuthenticationKey(connect.ResInfo{
-				Bandwidth: connect.FromKbps(tc.bw)},
-				([16]byte)(masterKey))
-			require.Error(t, err)
-			continue
-		}
-		require.NoError(t, err)
-		// convert back
-		bandwidth2, err := connect.FromWireFormat(wf)
-		require.NoError(t, err)
-		require.Equal(t, bandwidth, bandwidth2)
 	}
 }
 
@@ -204,7 +137,7 @@ func TestAuthKeyComputation(t *testing.T) {
 	svc := connect.NewHummingbirdKeyDerivationService(masterKey)
 
 	// Create a ResInfo
-	bw := connect.FromKbps(1200) // 1.2 Mbps
+	bw := connect.Bandwidth(197)
 	start := time.Unix(100_000, 0)
 	dur := 3600 * time.Second
 	isdAs := addr.MustParseIA("1-0000:0000:0110")
@@ -230,15 +163,6 @@ func TestAuthKeyComputation(t *testing.T) {
 		t.Errorf("completeReservation.AuthenticationKey = %v ; want %v ",
 			completeReservation.AuthenticationKey, expectedAk)
 	}
-	var expectedBWP uint64 = 4320000
-	if completeReservation.ResInfo.TimeBandwidthProductKb() != expectedBWP {
-		t.Errorf("completeReservation.ResInfo.TimeBandwidthProductKb() = %v ; want %v ",
-			completeReservation.ResInfo.TimeBandwidthProductKb(), expectedBWP)
-	}
-}
-
-func TestRedemption(t *testing.T) {
-	return
 }
 
 func TestClientEncryption(t *testing.T) {
@@ -254,7 +178,6 @@ func TestClientEncryption(t *testing.T) {
 		t.Errorf("_clientDecryptTesting(clientEncrypt(Ak)) = %v ; want %v ",
 			decryptedAk, authenticationKey)
 	}
-	return
 }
 
 func _clientDecryptTesting(cipher []byte) (plaintext []byte, err error) {
@@ -277,7 +200,7 @@ func TestExample(t *testing.T) {
 	svc := hbirdconnect.NewHummingbirdKeyDerivationService(masterKey)
 
 	// Create a ResInfo
-	bw := hbirdconnect.FromKbps(1200) // 1.2 Mbps
+	bw := hbirdconnect.Bandwidth(197)
 	start := time.Unix(100_000, 0)
 	dur := 3600 * time.Second
 	isdAs := addr.MustParseIA("1-0000:0000:0110")
@@ -300,8 +223,6 @@ func TestExample(t *testing.T) {
 	}
 
 	fmt.Printf("Derived auth key: %x\n", completeReservation.AuthenticationKey)
-	fmt.Printf("Time x bandwidth product: %d kb\n",
-		completeReservation.ResInfo.TimeBandwidthProductKb())
 }
 
 func TestLocalServerClientIntegration(t *testing.T) {
@@ -386,7 +307,7 @@ func TestLocalServerClientIntegration(t *testing.T) {
 		IngressInterface: uint16(rreqs.Redemption[0].RedInfo.GetIngress()),
 		EgressInterface:  uint16(rreqs.Redemption[0].RedInfo.GetEgress()),
 		ResID:            rresp.Reservation[0].GetResId(),
-		Bandwidth:        connect.FromKbps(uint64(rreqs.Redemption[0].RedInfo.GetBw())),
+		Bandwidth:        connect.Bandwidth(rreqs.Redemption[0].RedInfo.GetBw()),
 		StartTime:        time.Unix(int64(rreqs.Redemption[0].RedInfo.GetStartTime()), 0),
 		Duration:         mustParseDuration(uint64(rreqs.Redemption[0].RedInfo.GetDuration())),
 	}
@@ -443,7 +364,6 @@ func TestLocalServerClientIntegration(t *testing.T) {
 	}
 	fmt.Printf("Got expected connection error\n\n")
 	fmt.Println("TestServerClientIntegration completed")
-	return
 }
 
 func checkStatus() error {
@@ -492,7 +412,7 @@ func query(requestURL, bodyStr string, checkResponse bool) ([]byte, error) {
 	procedureName := pathSegments[len(pathSegments)-1]
 	fmt.Printf("%s response status: %d\n", procedureName, res.StatusCode)
 	if res.StatusCode != 200 {
-		return nil, errors.New(fmt.Sprintf("wrong status code: %d", res.StatusCode))
+		return nil, fmt.Errorf("wrong status code: %d", res.StatusCode)
 	}
 	response, err := io.ReadAll(res.Body)
 	if err != nil {
