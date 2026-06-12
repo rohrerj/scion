@@ -84,6 +84,7 @@ message MarketplaceInfoResponse {
     uint64 api_minor_version = 2;
     string currency = 3;
     uint64 max_statistics_granularity = 4;
+    bool supports_redemption_delegation = 5;
 }
 
 message PublishAssetRequest {

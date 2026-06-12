@@ -27,13 +27,12 @@ const (
 )
 
 type DelegateRedemptionRequest struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	StopsAt            *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
-	ReservationIdStart uint64                 `protobuf:"varint,2,opt,name=reservation_id_start,json=reservationIdStart,proto3" json:"reservation_id_start,omitempty"`
-	ReservationIdEnd   uint64                 `protobuf:"varint,3,opt,name=reservation_id_end,json=reservationIdEnd,proto3" json:"reservation_id_end,omitempty"`
-	Key                []byte                 `protobuf:"bytes,4,opt,name=Key,proto3" json:"Key,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	ExpirationTime          *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=expiration_time,json=expirationTime,proto3" json:"expiration_time,omitempty"`
+	ReservationIdUpperBound uint64                 `protobuf:"varint,2,opt,name=reservation_id_upper_bound,json=reservationIdUpperBound,proto3" json:"reservation_id_upper_bound,omitempty"`
+	Key                     []byte                 `protobuf:"bytes,3,opt,name=Key,proto3" json:"Key,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *DelegateRedemptionRequest) Reset() {
@@ -66,23 +65,16 @@ func (*DelegateRedemptionRequest) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_redemption_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *DelegateRedemptionRequest) GetStopsAt() *timestamppb.Timestamp {
+func (x *DelegateRedemptionRequest) GetExpirationTime() *timestamppb.Timestamp {
 	if x != nil {
-		return x.StopsAt
+		return x.ExpirationTime
 	}
 	return nil
 }
 
-func (x *DelegateRedemptionRequest) GetReservationIdStart() uint64 {
+func (x *DelegateRedemptionRequest) GetReservationIdUpperBound() uint64 {
 	if x != nil {
-		return x.ReservationIdStart
-	}
-	return 0
-}
-
-func (x *DelegateRedemptionRequest) GetReservationIdEnd() uint64 {
-	if x != nil {
-		return x.ReservationIdEnd
+		return x.ReservationIdUpperBound
 	}
 	return 0
 }
@@ -95,10 +87,10 @@ func (x *DelegateRedemptionRequest) GetKey() []byte {
 }
 
 type DelegateRedemptionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	StopsAt       *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ExpirationTime *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=expiration_time,json=expirationTime,proto3" json:"expiration_time,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *DelegateRedemptionResponse) Reset() {
@@ -131,9 +123,9 @@ func (*DelegateRedemptionResponse) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_redemption_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *DelegateRedemptionResponse) GetStopsAt() *timestamppb.Timestamp {
+func (x *DelegateRedemptionResponse) GetExpirationTime() *timestamppb.Timestamp {
 	if x != nil {
-		return x.StopsAt
+		return x.ExpirationTime
 	}
 	return nil
 }
@@ -346,14 +338,13 @@ var File_proto_hummingbird_v1_redemption_proto protoreflect.FileDescriptor
 
 const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
 	"\n" +
-	"%proto/hummingbird/v1/redemption.proto\x12\x14proto.hummingbird.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc4\x01\n" +
-	"\x19DelegateRedemptionRequest\x125\n" +
-	"\bstops_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x120\n" +
-	"\x14reservation_id_start\x18\x02 \x01(\x04R\x12reservationIdStart\x12,\n" +
-	"\x12reservation_id_end\x18\x03 \x01(\x04R\x10reservationIdEnd\x12\x10\n" +
-	"\x03Key\x18\x04 \x01(\fR\x03Key\"S\n" +
-	"\x1aDelegateRedemptionResponse\x125\n" +
-	"\bstops_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\"\xf5\x01\n" +
+	"%proto/hummingbird/v1/redemption.proto\x12\x14proto.hummingbird.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaf\x01\n" +
+	"\x19DelegateRedemptionRequest\x12C\n" +
+	"\x0fexpiration_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x0eexpirationTime\x12;\n" +
+	"\x1areservation_id_upper_bound\x18\x02 \x01(\x04R\x17reservationIdUpperBound\x12\x10\n" +
+	"\x03Key\x18\x03 \x01(\fR\x03Key\"a\n" +
+	"\x1aDelegateRedemptionResponse\x12C\n" +
+	"\x0fexpiration_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x0eexpirationTime\"\xf5\x01\n" +
 	"\x18RedeemAssetFromASRequest\x12\x1d\n" +
 	"\n" +
 	"ingress_id\x18\x01 \x01(\rR\tingressId\x12\x1b\n" +
@@ -399,8 +390,8 @@ var file_proto_hummingbird_v1_redemption_proto_goTypes = []any{
 	(*timestamppb.Timestamp)(nil),      // 5: google.protobuf.Timestamp
 }
 var file_proto_hummingbird_v1_redemption_proto_depIdxs = []int32{
-	5, // 0: proto.hummingbird.v1.DelegateRedemptionRequest.stops_at:type_name -> google.protobuf.Timestamp
-	5, // 1: proto.hummingbird.v1.DelegateRedemptionResponse.stops_at:type_name -> google.protobuf.Timestamp
+	5, // 0: proto.hummingbird.v1.DelegateRedemptionRequest.expiration_time:type_name -> google.protobuf.Timestamp
+	5, // 1: proto.hummingbird.v1.DelegateRedemptionResponse.expiration_time:type_name -> google.protobuf.Timestamp
 	5, // 2: proto.hummingbird.v1.RedeemAssetFromASRequest.starts_at:type_name -> google.protobuf.Timestamp
 	5, // 3: proto.hummingbird.v1.RedeemAssetFromASRequest.stops_at:type_name -> google.protobuf.Timestamp
 	4, // 4: proto.hummingbird.v1.RedeemAssetFromASResponse.res_info:type_name -> proto.hummingbird.v1.ReservationInfo

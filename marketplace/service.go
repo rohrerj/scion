@@ -51,10 +51,11 @@ type Service struct {
 }
 
 type MarketplaceInfo struct {
-	ApiMajorVersion           uint64
-	ApiMinorVersion           uint64
-	Currency                  string
-	StatisticsTimeGranularity time.Duration
+	ApiMajorVersion              uint64
+	ApiMinorVersion              uint64
+	Currency                     string
+	StatisticsTimeGranularity    time.Duration
+	SupportsRedemptionDelegation bool
 }
 
 func NewService(info *MarketplaceInfo, store *storage.MarketplaceStorage) *Service {
@@ -202,10 +203,11 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 	fmt.Println("Info")
 	return &connect.Response[hummingbird.MarketplaceInfoResponse]{
 		Msg: &hummingbird.MarketplaceInfoResponse{
-			ApiMajorVersion:          s.info.ApiMajorVersion,
-			ApiMinorVersion:          s.info.ApiMinorVersion,
-			Currency:                 s.info.Currency,
-			MaxStatisticsGranularity: uint64(s.info.StatisticsTimeGranularity),
+			ApiMajorVersion:              s.info.ApiMajorVersion,
+			ApiMinorVersion:              s.info.ApiMinorVersion,
+			Currency:                     s.info.Currency,
+			MaxStatisticsGranularity:     uint64(s.info.StatisticsTimeGranularity),
+			SupportsRedemptionDelegation: s.info.SupportsRedemptionDelegation,
 		},
 	}, nil
 }
@@ -311,8 +313,6 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	if !found {
 		return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not reachable"), undoRedemption()))
 	}
-	// after this line we cannot safely undo the redemption anymore because the redemption server
-	// might have already received the request
 	respCh := peer.Send(&hummingbird.RedeemAssetFromASRequest{
 		Bw:        bw,
 		IngressId: ingressID,
@@ -322,6 +322,9 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	})
 	select {
 	case resp := <-respCh:
+		if resp == nil {
+			return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
+		}
 		n, err := s.store.InsertReservation(ctx, &db.DBReservation{
 			ID:        int64(resp.ResInfo.ResId),
 			IA:        ia,
@@ -349,7 +352,7 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			},
 		}, nil
 	case <-time.After(30 * time.Second):
-		return nil, connect.NewError(connect.CodeUnavailable, serrors.New("Redemption service not available"))
+		return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
 	}
 }
 

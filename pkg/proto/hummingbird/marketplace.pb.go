@@ -473,13 +473,14 @@ func (*MarketplaceInfoRequest) Descriptor() ([]byte, []int) {
 }
 
 type MarketplaceInfoResponse struct {
-	state                    protoimpl.MessageState `protogen:"open.v1"`
-	ApiMajorVersion          uint64                 `protobuf:"varint,1,opt,name=api_major_version,json=apiMajorVersion,proto3" json:"api_major_version,omitempty"`
-	ApiMinorVersion          uint64                 `protobuf:"varint,2,opt,name=api_minor_version,json=apiMinorVersion,proto3" json:"api_minor_version,omitempty"`
-	Currency                 string                 `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
-	MaxStatisticsGranularity uint64                 `protobuf:"varint,4,opt,name=max_statistics_granularity,json=maxStatisticsGranularity,proto3" json:"max_statistics_granularity,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	state                        protoimpl.MessageState `protogen:"open.v1"`
+	ApiMajorVersion              uint64                 `protobuf:"varint,1,opt,name=api_major_version,json=apiMajorVersion,proto3" json:"api_major_version,omitempty"`
+	ApiMinorVersion              uint64                 `protobuf:"varint,2,opt,name=api_minor_version,json=apiMinorVersion,proto3" json:"api_minor_version,omitempty"`
+	Currency                     string                 `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
+	MaxStatisticsGranularity     uint64                 `protobuf:"varint,4,opt,name=max_statistics_granularity,json=maxStatisticsGranularity,proto3" json:"max_statistics_granularity,omitempty"`
+	SupportsRedemptionDelegation bool                   `protobuf:"varint,5,opt,name=supports_redemption_delegation,json=supportsRedemptionDelegation,proto3" json:"supports_redemption_delegation,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *MarketplaceInfoResponse) Reset() {
@@ -538,6 +539,13 @@ func (x *MarketplaceInfoResponse) GetMaxStatisticsGranularity() uint64 {
 		return x.MaxStatisticsGranularity
 	}
 	return 0
+}
+
+func (x *MarketplaceInfoResponse) GetSupportsRedemptionDelegation() bool {
+	if x != nil {
+		return x.SupportsRedemptionDelegation
+	}
+	return false
 }
 
 type PublishAssetRequest struct {
@@ -1555,12 +1563,13 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"asset_id_2\x18\x02 \x01(\tR\bassetId2\"1\n" +
 	"\x14CombineAssetResponse\x12\x19\n" +
 	"\basset_id\x18\x01 \x01(\tR\aassetId\"\x18\n" +
-	"\x16MarketplaceInfoRequest\"\xcb\x01\n" +
+	"\x16MarketplaceInfoRequest\"\x91\x02\n" +
 	"\x17MarketplaceInfoResponse\x12*\n" +
 	"\x11api_major_version\x18\x01 \x01(\x04R\x0fapiMajorVersion\x12*\n" +
 	"\x11api_minor_version\x18\x02 \x01(\x04R\x0fapiMinorVersion\x12\x1a\n" +
 	"\bcurrency\x18\x03 \x01(\tR\bcurrency\x12<\n" +
-	"\x1amax_statistics_granularity\x18\x04 \x01(\x04R\x18maxStatisticsGranularity\"\xa8\x03\n" +
+	"\x1amax_statistics_granularity\x18\x04 \x01(\x04R\x18maxStatisticsGranularity\x12D\n" +
+	"\x1esupports_redemption_delegation\x18\x05 \x01(\bR\x1csupportsRedemptionDelegation\"\xa8\x03\n" +
 	"\x13PublishAssetRequest\x12\x1c\n" +
 	"\tbandwidth\x18\x01 \x01(\x04R\tbandwidth\x12#\n" +
 	"\rbandwidth_min\x18\x02 \x01(\x04R\fbandwidthMin\x127\n" +

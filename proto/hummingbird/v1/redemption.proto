@@ -26,17 +26,15 @@ service RedemptionService {
 }
 
 message DelegateRedemptionRequest {
-    // delegate request valid from now until stops_at
-    google.protobuf.Timestamp stops_at = 1;
-    // the inclusive start of the reservation ID interval
-    uint64 reservation_id_start = 2;
+    // delegate request valid from now until expiration_time
+    google.protobuf.Timestamp expiration_time = 1;
     // the exclusive end of the reservation ID interval
-    uint64 reservation_id_end = 3;
+    uint64 reservation_id_upper_bound = 2;
     // the key used for the derival of the authentication keys
-    bytes Key = 4;
+    bytes Key = 3;
 }
 message DelegateRedemptionResponse {
-    google.protobuf.Timestamp stops_at = 1;
+    google.protobuf.Timestamp expiration_time = 1;
 }
 
 message RedeemAssetFromASRequest {

@@ -138,10 +138,11 @@ func realMain(ctx context.Context) error {
 	trustVerifer := trust.NewTLSCryptoVerifier(trustDB)
 
 	service := marketplace.NewService(&marketplace.MarketplaceInfo{
-		ApiMajorVersion:           APIMajorVersion,
-		ApiMinorVersion:           APIMinorVersion,
-		Currency:                  globalCfg.Marketplace.Currency,
-		StatisticsTimeGranularity: time.Duration(globalCfg.Marketplace.StatisticsTimeGranularity) * time.Second,
+		ApiMajorVersion:              APIMajorVersion,
+		ApiMinorVersion:              APIMinorVersion,
+		Currency:                     globalCfg.Marketplace.Currency,
+		StatisticsTimeGranularity:    time.Duration(globalCfg.Marketplace.StatisticsTimeGranularity) * time.Second,
+		SupportsRedemptionDelegation: globalCfg.Marketplace.SupportsRedemptionDelegation,
 	}, store)
 
 	mux := http.NewServeMux()
