@@ -29,8 +29,9 @@ const (
 type DelegateRedemptionRequest struct {
 	state                   protoimpl.MessageState `protogen:"open.v1"`
 	ExpirationTime          *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=expiration_time,json=expirationTime,proto3" json:"expiration_time,omitempty"`
-	ReservationIdUpperBound uint64                 `protobuf:"varint,2,opt,name=reservation_id_upper_bound,json=reservationIdUpperBound,proto3" json:"reservation_id_upper_bound,omitempty"`
+	ReservationIdUpperBound uint32                 `protobuf:"varint,2,opt,name=reservation_id_upper_bound,json=reservationIdUpperBound,proto3" json:"reservation_id_upper_bound,omitempty"`
 	Key                     []byte                 `protobuf:"bytes,3,opt,name=Key,proto3" json:"Key,omitempty"`
+	EncodingPoints          []uint64               `protobuf:"varint,4,rep,packed,name=encoding_points,json=encodingPoints,proto3" json:"encoding_points,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -72,7 +73,7 @@ func (x *DelegateRedemptionRequest) GetExpirationTime() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *DelegateRedemptionRequest) GetReservationIdUpperBound() uint64 {
+func (x *DelegateRedemptionRequest) GetReservationIdUpperBound() uint32 {
 	if x != nil {
 		return x.ReservationIdUpperBound
 	}
@@ -82,6 +83,13 @@ func (x *DelegateRedemptionRequest) GetReservationIdUpperBound() uint64 {
 func (x *DelegateRedemptionRequest) GetKey() []byte {
 	if x != nil {
 		return x.Key
+	}
+	return nil
+}
+
+func (x *DelegateRedemptionRequest) GetEncodingPoints() []uint64 {
+	if x != nil {
+		return x.EncodingPoints
 	}
 	return nil
 }
@@ -217,7 +225,7 @@ func (x *RedeemAssetFromASRequest) GetRequestId() uint64 {
 type RedeemAssetFromASResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ResInfo       *ReservationInfo       `protobuf:"bytes,1,opt,name=res_info,json=resInfo,proto3" json:"res_info,omitempty"`
-	Ak            string                 `protobuf:"bytes,2,opt,name=ak,proto3" json:"ak,omitempty"`
+	Ak            []byte                 `protobuf:"bytes,2,opt,name=ak,proto3" json:"ak,omitempty"`
 	RequestId     uint64                 `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -260,11 +268,11 @@ func (x *RedeemAssetFromASResponse) GetResInfo() *ReservationInfo {
 	return nil
 }
 
-func (x *RedeemAssetFromASResponse) GetAk() string {
+func (x *RedeemAssetFromASResponse) GetAk() []byte {
 	if x != nil {
 		return x.Ak
 	}
-	return ""
+	return nil
 }
 
 func (x *RedeemAssetFromASResponse) GetRequestId() uint64 {
@@ -276,7 +284,7 @@ func (x *RedeemAssetFromASResponse) GetRequestId() uint64 {
 
 type ReservationInfo struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
-	ResId               uint64                 `protobuf:"varint,1,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
+	ResId               uint32                 `protobuf:"varint,1,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
 	BwRounded           uint64                 `protobuf:"varint,2,opt,name=bw_rounded,json=bwRounded,proto3" json:"bw_rounded,omitempty"`
 	BwDataplaneEncoding uint32                 `protobuf:"varint,3,opt,name=bw_dataplane_encoding,json=bwDataplaneEncoding,proto3" json:"bw_dataplane_encoding,omitempty"`
 	unknownFields       protoimpl.UnknownFields
@@ -313,7 +321,7 @@ func (*ReservationInfo) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_redemption_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *ReservationInfo) GetResId() uint64 {
+func (x *ReservationInfo) GetResId() uint32 {
 	if x != nil {
 		return x.ResId
 	}
@@ -338,11 +346,12 @@ var File_proto_hummingbird_v1_redemption_proto protoreflect.FileDescriptor
 
 const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
 	"\n" +
-	"%proto/hummingbird/v1/redemption.proto\x12\x14proto.hummingbird.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaf\x01\n" +
+	"%proto/hummingbird/v1/redemption.proto\x12\x14proto.hummingbird.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd8\x01\n" +
 	"\x19DelegateRedemptionRequest\x12C\n" +
 	"\x0fexpiration_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x0eexpirationTime\x12;\n" +
-	"\x1areservation_id_upper_bound\x18\x02 \x01(\x04R\x17reservationIdUpperBound\x12\x10\n" +
-	"\x03Key\x18\x03 \x01(\fR\x03Key\"a\n" +
+	"\x1areservation_id_upper_bound\x18\x02 \x01(\rR\x17reservationIdUpperBound\x12\x10\n" +
+	"\x03Key\x18\x03 \x01(\fR\x03Key\x12'\n" +
+	"\x0fencoding_points\x18\x04 \x03(\x04R\x0eencodingPoints\"a\n" +
 	"\x1aDelegateRedemptionResponse\x12C\n" +
 	"\x0fexpiration_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x0eexpirationTime\"\xf5\x01\n" +
 	"\x18RedeemAssetFromASRequest\x12\x1d\n" +
@@ -356,11 +365,11 @@ const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
 	"request_id\x18\x06 \x01(\x04R\trequestId\"\x8c\x01\n" +
 	"\x19RedeemAssetFromASResponse\x12@\n" +
 	"\bres_info\x18\x01 \x01(\v2%.proto.hummingbird.v1.ReservationInfoR\aresInfo\x12\x0e\n" +
-	"\x02ak\x18\x02 \x01(\tR\x02ak\x12\x1d\n" +
+	"\x02ak\x18\x02 \x01(\fR\x02ak\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x03 \x01(\x04R\trequestId\"{\n" +
 	"\x0fReservationInfo\x12\x15\n" +
-	"\x06res_id\x18\x01 \x01(\x04R\x05resId\x12\x1d\n" +
+	"\x06res_id\x18\x01 \x01(\rR\x05resId\x12\x1d\n" +
 	"\n" +
 	"bw_rounded\x18\x02 \x01(\x04R\tbwRounded\x122\n" +
 	"\x15bw_dataplane_encoding\x18\x03 \x01(\rR\x13bwDataplaneEncoding2\x86\x02\n" +

@@ -52,6 +52,7 @@ const (
 		FOREIGN KEY (owner_id) REFERENCES Users(id)
 	);
 	CREATE INDEX idx_reservations_owner ON Reservations(owner_id);
+	CREATE INDEX idx_reservations_used ON Reservations(isd_id, as_id, starts_at, stops_at);
 	CREATE TABLE Users(
 		id INTEGER PRIMARY KEY,
 		name TEXT NOT NULL UNIQUE,

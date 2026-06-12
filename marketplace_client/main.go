@@ -581,14 +581,14 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 		return
 	}
 	type Reservation struct {
-		ResId     uint64
+		ResId     uint32
 		Ia        addr.IA
 		IngressId uint32
 		EgressId  uint32
 		Bw        uint64
 		StartsAt  time.Time
 		StopsAt   time.Time
-		Ak        string
+		Ak        []byte
 	}
 	transformed := make([]*Reservation, 0, len(rep.Msg.Reservations))
 	for _, res := range rep.Msg.Reservations {

@@ -39,6 +39,7 @@ type MarketplaceDB interface {
 	CreateASUser(ctx context.Context, user *DBASUser) (int64, error)
 	UpdateMoney(ctx context.Context, id int64, amount int64) (int64, error)
 	SearchAssetsForStatistics(ctx context.Context, params *StatisticsQuery) ([]*DBStat, error)
+	FindUsedReservations(ctx context.Context, params *UsedReservationsQuery) ([]*UsedReservation, error)
 	BeginTransaction(ctx context.Context, opts *sql.TxOptions) (*transaction, error)
 }
 
@@ -167,6 +168,50 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 		args = append(args, *params.Egress)
 	}
 	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
+	return strings.Join(query, "\n"), args
+}
+
+func (e *executor) FindUsedReservations(ctx context.Context, params *UsedReservationsQuery) ([]*UsedReservation, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	stmt, args := e.buildUsedReservationsQuery(params)
+	rows, err := e.read.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
+	}
+	defer rows.Close()
+	var res []*UsedReservation
+	for rows.Next() {
+		a := &UsedReservation{}
+		var startsAtString string
+		var stopsAtString string
+		err = rows.Scan(&a.Id, &startsAtString, &stopsAtString)
+		if err != nil {
+			return nil, serrors.Wrap("Error reading DB response", err)
+		}
+		a.StartsAt, err = time.Parse(time.RFC3339, startsAtString)
+		if err != nil {
+			return nil, err
+		}
+		a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, a)
+	}
+	return res, nil
+}
+
+func (e *executor) buildUsedReservationsQuery(params *UsedReservationsQuery) (string, []any) {
+	var args []any
+	query := []string{
+		"SELECT id, starts_at, stops_at FROM Reservations",
+		"WHERE (isd_id = ?) AND (as_id = ?) AND (starts_at >= ?) AND (stops_at < ?)",
+	}
+	// we want to find all reservations of the IA, that are at least partially valid withing our interval,
+	// i.e. end of reservation must come after interval start and start of reservation must come before end of interval
+	args = append(args, params.IA.ISD(), params.IA.AS(), params.StopsAt, params.StartsAt)
 	return strings.Join(query, "\n"), args
 }
 

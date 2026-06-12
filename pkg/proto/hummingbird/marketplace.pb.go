@@ -1230,8 +1230,8 @@ func (x *RedeemAssetRequest) GetIfPairAssetId() string {
 
 type RedeemAssetResponse struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
-	Ak                  string                 `protobuf:"bytes,1,opt,name=ak,proto3" json:"ak,omitempty"`
-	ResId               uint64                 `protobuf:"varint,2,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
+	Ak                  []byte                 `protobuf:"bytes,1,opt,name=ak,proto3" json:"ak,omitempty"`
+	ResId               uint32                 `protobuf:"varint,2,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
 	BwRounded           uint64                 `protobuf:"varint,3,opt,name=bw_rounded,json=bwRounded,proto3" json:"bw_rounded,omitempty"`
 	BwDataplaneEncoding uint32                 `protobuf:"varint,4,opt,name=bw_dataplane_encoding,json=bwDataplaneEncoding,proto3" json:"bw_dataplane_encoding,omitempty"`
 	unknownFields       protoimpl.UnknownFields
@@ -1268,14 +1268,14 @@ func (*RedeemAssetResponse) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *RedeemAssetResponse) GetAk() string {
+func (x *RedeemAssetResponse) GetAk() []byte {
 	if x != nil {
 		return x.Ak
 	}
-	return ""
+	return nil
 }
 
-func (x *RedeemAssetResponse) GetResId() uint64 {
+func (x *RedeemAssetResponse) GetResId() uint32 {
 	if x != nil {
 		return x.ResId
 	}
@@ -1426,14 +1426,14 @@ func (x *FetchReservationsResponse) GetReservations() []*Reservation {
 
 type Reservation struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ResId         uint64                 `protobuf:"varint,1,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
+	ResId         uint32                 `protobuf:"varint,1,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
 	Ia            uint64                 `protobuf:"varint,2,opt,name=ia,proto3" json:"ia,omitempty"`
 	IngressId     uint32                 `protobuf:"varint,3,opt,name=ingress_id,json=ingressId,proto3" json:"ingress_id,omitempty"`
 	EgressId      uint32                 `protobuf:"varint,4,opt,name=egress_id,json=egressId,proto3" json:"egress_id,omitempty"`
 	Bw            uint64                 `protobuf:"varint,5,opt,name=bw,proto3" json:"bw,omitempty"`
 	StartsAt      *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
 	StopsAt       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
-	Ak            string                 `protobuf:"bytes,8,opt,name=ak,proto3" json:"ak,omitempty"`
+	Ak            []byte                 `protobuf:"bytes,8,opt,name=ak,proto3" json:"ak,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1468,7 +1468,7 @@ func (*Reservation) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{22}
 }
 
-func (x *Reservation) GetResId() uint64 {
+func (x *Reservation) GetResId() uint32 {
 	if x != nil {
 		return x.ResId
 	}
@@ -1517,11 +1517,11 @@ func (x *Reservation) GetStopsAt() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *Reservation) GetAk() string {
+func (x *Reservation) GetAk() []byte {
 	if x != nil {
 		return x.Ak
 	}
-	return ""
+	return nil
 }
 
 var File_proto_hummingbird_v1_marketplace_proto protoreflect.FileDescriptor
@@ -1638,8 +1638,8 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x10_egress_asset_idB\x13\n" +
 	"\x11_if_pair_asset_id\"\x8f\x01\n" +
 	"\x13RedeemAssetResponse\x12\x0e\n" +
-	"\x02ak\x18\x01 \x01(\tR\x02ak\x12\x15\n" +
-	"\x06res_id\x18\x02 \x01(\x04R\x05resId\x12\x1d\n" +
+	"\x02ak\x18\x01 \x01(\fR\x02ak\x12\x15\n" +
+	"\x06res_id\x18\x02 \x01(\rR\x05resId\x12\x1d\n" +
 	"\n" +
 	"bw_rounded\x18\x03 \x01(\x04R\tbwRounded\x122\n" +
 	"\x15bw_dataplane_encoding\x18\x04 \x01(\rR\x13bwDataplaneEncoding\"\xca\x02\n" +
@@ -1662,7 +1662,7 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x19FetchReservationsResponse\x12E\n" +
 	"\freservations\x18\x01 \x03(\v2!.proto.hummingbird.v1.ReservationR\freservations\"\x80\x02\n" +
 	"\vReservation\x12\x15\n" +
-	"\x06res_id\x18\x01 \x01(\x04R\x05resId\x12\x0e\n" +
+	"\x06res_id\x18\x01 \x01(\rR\x05resId\x12\x0e\n" +
 	"\x02ia\x18\x02 \x01(\x04R\x02ia\x12\x1d\n" +
 	"\n" +
 	"ingress_id\x18\x03 \x01(\rR\tingressId\x12\x1b\n" +
@@ -1670,7 +1670,7 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x02bw\x18\x05 \x01(\x04R\x02bw\x127\n" +
 	"\tstarts_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
 	"\bstops_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12\x0e\n" +
-	"\x02ak\x18\b \x01(\tR\x02ak2\xbb\a\n" +
+	"\x02ak\x18\b \x01(\fR\x02ak2\xbb\a\n" +
 	"\x12MarketplaceService\x12e\n" +
 	"\x04Info\x12,.proto.hummingbird.v1.MarketplaceInfoRequest\x1a-.proto.hummingbird.v1.MarketplaceInfoResponse\"\x00\x12g\n" +
 	"\fPublishAsset\x12).proto.hummingbird.v1.PublishAssetRequest\x1a*.proto.hummingbird.v1.PublishAssetResponse\"\x00\x12g\n" +

@@ -12,6 +12,7 @@ import (
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"golang.org/x/net/http2"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type RedemptionClient struct {
@@ -39,12 +40,25 @@ func (c *RedemptionClient) Init() error {
 	}
 
 	ctx := context.Background()
-	stream := client.RedeemASAsset(ctx)
+	rep, err := client.DelegateRedemption(ctx, &connect.Request[hummingbird.DelegateRedemptionRequest]{
+		Msg: &hummingbird.DelegateRedemptionRequest{
+			ExpirationTime:          timestamppb.New(time.Now().Add(time.Hour * 24 * 7)),
+			ReservationIdUpperBound: 1 << 20,
+			Key:                     []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+			EncodingPoints:          []uint64{100, 250, 500, 1000, 1500, 2000, 2500, 5000, 10000, 20000, 50000, 100000},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Println("Redemption delegation until", rep.Msg.ExpirationTime)
+	return nil
+	/*stream := client.RedeemASAsset(ctx)
 
 	fmt.Println("Connected to marketplace")
 	err := stream.Send(&hummingbird.RedeemAssetFromASResponse{})
 	fmt.Println("send empty", err)
-	resID := uint64(0)
+	resID := uint32(0)
 	for {
 		msg, err := stream.Receive()
 		if err != nil {
@@ -59,7 +73,7 @@ func (c *RedemptionClient) Init() error {
 				BwRounded:           1,
 				BwDataplaneEncoding: 0xFF,
 			},
-			Ak:        "my-ak",
+			Ak:        []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 			RequestId: msg.RequestId,
 		}
 		resID++
@@ -67,5 +81,5 @@ func (c *RedemptionClient) Init() error {
 		if err := stream.Send(rep); err != nil {
 			fmt.Println("Send error:", err)
 		}
-	}
+	}*/
 }

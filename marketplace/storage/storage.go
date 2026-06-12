@@ -271,6 +271,10 @@ func (s *MarketplaceStorage) Statistics(ctx context.Context, params *marketplace
 	return s.db.SearchAssetsForStatistics(ctx, params)
 }
 
+func (s *MarketplaceStorage) FindUsedReservations(ctx context.Context, params *marketplacedb.UsedReservationsQuery) ([]*marketplacedb.UsedReservation, error) {
+	return s.db.FindUsedReservations(ctx, params)
+}
+
 func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, assets []*hummingbird.BuyAsset, maxPrice uint64) ([]int64, int64, error) {
 	uniqueCheck := make(map[string]bool)
 	for _, asset := range assets {

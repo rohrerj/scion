@@ -31,6 +31,19 @@ type AssetQuery struct {
 	StopsAt              *string
 	Price                *uint64
 }
+
+type UsedReservationsQuery struct {
+	IA       addr.IA
+	StartsAt string
+	StopsAt  string
+}
+
+type UsedReservation struct {
+	Id       uint32
+	StartsAt time.Time
+	StopsAt  time.Time
+}
+
 type ReservationQuery struct {
 	OwnerId  int64
 	IA       *addr.IA
@@ -63,7 +76,7 @@ type DBReservation struct {
 	StartsAt  time.Time
 	StopsAt   time.Time
 	OwnerId   int64
-	Key       string
+	Key       []byte
 }
 
 type DBAsset struct {

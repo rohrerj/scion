@@ -182,7 +182,7 @@ func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hu
 	resp := make([]*hummingbird.Reservation, 0, len(reservations))
 	for _, reservation := range reservations {
 		resp = append(resp, &hummingbird.Reservation{
-			ResId:     uint64(reservation.ID),
+			ResId:     uint32(reservation.ID),
 			Ia:        uint64(reservation.IA),
 			IngressId: uint32(reservation.Ingress),
 			EgressId:  uint32(reservation.Egress),
@@ -346,7 +346,7 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 		return &connect.Response[hummingbird.RedeemAssetResponse]{
 			Msg: &hummingbird.RedeemAssetResponse{
 				Ak:                  resp.Ak,
-				ResId:               resp.ResInfo.ResId,
+				ResId:               uint32(resp.ResInfo.ResId),
 				BwRounded:           resp.ResInfo.BwRounded,
 				BwDataplaneEncoding: resp.ResInfo.BwDataplaneEncoding,
 			},
