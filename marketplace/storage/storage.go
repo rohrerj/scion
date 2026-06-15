@@ -79,6 +79,13 @@ func (s *MarketplaceStorage) CreateASUser(ctx context.Context, user *marketplace
 	return s.db.CreateASUser(ctx, user)
 }
 
+func (s *MarketplaceStorage) CreateOrUpdateRedemptionDelegations(ctx context.Context, r *marketplacedb.RedemptionDelegation) (int64, error) {
+	return s.db.CreateOrUpdateRedemptionDelegations(ctx, r)
+}
+func (s *MarketplaceStorage) FindRedemptionDelegations(ctx context.Context) ([]*marketplacedb.RedemptionDelegation, error) {
+	return s.db.FindRedemptionDelegations(ctx)
+}
+
 func totalPrice(price uint64, bw uint64, startsAt time.Time, stopsAt time.Time) int64 {
 	splitDuration := uint64(stopsAt.Sub(startsAt).Seconds())
 	return int64(price * splitDuration * bw)

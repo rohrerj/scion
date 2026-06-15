@@ -58,12 +58,46 @@ type MarketplaceInfo struct {
 	SupportsRedemptionDelegation bool
 }
 
-func NewService(info *MarketplaceInfo, store *storage.MarketplaceStorage) *Service {
-	return &Service{
+func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.MarketplaceStorage) (*Service, error) {
+	s := &Service{
 		redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
 		info:                  info,
 		store:                 store,
 	}
+	//tmp
+	s.info.SupportsRedemptionDelegation = true
+	delegation := &db.RedemptionDelegation{
+		IA:                 addr.MustParseIA("1-ff00:0:110"),
+		Expiration:         time.Now().Add(time.Hour * 24 * 7),
+		ReservationIdLimit: 1000000,
+		Key:                []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+	}
+	delegation.EncodeInts([]uint64{100, 200, 300})
+	_, err := s.store.CreateOrUpdateRedemptionDelegations(ctx, delegation)
+	if err != nil {
+		return nil, err
+	}
+	//tmp
+	if s.info.SupportsRedemptionDelegation {
+		d, err := store.FindRedemptionDelegations(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, delegation := range d {
+			delegation.EncodingsToInts()
+			peer := s.newRedemptionServerPeer(delegation.IA)
+			peer.delegatedServer, err = NewRedemptionService(ctx, peer, store, delegation.IA, RedemptionDelegationUpdate{
+				ExpirationTime:     delegation.Expiration,
+				ReservationIdLimit: delegation.ReservationIdLimit,
+				Key:                delegation.Key,
+				EncodingPoints:     delegation.EncodingsToInts(),
+			}, peer.sendCh, peer.pending)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return s, nil
 }
 
 func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error) {

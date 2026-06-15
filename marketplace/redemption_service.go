@@ -19,6 +19,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"slices"
 	"sort"
@@ -110,10 +111,13 @@ func (s *RedemptionService) readRoutine() {
 				return
 			}
 			if err = s.handleUpdate(u); err != nil {
+				fmt.Println(err)
 				return
 			}
 		case r := <-s.SendChannel:
-			s.handleRequest(r)
+			if err = s.handleRequest(r); err != nil {
+				fmt.Println(err)
+			}
 		}
 	}
 }

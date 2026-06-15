@@ -48,7 +48,7 @@ const (
 		bandwidth INTEGER NOT NULL,
 		starts_at TEXT NOT NULL,
 		stops_at TEXT NOT NULL,
-		key TEXT NOT NULL,
+		key BLOB NOT NULL,
 		FOREIGN KEY (owner_id) REFERENCES Users(id)
 	);
 	CREATE INDEX idx_reservations_owner ON Reservations(owner_id);
@@ -65,5 +65,15 @@ const (
 		as_id INTEGER NOT NULL,
 		PRIMARY KEY(isd_id, as_id)
 	);
+	CREATE TABLE Redemption_Delegations(
+		isd_id INTEGER NOT NULL,
+		as_id INTEGER NOT NULL,
+		res_id_limit INTEGER NOT NULL,
+		expiration TEXT NOT NULL,
+		key BLOB NOT NULL,
+		encodings BLOB NOT NULL,
+		PRIMARY KEY(isd_id, as_id)
+	);
+	CREATE INDEX idx_redemption_expiration ON Redemption_Delegations(expiration);
 	`
 )

@@ -40,6 +40,8 @@ type MarketplaceDB interface {
 	UpdateMoney(ctx context.Context, id int64, amount int64) (int64, error)
 	SearchAssetsForStatistics(ctx context.Context, params *StatisticsQuery) ([]*DBStat, error)
 	FindUsedReservations(ctx context.Context, params *UsedReservationsQuery) ([]*UsedReservation, error)
+	CreateOrUpdateRedemptionDelegations(ctx context.Context, r *RedemptionDelegation) (int64, error)
+	FindRedemptionDelegations(ctx context.Context) ([]*RedemptionDelegation, error)
 	BeginTransaction(ctx context.Context, opts *sql.TxOptions) (*transaction, error)
 }
 
@@ -169,6 +171,57 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 	}
 	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
 	return strings.Join(query, "\n"), args
+}
+
+func (e *executor) FindRedemptionDelegations(ctx context.Context) ([]*RedemptionDelegation, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	stmt := `SELECT isd_id, as_id, res_id_limit, expiration, key, encodings FROM Redemption_Delegations WHERE expiration >= ?`
+	args := []any{time.Now().Format(time.RFC3339)}
+	rows, err := e.read.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
+	}
+	defer rows.Close()
+	var res []*RedemptionDelegation
+	for rows.Next() {
+		a := &RedemptionDelegation{}
+		var expirationString string
+		var isd uint16
+		var as uint64
+		err = rows.Scan(&isd, &as, &a.ReservationIdLimit, &expirationString, &a.Key, &a.Encodings)
+		if err != nil {
+			return nil, serrors.Wrap("Error reading DB response", err)
+		}
+		a.Expiration, err = time.Parse(time.RFC3339, expirationString)
+		if err != nil {
+			return nil, err
+		}
+		a.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
+		res = append(res, a)
+	}
+	return res, nil
+}
+
+func (e *executor) CreateOrUpdateRedemptionDelegations(ctx context.Context, r *RedemptionDelegation) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	q := `
+	INSERT INTO Redemption_Delegations (isd_id, as_id, res_id_limit, expiration, key, encodings)
+	VALUES (?,?,?,?,?,?)
+	ON CONFLICT(isd_id, as_id)
+	DO UPDATE SET
+		expiration = excluded.expiration,
+		key = excluded.key,
+		encodings = excluded.encodings,
+		res_id_limit = excluded.res_id_limit;`
+	res, err := e.write.ExecContext(ctx, q, r.IA.ISD(), r.IA.AS(), r.ReservationIdLimit, r.Expiration.Format(time.RFC3339), r.Key, r.Encodings)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (e *executor) FindUsedReservations(ctx context.Context, params *UsedReservationsQuery) ([]*UsedReservation, error) {
