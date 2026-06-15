@@ -49,6 +49,7 @@ type RedemptionService struct {
 	resLimit       uint32
 	resIdStore     ReservationIdStore
 	encodingPoints []uint64
+	expiration     time.Time
 	mtx            sync.RWMutex
 }
 
@@ -59,6 +60,11 @@ type RedemptionDelegationUpdate struct {
 	EncodingPoints     []uint64
 }
 
+type RedemptionDelegationUpdateResult struct {
+	ExpirationTime time.Time
+	OK             bool
+}
+
 type ReservationIdStore interface {
 	Init(limit uint32, r []*db.UsedReservation) error
 	Next(start uint64, end uint64) (uint32, error)
@@ -66,7 +72,7 @@ type ReservationIdStore interface {
 	Close() error
 }
 
-func NewRedemptionService(ctx context.Context, client *RedemptionServerPeer, store *storage.MarketplaceStorage, ia addr.IA, initState RedemptionDelegationUpdate, sendCh chan *hummingbird.RedeemAssetFromASRequest,
+func NewRedemptionService(ctx context.Context, client *RedemptionServerPeer, store *storage.MarketplaceStorage, ia addr.IA, initState *RedemptionDelegationUpdate, sendCh chan *hummingbird.RedeemAssetFromASRequest,
 	pending map[uint64]chan *hummingbird.RedeemAssetFromASResponse) (*RedemptionService, error) {
 	slices.Sort(initState.EncodingPoints)
 	blockCipher, err := aes.NewCipher(initState.Key)
@@ -76,12 +82,13 @@ func NewRedemptionService(ctx context.Context, client *RedemptionServerPeer, sto
 	s := &RedemptionService{
 		SendChannel:    sendCh,
 		Pending:        pending,
-		UpdateChannel:  make(chan *RedemptionDelegationUpdate, 1),
+		UpdateChannel:  make(chan *RedemptionDelegationUpdate),
 		store:          store,
 		cipher:         blockCipher,
 		resLimit:       initState.ReservationIdLimit,
 		encodingPoints: initState.EncodingPoints,
 		client:         client,
+		expiration:     initState.ExpirationTime,
 		resIdStore:     &UsedIDStore{},
 	}
 	now := time.Now()
@@ -106,8 +113,7 @@ func (s *RedemptionService) readRoutine() {
 	for {
 		select {
 		case u := <-s.UpdateChannel:
-			if u.ExpirationTime.After(time.Now()) {
-				s.client.closeConnection()
+			if s.expiration.Before(time.Now()) {
 				return
 			}
 			if err = s.handleUpdate(u); err != nil {
@@ -115,8 +121,12 @@ func (s *RedemptionService) readRoutine() {
 				return
 			}
 		case r := <-s.SendChannel:
+			if s.expiration.Before(time.Now()) {
+				return
+			}
 			if err = s.handleRequest(r); err != nil {
 				fmt.Println(err)
+				return
 			}
 		}
 	}

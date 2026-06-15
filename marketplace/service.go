@@ -64,20 +64,6 @@ func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.Marke
 		info:                  info,
 		store:                 store,
 	}
-	//tmp
-	s.info.SupportsRedemptionDelegation = true
-	delegation := &db.RedemptionDelegation{
-		IA:                 addr.MustParseIA("1-ff00:0:110"),
-		Expiration:         time.Now().Add(time.Hour * 24 * 7),
-		ReservationIdLimit: 1000000,
-		Key:                []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
-	}
-	delegation.EncodeInts([]uint64{100, 200, 300})
-	_, err := s.store.CreateOrUpdateRedemptionDelegations(ctx, delegation)
-	if err != nil {
-		return nil, err
-	}
-	//tmp
 	if s.info.SupportsRedemptionDelegation {
 		d, err := store.FindRedemptionDelegations(ctx)
 		if err != nil {
@@ -86,12 +72,12 @@ func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.Marke
 		for _, delegation := range d {
 			delegation.EncodingsToInts()
 			peer := s.newRedemptionServerPeer(delegation.IA)
-			peer.delegatedServer, err = NewRedemptionService(ctx, peer, store, delegation.IA, RedemptionDelegationUpdate{
+			err = s.startOrUpdateRedemptionDelegation(ctx, peer.ia, &RedemptionDelegationUpdate{
 				ExpirationTime:     delegation.Expiration,
 				ReservationIdLimit: delegation.ReservationIdLimit,
 				Key:                delegation.Key,
 				EncodingPoints:     delegation.EncodingsToInts(),
-			}, peer.sendCh, peer.pending)
+			}, false)
 			if err != nil {
 				return nil, err
 			}
