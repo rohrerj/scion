@@ -564,7 +564,7 @@ func (e *executor) UndoRedemption(ctx context.Context, user_id int64, id int64) 
 		return 0, serrors.New("No database open")
 	}
 	q := `
-	UPDATE assets a
+	UPDATE Assets
 	SET state = 0
 	WHERE id = ?
 	AND owner_id = ?

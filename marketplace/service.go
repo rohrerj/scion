@@ -32,17 +32,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type assetState int
-
-const (
-	Listed assetState = iota
-	Bought
-	Redeemed
-	CheckedOut
-	BeingRedeemed
-	BeingSplit
-)
-
 type Service struct {
 	redemptionServerPeers map[addr.IA]*RedemptionServerPeer
 	mtx                   sync.Mutex

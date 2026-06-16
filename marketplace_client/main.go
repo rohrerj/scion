@@ -570,9 +570,6 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 	if stopsAt != nil {
 		req.StopsAt = timestamppb.New(*stopsAt)
 	}
-	if !readConfirm(reader) {
-		return
-	}
 	rep, err := c.FetchReservations(ctx, &connect.Request[hummingbird.FetchReservationsRequest]{
 		Msg: req,
 	})

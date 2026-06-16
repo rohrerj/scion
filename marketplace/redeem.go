@@ -132,7 +132,7 @@ func (s *Service) startOrUpdateRedemptionDelegation(ctx context.Context, clientI
 	return nil
 }
 
-func (s *Service) stopRedemptionDelegation(ctx context.Context, clientID addr.IA) error {
+func (s *Service) stopRedemptionDelegation(ctx context.Context, clientID addr.IA, onlyIfExpired bool) error {
 	fmt.Println("stopRedemptionDelegation", clientID)
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -144,6 +144,9 @@ func (s *Service) stopRedemptionDelegation(ctx context.Context, clientID addr.IA
 	defer client.mtx.Unlock()
 	if client.delegatedServer == nil {
 		return serrors.New("cannot stop redemption delegation without active delegation")
+	}
+	if onlyIfExpired && !client.delegatedServer.expiration.Before(time.Now()) {
+		return serrors.New("not yet expired")
 	}
 	client.delegatedServer.UpdateChannel <- &RedemptionDelegationUpdate{ExpirationTime: time.Time{}}
 	client.delegatedServer = nil
@@ -168,7 +171,7 @@ func (s *Service) DelegateRedemption(ctx context.Context, req *connect.Request[h
 	}
 	expTime := req.Msg.ExpirationTime.AsTime()
 	if expTime.Before(time.Now()) {
-		err := s.stopRedemptionDelegation(ctx, clientID)
+		err := s.stopRedemptionDelegation(ctx, clientID, false)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -206,14 +209,14 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 		s.redemptionServerPeers[clientID] = client
 	}
 	s.mtx.Unlock()
-
+	s.stopRedemptionDelegation(ctx, clientID, true)
 	client.mtx.Lock()
 	client.closeCh = make(chan struct{})
 	defer func() {
 		client.mtx.Lock()
 		defer client.mtx.Unlock()
 		close(client.closeCh)
-
+		client.closeCh = nil
 	}()
 	client.mtx.Unlock()
 	fmt.Println("AS redemption service connected:", clientID)

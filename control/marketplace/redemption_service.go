@@ -42,7 +42,7 @@ func (c *RedemptionClient) Init() error {
 	ctx := context.Background()
 	rep, err := client.DelegateRedemption(ctx, &connect.Request[hummingbird.DelegateRedemptionRequest]{
 		Msg: &hummingbird.DelegateRedemptionRequest{
-			ExpirationTime:          timestamppb.New(time.Now().Add(time.Hour * 24 * 7)),
+			ExpirationTime:          timestamppb.New(time.Now().Add(time.Second * 30)),
 			ReservationIdUpperBound: 1 << 20,
 			Key:                     []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 			EncodingPoints:          []uint64{100, 250, 500, 1000, 1500, 2000, 2500, 5000, 10000, 20000, 50000, 100000},
@@ -52,11 +52,12 @@ func (c *RedemptionClient) Init() error {
 		return err
 	}
 	fmt.Println("Redemption delegation until", rep.Msg.ExpirationTime)
-	return nil
-	/*stream := client.RedeemASAsset(ctx)
+	//return nil
+	time.Sleep(time.Second * 30)
+	stream := client.RedeemASAsset(ctx)
 
 	fmt.Println("Connected to marketplace")
-	err := stream.Send(&hummingbird.RedeemAssetFromASResponse{})
+	err = stream.Send(&hummingbird.RedeemAssetFromASResponse{})
 	fmt.Println("send empty", err)
 	resID := uint32(0)
 	for {
@@ -81,5 +82,5 @@ func (c *RedemptionClient) Init() error {
 		if err := stream.Send(rep); err != nil {
 			fmt.Println("Send error:", err)
 		}
-	}*/
+	}
 }
