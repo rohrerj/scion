@@ -113,7 +113,7 @@ func (s *RedemptionService) readRoutine() {
 	for {
 		select {
 		case u := <-s.UpdateChannel:
-			if s.expiration.Before(time.Now()) {
+			if u.ExpirationTime.Before(time.Now()) {
 				return
 			}
 			if err = s.handleUpdate(u); err != nil {

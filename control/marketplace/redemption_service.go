@@ -42,7 +42,7 @@ func (c *RedemptionClient) Init() error {
 	ctx := context.Background()
 	rep, err := client.DelegateRedemption(ctx, &connect.Request[hummingbird.DelegateRedemptionRequest]{
 		Msg: &hummingbird.DelegateRedemptionRequest{
-			ExpirationTime:          timestamppb.New(time.Now().Add(time.Second * 30)),
+			ExpirationTime:          timestamppb.New(time.Now().Add(time.Second * 60)),
 			ReservationIdUpperBound: 1 << 20,
 			Key:                     []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 			EncodingPoints:          []uint64{100, 250, 500, 1000, 1500, 2000, 2500, 5000, 10000, 20000, 50000, 100000},
