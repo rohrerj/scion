@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 
@@ -40,47 +41,65 @@ func (c *RedemptionClient) Init() error {
 	}
 
 	ctx := context.Background()
-	rep, err := client.DelegateRedemption(ctx, &connect.Request[hummingbird.DelegateRedemptionRequest]{
-		Msg: &hummingbird.DelegateRedemptionRequest{
-			ExpirationTime:          timestamppb.New(time.Now().Add(time.Second * 60)),
-			ReservationIdUpperBound: 1 << 20,
-			Key:                     []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-			EncodingPoints:          []uint64{100, 250, 500, 1000, 1500, 2000, 2500, 5000, 10000, 20000, 50000, 100000},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	fmt.Println("Redemption delegation until", rep.Msg.ExpirationTime)
+	//var err error
 	//return nil
-	time.Sleep(time.Second * 30)
-	stream := client.RedeemASAsset(ctx)
+	/*
+		stream := client.RedeemASAsset(ctx)
 
-	fmt.Println("Connected to marketplace")
-	err = stream.Send(&hummingbird.RedeemAssetFromASResponse{})
-	fmt.Println("send empty", err)
-	resID := uint32(0)
+		fmt.Println("Connected to marketplace")
+		err = stream.Send(&hummingbird.RedeemAssetFromASResponse{})
+		fmt.Println("send empty", err)
+		resID := uint32(0)
+		go func() {
+			for {
+				msg, err := stream.Receive()
+				if err != nil {
+					fmt.Println("Receive error:", err)
+					return
+				}
+				fmt.Println("received redemption request")
+
+				rep := &hummingbird.RedeemAssetFromASResponse{
+					ResInfo: &hummingbird.ReservationInfo{
+						ResId:               resID,
+						BwRounded:           1,
+						BwDataplaneEncoding: 0xFF,
+					},
+					Ak:        []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+					RequestId: msg.RequestId,
+				}
+				resID++
+
+				if err := stream.Send(rep); err != nil {
+					fmt.Println("Send error:", err)
+				}
+			}
+		}()*/
+	var step = math.Pow(10_000_000.0/100.0, 1.0/float64(1024-1))
+
+	// For some DP encoding i, return the corresponding bandwidth in kbps.
+	indexToBwKbps := func(i int) int {
+		bw := 100.0 * math.Pow(step, float64(i))
+		return int(math.Ceil(bw))
+	}
+	encodings := make([]uint64, 1024)
+	for i := 0; i < 1024; i++ {
+		encodings[i] = uint64(indexToBwKbps(i))
+	}
 	for {
-		msg, err := stream.Receive()
+		rep, err := client.DelegateRedemption(ctx, &connect.Request[hummingbird.DelegateRedemptionRequest]{
+			Msg: &hummingbird.DelegateRedemptionRequest{
+				ExpirationTime:          timestamppb.New(time.Now().Add(time.Second * 600)),
+				ReservationIdUpperBound: 1 << 20,
+				Key:                     []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+				EncodingPoints:          encodings,
+			},
+		})
 		if err != nil {
-			fmt.Println("Receive error:", err)
 			return err
 		}
-		fmt.Println("received redemption request")
+		fmt.Println("Redemption delegation until", rep.Msg.ExpirationTime)
+		time.Sleep(time.Second * 300)
 
-		rep := &hummingbird.RedeemAssetFromASResponse{
-			ResInfo: &hummingbird.ReservationInfo{
-				ResId:               resID,
-				BwRounded:           1,
-				BwDataplaneEncoding: 0xFF,
-			},
-			Ak:        []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-			RequestId: msg.RequestId,
-		}
-		resID++
-
-		if err := stream.Send(rep); err != nil {
-			fmt.Println("Send error:", err)
-		}
 	}
 }

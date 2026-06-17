@@ -309,7 +309,9 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
 	}
 	undoRedemption := func() error {
-		err = s.store.UndoRedemption(ctx, user, req.Msg.IngressAssetId, req.Msg.EgressAssetId, req.Msg.IfPairAssetId)
+		// we use context.Background here because if the client disconnected in the meantime,
+		// we cannot undo the redemption using the request's context.
+		err = s.store.UndoRedemption(context.Background(), user, req.Msg.IngressAssetId, req.Msg.EgressAssetId, req.Msg.IfPairAssetId)
 		if err != nil {
 			log.Error("Error while undoing redemption", "err", err)
 		}

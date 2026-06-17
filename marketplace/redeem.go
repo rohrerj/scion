@@ -104,6 +104,10 @@ func (s *Service) startOrUpdateRedemptionDelegation(ctx context.Context, clientI
 	} else if client.delegatedServer != nil {
 		// the redemption server was already delegated, but we received an update request
 		client.delegatedServer.UpdateChannel <- state
+		err = <-client.delegatedServer.UpdateResultChannel
+		if err != nil {
+			return err
+		}
 	} else {
 		// the redemption server was previously run by the AS, now it is delegated
 		client.mtx.Lock()
@@ -146,6 +150,7 @@ func (s *Service) stopRedemptionDelegation(ctx context.Context, clientID addr.IA
 		return serrors.New("cannot stop redemption delegation without active delegation")
 	}
 	client.delegatedServer.UpdateChannel <- &RedemptionDelegationUpdate{ExpirationTime: time.Time{}}
+	_ = <-client.delegatedServer.UpdateResultChannel
 	client.delegatedServer = nil
 	if client.closeCh != nil {
 		client.closeCh <- struct{}{}

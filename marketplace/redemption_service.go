@@ -20,10 +20,8 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"slices"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/scionproto/scion/marketplace/db"
@@ -34,23 +32,25 @@ import (
 )
 
 const (
-	RESID_BITS       = 22
-	MAX_DURATION_SEC = math.MaxUint16
-	AkBufferSize     = 16
+	AkBufferSize = 16
 )
 
 type RedemptionService struct {
-	SendChannel    chan *hummingbird.RedeemAssetFromASRequest
-	Pending        map[uint64]chan *hummingbird.RedeemAssetFromASResponse
-	UpdateChannel  chan *RedemptionDelegationUpdate
-	client         *RedemptionServerPeer
-	store          *storage.MarketplaceStorage
-	cipher         cipher.Block
-	resLimit       uint32
-	resIdStore     ReservationIdStore
-	encodingPoints []uint64
-	expiration     time.Time
-	mtx            sync.RWMutex
+	SendChannel chan *hummingbird.RedeemAssetFromASRequest
+	Pending     map[uint64]chan *hummingbird.RedeemAssetFromASResponse
+	// The update channel is used to propagate updates to the redemption service
+	// like different secret key or updated expiration date
+	// The result of the update is send over the UpdateResultChannel, which MUST
+	// be consumed by the entity who send the update over the UpdateChannel.
+	UpdateChannel       chan *RedemptionDelegationUpdate
+	UpdateResultChannel chan error
+	client              *RedemptionServerPeer
+	store               *storage.MarketplaceStorage
+	cipher              cipher.Block
+	resLimit            uint32
+	resIdStore          ReservationIdStore
+	encodingPoints      []uint64
+	expiration          time.Time
 }
 
 type RedemptionDelegationUpdate struct {
@@ -68,7 +68,7 @@ type RedemptionDelegationUpdateResult struct {
 type ReservationIdStore interface {
 	Init(limit uint32, r []*db.UsedReservation) error
 	Next(start uint64, end uint64) (uint32, error)
-	Migrate(newLimit uint32) error
+	Migrate(newLimit uint32, r []*db.UsedReservation) error
 	Close() error
 }
 
@@ -80,16 +80,17 @@ func NewRedemptionService(ctx context.Context, client *RedemptionServerPeer, sto
 		return nil, err
 	}
 	s := &RedemptionService{
-		SendChannel:    sendCh,
-		Pending:        pending,
-		UpdateChannel:  make(chan *RedemptionDelegationUpdate),
-		store:          store,
-		cipher:         blockCipher,
-		resLimit:       initState.ReservationIdLimit,
-		encodingPoints: initState.EncodingPoints,
-		client:         client,
-		expiration:     initState.ExpirationTime,
-		resIdStore:     &UsedIDStore{},
+		SendChannel:         sendCh,
+		Pending:             pending,
+		UpdateChannel:       make(chan *RedemptionDelegationUpdate),
+		UpdateResultChannel: make(chan error),
+		store:               store,
+		cipher:              blockCipher,
+		resLimit:            initState.ReservationIdLimit,
+		encodingPoints:      initState.EncodingPoints,
+		client:              client,
+		expiration:          initState.ExpirationTime,
+		resIdStore:          &UsedIDStore{},
 	}
 	now := time.Now()
 	res, err := s.store.FindUsedReservations(ctx, &db.UsedReservationsQuery{
@@ -114,14 +115,16 @@ func (s *RedemptionService) readRoutine() {
 		select {
 		case u := <-s.UpdateChannel:
 			if u.ExpirationTime.Before(time.Now()) {
+				s.UpdateResultChannel <- nil
 				return
 			}
-			if err = s.handleUpdate(u); err != nil {
-				fmt.Println(err)
-				return
-			}
+			s.UpdateResultChannel <- s.handleUpdate(u)
 		case r := <-s.SendChannel:
 			if s.expiration.Before(time.Now()) {
+				select {
+				case s.SendChannel <- r:
+				default:
+				}
 				return
 			}
 			if err = s.handleRequest(r); err != nil {
@@ -133,9 +136,21 @@ func (s *RedemptionService) readRoutine() {
 }
 
 func (s *RedemptionService) handleUpdate(u *RedemptionDelegationUpdate) error {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	err := s.resIdStore.Migrate(u.ReservationIdLimit)
+	var res []*db.UsedReservation
+	var err error
+	if u.ExpirationTime != s.expiration {
+		now := time.Now()
+		res, err = s.store.FindUsedReservations(context.TODO(), &db.UsedReservationsQuery{
+			IA:       s.client.ia,
+			StartsAt: now.UTC().Format(time.RFC3339),
+			StopsAt:  u.ExpirationTime.Format(time.RFC3339),
+		})
+		if err != nil {
+			return err
+		}
+		s.expiration = u.ExpirationTime
+	}
+	err = s.resIdStore.Migrate(u.ReservationIdLimit, res)
 	if err != nil {
 		return err
 	}
@@ -146,8 +161,6 @@ func (s *RedemptionService) handleUpdate(u *RedemptionDelegationUpdate) error {
 }
 
 func (s *RedemptionService) handleRequest(r *hummingbird.RedeemAssetFromASRequest) error {
-	s.mtx.RLock()
-	defer s.mtx.RUnlock()
 	resId, err := s.resIdStore.Next(uint64(r.StartsAt.Seconds), uint64(r.StopsAt.Seconds))
 	if err != nil {
 		return err
@@ -222,7 +235,7 @@ type UsedIDStore struct {
 }
 
 func (s *UsedIDStore) Init(limit uint32, r []*db.UsedReservation) error {
-	clear(s.usedIds)
+	s.usedIds = make(map[uint32]struct{})
 	s.limit = limit
 	s.next = 0
 	for _, res := range r {
@@ -235,18 +248,28 @@ func (s *UsedIDStore) Next(start uint64, end uint64) (uint32, error) {
 	for ; s.next < s.limit; s.next++ {
 		_, found := s.usedIds[s.next]
 		if !found {
-			return s.next, nil
+			s.usedIds[s.next] = struct{}{}
+			tmp := s.next
+			s.next++
+			return tmp, nil
 		}
 	}
 	return 0, serrors.New("no free reservation id")
 }
 
-func (s *UsedIDStore) Migrate(newLimit uint32) error {
-	if s.next < newLimit {
-		s.limit = newLimit
-		return nil
+func (s *UsedIDStore) Migrate(newLimit uint32, r []*db.UsedReservation) error {
+	if s.next > newLimit {
+		return serrors.New("newLimit too small")
 	}
-	return serrors.New("newLimit too small")
+	if r != nil {
+		clear(s.usedIds)
+		s.next = 0
+		for _, res := range r {
+			s.usedIds[res.Id] = struct{}{}
+		}
+	}
+	s.limit = newLimit
+	return nil
 }
 
 func (s *UsedIDStore) Close() error {
