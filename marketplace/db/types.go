@@ -16,6 +16,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/binary"
 	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
@@ -31,6 +32,27 @@ type AssetQuery struct {
 	StopsAt              *string
 	Price                *uint64
 }
+
+type UsedReservationsQuery struct {
+	IA       addr.IA
+	StartsAt string
+	StopsAt  string
+}
+
+type UsedReservation struct {
+	Id       uint32
+	StartsAt time.Time
+	StopsAt  time.Time
+}
+
+type RedemptionDelegation struct {
+	IA                 addr.IA
+	Expiration         time.Time
+	ReservationIdLimit uint32
+	Key                []byte
+	Encodings          []byte
+}
+
 type ReservationQuery struct {
 	OwnerId  int64
 	IA       *addr.IA
@@ -63,7 +85,7 @@ type DBReservation struct {
 	StartsAt  time.Time
 	StopsAt   time.Time
 	OwnerId   int64
-	Key       string
+	Key       []byte
 }
 
 type DBAsset struct {
@@ -90,4 +112,23 @@ type DBUser struct {
 
 type DBASUser struct {
 	IA addr.IA
+}
+
+func (r *RedemptionDelegation) EncodingsToInts() []uint64 {
+	if len(r.Encodings)%8 != 0 {
+		panic("invalid data length")
+	}
+	nums := make([]uint64, len(r.Encodings)/8)
+	for i := range nums {
+		nums[i] = binary.LittleEndian.Uint64(r.Encodings[i*8:])
+	}
+	return nums
+}
+
+func (r *RedemptionDelegation) EncodeInts(nums []uint64) {
+	buf := make([]byte, len(nums)*8)
+	for i, n := range nums {
+		binary.LittleEndian.PutUint64(buf[i*8:], n)
+	}
+	r.Encodings = buf
 }

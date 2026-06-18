@@ -570,9 +570,6 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 	if stopsAt != nil {
 		req.StopsAt = timestamppb.New(*stopsAt)
 	}
-	if !readConfirm(reader) {
-		return
-	}
 	rep, err := c.FetchReservations(ctx, &connect.Request[hummingbird.FetchReservationsRequest]{
 		Msg: req,
 	})
@@ -581,14 +578,14 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 		return
 	}
 	type Reservation struct {
-		ResId     uint64
+		ResId     uint32
 		Ia        addr.IA
 		IngressId uint32
 		EgressId  uint32
 		Bw        uint64
 		StartsAt  time.Time
 		StopsAt   time.Time
-		Ak        string
+		Ak        []byte
 	}
 	transformed := make([]*Reservation, 0, len(rep.Msg.Reservations))
 	for _, res := range rep.Msg.Reservations {
@@ -777,9 +774,6 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 			TimeGranularity: asset.TimeGranularity,
 		})
 	}
-	sort.Slice(transformed, func(i, j int) bool {
-		return transformed[i].ID < transformed[j].ID
-	})
 	j, err := json.MarshalIndent(transformed, "", "\t")
 	if err != nil {
 		fmt.Println(err)

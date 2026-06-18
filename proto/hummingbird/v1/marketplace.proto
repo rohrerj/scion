@@ -84,6 +84,7 @@ message MarketplaceInfoResponse {
     uint64 api_minor_version = 2;
     string currency = 3;
     uint64 max_statistics_granularity = 4;
+    bool supports_redemption_delegation = 5;
 }
 
 message PublishAssetRequest {
@@ -157,8 +158,8 @@ message RedeemAssetRequest {
 }
 
 message RedeemAssetResponse {
-    string ak = 1;
-    uint64 res_id = 2;
+    bytes ak = 1;
+    uint32 res_id = 2;
     uint64 bw_rounded = 3;
     uint32 bw_dataplane_encoding = 4;
 }
@@ -177,12 +178,12 @@ message FetchReservationsResponse {
 }
 
 message Reservation {
-    uint64 res_id = 1;
+    uint32 res_id = 1;
     uint64 ia = 2;
     uint32 ingress_id = 3;
     uint32 egress_id = 4;
     uint64 bw = 5;
     google.protobuf.Timestamp starts_at = 6;
     google.protobuf.Timestamp stops_at = 7;
-    string ak = 8;
+    bytes ak = 8;
 }

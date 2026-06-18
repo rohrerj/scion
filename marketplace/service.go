@@ -32,17 +32,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type assetState int
-
-const (
-	Listed assetState = iota
-	Bought
-	Redeemed
-	CheckedOut
-	BeingRedeemed
-	BeingSplit
-)
-
 type Service struct {
 	redemptionServerPeers map[addr.IA]*RedemptionServerPeer
 	mtx                   sync.Mutex
@@ -51,18 +40,39 @@ type Service struct {
 }
 
 type MarketplaceInfo struct {
-	ApiMajorVersion           uint64
-	ApiMinorVersion           uint64
-	Currency                  string
-	StatisticsTimeGranularity time.Duration
+	ApiMajorVersion              uint64
+	ApiMinorVersion              uint64
+	Currency                     string
+	StatisticsTimeGranularity    time.Duration
+	SupportsRedemptionDelegation bool
 }
 
-func NewService(info *MarketplaceInfo, store *storage.MarketplaceStorage) *Service {
-	return &Service{
+func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.MarketplaceStorage) (*Service, error) {
+	s := &Service{
 		redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
 		info:                  info,
 		store:                 store,
 	}
+	if s.info.SupportsRedemptionDelegation {
+		d, err := store.FindRedemptionDelegations(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, delegation := range d {
+			delegation.EncodingsToInts()
+			peer := s.newRedemptionServerPeer(delegation.IA)
+			err = s.startOrUpdateRedemptionDelegation(ctx, peer.ia, &RedemptionDelegationUpdate{
+				ExpirationTime:     delegation.Expiration,
+				ReservationIdLimit: delegation.ReservationIdLimit,
+				Key:                delegation.Key,
+				EncodingPoints:     delegation.EncodingsToInts(),
+			}, false)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return s, nil
 }
 
 func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error) {
@@ -181,7 +191,7 @@ func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hu
 	resp := make([]*hummingbird.Reservation, 0, len(reservations))
 	for _, reservation := range reservations {
 		resp = append(resp, &hummingbird.Reservation{
-			ResId:     uint64(reservation.ID),
+			ResId:     uint32(reservation.ID),
 			Ia:        uint64(reservation.IA),
 			IngressId: uint32(reservation.Ingress),
 			EgressId:  uint32(reservation.Egress),
@@ -202,10 +212,11 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 	fmt.Println("Info")
 	return &connect.Response[hummingbird.MarketplaceInfoResponse]{
 		Msg: &hummingbird.MarketplaceInfoResponse{
-			ApiMajorVersion:          s.info.ApiMajorVersion,
-			ApiMinorVersion:          s.info.ApiMinorVersion,
-			Currency:                 s.info.Currency,
-			MaxStatisticsGranularity: uint64(s.info.StatisticsTimeGranularity),
+			ApiMajorVersion:              s.info.ApiMajorVersion,
+			ApiMinorVersion:              s.info.ApiMinorVersion,
+			Currency:                     s.info.Currency,
+			MaxStatisticsGranularity:     uint64(s.info.StatisticsTimeGranularity),
+			SupportsRedemptionDelegation: s.info.SupportsRedemptionDelegation,
 		},
 	}, nil
 }
@@ -298,7 +309,9 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
 	}
 	undoRedemption := func() error {
-		err = s.store.UndoRedemption(ctx, user, req.Msg.IngressAssetId, req.Msg.EgressAssetId, req.Msg.IfPairAssetId)
+		// we use context.Background here because if the client disconnected in the meantime,
+		// we cannot undo the redemption using the request's context.
+		err = s.store.UndoRedemption(context.Background(), user, req.Msg.IngressAssetId, req.Msg.EgressAssetId, req.Msg.IfPairAssetId)
 		if err != nil {
 			log.Error("Error while undoing redemption", "err", err)
 		}
@@ -311,8 +324,6 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	if !found {
 		return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not reachable"), undoRedemption()))
 	}
-	// after this line we cannot safely undo the redemption anymore because the redemption server
-	// might have already received the request
 	respCh := peer.Send(&hummingbird.RedeemAssetFromASRequest{
 		Bw:        bw,
 		IngressId: ingressID,
@@ -322,6 +333,9 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 	})
 	select {
 	case resp := <-respCh:
+		if resp == nil {
+			return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
+		}
 		n, err := s.store.InsertReservation(ctx, &db.DBReservation{
 			ID:        int64(resp.ResInfo.ResId),
 			IA:        ia,
@@ -343,13 +357,13 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 		return &connect.Response[hummingbird.RedeemAssetResponse]{
 			Msg: &hummingbird.RedeemAssetResponse{
 				Ak:                  resp.Ak,
-				ResId:               resp.ResInfo.ResId,
+				ResId:               uint32(resp.ResInfo.ResId),
 				BwRounded:           resp.ResInfo.BwRounded,
 				BwDataplaneEncoding: resp.ResInfo.BwDataplaneEncoding,
 			},
 		}, nil
 	case <-time.After(30 * time.Second):
-		return nil, connect.NewError(connect.CodeUnavailable, serrors.New("Redemption service not available"))
+		return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
 	}
 }
 

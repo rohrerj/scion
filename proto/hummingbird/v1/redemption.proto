@@ -26,17 +26,17 @@ service RedemptionService {
 }
 
 message DelegateRedemptionRequest {
-    // delegate request valid from now until stops_at
-    google.protobuf.Timestamp stops_at = 1;
-    // the inclusive start of the reservation ID interval
-    uint64 reservation_id_start = 2;
+    // delegate request valid from now until expiration_time
+    google.protobuf.Timestamp expiration_time = 1;
     // the exclusive end of the reservation ID interval
-    uint64 reservation_id_end = 3;
+    uint32 reservation_id_upper_bound = 2;
     // the key used for the derival of the authentication keys
-    bytes Key = 4;
+    bytes Key = 3;
+    // up to 1024 sorted values that indicate the dataplane encoding points
+    repeated uint64 encoding_points = 4;
 }
 message DelegateRedemptionResponse {
-    google.protobuf.Timestamp stops_at = 1;
+    google.protobuf.Timestamp expiration_time = 1;
 }
 
 message RedeemAssetFromASRequest {
@@ -51,13 +51,13 @@ message RedeemAssetFromASRequest {
 
 message RedeemAssetFromASResponse {
     ReservationInfo res_info = 1;
-    string ak = 2;
+    bytes ak = 2;
     // to match request with response
     uint64 request_id = 3;
 }
 
 message ReservationInfo {
-    uint64 res_id = 1;
+    uint32 res_id = 1;
     uint64 bw_rounded = 2;
-    uint32  bw_dataplane_encoding = 3;
+    uint32 bw_dataplane_encoding = 3;
 }

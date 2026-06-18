@@ -17,23 +17,20 @@ package marketplace
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
+	"time"
 
 	"connectrpc.com/connect"
+	"github.com/scionproto/scion/marketplace/db"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 )
 
 func (s *Service) newRedemptionServerPeer(ia addr.IA) *RedemptionServerPeer {
-	if s.redemptionServerPeers == nil {
-		s.redemptionServerPeers = make(map[addr.IA]*RedemptionServerPeer)
-	}
 	peer := &RedemptionServerPeer{
 		ia:      ia,
-		sendCh:  make(chan *hummingbird.RedeemAssetFromASRequest),
-		recvCh:  make(chan *hummingbird.RedeemAssetFromASResponse),
+		sendCh:  make(chan *hummingbird.RedeemAssetFromASRequest, 64),
 		pending: make(map[uint64]chan *hummingbird.RedeemAssetFromASResponse),
 	}
 	s.redemptionServerPeers[ia] = peer
@@ -41,31 +38,159 @@ func (s *Service) newRedemptionServerPeer(ia addr.IA) *RedemptionServerPeer {
 }
 
 type RedemptionServerPeer struct {
-	ia     addr.IA
-	sendCh chan *hummingbird.RedeemAssetFromASRequest
-	recvCh chan *hummingbird.RedeemAssetFromASResponse
-
-	pending   map[uint64]chan *hummingbird.RedeemAssetFromASResponse
-	requestID uint64
-	mu        sync.Mutex
+	delegatedServer     *RedemptionService
+	ia                  addr.IA
+	sendCh              chan *hummingbird.RedeemAssetFromASRequest
+	pending             map[uint64]chan *hummingbird.RedeemAssetFromASResponse
+	requestID           uint64
+	cancelOldConnection context.CancelFunc
+	mtx                 sync.Mutex
 }
 
 func (c *RedemptionServerPeer) Send(req *hummingbird.RedeemAssetFromASRequest) <-chan *hummingbird.RedeemAssetFromASResponse {
 	respCh := make(chan *hummingbird.RedeemAssetFromASResponse, 1)
-
-	c.mu.Lock()
+	c.mtx.Lock()
 	req.RequestId = c.requestID
 	c.requestID++
 	c.pending[req.RequestId] = respCh
-	c.mu.Unlock()
-
+	c.mtx.Unlock()
 	c.sendCh <- req
-
 	return respCh
 }
 
+func (c *RedemptionServerPeer) ReturnResponse(msg *hummingbird.RedeemAssetFromASResponse) {
+	reqID := msg.RequestId
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	ch, ok := c.pending[reqID]
+	if ok {
+		ch <- msg
+		close(ch)
+		delete(c.pending, reqID)
+	}
+}
+
+func (s *Service) startOrUpdateRedemptionDelegation(ctx context.Context, clientID addr.IA, state *RedemptionDelegationUpdate, persist bool) error {
+	fmt.Println("startOrUpdateRedemptionDelegation", clientID)
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	client, found := s.redemptionServerPeers[clientID]
+	var err error
+	if !found {
+		// new peer
+		client = s.newRedemptionServerPeer(clientID)
+		client.mtx.Lock()
+		defer client.mtx.Unlock()
+		s.redemptionServerPeers[clientID] = client
+		if persist {
+			dbDelegation := &db.RedemptionDelegation{
+				IA:                 clientID,
+				Expiration:         state.ExpirationTime,
+				ReservationIdLimit: state.ReservationIdLimit,
+				Key:                state.Key,
+			}
+			dbDelegation.EncodeInts(state.EncodingPoints)
+			_, err = s.store.CreateOrUpdateRedemptionDelegations(ctx, dbDelegation)
+			if err != nil {
+				return err
+			}
+		}
+		client.delegatedServer, err = NewRedemptionService(ctx, client, s.store, clientID, state, client.sendCh, client.pending)
+		if err != nil {
+			return err
+		}
+
+	} else if client.delegatedServer != nil {
+		// the redemption server was already delegated, but we received an update request
+		client.delegatedServer.UpdateChannel <- state
+		err = <-client.delegatedServer.UpdateResultChannel
+		if err != nil {
+			return err
+		}
+	} else {
+		// the redemption server was previously run by the AS, now it is delegated
+		client.mtx.Lock()
+		defer client.mtx.Unlock()
+		if client.cancelOldConnection != nil {
+			client.cancelOldConnection()
+		}
+		if persist {
+			dbDelegation := &db.RedemptionDelegation{
+				IA:                 clientID,
+				Expiration:         state.ExpirationTime,
+				ReservationIdLimit: state.ReservationIdLimit,
+				Key:                state.Key,
+			}
+			dbDelegation.EncodeInts(state.EncodingPoints)
+			_, err = s.store.CreateOrUpdateRedemptionDelegations(ctx, dbDelegation)
+			if err != nil {
+				return err
+			}
+		}
+		client.delegatedServer, err = NewRedemptionService(ctx, client, s.store, clientID, state, client.sendCh, client.pending)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) stopRedemptionDelegation(ctx context.Context, clientID addr.IA) error {
+	fmt.Println("stopRedemptionDelegation", clientID)
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	client, found := s.redemptionServerPeers[clientID]
+	if !found {
+		return serrors.New("cannot stop redemption delegation of unkown peer", "ia", clientID)
+	}
+	client.mtx.Lock()
+	defer client.mtx.Unlock()
+	if client.delegatedServer == nil {
+		return serrors.New("cannot stop redemption delegation without active delegation")
+	}
+	client.delegatedServer.UpdateChannel <- &RedemptionDelegationUpdate{ExpirationTime: time.Time{}}
+	_ = <-client.delegatedServer.UpdateResultChannel
+	client.delegatedServer = nil
+	_, err := s.store.CreateOrUpdateRedemptionDelegations(ctx, &db.RedemptionDelegation{
+		IA:         clientID,
+		Expiration: time.Time{},
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Service) DelegateRedemption(ctx context.Context, req *connect.Request[hummingbird.DelegateRedemptionRequest]) (*connect.Response[hummingbird.DelegateRedemptionResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, serrors.New("Not implemented"))
+	fmt.Println("DelegateRedemption")
+	clientID, ok := ctx.Value("user").(addr.IA)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
+	}
+	expTime := req.Msg.ExpirationTime.AsTime()
+	if expTime.Before(time.Now()) {
+		err := s.stopRedemptionDelegation(ctx, clientID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		return &connect.Response[hummingbird.DelegateRedemptionResponse]{
+			Msg: &hummingbird.DelegateRedemptionResponse{},
+		}, nil
+	}
+	err := s.startOrUpdateRedemptionDelegation(ctx, clientID, &RedemptionDelegationUpdate{
+		ExpirationTime:     req.Msg.ExpirationTime.AsTime(),
+		ReservationIdLimit: req.Msg.ReservationIdUpperBound,
+		Key:                req.Msg.Key,
+		EncodingPoints:     req.Msg.EncodingPoints,
+	}, true)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	return &connect.Response[hummingbird.DelegateRedemptionResponse]{
+		Msg: &hummingbird.DelegateRedemptionResponse{
+			ExpirationTime: req.Msg.ExpirationTime,
+		},
+	}, nil
 }
 
 func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
@@ -74,7 +199,6 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 	if !ok {
 		return connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
 	}
-	stream.Receive()
 	s.mtx.Lock()
 	client, found := s.redemptionServerPeers[clientID]
 	if !found {
@@ -82,37 +206,52 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 		s.redemptionServerPeers[clientID] = client
 	}
 	s.mtx.Unlock()
-
+	s.stopRedemptionDelegation(ctx, clientID)
+	client.mtx.Lock()
+	if client.cancelOldConnection != nil {
+		client.cancelOldConnection()
+	}
+	cancelCtx, cancelF := context.WithCancel(ctx)
+	client.cancelOldConnection = cancelF
+	client.mtx.Unlock()
+	_, err := stream.Receive()
+	if err != nil {
+		return err
+	}
 	fmt.Println("AS redemption service connected:", clientID)
 
 	go func() {
-		for req := range client.sendCh {
-			if req == nil {
+		for {
+			select {
+			case <-cancelCtx.Done():
 				return
-			}
-			if err := stream.Send(req); err != nil {
-				log.Println("Send error:", err)
-				return
+			default:
+				msg, err := stream.Receive()
+				if err != nil {
+					fmt.Println("receive error", err)
+					return
+				}
+				if client.delegatedServer != nil {
+					continue
+				}
+				client.ReturnResponse(msg)
 			}
 		}
 	}()
-
 	for {
-		msg, err := stream.Receive()
-		if err != nil {
-			log.Println("Receive error:", err)
-			continue
+		select {
+		case <-cancelCtx.Done():
+			return nil
+		case req := <-client.sendCh:
+			if req == nil {
+				return serrors.New("send channel closed")
+			}
+			if client.delegatedServer != nil {
+				continue
+			}
+			if err := stream.Send(req); err != nil {
+				return err
+			}
 		}
-
-		reqID := msg.RequestId
-
-		client.mu.Lock()
-		ch, ok := client.pending[reqID]
-		if ok {
-			ch <- msg
-			close(ch)
-			delete(client.pending, reqID)
-		}
-		client.mu.Unlock()
 	}
 }

@@ -137,12 +137,16 @@ func realMain(ctx context.Context) error {
 
 	trustVerifer := trust.NewTLSCryptoVerifier(trustDB)
 
-	service := marketplace.NewService(&marketplace.MarketplaceInfo{
-		ApiMajorVersion:           APIMajorVersion,
-		ApiMinorVersion:           APIMinorVersion,
-		Currency:                  globalCfg.Marketplace.Currency,
-		StatisticsTimeGranularity: time.Duration(globalCfg.Marketplace.StatisticsTimeGranularity) * time.Second,
+	service, err := marketplace.NewService(ctx, &marketplace.MarketplaceInfo{
+		ApiMajorVersion:              APIMajorVersion,
+		ApiMinorVersion:              APIMinorVersion,
+		Currency:                     globalCfg.Marketplace.Currency,
+		StatisticsTimeGranularity:    time.Duration(globalCfg.Marketplace.StatisticsTimeGranularity) * time.Second,
+		SupportsRedemptionDelegation: globalCfg.Marketplace.SupportsRedemptionDelegation,
 	}, store)
+	if err != nil {
+		return err
+	}
 
 	mux := http.NewServeMux()
 	apiPath1, handler1 := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier)))

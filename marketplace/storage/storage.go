@@ -79,6 +79,13 @@ func (s *MarketplaceStorage) CreateASUser(ctx context.Context, user *marketplace
 	return s.db.CreateASUser(ctx, user)
 }
 
+func (s *MarketplaceStorage) CreateOrUpdateRedemptionDelegations(ctx context.Context, r *marketplacedb.RedemptionDelegation) (int64, error) {
+	return s.db.CreateOrUpdateRedemptionDelegations(ctx, r)
+}
+func (s *MarketplaceStorage) FindRedemptionDelegations(ctx context.Context) ([]*marketplacedb.RedemptionDelegation, error) {
+	return s.db.FindRedemptionDelegations(ctx)
+}
+
 func totalPrice(price uint64, bw uint64, startsAt time.Time, stopsAt time.Time) int64 {
 	splitDuration := uint64(stopsAt.Sub(startsAt).Seconds())
 	return int64(price * splitDuration * bw)
@@ -269,6 +276,10 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 
 func (s *MarketplaceStorage) Statistics(ctx context.Context, params *marketplacedb.StatisticsQuery) ([]*marketplacedb.DBStat, error) {
 	return s.db.SearchAssetsForStatistics(ctx, params)
+}
+
+func (s *MarketplaceStorage) FindUsedReservations(ctx context.Context, params *marketplacedb.UsedReservationsQuery) ([]*marketplacedb.UsedReservation, error) {
+	return s.db.FindUsedReservations(ctx, params)
 }
 
 func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, assets []*hummingbird.BuyAsset, maxPrice uint64) ([]int64, int64, error) {

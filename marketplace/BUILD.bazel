@@ -7,6 +7,7 @@ go_library(
         "auth.go",
         "config.go",
         "redeem.go",
+        "redemption_service.go",
         "service.go",
         "trust_db_wrapper.go",
     ],
@@ -31,5 +32,6 @@ go_library(
         "@com_connectrpc_connect//:go_default_library",
         "@com_github_golang_jwt_jwt//:go_default_library",
         "@org_golang_google_protobuf//types/known/timestamppb:go_default_library",
+        "@org_golang_x_sync//errgroup:go_default_library",
     ],
 )
