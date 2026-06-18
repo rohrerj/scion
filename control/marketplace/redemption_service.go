@@ -86,10 +86,10 @@ func (c *RedemptionClient) Init() error {
 	for i := 0; i < 1024; i++ {
 		encodings[i] = uint64(indexToBwKbps(i))
 	}
-	for {
+	startDelegation := func(exp time.Time) error {
 		rep, err := client.DelegateRedemption(ctx, &connect.Request[hummingbird.DelegateRedemptionRequest]{
 			Msg: &hummingbird.DelegateRedemptionRequest{
-				ExpirationTime:          timestamppb.New(time.Now().Add(time.Second * 600)),
+				ExpirationTime:          timestamppb.New(exp),
 				ReservationIdUpperBound: 1 << 20,
 				Key:                     []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 				EncodingPoints:          encodings,
@@ -99,7 +99,52 @@ func (c *RedemptionClient) Init() error {
 			return err
 		}
 		fmt.Println("Redemption delegation until", rep.Msg.ExpirationTime)
-		time.Sleep(time.Second * 300)
-
+		return nil
 	}
+	connectAsRedemptionService := func() {
+		var err error
+		stream := client.RedeemASAsset(ctx)
+
+		fmt.Println("Connected to marketplace")
+		err = stream.Send(&hummingbird.RedeemAssetFromASResponse{})
+		fmt.Println("send empty", err)
+		resID := uint32(0)
+		go func() {
+			for {
+				msg, err := stream.Receive()
+				if err != nil {
+					fmt.Println("Receive error:", err)
+					return
+				}
+				fmt.Println("received redemption request")
+
+				rep := &hummingbird.RedeemAssetFromASResponse{
+					ResInfo: &hummingbird.ReservationInfo{
+						ResId:               resID,
+						BwRounded:           1,
+						BwDataplaneEncoding: 0xFF,
+					},
+					Ak:        []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+					RequestId: msg.RequestId,
+				}
+				resID++
+
+				if err := stream.Send(rep); err != nil {
+					fmt.Println("Send error:", err)
+				}
+			}
+		}()
+	}
+	startDelegation(time.Now().Add(time.Hour * 24 * 7))
+	time.Sleep(time.Hour * 24 * 6)
+	connectAsRedemptionService()
+	/*time.Sleep(time.Second * 10)
+	startDelegation(time.Now().Add(time.Second * 10))
+	time.Sleep(time.Second * 20)
+	connectAsRedemptionService()
+	time.Sleep(time.Second * 10)
+	startDelegation(time.Time{})
+	time.Sleep(time.Second * 10)
+	connectAsRedemptionService()*/
+	return nil
 }

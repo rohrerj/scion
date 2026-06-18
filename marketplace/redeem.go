@@ -25,7 +25,6 @@ import (
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
-	"golang.org/x/sync/errgroup"
 )
 
 func (s *Service) newRedemptionServerPeer(ia addr.IA) *RedemptionServerPeer {
@@ -39,13 +38,13 @@ func (s *Service) newRedemptionServerPeer(ia addr.IA) *RedemptionServerPeer {
 }
 
 type RedemptionServerPeer struct {
-	delegatedServer *RedemptionService
-	ia              addr.IA
-	sendCh          chan *hummingbird.RedeemAssetFromASRequest
-	pending         map[uint64]chan *hummingbird.RedeemAssetFromASResponse
-	closeCh         chan struct{}
-	requestID       uint64
-	mtx             sync.Mutex
+	delegatedServer     *RedemptionService
+	ia                  addr.IA
+	sendCh              chan *hummingbird.RedeemAssetFromASRequest
+	pending             map[uint64]chan *hummingbird.RedeemAssetFromASResponse
+	requestID           uint64
+	cancelOldConnection context.CancelFunc
+	mtx                 sync.Mutex
 }
 
 func (c *RedemptionServerPeer) Send(req *hummingbird.RedeemAssetFromASRequest) <-chan *hummingbird.RedeemAssetFromASResponse {
@@ -112,8 +111,8 @@ func (s *Service) startOrUpdateRedemptionDelegation(ctx context.Context, clientI
 		// the redemption server was previously run by the AS, now it is delegated
 		client.mtx.Lock()
 		defer client.mtx.Unlock()
-		if client.closeCh != nil {
-			client.closeCh <- struct{}{}
+		if client.cancelOldConnection != nil {
+			client.cancelOldConnection()
 		}
 		if persist {
 			dbDelegation := &db.RedemptionDelegation{
@@ -152,9 +151,6 @@ func (s *Service) stopRedemptionDelegation(ctx context.Context, clientID addr.IA
 	client.delegatedServer.UpdateChannel <- &RedemptionDelegationUpdate{ExpirationTime: time.Time{}}
 	_ = <-client.delegatedServer.UpdateResultChannel
 	client.delegatedServer = nil
-	if client.closeCh != nil {
-		client.closeCh <- struct{}{}
-	}
 	_, err := s.store.CreateOrUpdateRedemptionDelegations(ctx, &db.RedemptionDelegation{
 		IA:         clientID,
 		Expiration: time.Time{},
@@ -203,7 +199,6 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 	if !ok {
 		return connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
 	}
-	stream.Receive()
 	s.mtx.Lock()
 	client, found := s.redemptionServerPeers[clientID]
 	if !found {
@@ -213,46 +208,28 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 	s.mtx.Unlock()
 	s.stopRedemptionDelegation(ctx, clientID)
 	client.mtx.Lock()
-	client.closeCh = make(chan struct{})
-	defer func() {
-		client.mtx.Lock()
-		defer client.mtx.Unlock()
-		close(client.closeCh)
-		client.closeCh = nil
-	}()
+	if client.cancelOldConnection != nil {
+		client.cancelOldConnection()
+	}
+	cancelCtx, cancelF := context.WithCancel(ctx)
+	client.cancelOldConnection = cancelF
 	client.mtx.Unlock()
+	_, err := stream.Receive()
+	if err != nil {
+		return err
+	}
 	fmt.Println("AS redemption service connected:", clientID)
 
-	g, errCtx := errgroup.WithContext(ctx)
-	g.Go(func() error {
+	go func() {
 		for {
 			select {
-			case <-errCtx.Done():
-				return nil
-			case <-client.closeCh:
-				return serrors.New("connection closed due to delegation")
-			case req := <-client.sendCh:
-				if req == nil {
-					return serrors.New("send channel closed")
-				}
-				if client.delegatedServer != nil {
-					continue
-				}
-				if err := stream.Send(req); err != nil {
-					return err
-				}
-			}
-		}
-	})
-	g.Go(func() error {
-		for {
-			select {
-			case <-errCtx.Done():
-				return nil
+			case <-cancelCtx.Done():
+				return
 			default:
 				msg, err := stream.Receive()
 				if err != nil {
-					return err
+					fmt.Println("receive error", err)
+					return
 				}
 				if client.delegatedServer != nil {
 					continue
@@ -260,6 +237,21 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 				client.ReturnResponse(msg)
 			}
 		}
-	})
-	return g.Wait()
+	}()
+	for {
+		select {
+		case <-cancelCtx.Done():
+			return nil
+		case req := <-client.sendCh:
+			if req == nil {
+				return serrors.New("send channel closed")
+			}
+			if client.delegatedServer != nil {
+				continue
+			}
+			if err := stream.Send(req); err != nil {
+				return err
+			}
+		}
+	}
 }
