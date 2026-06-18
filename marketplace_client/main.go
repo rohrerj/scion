@@ -90,7 +90,7 @@ func (q *Querier) Query(ctx context.Context, ia addr.IA) ([]snet.Path, error) {
 	return q.Connector.PathService.Paths(ctx, ia, q.Connector.Topology.LocalIA)
 }
 
-func withSCION(ctx context.Context, endhostAPI string, remote *snet.UDPAddr, token string) (hummingbirdconnect.MarketplaceServiceClient, error) {
+func withSCION(ctx context.Context, endhostAPI string, remote *snet.UDPAddr, serverName string, token string) (hummingbirdconnect.MarketplaceServiceClient, error) {
 	connector, err := endhost.NewConnector(ctx, endhostAPI)
 	if err != nil {
 		return nil, err
@@ -146,22 +146,38 @@ func withSCION(ctx context.Context, endhostAPI string, remote *snet.UDPAddr, tok
 	if err != nil {
 		return nil, err
 	}
-
-	dialerFunc := (&squic.EarlyDialerFactory{
-		Transport: quicStack.InsecureDialer.Transport,
-		TLSConfig: func() *tls.Config {
-			cfg := quicStack.InsecureDialer.TLSConfig.Clone()
-			cfg.NextProtos = []string{"h3", "SCION"}
-			return cfg
-		}(),
-		Rewriter: &appnet.AddressRewriter{
-			Router: &snet.BaseRouter{
-				Querier: &Querier{
-					Connector: connector,
+	var dialerFunc func(a net.Addr, opts ...squic.EarlyDialerOption) squic.EarlyDialer
+	if insecure {
+		dialerFunc = (&squic.EarlyDialerFactory{
+			Transport: quicStack.Dialer.Transport,
+			TLSConfig: &tls.Config{
+				NextProtos:         []string{"h3", "SCION"},
+				InsecureSkipVerify: true,
+			},
+			Rewriter: &appnet.AddressRewriter{
+				Router: &snet.BaseRouter{
+					Querier: &Querier{
+						Connector: connector,
+					},
 				},
 			},
-		},
-	}).NewDialer
+		}).NewDialer
+	} else {
+		dialerFunc = (&squic.EarlyDialerFactory{
+			Transport: quicStack.Dialer.Transport,
+			TLSConfig: &tls.Config{
+				NextProtos: []string{"h3", "SCION"},
+				ServerName: serverName,
+			},
+			Rewriter: &appnet.AddressRewriter{
+				Router: &snet.BaseRouter{
+					Querier: &Querier{
+						Connector: connector,
+					},
+				},
+			},
+		}).NewDialer
+	}
 
 	dialer := dialerFunc(remote)
 	client := hummingbirdconnect.NewMarketplaceServiceClient(
@@ -279,6 +295,28 @@ func tokenType(tokenStr string) (string, jwtType, error) {
 	}
 }
 
+func parseAddr(s string) (addr.Addr, uint16, string, error) {
+	host, port, err := net.SplitHostPort(s)
+	if err != nil {
+		return addr.Addr{}, 0, "", serrors.Wrap("invalid address: split host:port", err, "addr", s)
+	}
+	splits := strings.Split(host, ",")
+	if len(splits) != 2 {
+		return addr.Addr{}, 0, "", serrors.Wrap("invalid address: split host:port", err, "addr", s)
+	}
+	_, err = netip.ParseAddr(splits[1])
+	if err != nil {
+		ipAddr, err := net.ResolveIPAddr("ip", splits[1])
+		if err != nil {
+			return addr.Addr{}, 0, "", serrors.Wrap("invalid address: split host:port", err, "addr", s)
+		}
+		s = fmt.Sprintf("[%s,%s]:%s", splits[0], ipAddr.String(), port)
+	}
+	fmt.Println(s)
+	a, p, err := addr.ParseAddrPort(s)
+	return a, p, splits[1], err
+}
+
 func userInteraction() {
 	ctx := context.Background()
 	reader := bufio.NewReader(os.Stdin)
@@ -311,7 +349,7 @@ func userInteraction() {
 		fmt.Println("invalid url", url)
 		return
 	}
-	scionAddr, port, err := addr.ParseAddrPort(api)
+	scionAddr, port, serverName, err := parseAddr(api)
 	if err == nil {
 		remote := &snet.UDPAddr{
 			IA:   scionAddr.IA,
@@ -324,7 +362,7 @@ func userInteraction() {
 				return
 			}
 		}
-		client, err = withSCION(ctx, endhostApi, remote, token)
+		client, err = withSCION(ctx, endhostApi, remote, serverName, token)
 		if err != nil {
 			fmt.Println(err)
 			return

@@ -114,7 +114,7 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cert, err := generateSelfSignedCert()
+	cert, err := loadOrCreateCertificate(path.Join(globalCfg.General.ConfigDir, "server.crt"), path.Join(globalCfg.General.ConfigDir, "server.key"))
 	if err != nil {
 		return err
 	}
@@ -334,8 +334,13 @@ func getJwtKeys() (ed25519.PublicKey, ed25519.PrivateKey, error) {
 
 	return pub, priv, nil
 }
+func loadOrCreateCertificate(certFile, keyFile string) (tls.Certificate, error) {
+	// Try existing files first.
+	if _, err := os.Stat(certFile); err == nil {
+		return tls.LoadX509KeyPair(certFile, keyFile)
+	}
 
-func generateSelfSignedCert() (tls.Certificate, error) {
+	// Generate new key.
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return tls.Certificate{}, err
@@ -344,15 +349,18 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			CommonName: "localhost",
+			CommonName: "marketplace.local",
 		},
 		NotBefore: time.Now(),
-		NotAfter:  time.Now().Add(24 * time.Hour * 365),
+		NotAfter:  time.Now().Add(365 * 24 * time.Hour),
 
-		KeyUsage: x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		KeyUsage: x509.KeyUsageKeyEncipherment |
+			x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{
 			x509.ExtKeyUsageServerAuth,
 		},
+
+		DNSNames: []string{"marketplace.local"},
 	}
 
 	derBytes, err := x509.CreateCertificate(
@@ -366,10 +374,35 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 		return tls.Certificate{}, err
 	}
 
-	cert := tls.Certificate{
-		Certificate: [][]byte{derBytes},
-		PrivateKey:  priv,
+	// Write certificate.
+	certOut, err := os.Create(certFile)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	defer certOut.Close()
+
+	err = pem.Encode(certOut, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: derBytes,
+	})
+	if err != nil {
+		return tls.Certificate{}, err
 	}
 
-	return cert, nil
+	// Write private key.
+	keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	defer keyOut.Close()
+
+	err = pem.Encode(keyOut, &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(priv),
+	})
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	return tls.LoadX509KeyPair(certFile, keyFile)
 }
