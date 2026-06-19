@@ -47,17 +47,12 @@ func ASAccountManagerInterceptor() connect.UnaryInterceptorFunc {
 }
 
 func (s *ASAccountManager) CreateChallenge(ctx context.Context, req *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error) {
-	id, challenge, err := s.registrationService.CreateChallenge(ctx, addr.IA(req.Msg.Ia))
+	challenge, err := s.registrationService.CreateChallenge(ctx, addr.IA(req.Msg.Ia))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	return &connect.Response[hummingbird.CreateChallengeResponse]{
-		Msg: &hummingbird.CreateChallengeResponse{
-			Challenge: &hummingbird.ASChallenge{
-				Id:    id,
-				Value: challenge,
-			},
-		},
+		Msg: challenge,
 	}, nil
 }
 

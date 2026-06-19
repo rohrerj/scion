@@ -29,6 +29,7 @@ import (
 	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	cryptopb "github.com/scionproto/scion/pkg/proto/crypto"
+	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	"github.com/scionproto/scion/private/trust"
@@ -148,7 +149,7 @@ func (s *Service) startCleanupRoutine() {
 	}()
 }
 
-func (s *Service) CreateChallenge(ctx context.Context, ia addr.IA) (string, []byte, error) {
+func (s *Service) CreateChallenge(ctx context.Context, ia addr.IA) (*hummingbird.CreateChallengeResponse, error) {
 	nonce := make([]byte, 32)
 	challengeID := make([]byte, 32)
 	rand.Read(nonce)
@@ -161,7 +162,10 @@ func (s *Service) CreateChallenge(ctx context.Context, ia addr.IA) (string, []by
 		Nonce: nonce,
 	}
 	s.insert(time.Now(), c)
-	return challengeIDString, nonce, nil
+	return &hummingbird.CreateChallengeResponse{
+		Id:    challengeIDString,
+		Value: nonce,
+	}, nil
 }
 
 // get searches for the challenge in both current and previous bucket (validity might overlap)

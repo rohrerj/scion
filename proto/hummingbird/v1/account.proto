@@ -40,10 +40,6 @@ message CreateChallengeRequest {
 }
 
 message CreateChallengeResponse {
-    ASChallenge challenge = 1;
-}
-
-message ASChallenge {
     string id = 1;
     bytes value = 2;
 }
