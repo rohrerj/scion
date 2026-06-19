@@ -41,7 +41,6 @@ type Service struct {
 	buckets           [3]*bucket
 	challengeLifetime int64
 	trustProvider     trust.Provider
-	jwtSigner         *Signer
 	mtx               sync.RWMutex
 }
 type bucket struct {
@@ -103,7 +102,7 @@ func (r *recurser) AllowRecursion(peer net.Addr) error {
 	return nil
 }
 
-func NewService(connector *endhost.Connector, trustDB trust.DB, signer *Signer) *Service {
+func NewService(connector *endhost.Connector, trustDB trust.DB) *Service {
 	buckets := [3]*bucket{}
 	for i := range 3 {
 		buckets[i] = &bucket{
@@ -123,7 +122,6 @@ func NewService(connector *endhost.Connector, trustDB trust.DB, signer *Signer) 
 			},
 			Recurser: &recurser{},
 		},
-		jwtSigner: signer,
 	}
 	s.startCleanupRoutine()
 	return s
@@ -216,11 +214,11 @@ func (s *Service) clear(now time.Time) {
 	clear(bucket.challenges)
 }
 
-func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg *cryptopb.SignedMessage, name string) (string, string, addr.IA, error) {
+func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg *cryptopb.SignedMessage, name string, claims ...jwt.MapClaims) (addr.IA, error) {
 	now := time.Now()
 	c, found := s.get(now, challengeID)
 	if !found {
-		return "", "", 0, serrors.New("challenge not found")
+		return 0, serrors.New("challenge not found")
 	}
 	verifier := &trust.Verifier{
 		BoundIA: c.IA,
@@ -232,29 +230,11 @@ func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg 
 	}
 	msg, err := verifier.Verify(ctx, signedMsg, []byte(name), []byte(hummingbirdconnect.AccountServiceRegisterASProcedure))
 	if err != nil {
-		return "", "", 0, err
+		return 0, err
 	}
 	if slices.Compare(msg.Body, c.Nonce) != 0 {
-		return "", "", 0, serrors.New("wrong challenge")
+		return 0, serrors.New("wrong challenge")
 	}
 	s.delete(now, c.ID)
-	publisherToken, err := s.jwtSigner.GenerateToken(jwt.MapClaims{
-		"sub":   c.IA.String(),
-		"scope": ScopeAssetPublisher,
-		"exp":   now.Add(time.Hour * 24 * 7).Unix(),
-		"iat":   now.Unix(),
-	})
-	if err != nil {
-		return "", "", 0, err
-	}
-	redemptionToken, err := s.jwtSigner.GenerateToken(jwt.MapClaims{
-		"sub":   c.IA.String(),
-		"scope": ScopeRedemptionService,
-		"exp":   now.Add(time.Hour * 24 * 7).Unix(),
-		"iat":   now.Unix(),
-	})
-	if err != nil {
-		return "", "", 0, err
-	}
-	return publisherToken, redemptionToken, c.IA, nil
+	return c.IA, nil
 }

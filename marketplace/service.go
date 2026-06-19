@@ -26,6 +26,7 @@ import (
 	"github.com/scionproto/scion/marketplace/db"
 	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
@@ -37,6 +38,8 @@ type Service struct {
 	mtx                   sync.Mutex
 	info                  *MarketplaceInfo
 	store                 *storage.MarketplaceStorage
+	registrationService   *registration.Service
+	signer                *registration.Signer
 }
 
 type MarketplaceInfo struct {
@@ -47,11 +50,13 @@ type MarketplaceInfo struct {
 	SupportsRedemptionDelegation bool
 }
 
-func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.MarketplaceStorage) (*Service, error) {
+func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.MarketplaceStorage, regService *registration.Service, signer *registration.Signer) (*Service, error) {
 	s := &Service{
 		redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
 		info:                  info,
 		store:                 store,
+		registrationService:   regService,
+		signer:                signer,
 	}
 	if s.info.SupportsRedemptionDelegation {
 		d, err := store.FindRedemptionDelegations(ctx)

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	marketplacedb "github.com/scionproto/scion/marketplace/db"
+	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/private/config"
@@ -67,6 +68,11 @@ func (s *MarketplaceStorage) PublishAsset(ctx context.Context, a *marketplacedb.
 func (s *MarketplaceStorage) GetUser(ctx context.Context, id int64) (*marketplacedb.DBUser, error) {
 	return s.db.GetUser(ctx, id)
 }
+
+func (s *MarketplaceStorage) GetASUser(ctx context.Context, ia addr.IA) (*marketplacedb.DBASUser, error) {
+	return s.db.GetASUser(ctx, ia)
+}
+
 func (s *MarketplaceStorage) GetUserByName(ctx context.Context, name string) (*marketplacedb.DBUser, error) {
 	return s.db.GetUserByName(ctx, name)
 }
@@ -89,6 +95,12 @@ func (s *MarketplaceStorage) FindRedemptionDelegations(ctx context.Context) ([]*
 func totalPrice(price uint64, bw uint64, startsAt time.Time, stopsAt time.Time) int64 {
 	splitDuration := uint64(stopsAt.Sub(startsAt).Seconds())
 	return int64(price * splitDuration * bw)
+}
+func (s *MarketplaceStorage) IncrementASJWTVersion(ctx context.Context, ia addr.IA, current int64) (int64, error) {
+	return s.db.IncrementASJWTVersion(ctx, ia, current)
+}
+func (s *MarketplaceStorage) IncrementUserJWTVersion(ctx context.Context, userid int64, current int64) (int64, error) {
+	return s.db.IncrementUserJWTVersion(ctx, userid, current)
 }
 
 func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, assetId1 int64, assetId2 int64) (int64, error) {

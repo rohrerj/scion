@@ -57,12 +57,15 @@ const (
 		id INTEGER PRIMARY KEY,
 		name TEXT NOT NULL UNIQUE,
 		pw_hash TEXT NOT NULL,
+		jwt_version INTEGER NOT NULL DEFAULT 0,
 		balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0)
 	);
 	CREATE INDEX idx_users_name ON Users(name);
 	CREATE TABLE Ases(
 		isd_id INTEGER NOT NULL,
 		as_id INTEGER NOT NULL,
+		jwt_version INTEGER NOT NULL DEFAULT 0,
+		balance INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY(isd_id, as_id)
 	);
 	CREATE TABLE Redemption_Delegations(

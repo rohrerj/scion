@@ -17,22 +17,19 @@ package marketplace
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"connectrpc.com/connect"
+	"github.com/golang-jwt/jwt"
 	"github.com/scionproto/scion/marketplace/db"
-	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 )
 
-type ASAccountManager struct {
-	store               *storage.MarketplaceStorage
-	registrationService *registration.Service
-}
-
-func ASAccountManagerInterceptor() connect.UnaryInterceptorFunc {
+func ASAccountManagerInterceptor(verifier *TokenVerifier) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			authority := req.Header().Get(":authority")
@@ -41,12 +38,24 @@ func ASAccountManagerInterceptor() connect.UnaryInterceptorFunc {
 			}
 
 			ctx = context.WithValue(ctx, "authority", authority)
+			authHeader := req.Header().Get("Authorization")
+
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+				if tokenStr != "" {
+					var err error
+					ctx, err = verifier.contextFromJwt(ctx, tokenStr, "")
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
 			return next(ctx, req)
 		}
 	}
 }
 
-func (s *ASAccountManager) CreateChallenge(ctx context.Context, req *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error) {
+func (s *Service) CreateChallenge(ctx context.Context, req *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error) {
 	challenge, err := s.registrationService.CreateChallenge(ctx, addr.IA(req.Msg.Ia))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -56,18 +65,51 @@ func (s *ASAccountManager) CreateChallenge(ctx context.Context, req *connect.Req
 	}, nil
 }
 
-func (s *ASAccountManager) RegisterAS(ctx context.Context, req *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error) {
+func (s *Service) RegisterAS(ctx context.Context, req *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error) {
 	authority, ok := ctx.Value("authority").(string)
 	if !ok || authority == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("Request must provide HTTP Host or HTTP2 :authority header"))
 	}
 	fmt.Println("Register AS", "Authority", authority)
-	publisherToken, redemptionToken, ia, err := s.registrationService.RegisterAS(ctx, req.Msg.Id, req.Msg.SignedChallenge, authority)
+	ia, err := s.registrationService.RegisterAS(ctx, req.Msg.Id, req.Msg.SignedChallenge, authority)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	_, err = s.store.CreateASUser(ctx, &db.DBASUser{
-		IA: ia,
+	dbUser, err := s.store.GetASUser(ctx, ia)
+	if err != nil {
+		fmt.Println(err)
+
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if dbUser == nil {
+		dbUser = &db.DBASUser{
+			IA:           ia,
+			TokenVersion: 0,
+		}
+		_, err = s.store.CreateASUser(ctx, dbUser)
+		if err != nil {
+			fmt.Println(err)
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
+	now := time.Now()
+	publisherToken, err := s.signer.GenerateToken(jwt.MapClaims{
+		"sub":   ia.String(),
+		"scope": registration.ScopeAssetPublisher,
+		"exp":   now.Add(time.Hour * 24 * 7).Unix(),
+		"iat":   now.Unix(),
+		"ver":   dbUser.TokenVersion,
+	})
+	if err != nil {
+		fmt.Println(err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	redemptionToken, err := s.signer.GenerateToken(jwt.MapClaims{
+		"sub":   ia.String(),
+		"scope": registration.ScopeRedemptionService,
+		"exp":   now.Add(time.Hour * 24 * 7).Unix(),
+		"iat":   now.Unix(),
+		"ver":   dbUser.TokenVersion,
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -81,21 +123,41 @@ func (s *ASAccountManager) RegisterAS(ctx context.Context, req *connect.Request[
 	}, nil
 }
 
-func NewASAccountManager(store *storage.MarketplaceStorage, regService *registration.Service) *ASAccountManager {
-	return &ASAccountManager{
-		store:               store,
-		registrationService: regService,
+func (s *Service) ResetJWT(ctx context.Context, req *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error) {
+	ver, ok := ctx.Value("ver").(int64)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, serrors.New("invalid token"))
 	}
-}
-
-func (s *ASAccountManager) ResetJWT(ctx context.Context, req *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error) {
-	/*name, err := subjectFromCtx(ctx)
-	if err != nil {
-		return nil, err
+	v := ctx.Value("user")
+	switch x := v.(type) {
+	case nil:
+		return nil, connect.NewError(connect.CodeUnauthenticated, serrors.New("invalid token"))
+	case int64:
+		_, err := s.store.IncrementUserJWTVersion(ctx, x, ver)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
+	case addr.IA:
+		_, err := s.store.IncrementASJWTVersion(ctx, x, ver)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
+		kickRedemptionService := func() {
+			s.mtx.Lock()
+			defer s.mtx.Unlock()
+			peer, found := s.redemptionServerPeers[x]
+			if !found {
+				return
+			}
+			peer.mtx.Lock()
+			defer peer.mtx.Unlock()
+			if peer.cancelOldConnection != nil {
+				peer.cancelOldConnection()
+			}
+		}
+		kickRedemptionService()
+	default:
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid token"))
 	}
-	user := s.db.GetASUser(name)
-	if user != nil {
-		user.TokenVersion++
-	}*/
 	return &connect.Response[hummingbird.JWTResetResponse]{Msg: &hummingbird.JWTResetResponse{}}, nil
 }

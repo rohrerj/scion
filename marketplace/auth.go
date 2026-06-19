@@ -22,6 +22,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt"
+	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 )
@@ -40,63 +41,127 @@ var methodScopes = map[string]string{
 }
 
 type AuthInterceptor struct {
-	Verifier *registration.Verifier
+	TokenVerifier *TokenVerifier
 }
 
-func NewAuthInterceptor(v *registration.Verifier) *AuthInterceptor {
+func NewAuthInterceptor(v *TokenVerifier) *AuthInterceptor {
 	return &AuthInterceptor{
-		Verifier: v,
+		TokenVerifier: v,
 	}
 }
 
-/*
-	func (a *AuthInterceptor) verifyTokenVersion(user string, claims jwt.MapClaims, scopes map[string]bool) error {
-		tokenVersion := uint64(0)
-		if scopes["AssetPublisher"] || scopes["RedemptionService"] {
-			ia, err := addr.ParseIA(user)
-			if err != nil {
-				return connect.NewError(
-					connect.CodeUnauthenticated,
-					fmt.Errorf("invalid token"),
-				)
-			}
-			dbUser := a.accountDB.GetASUser(ia)
-			if dbUser == nil {
-				return connect.NewError(
-					connect.CodeUnauthenticated,
-					fmt.Errorf("invalid token"),
-				)
-			}
-			tokenVersion = dbUser.TokenVersion
-		} else if scopes["User"] {
-			dbUser := a.accountDB.GetUser(user)
-			if dbUser == nil {
-				return connect.NewError(
-					connect.CodeUnauthenticated,
-					fmt.Errorf("invalid token"),
-				)
-			}
-			tokenVersion = dbUser.TokenVersion
-		} else {
-			return connect.NewError(
+type TokenVerifier struct {
+	Store       *storage.MarketplaceStorage
+	JWTVerifier *registration.Verifier
+}
+
+func (a *TokenVerifier) verifyTokenVersion(ctx context.Context, user any, claims jwt.MapClaims, scopes map[string]bool) (int64, error) {
+	tokenVersion := int64(0)
+	if scopes["AssetPublisher"] || scopes["RedemptionService"] {
+		dbUser, err := a.Store.GetASUser(ctx, user.(addr.IA))
+		if err != nil {
+			return 0, connect.NewError(
 				connect.CodeUnauthenticated,
 				fmt.Errorf("invalid token"),
 			)
 		}
-		versionClaim, ok := claims["ver"].(float64)
-		if !ok || uint64(versionClaim) < tokenVersion {
-			return connect.NewError(
+		tokenVersion = dbUser.TokenVersion
+	} else if scopes["User"] {
+		dbUser, err := a.Store.GetUser(ctx, user.(int64))
+		if err != nil {
+			return 0, connect.NewError(
 				connect.CodeUnauthenticated,
 				fmt.Errorf("invalid token"),
 			)
 		}
-		return nil
+		tokenVersion = dbUser.TokenVersion
+	} else {
+		return 0, connect.NewError(
+			connect.CodeUnauthenticated,
+			fmt.Errorf("invalid token"),
+		)
 	}
-*/
+	versionClaim, ok := claims["ver"].(float64)
+	if !ok || int64(versionClaim) < tokenVersion {
+		return 0, connect.NewError(
+			connect.CodeUnauthenticated,
+			fmt.Errorf("invalid token"),
+		)
+	}
+	return int64(versionClaim), nil
+}
+
 func (a *AuthInterceptor) WrapStreamingClient(
 	next connect.StreamingClientFunc,
 ) connect.StreamingClientFunc {
 	return next
+}
+
+func (t *TokenVerifier) contextFromJwt(ctx context.Context, tokenStr string, requiredScope string) (context.Context, error) {
+	token, err := t.JWTVerifier.VerifyToken(tokenStr)
+	if err != nil || !token.Valid {
+		fmt.Println("invalid token")
+		return nil, connect.NewError(
+			connect.CodeUnauthenticated,
+			fmt.Errorf("invalid token"),
+		)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, connect.NewError(
+			connect.CodeUnauthenticated,
+			fmt.Errorf("invalid claims"),
+		)
+	}
+
+	user, ok := claims["sub"].(string)
+	if !ok || user == "" {
+		return nil, connect.NewError(
+			connect.CodeUnauthenticated,
+			fmt.Errorf("missing subject"),
+		)
+	}
+	scopeStr, ok := claims["scope"].(string)
+	if !ok || scopeStr == "" {
+		return nil, connect.NewError(
+			connect.CodePermissionDenied,
+			fmt.Errorf("missing scopes"),
+		)
+	}
+	scopes := parseScopes(scopeStr)
+
+	if requiredScope != "" && !scopes[requiredScope] {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("missing scope: %s", requiredScope))
+	}
+	if scopes["User"] {
+		userid, err := strconv.ParseInt(user, 10, 64)
+		if err != nil {
+			return nil, connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("invalid token"))
+		}
+		tokenVer, err := t.verifyTokenVersion(ctx, userid, claims, scopes)
+		if err != nil {
+			return nil, err
+		}
+		ctx = context.WithValue(ctx, "ver", tokenVer)
+		ctx = context.WithValue(ctx, "user", userid)
+	} else {
+		ia, err := addr.ParseIA(user)
+		if err != nil {
+			return nil, connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("invalid scope"))
+		}
+		tokenVer, err := t.verifyTokenVersion(ctx, ia, claims, scopes)
+		if err != nil {
+			return nil, err
+		}
+		ctx = context.WithValue(ctx, "ver", tokenVer)
+		ctx = context.WithValue(ctx, "user", ia)
+	}
+
+	return ctx, nil
 }
 
 func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
@@ -121,65 +186,11 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 				fmt.Errorf("missing bearer token"),
 			)
 		}
-
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-
-		token, err := a.Verifier.VerifyToken(tokenStr)
-		if err != nil || !token.Valid {
-			fmt.Println("invalid token")
-			return nil, connect.NewError(
-				connect.CodeUnauthenticated,
-				fmt.Errorf("invalid token"),
-			)
-		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			return nil, connect.NewError(
-				connect.CodeUnauthenticated,
-				fmt.Errorf("invalid claims"),
-			)
-		}
-
-		user, ok := claims["sub"].(string)
-		if !ok || user == "" {
-			return nil, connect.NewError(
-				connect.CodeUnauthenticated,
-				fmt.Errorf("missing subject"),
-			)
-		}
-		scopeStr, ok := claims["scope"].(string)
-		if !ok || scopeStr == "" {
-			return nil, connect.NewError(
-				connect.CodePermissionDenied,
-				fmt.Errorf("missing scopes"),
-			)
-		}
-		scopes := parseScopes(scopeStr)
-		/*if err = a.verifyTokenVersion(user, claims, scopes); err != nil {
+		ctx, err := a.TokenVerifier.contextFromJwt(ctx, tokenStr, requiredScope)
+		if err != nil {
 			return nil, err
-		}*/
-
-		if found && !scopes[requiredScope] {
-			return nil, connect.NewError(connect.CodePermissionDenied,
-				fmt.Errorf("missing scope: %s", requiredScope))
 		}
-		if scopes["User"] {
-			userid, err := strconv.ParseInt(user, 10, 64)
-			if err != nil {
-				return nil, connect.NewError(connect.CodePermissionDenied,
-					fmt.Errorf("invalid token"))
-			}
-			ctx = context.WithValue(ctx, "user", userid)
-		} else {
-			ia, err := addr.ParseIA(user)
-			if err != nil {
-				return nil, connect.NewError(connect.CodePermissionDenied,
-					fmt.Errorf("invalid scope"))
-			}
-			ctx = context.WithValue(ctx, "user", ia)
-		}
-
 		return next(ctx, req)
 	}
 }
@@ -207,60 +218,9 @@ func (a *AuthInterceptor) WrapStreamingHandler(
 		}
 
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-
-		token, err := a.Verifier.VerifyToken(tokenStr)
-		if err != nil || !token.Valid {
-			return connect.NewError(
-				connect.CodeUnauthenticated,
-				fmt.Errorf("invalid token"),
-			)
-		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			return connect.NewError(
-				connect.CodeUnauthenticated,
-				fmt.Errorf("invalid claims"),
-			)
-		}
-
-		user, ok := claims["sub"].(string)
-		if !ok || user == "" {
-			return connect.NewError(
-				connect.CodeUnauthenticated,
-				fmt.Errorf("missing subject"),
-			)
-		}
-		scopeStr, ok := claims["scope"].(string)
-		if !ok || scopeStr == "" {
-			return connect.NewError(
-				connect.CodePermissionDenied,
-				fmt.Errorf("missing scopes"),
-			)
-		}
-		scopes := parseScopes(scopeStr)
-		/*if err = a.verifyTokenVersion(user, claims, scopes); err != nil {
+		ctx, err := a.TokenVerifier.contextFromJwt(ctx, tokenStr, requiredScope)
+		if err != nil {
 			return err
-		}*/
-
-		if found && !scopes[requiredScope] {
-			return connect.NewError(connect.CodePermissionDenied,
-				fmt.Errorf("missing scope: %s", requiredScope))
-		}
-		if scopes["User"] {
-			userid, err := strconv.ParseInt(user, 10, 64)
-			if err != nil {
-				return connect.NewError(connect.CodePermissionDenied,
-					fmt.Errorf("invalid token"))
-			}
-			ctx = context.WithValue(ctx, "user", userid)
-		} else {
-			ia, err := addr.ParseIA(user)
-			if err != nil {
-				return connect.NewError(connect.CodePermissionDenied,
-					fmt.Errorf("invalid scope"))
-			}
-			ctx = context.WithValue(ctx, "user", ia)
 		}
 
 		return next(ctx, conn)

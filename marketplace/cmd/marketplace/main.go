@@ -123,7 +123,10 @@ func realMain(ctx context.Context) error {
 		return err
 	}
 	jwtSigner := registration.NewSigner(signingPrivKey)
-	jwtVerifier := registration.NewVerifier(signingPubKey)
+	tokenVerifier := &marketplace.TokenVerifier{
+		Store:       store,
+		JWTVerifier: registration.NewVerifier(signingPubKey),
+	}
 	trustDB, err := storage.NewInMemoryTrustStorage()
 	if err != nil {
 		return err
@@ -136,21 +139,21 @@ func realMain(ctx context.Context) error {
 	trustDB = marketplace.FromTrustDB(trustDB, connector.TrustService)
 
 	trustVerifer := trust.NewTLSCryptoVerifier(trustDB)
-
+	regService := registration.NewService(connector, trustDB)
 	service, err := marketplace.NewService(ctx, &marketplace.MarketplaceInfo{
 		ApiMajorVersion:              APIMajorVersion,
 		ApiMinorVersion:              APIMinorVersion,
 		Currency:                     globalCfg.Marketplace.Currency,
 		StatisticsTimeGranularity:    time.Duration(globalCfg.Marketplace.StatisticsTimeGranularity) * time.Second,
 		SupportsRedemptionDelegation: globalCfg.Marketplace.SupportsRedemptionDelegation,
-	}, store)
+	}, store, regService, jwtSigner)
 	if err != nil {
 		return err
 	}
 
 	mux := http.NewServeMux()
-	apiPath1, handler1 := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier)))
-	apiPath2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(jwtVerifier)))
+	apiPath1, handler1 := hummingbirdconnect.NewMarketplaceServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(tokenVerifier)))
+	apiPath2, handler2 := hummingbirdconnect.NewRedemptionServiceHandler(service, connect.WithInterceptors(marketplace.NewAuthInterceptor(tokenVerifier)))
 
 	mux.Handle(apiPath1, handler1)
 	mux.Handle(apiPath2, handler2)
@@ -163,8 +166,7 @@ func realMain(ctx context.Context) error {
 		},
 	}
 
-	regService := registration.NewService(connector, trustDB, jwtSigner)
-	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(marketplace.NewASAccountManager(store, regService), connect.WithInterceptors(marketplace.ASAccountManagerInterceptor()))
+	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(service, connect.WithInterceptors(marketplace.ASAccountManagerInterceptor(tokenVerifier)))
 
 	webapp.Init(jwtSigner, store, mux)
 	mux.Handle(accountPath, accountHandler)

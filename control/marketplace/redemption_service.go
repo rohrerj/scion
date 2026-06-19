@@ -101,7 +101,7 @@ func (c *RedemptionClient) Init() error {
 		fmt.Println("Redemption delegation until", rep.Msg.ExpirationTime)
 		return nil
 	}
-	connectAsRedemptionService := func() {
+	connectAsRedemptionService := func() error {
 		var err error
 		stream := client.RedeemASAsset(ctx)
 
@@ -109,32 +109,39 @@ func (c *RedemptionClient) Init() error {
 		err = stream.Send(&hummingbird.RedeemAssetFromASResponse{})
 		fmt.Println("send empty", err)
 		resID := uint32(0)
-		go func() {
-			for {
-				msg, err := stream.Receive()
-				if err != nil {
-					fmt.Println("Receive error:", err)
-					return
-				}
-				fmt.Println("received redemption request")
-
-				rep := &hummingbird.RedeemAssetFromASResponse{
-					ResInfo: &hummingbird.ReservationInfo{
-						ResId:               resID,
-						BwRounded:           1,
-						BwDataplaneEncoding: 0xFF,
-					},
-					Ak:        []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-					RequestId: msg.RequestId,
-				}
-				resID++
-
-				if err := stream.Send(rep); err != nil {
-					fmt.Println("Send error:", err)
-				}
+		for {
+			msg, err := stream.Receive()
+			if err != nil {
+				fmt.Println("Receive error:", err)
+				return err
 			}
-		}()
+			fmt.Println("received redemption request")
+
+			rep := &hummingbird.RedeemAssetFromASResponse{
+				ResInfo: &hummingbird.ReservationInfo{
+					ResId:               resID,
+					BwRounded:           1,
+					BwDataplaneEncoding: 0xFF,
+				},
+				Ak:        []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+				RequestId: msg.RequestId,
+			}
+			resID++
+
+			if err := stream.Send(rep); err != nil {
+				fmt.Println("Send error:", err)
+			}
+		}
 	}
+	for i := 0; i < 10; i++ {
+		err := connectAsRedemptionService()
+		if err != nil {
+			fmt.Println(err)
+		}
+		time.Sleep(time.Minute)
+	}
+
+	time.Sleep(time.Hour * 24 * 6)
 	startDelegation(time.Now().Add(time.Hour * 24 * 7))
 	time.Sleep(time.Hour * 24 * 6)
 	connectAsRedemptionService()

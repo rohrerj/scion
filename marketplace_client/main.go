@@ -18,6 +18,8 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -78,7 +80,10 @@ func printOptions(t jwtType) {
 	case Publisher:
 		fmt.Println("-> publish")
 		fmt.Println("-> statistics")
+	case RedemptionService:
+		fmt.Println("-> delegate")
 	}
+	fmt.Println("-> reset")
 	fmt.Println("-> exit")
 }
 
@@ -90,14 +95,25 @@ func (q *Querier) Query(ctx context.Context, ia addr.IA) ([]snet.Path, error) {
 	return q.Connector.PathService.Paths(ctx, ia, q.Connector.Topology.LocalIA)
 }
 
-func withSCION(ctx context.Context, endhostAPI string, remote *snet.UDPAddr, serverName string, token string) (hummingbirdconnect.MarketplaceServiceClient, error) {
-	connector, err := endhost.NewConnector(ctx, endhostAPI)
-	if err != nil {
-		return nil, err
+func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *snet.UDPAddr, serverName string, token string) (
+	hummingbirdconnect.MarketplaceServiceClient, hummingbirdconnect.RedemptionServiceClient, hummingbirdconnect.AccountServiceClient, error) {
+	var connector *endhost.Connector
+	var err error
+	if !localIA.IsZero() {
+		connector, err = endhost.NewConnector(ctx, endhostAPI, endhost.WithLocalIA(localIA))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	} else {
+		connector, err = endhost.NewConnector(ctx, endhostAPI)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
+
 	trustDB, err := storage.NewInMemoryTrustStorage()
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	var localPublic *net.UDPAddr
 	var dp snet.DataplanePath
@@ -110,10 +126,10 @@ func withSCION(ctx context.Context, endhostAPI string, remote *snet.UDPAddr, ser
 	} else {
 		paths, err := connector.PathService.Paths(ctx, remote.IA, connector.Topology.LocalIA)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
 		if len(paths) == 0 {
-			return nil, serrors.New("no paths found to marketplace")
+			return nil, nil, nil, serrors.New("no paths found to marketplace")
 		}
 		dp = paths[0].Dataplane()
 		nextHop = paths[0].UnderlayNextHop()
@@ -144,7 +160,7 @@ func withSCION(ctx context.Context, endhostAPI string, remote *snet.UDPAddr, ser
 	}
 	quicStack, err := nc.QUICStack(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	var dialerFunc func(a net.Addr, opts ...squic.EarlyDialerOption) squic.EarlyDialer
 	if insecure {
@@ -180,13 +196,25 @@ func withSCION(ctx context.Context, endhostAPI string, remote *snet.UDPAddr, ser
 	}
 
 	dialer := dialerFunc(remote)
-	client := hummingbirdconnect.NewMarketplaceServiceClient(
+	marketplaceClient := hummingbirdconnect.NewMarketplaceServiceClient(
 		libconnect.HTTPClient{
 			RoundTripper: &http3.Transport{
 				Dial: dialer.DialEarly,
 			},
 		}, libconnect.BaseUrl(remote), connect.WithInterceptors(authInterceptor(token)))
-	return client, nil
+	redemptionClient := hummingbirdconnect.NewRedemptionServiceClient(
+		libconnect.HTTPClient{
+			RoundTripper: &http3.Transport{
+				Dial: dialer.DialEarly,
+			},
+		}, libconnect.BaseUrl(remote), connect.WithInterceptors(authInterceptor(token)))
+	accountClient := hummingbirdconnect.NewAccountServiceClient(
+		libconnect.HTTPClient{
+			RoundTripper: &http3.Transport{
+				Dial: dialer.DialEarly,
+			},
+		}, libconnect.BaseUrl(remote), connect.WithInterceptors(authInterceptor(token)))
+	return marketplaceClient, redemptionClient, accountClient, nil
 }
 
 type HummingbirdNotes struct {
@@ -290,6 +318,8 @@ func tokenType(tokenStr string) (string, jwtType, error) {
 		return user, User, nil
 	} else if scopes[registration.ScopeAssetPublisher] {
 		return user, Publisher, nil
+	} else if scopes[registration.ScopeRedemptionService] {
+		return user, RedemptionService, nil
 	} else {
 		return "", 0, serrors.New("unsupported JWT")
 	}
@@ -336,18 +366,33 @@ func userInteraction() {
 		}
 		url = marketplace.Api
 	}
-	defaultJWT := ""
-	token := *readOptionalString(reader, "jwt_token: ", &defaultJWT)
-	var client hummingbirdconnect.MarketplaceServiceClient
+	token := ""
+	if !as_registration {
+		token = readString(reader, "jwt_token: ")
+	}
+	var marketplaceClient hummingbirdconnect.MarketplaceServiceClient
+	var redemptionClient hummingbirdconnect.RedemptionServiceClient
+	var accountClient hummingbirdconnect.AccountServiceClient
 	urlSplit := strings.Split(url, "://")
+	var httpHost string
 	api := ""
 	if len(urlSplit) == 1 {
 		api = urlSplit[0]
 	} else if len(urlSplit) == 2 {
 		api = urlSplit[1]
+		httpHost = api
 	} else {
 		fmt.Println("invalid url", url)
 		return
+	}
+	var localIA addr.IA
+	if as_registration {
+		localIAString := readString(reader, "local IA: ")
+		localIA, err = addr.ParseIA(localIAString)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 	}
 	scionAddr, port, serverName, err := parseAddr(api)
 	if err == nil {
@@ -355,6 +400,12 @@ func userInteraction() {
 			IA:   scionAddr.IA,
 			Host: net.UDPAddrFromAddrPort(netip.AddrPortFrom(scionAddr.Host.IP(), port)),
 		}
+		baseUrlSplit := strings.Split(libconnect.BaseUrl(remote), "https://")
+		if len(baseUrlSplit) != 2 {
+			fmt.Println("base Url is invalid", baseUrlSplit)
+			return
+		}
+		httpHost = baseUrlSplit[1]
 		if endhostApi == "" {
 			endhostApi = readString(reader, "endhostAPI: ")
 			if endhostApi == "" {
@@ -362,7 +413,7 @@ func userInteraction() {
 				return
 			}
 		}
-		client, err = withSCION(ctx, endhostApi, remote, serverName, token)
+		marketplaceClient, redemptionClient, accountClient, err = withSCION(ctx, endhostApi, localIA, remote, serverName, token)
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -370,7 +421,21 @@ func userInteraction() {
 		fmt.Println("use SCION connection")
 	} else {
 		if insecure {
-			client = hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
+			marketplaceClient = hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true,
+					},
+				},
+			}, url, connect.WithInterceptors(authInterceptor(token)))
+			redemptionClient = hummingbirdconnect.NewRedemptionServiceClient(&http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true,
+					},
+				},
+			}, url, connect.WithInterceptors(authInterceptor(token)))
+			accountClient = hummingbirdconnect.NewAccountServiceClient(&http.Client{
 				Transport: &http.Transport{
 					TLSClientConfig: &tls.Config{
 						InsecureSkipVerify: true,
@@ -378,17 +443,35 @@ func userInteraction() {
 				},
 			}, url, connect.WithInterceptors(authInterceptor(token)))
 		} else {
-			client = hummingbirdconnect.NewMarketplaceServiceClient(http.DefaultClient,
+			marketplaceClient = hummingbirdconnect.NewMarketplaceServiceClient(http.DefaultClient,
+				url, connect.WithInterceptors(authInterceptor(token)))
+			redemptionClient = hummingbirdconnect.NewRedemptionServiceClient(http.DefaultClient,
+				url, connect.WithInterceptors(authInterceptor(token)))
+			accountClient = hummingbirdconnect.NewAccountServiceClient(http.DefaultClient,
 				url, connect.WithInterceptors(authInterceptor(token)))
 		}
 
 		fmt.Println("use TCP connection")
 	}
-	username, t, err := tokenType(token)
-	if err != nil {
-		fmt.Println(err)
+	if as_registration {
+		trcDir := readString(reader, "trc directory: ")
+		certDir := readString(reader, "certificate directory: ")
+		keyRingDir := readString(reader, "keyring directory: ")
+		fmt.Println("httpHost", httpHost)
+		regClient := registration.NewClient(accountClient, httpHost)
+		publisherToken, redemptionToken, err := regClient.RegisterWithNewSigner(ctx, localIA, trcDir, certDir, keyRingDir)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Printf("Publisher Token: %s\nRedemptionService Token: %s\n", publisherToken, redemptionToken)
+		return
 	}
-	fmt.Printf("Logged in as %s\n", username)
+	username, t, err := tokenType(token)
+	if err == nil {
+		fmt.Printf("Logged in as %s\n", username)
+	}
+
 	for {
 		printOptions(t)
 		option, err := reader.ReadString('\n')
@@ -399,28 +482,109 @@ func userInteraction() {
 		}
 		switch {
 		case option == "info":
-			handleInfo(ctx, client)
+			handleInfo(ctx, marketplaceClient)
 		case option == "search":
-			handleSearch(ctx, reader, client)
+			handleSearch(ctx, reader, marketplaceClient)
 		case option == "buy":
-			handleBuy(ctx, reader, client)
+			handleBuy(ctx, reader, marketplaceClient)
 		case option == "split":
-			handleSplit(ctx, reader, client)
+			handleSplit(ctx, reader, marketplaceClient)
 		case option == "combine":
-			handleCombine(ctx, reader, client)
+			handleCombine(ctx, reader, marketplaceClient)
 		case option == "redeem":
-			handleRedeem(ctx, reader, client)
+			handleRedeem(ctx, reader, marketplaceClient)
 		case option == "reservation":
-			handleReservation(ctx, reader, client)
+			handleReservation(ctx, reader, marketplaceClient)
 		case option == "publish":
-			handlePublish(ctx, reader, client)
+			handlePublish(ctx, reader, marketplaceClient)
 		case option == "statistics":
-			handleStatistics(ctx, reader, client)
+			handleStatistics(ctx, reader, marketplaceClient)
+		case option == "delegate":
+			handleDelegate(ctx, reader, redemptionClient)
+		case option == "reset":
+			if success := handleResetJwt(ctx, reader, accountClient, t); success {
+				return
+			}
 		case option == "exit":
 			return
 		}
 		fmt.Println("----------")
 	}
+}
+
+func handleResetJwt(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.AccountServiceClient, t jwtType) bool {
+	fmt.Println("Handle jwt reset query")
+	if t == Publisher || t == RedemptionService {
+		fmt.Println("Warning! Reseting the Token will also terminate the connection between the marketplace and the redemption service!")
+	}
+	if !readConfirm(reader) {
+		return false
+	}
+	_, err := c.ResetJWT(ctx, &connect.Request[hummingbird.JWTResetRequest]{})
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	fmt.Println("token reseted")
+	return true
+}
+
+func handleDelegate(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.RedemptionServiceClient) {
+	fmt.Println("Handle redemption delegation query")
+	expTime := readTime(reader, "Redemption until (2006-01-02T15:04:05): ")
+	idUpperBound := uint32(readUint64(reader, "Reservation ID upper bound: "))
+	hexStr := readString(reader, "Key in hexadecimal (a1b2c3): ")
+	key, err := hex.DecodeString(hexStr)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	if len(key) != 16 {
+		fmt.Println("key has invalid length", "expected", 16, "got", len(key))
+		return
+	}
+	pathToEncodings := readString(reader, "path to encodings file(csv): ")
+	f, err := os.Open(pathToEncodings)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer f.Close()
+
+	r := csv.NewReader(f)
+
+	record, err := r.Read()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	encodings := make([]uint64, len(record))
+
+	for i, s := range record {
+		v, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		encodings[i] = v
+	}
+	if !readConfirm(reader) {
+		return
+	}
+
+	resp, err := c.DelegateRedemption(ctx, &connect.Request[hummingbird.DelegateRedemptionRequest]{
+		Msg: &hummingbird.DelegateRedemptionRequest{
+			ExpirationTime:          timestamppb.New(expTime),
+			ReservationIdUpperBound: idUpperBound,
+			Key:                     key,
+			EncodingPoints:          encodings,
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("Delegated until:", resp.Msg.ExpirationTime)
 }
 func handlePublish(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	fmt.Println("Handle publish asset query.")
@@ -995,9 +1159,11 @@ func readOptionalTime(reader *bufio.Reader, prompt string) *time.Time {
 }
 
 var insecure bool
+var as_registration bool
 
 func main() {
 	flag.BoolVar(&insecure, "insecure", false, "indicates whether TLS insecure skip verify should be applied")
+	flag.BoolVar(&as_registration, "register", false, "start AS registration")
 	flag.Parse()
 	userInteraction()
 }

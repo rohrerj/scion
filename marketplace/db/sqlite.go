@@ -42,6 +42,9 @@ type MarketplaceDB interface {
 	FindUsedReservations(ctx context.Context, params *UsedReservationsQuery) ([]*UsedReservation, error)
 	CreateOrUpdateRedemptionDelegations(ctx context.Context, r *RedemptionDelegation) (int64, error)
 	FindRedemptionDelegations(ctx context.Context) ([]*RedemptionDelegation, error)
+	IncrementASJWTVersion(ctx context.Context, ia addr.IA, current int64) (int64, error)
+	IncrementUserJWTVersion(ctx context.Context, userid int64, current int64) (int64, error)
+	GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error)
 	BeginTransaction(ctx context.Context, opts *sql.TxOptions) (*transaction, error)
 }
 
@@ -202,6 +205,48 @@ func (e *executor) FindRedemptionDelegations(ctx context.Context) ([]*Redemption
 		res = append(res, a)
 	}
 	return res, nil
+}
+
+func (e *executor) IncrementASJWTVersion(ctx context.Context, ia addr.IA, current int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	q := `UPDATE Ases SET jwt_version = jwt_version + 1 WHERE isd_id = ? AND as_id = ? AND jwt_version = ? RETURNING jwt_version`
+	rows, err := e.write.QueryContext(ctx, q, ia.ISD(), ia.AS(), current)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return 0, serrors.New("AS not found", "ia", ia)
+	}
+	var newVersion int64
+	err = rows.Scan(&newVersion)
+	if err != nil {
+		return 0, serrors.Wrap("Error reading DB response", err)
+	}
+	return newVersion, nil
+}
+
+func (e *executor) IncrementUserJWTVersion(ctx context.Context, userid int64, current int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	q := `UPDATE Users SET jwt_version = jwt_version + 1 WHERE id = ? AND jwt_version = ? RETURNING jwt_version`
+	rows, err := e.write.QueryContext(ctx, q, userid, current)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return 0, serrors.New("User not found", "userid", userid)
+	}
+	var newVersion int64
+	err = rows.Scan(&newVersion)
+	if err != nil {
+		return 0, serrors.Wrap("Error reading DB response", err)
+	}
+	return newVersion, nil
 }
 
 func (e *executor) CreateOrUpdateRedemptionDelegations(ctx context.Context, r *RedemptionDelegation) (int64, error) {
@@ -682,7 +727,7 @@ func (e *executor) GetUser(ctx context.Context, id int64) (*DBUser, error) {
 	if e.read == nil {
 		return nil, serrors.New("No database open")
 	}
-	q := `SELECT id, name, pw_hash, balance FROM Users WHERE id=?`
+	q := `SELECT id, name, pw_hash, jwt_version, balance FROM Users WHERE id=?`
 	rows, err := e.read.QueryContext(ctx, q, id)
 	if err != nil {
 		return nil, err
@@ -692,7 +737,7 @@ func (e *executor) GetUser(ctx context.Context, id int64) (*DBUser, error) {
 		return nil, nil
 	}
 	user := &DBUser{}
-	err = rows.Scan(&user.ID, &user.Name, &user.PasswordHash, &user.Balance)
+	err = rows.Scan(&user.ID, &user.Name, &user.PasswordHash, &user.TokenVersion, &user.Balance)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
@@ -748,7 +793,7 @@ func (e *executor) GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error)
 	if e.read == nil {
 		return nil, serrors.New("No database open")
 	}
-	q := `SELECT isd_id, as_id FROM Ases WHERE isd_id=? AND as_id=?`
+	q := `SELECT isd_id, as_id, jwt_version, balance FROM Ases WHERE isd_id=? AND as_id=?`
 	rows, err := e.read.QueryContext(ctx, q, ia.ISD(), ia.AS())
 	if err != nil {
 		return nil, err
@@ -758,9 +803,15 @@ func (e *executor) GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error)
 		return nil, nil
 	}
 	user := &DBASUser{}
-	err = rows.Scan(&user.IA)
+	var isd uint16
+	var as uint64
+	err = rows.Scan(&isd, &as, &user.TokenVersion, &user.Balance)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
+	}
+	user.IA, err = addr.IAFrom(ia.ISD(), addr.AS(as))
+	if err != nil {
+		return nil, err
 	}
 	return user, nil
 }

@@ -108,10 +108,13 @@ type DBUser struct {
 	Name         string
 	Balance      int64
 	PasswordHash string
+	TokenVersion int64
 }
 
 type DBASUser struct {
-	IA addr.IA
+	IA           addr.IA
+	TokenVersion int64
+	Balance      int64
 }
 
 func (r *RedemptionDelegation) EncodingsToInts() []uint64 {

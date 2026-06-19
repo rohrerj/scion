@@ -113,7 +113,6 @@ pkg_tar(
         "//dispatcher/cmd/dispatcher",
         "//gateway/cmd/gateway",
         "//marketplace/cmd/marketplace",
-        "//marketplace_account_client",
         "//marketplace_client",
         "//router/cmd/router",
         "//scion-pki/cmd/scion-pki",

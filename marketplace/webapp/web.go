@@ -228,7 +228,14 @@ func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 		templates.ExecuteTemplate(w, "token.html", map[string]any{})
 		return
 	}
-	token, err := h.createToken(strconv.FormatInt(userId, 10))
+	dbUser, err := h.store.GetUser(r.Context(), userId)
+	if err != nil {
+		templates.ExecuteTemplate(w, "token.html", map[string]any{
+			"Error": err,
+		})
+		return
+	}
+	token, err := h.createToken(strconv.FormatInt(userId, 10), dbUser.TokenVersion)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -239,13 +246,13 @@ func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) createToken(user string) (string, error) {
+func (h *Handler) createToken(user string, tokenVersion int64) (string, error) {
 	claims := jwt.MapClaims{
 		"sub":   user,
 		"scope": "User",
 		"exp":   time.Now().Add(time.Hour * 24 * 7).Unix(),
 		"iat":   time.Now().Unix(),
-		//"ver":   user.TokenVersion,
+		"ver":   tokenVersion,
 	}
 	return h.signer.GenerateToken(claims)
 }
