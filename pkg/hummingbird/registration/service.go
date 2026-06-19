@@ -29,6 +29,7 @@ import (
 	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	cryptopb "github.com/scionproto/scion/pkg/proto/crypto"
+	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	"github.com/scionproto/scion/private/trust"
 )
@@ -225,7 +226,7 @@ func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg 
 			NotAfter:  now,
 		},
 	}
-	msg, err := verifier.Verify(ctx, signedMsg, []byte(name))
+	msg, err := verifier.Verify(ctx, signedMsg, []byte(name), []byte(hummingbirdconnect.AccountServiceRegisterASProcedure))
 	if err != nil {
 		return "", "", 0, err
 	}

@@ -101,7 +101,7 @@ func (c *Client) Register(ctx context.Context, signer trust.Signer) (string, str
 	if err != nil {
 		return "", "", err
 	}
-	signedMsg, err := signer.Sign(ctx, challengeResponse.Msg.Challenge.Value, []byte(c.name))
+	signedMsg, err := signer.Sign(ctx, challengeResponse.Msg.Challenge.Value, []byte(c.name), []byte(hummingbirdconnect.AccountServiceRegisterASProcedure))
 	if err != nil {
 		return "", "", err
 	}
