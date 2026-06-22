@@ -111,7 +111,8 @@ func realMain(ctx context.Context) error {
 			return err
 		}
 	}
-	store, err := marketplacestorage.NewStorage(globalCfg.MarketplaceDB)
+	store, err := marketplacestorage.NewStorage(globalCfg.MarketplaceDB, globalCfg.Marketplace.TransactionFeeRelative,
+		globalCfg.Marketplace.TransactionFeeAbsolute, globalCfg.Marketplace.SplitCombineFeeAbsolute, globalCfg.Marketplace.DelegationHourlyFee)
 	if err != nil {
 		return err
 	}

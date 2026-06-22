@@ -66,14 +66,15 @@ const (
 		isd_id INTEGER NOT NULL,
 		as_id INTEGER NOT NULL,
 		jwt_version INTEGER NOT NULL DEFAULT 0,
-		balance INTEGER NOT NULL DEFAULT 0,
+		balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
 		PRIMARY KEY(isd_id, as_id)
 	);
 	CREATE TABLE Redemption_Delegations(
 		isd_id INTEGER NOT NULL,
 		as_id INTEGER NOT NULL,
 		res_id_limit INTEGER NOT NULL,
-		expiration TEXT NOT NULL,
+		expiration TEXT NOT NULL CHECK (expiration <= paid_until),
+		paid_until TEXT NOT NULL,
 		key BLOB NOT NULL,
 		encodings BLOB NOT NULL,
 		PRIMARY KEY(isd_id, as_id)

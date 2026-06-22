@@ -37,10 +37,15 @@ type DBConfig struct {
 }
 
 type MarketplaceStorage struct {
-	db marketplacedb.MarketplaceDB
+	db                      marketplacedb.MarketplaceDB
+	transactionFeeRelative  float32
+	transactionFeeAbsolute  uint32
+	splitCombineFeeAbsolute uint32
+	delegationHourlyFee     uint32
 }
 
-func NewStorage(c DBConfig) (*MarketplaceStorage, error) {
+func NewStorage(c DBConfig, transactionFeeRelative float32, transactionFeeAbsolute uint32, splitCombineFeeAbsolute uint32, delegationHourlyFee uint32) (
+	*MarketplaceStorage, error) {
 	db, err := marketplacedb.New(c.Connection, &db.SqliteConfig{
 		MaxOpenReadConns: c.MaxOpenReadConns,
 		MaxIdleReadConns: c.MaxIdleReadConns,
@@ -49,7 +54,11 @@ func NewStorage(c DBConfig) (*MarketplaceStorage, error) {
 		return nil, err
 	}
 	return &MarketplaceStorage{
-		db: db,
+		db:                      db,
+		transactionFeeRelative:  transactionFeeRelative,
+		transactionFeeAbsolute:  transactionFeeAbsolute,
+		splitCombineFeeAbsolute: splitCombineFeeAbsolute,
+		delegationHourlyFee:     delegationHourlyFee,
 	}, nil
 }
 
@@ -109,17 +118,59 @@ func (s *MarketplaceStorage) CreateUser(ctx context.Context, user *marketplacedb
 func (s *MarketplaceStorage) CreateASUser(ctx context.Context, user *marketplacedb.DBASUser) (int64, error) {
 	return s.db.CreateASUser(ctx, user)
 }
-
+func ceilDuration(base time.Duration, multiple time.Duration) time.Duration {
+	truncated := base.Truncate(multiple)
+	if truncated == base {
+		return base
+	}
+	return truncated + multiple
+}
 func (s *MarketplaceStorage) CreateOrUpdateRedemptionDelegations(ctx context.Context, r *marketplacedb.RedemptionDelegation) (int64, error) {
-	return s.db.CreateOrUpdateRedemptionDelegations(ctx, r)
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	var paidUntil time.Time
+	dbDelegation, err := tx.FindRedemptionDelegation(ctx, r.IA)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	if dbDelegation == nil {
+		paidUntil = time.Now()
+	} else {
+		paidUntil = dbDelegation.PaidUntil
+	}
+	if r.Expiration.After(paidUntil) {
+		// needs payment
+		paymentDuration := ceilDuration(r.Expiration.Sub(paidUntil), time.Hour)
+		numHours := paymentDuration / time.Hour
+		_, err = tx.UpdateASMoney(ctx, r.IA, -int64(uint32(numHours)*s.delegationHourlyFee))
+		if err != nil {
+			return 0, serrors.Join(err, tx.Rollback())
+		}
+		r.PaidUntil = paidUntil.Add(paymentDuration)
+	} else {
+		r.PaidUntil = dbDelegation.PaidUntil
+	}
+	id, err := tx.CreateOrUpdateRedemptionDelegations(ctx, r)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	return id, nil
 }
 func (s *MarketplaceStorage) FindRedemptionDelegations(ctx context.Context) ([]*marketplacedb.RedemptionDelegation, error) {
 	return s.db.FindRedemptionDelegations(ctx)
 }
 
-func totalPrice(price uint32, bw uint32, startsAt time.Time, stopsAt time.Time) int64 {
+func (s *MarketplaceStorage) totalPrice(price uint32, bw uint32, startsAt time.Time, stopsAt time.Time) (int64, int64) {
 	splitDuration := uint32(stopsAt.Sub(startsAt).Seconds())
-	return int64(price * splitDuration * bw)
+	costWithoutFee := int64(price * splitDuration * bw)
+	fee := int64(float64(costWithoutFee)*float64(s.transactionFeeRelative)) + int64(s.transactionFeeAbsolute)
+	return costWithoutFee, fee
 }
 func (s *MarketplaceStorage) IncrementASJWTVersion(ctx context.Context, ia addr.IA, current int64) (int64, error) {
 	return s.db.IncrementASJWTVersion(ctx, ia, current)
@@ -132,6 +183,10 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
 	if err != nil {
 		return 0, err
+	}
+	_, err = tx.UpdateMoney(ctx, user_id, -int64(s.splitCombineFeeAbsolute))
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
 	}
 	a1, err := tx.PrepareCombine(ctx, assetId1, user_id)
 	if err != nil {
@@ -227,11 +282,16 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 	if err != nil {
 		return 0, 0, err
 	}
-	dbAsset, err := tx.PrepareSplit(ctx, assetId, user_id)
-	var requestedSplit []RequestedSplit
+	_, err = tx.UpdateMoney(ctx, user_id, -int64(s.splitCombineFeeAbsolute))
 	if err != nil {
 		return 0, 0, serrors.Join(err, tx.Rollback())
 	}
+	dbAsset, err := tx.PrepareSplit(ctx, assetId, user_id)
+	if err != nil {
+		return 0, 0, serrors.Join(err, tx.Rollback())
+	}
+	var requestedSplit []RequestedSplit
+
 	if bwSplit != nil {
 		requestedSplit = []RequestedSplit{
 			{
@@ -319,7 +379,9 @@ func (s *MarketplaceStorage) FindUsedReservations(ctx context.Context, params *m
 	return s.db.FindUsedReservations(ctx, params)
 }
 
-func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, assets []*hummingbird.BuyAsset, maxPrice uint64) ([]int64, int64, error) {
+func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, assets []*hummingbird.BuyAsset, maxPrice uint64,
+	transactionFeeAbsolute uint32, transactionFeeRelative float32) ([]int64, int64, error) {
+
 	uniqueCheck := make(map[string]bool)
 	for _, asset := range assets {
 		if uniqueCheck[asset.AssetId] {
@@ -376,7 +438,12 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, asset
 			if err != nil {
 				return nil, 0, serrors.Join(err, tx.Rollback())
 			}
-			costAcc += totalPrice(dbAsset.Price, segment.Bandwidth, segment.StartAt, segment.StopAt)
+			totalAssetPrice, fee := s.totalPrice(dbAsset.Price, segment.Bandwidth, segment.StartAt, segment.StopAt)
+			_, err = tx.UpdateASMoney(ctx, dbAsset.IA, totalAssetPrice)
+			if err != nil {
+				return nil, 0, serrors.Join(err, tx.Rollback())
+			}
+			costAcc += totalAssetPrice + fee // currently fee is deducted but the marketplace cannot really see their actual income
 			boughtAssets = append(boughtAssets, id)
 		}
 		for _, segment := range split.Unused {

@@ -133,6 +133,7 @@ func (c *RedemptionClient) Init() error {
 			}
 		}
 	}
+	time.Sleep(time.Hour * 24 * 6)
 	for i := 0; i < 10; i++ {
 		err := connectAsRedemptionService()
 		if err != nil {

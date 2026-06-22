@@ -48,6 +48,7 @@ type UsedReservation struct {
 type RedemptionDelegation struct {
 	IA                 addr.IA
 	Expiration         time.Time
+	PaidUntil          time.Time
 	ReservationIdLimit uint32
 	Key                []byte
 	Encodings          []byte

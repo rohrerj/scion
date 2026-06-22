@@ -102,6 +102,21 @@ func (s *Service) startOrUpdateRedemptionDelegation(ctx context.Context, clientI
 
 	} else if client.delegatedServer != nil {
 		// the redemption server was already delegated, but we received an update request
+		client.mtx.Lock()
+		defer client.mtx.Unlock()
+		if persist {
+			dbDelegation := &db.RedemptionDelegation{
+				IA:                 clientID,
+				Expiration:         state.ExpirationTime,
+				ReservationIdLimit: state.ReservationIdLimit,
+				Key:                state.Key,
+			}
+			dbDelegation.EncodeInts(state.EncodingPoints)
+			_, err = s.store.CreateOrUpdateRedemptionDelegations(ctx, dbDelegation)
+			if err != nil {
+				return err
+			}
+		}
 		client.delegatedServer.UpdateChannel <- state
 		err = <-client.delegatedServer.UpdateResultChannel
 		if err != nil {
