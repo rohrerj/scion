@@ -382,7 +382,7 @@ func (e *executor) Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, 
 		var stopsAtString string
 		var isd uint16
 		var as uint64
-		err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+		err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 		if err != nil {
 			return nil, serrors.Wrap("Error reading DB response", err)
 		}
@@ -404,7 +404,7 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 	var args []any
 	where := []string{}
 	query := []string{
-		"SELECT id, owner_id, isd_id, as_id, bandwidth, bandwidth_min, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets",
+		"SELECT id, owner_id, isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets",
 	}
 	where = append(where, "(state = 0)")
 	if params.OwnerId == nil {
@@ -696,16 +696,16 @@ func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
 	var res sql.Result
 	var err error
 	if a.OwnerId.Valid {
-		inst := `INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, price, time_granularity,
+		inst := `INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price, time_granularity,
 	time_min_duration, starts_at, stops_at, ingress, egress, owner_id)
-	VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`
-		res, err = e.write.ExecContext(ctx, inst, a.IA.ISD(), a.IA.AS(), a.Bandwidth, a.BandwidthMin, a.Price, a.TimeGranularity,
+	VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`
+		res, err = e.write.ExecContext(ctx, inst, a.IA.ISD(), a.IA.AS(), a.Bandwidth, a.BandwidthMin, a.BandwidthMax, a.Price, a.TimeGranularity,
 			a.TimeMinDuration, a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.IfIdIngress, a.IfIdEgress, a.OwnerId.Int64)
 	} else {
-		inst := `INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, price, time_granularity,
+		inst := `INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price, time_granularity,
 	time_min_duration, starts_at, stops_at, ingress, egress)
-	VALUES(?,?,?,?,?,?,?,?,?,?,?)`
-		res, err = e.write.ExecContext(ctx, inst, a.IA.ISD(), a.IA.AS(), a.Bandwidth, a.BandwidthMin, a.Price, a.TimeGranularity,
+	VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`
+		res, err = e.write.ExecContext(ctx, inst, a.IA.ISD(), a.IA.AS(), a.Bandwidth, a.BandwidthMin, a.BandwidthMax, a.Price, a.TimeGranularity,
 			a.TimeMinDuration, a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.IfIdIngress, a.IfIdEgress)
 	}
 	if err != nil {

@@ -89,7 +89,7 @@ func generatePurchases(
 		start := base.Add(time.Duration(i*30) * time.Second)
 		end := start.Add(1 * time.Minute)
 
-		bw := uint64(100 + (i%5)*50)
+		bw := uint32(100 + (i%5)*50)
 
 		p[i] = RequestedSplit{
 			ExactFrom:      start,
@@ -205,7 +205,7 @@ func FuzzSplitAsset(f *testing.F) {
 
 			duration := time.Duration((i%10)+1) * time.Minute
 
-			bw := uint64((i%20)+1) * 10
+			bw := uint32((i%20)+1) * 10
 
 			purchases = append(
 				purchases,
@@ -250,7 +250,7 @@ func verifyNoOverbooking(
 ) {
 
 	type usage struct {
-		used uint64
+		used uint32
 	}
 
 	m := map[int64]*usage{}

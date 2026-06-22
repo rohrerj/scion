@@ -52,7 +52,7 @@ type MarketplaceConfig struct {
 	APIAddr                      string `toml:"api_addr,omitempty"`
 	SCIONAPIAddr                 string `toml:"scion_api_addr,omitempty"`
 	Currency                     string `toml:"currency,omitempty"`
-	StatisticsTimeGranularity    uint64 `toml:"statistics_time_granularity,omitempty"`
+	StatisticsTimeGranularity    uint32 `toml:"statistics_time_granularity,omitempty"`
 	SupportsRedemptionDelegation bool   `toml:"supports_redemption_delegation,omitempty"`
 }
 

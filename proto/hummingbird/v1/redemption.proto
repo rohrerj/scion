@@ -33,7 +33,7 @@ message DelegateRedemptionRequest {
     // the key used for the derival of the authentication keys
     bytes Key = 3;
     // up to 1024 sorted values that indicate the dataplane encoding points
-    repeated uint64 encoding_points = 4;
+    repeated uint32 encoding_points = 4;
 }
 message DelegateRedemptionResponse {
     google.protobuf.Timestamp expiration_time = 1;
@@ -42,7 +42,7 @@ message DelegateRedemptionResponse {
 message RedeemAssetFromASRequest {
     uint32 ingress_id = 1;
     uint32 egress_id = 2;
-    uint64 bw = 3;
+    uint32 bandwidth = 3;
     google.protobuf.Timestamp starts_at = 4;
     google.protobuf.Timestamp stops_at = 5;
     // to match request with response
@@ -51,13 +51,13 @@ message RedeemAssetFromASRequest {
 
 message RedeemAssetFromASResponse {
     ReservationInfo res_info = 1;
-    bytes ak = 2;
+    bytes authentication_key = 2;
     // to match request with response
     uint64 request_id = 3;
 }
 
 message ReservationInfo {
-    uint32 res_id = 1;
-    uint64 bw_rounded = 2;
+    uint32 reservation_id = 1;
+    uint32 bandwith_rounded = 2;
     uint32 bw_dataplane_encoding = 3;
 }

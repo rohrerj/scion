@@ -30,6 +30,23 @@ service MarketplaceService {
     rpc SplitAsset(SplitAssetRequest) returns (SplitAssetResponse) {}
     rpc CombineAssets(CombineAssetRequest) returns (CombineAssetResponse) {}
     rpc Statistics(StatisticsRequest) returns (StatisticsResponse) {}
+    rpc UpdateAssets(UpdateAssetsRequest) returns (UpdateAssetsResponse) {}
+}
+
+message UpdateAssetsRequest {
+    repeated AssetUpdate assets = 1;
+}
+message AssetUpdate {
+    string asset_id = 1;
+    oneof operation {
+        PublisherAsset update = 2;
+        Delete delete = 3;
+    }
+}
+message Delete {}
+message UpdateAssetsResponse {
+    repeated string success = 1;
+    repeated string error = 2;
 }
 
 message StatisticsRequest {
@@ -37,7 +54,7 @@ message StatisticsRequest {
     optional uint32 if_id_egress = 2;
     google.protobuf.Timestamp start = 3;
     google.protobuf.Timestamp end = 4;
-    uint64 step = 5;
+    uint32 step = 5;
 }
 
 message StatisticsResponse {
@@ -53,7 +70,7 @@ message StatisticsResponseEntry {
 message SplitAssetRequest {
     string asset_id = 1;
     oneof split_option {
-        uint64 bw_split = 2;
+        uint32 bw_split = 2;
         google.protobuf.Timestamp time_split = 3;
     }
 }
@@ -80,27 +97,31 @@ message MarketplaceInfoRequest {
 }
 
 message MarketplaceInfoResponse {
-    uint64 api_major_version = 1;
-    uint64 api_minor_version = 2;
+    uint32 api_major_version = 1;
+    uint32 api_minor_version = 2;
     string currency = 3;
-    uint64 max_statistics_granularity = 4;
+    uint32 max_statistics_granularity = 4;
     bool supports_redemption_delegation = 5;
 }
 
 message PublishAssetRequest {
-    uint64 bandwidth = 1;
-    uint64 bandwidth_min = 2;
-    google.protobuf.Timestamp starts_at = 3;
-    google.protobuf.Timestamp stops_at = 4;
-    uint64 price = 5;
-    uint64 time_granularity = 6;
-    uint64 time_min_duration = 7;
-    optional uint32 if_id_ingress = 8;
-    optional uint32 if_id_egress = 9;
+    PublisherAsset asset = 1;
 }
 
 message PublishAssetResponse {
     string asset_id = 1;
+}
+message PublisherAsset {
+    optional uint32 if_id_ingress = 1;
+    optional uint32 if_id_egress = 2;
+    uint32 bandwidth = 3;
+    uint32 bandwidth_min = 4;
+    uint32 bandwidth_max = 5;
+    google.protobuf.Timestamp starts_at = 6;
+    google.protobuf.Timestamp stops_at = 7;
+    uint32 time_granularity = 8;
+    uint32 time_min_duration = 9;
+    uint32 price = 10;
 }
 
 message SearchAssetsRequest {
@@ -108,26 +129,28 @@ message SearchAssetsRequest {
     optional uint64 ia = 2;
     optional uint32 if_id_ingress = 3;
     optional uint32 if_id_egress = 4;
-    optional uint64 min_required_bw = 5;
+    optional uint32 min_required_bw = 5;
     optional google.protobuf.Timestamp starts_at_latest = 6;
     optional google.protobuf.Timestamp stops_at_earliest = 7;
-    optional uint64 price = 8;
+    optional uint32 price = 8;
 }
 
 message SearchAssetsResponse {
-    repeated Asset assets = 1;
+    repeated SearchAsset assets = 1;
 }
-
-message Asset {
+message SearchAsset {
     string asset_id = 1;
     uint64 ia = 2;
     optional uint32 if_id_ingress = 3;
     optional uint32 if_id_egress = 4;
-    uint64 bw = 5;
-    google.protobuf.Timestamp starts_at = 6;
-    google.protobuf.Timestamp stops_at = 7;
-    uint64 time_granularity = 8;
-    uint64 price = 9;
+    uint32 bandwidth = 5;
+    uint32 bandwidth_min = 6;
+    uint32 bandwidth_max = 7;
+    google.protobuf.Timestamp starts_at = 8;
+    google.protobuf.Timestamp stops_at = 9;
+    uint32 time_granularity = 10;
+    uint32 time_min_duration = 11;
+    uint32 price = 12;
 }
 
 message BuyAssetsRequest {
@@ -139,7 +162,7 @@ message BuyAsset {
     string asset_id = 1;
     google.protobuf.Timestamp starts_at_exactly = 2;
     google.protobuf.Timestamp stops_at_exactly = 3;
-    uint64 bw_exact = 4;
+    uint32 bandwidth_exact = 4;
 }
 
 message BuyAssetsResponse {
@@ -152,15 +175,20 @@ message BoughtAsset {
 }
 
 message RedeemAssetRequest {
-    optional string ingress_asset_id = 1;
-    optional string egress_asset_id = 2;
-    optional string if_pair_asset_id = 3;
+    oneof interfaces {
+        IngressEgressPair pair = 1;
+        string if_pair_asset_id = 3;
+    }
+}
+message IngressEgressPair {
+    string ingress_asset_id = 1;
+    string egress_asset_id = 2;
 }
 
 message RedeemAssetResponse {
-    bytes ak = 1;
-    uint32 res_id = 2;
-    uint64 bw_rounded = 3;
+    bytes authentication_key = 1;
+    uint32 reservation_id = 2;
+    uint32 bandwidth_rounded = 3;
     uint32 bw_dataplane_encoding = 4;
 }
 
@@ -168,7 +196,7 @@ message FetchReservationsRequest {
     optional uint64 ia = 1;
     optional uint32 ingress_id = 2;
     optional uint32 egress_id = 3;
-    optional uint64 bw = 4;
+    optional uint32 bandwidth = 4;
     optional google.protobuf.Timestamp starts_at = 5;
     optional google.protobuf.Timestamp stops_at = 6;
 }
@@ -178,12 +206,12 @@ message FetchReservationsResponse {
 }
 
 message Reservation {
-    uint32 res_id = 1;
+    uint32 reservation_id = 1;
     uint64 ia = 2;
     uint32 ingress_id = 3;
     uint32 egress_id = 4;
-    uint64 bw = 5;
+    uint32 bandwidth = 5;
     google.protobuf.Timestamp starts_at = 6;
     google.protobuf.Timestamp stops_at = 7;
-    bytes ak = 8;
+    bytes authentication_key = 8;
 }

@@ -92,8 +92,8 @@ func (s *MarketplaceStorage) FindRedemptionDelegations(ctx context.Context) ([]*
 	return s.db.FindRedemptionDelegations(ctx)
 }
 
-func totalPrice(price uint64, bw uint64, startsAt time.Time, stopsAt time.Time) int64 {
-	splitDuration := uint64(stopsAt.Sub(startsAt).Seconds())
+func totalPrice(price uint32, bw uint32, startsAt time.Time, stopsAt time.Time) int64 {
+	splitDuration := uint32(stopsAt.Sub(startsAt).Seconds())
 	return int64(price * splitDuration * bw)
 }
 func (s *MarketplaceStorage) IncrementASJWTVersion(ctx context.Context, ia addr.IA, current int64) (int64, error) {
@@ -194,7 +194,7 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 	return newId, nil
 }
 
-func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, assetId int64, bwSplit *uint64, timeSplit *time.Time) (int64, int64, error) {
+func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, assetId int64, bwSplit *uint32, timeSplit *time.Time) (int64, int64, error) {
 	if bwSplit == nil && timeSplit == nil {
 		return 0, 0, serrors.New("invalid split request")
 	}
@@ -324,7 +324,7 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, asset
 			{
 				ExactFrom:      asset.StartsAtExactly.AsTime(),
 				ExactTo:        asset.StopsAtExactly.AsTime(),
-				ExactBandwidth: asset.BwExact,
+				ExactBandwidth: asset.BandwidthExact,
 			},
 		})
 		if err != nil {

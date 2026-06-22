@@ -558,15 +558,15 @@ func handleDelegate(ctx context.Context, reader *bufio.Reader, c hummingbirdconn
 		fmt.Println(err)
 	}
 
-	encodings := make([]uint64, len(record))
+	encodings := make([]uint32, len(record))
 
 	for i, s := range record {
-		v, err := strconv.ParseUint(s, 10, 64)
+		v, err := strconv.ParseUint(s, 10, 32)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		encodings[i] = v
+		encodings[i] = uint32(v)
 	}
 	if !readConfirm(reader) {
 		return
@@ -620,15 +620,17 @@ func handlePublish(ctx context.Context, reader *bufio.Reader, c hummingbirdconne
 	}
 	resp, err := c.PublishAsset(ctx, &connect.Request[hummingbird.PublishAssetRequest]{
 		Msg: &hummingbird.PublishAssetRequest{
-			IfIdIngress:     ingress,
-			IfIdEgress:      egress,
-			Bandwidth:       bandwidth,
-			BandwidthMin:    bandwidthMin,
-			StartsAt:        timestamppb.New(startsAt),
-			StopsAt:         timestamppb.New(stopsAt),
-			Price:           price,
-			TimeMinDuration: timeMinDuration,
-			TimeGranularity: timeGranularity,
+			Asset: &hummingbird.PublisherAsset{
+				IfIdIngress:     ingress,
+				IfIdEgress:      egress,
+				Bandwidth:       uint32(bandwidth),
+				BandwidthMin:    uint32(bandwidthMin),
+				StartsAt:        timestamppb.New(startsAt),
+				StopsAt:         timestamppb.New(stopsAt),
+				Price:           uint32(price),
+				TimeMinDuration: uint32(timeMinDuration),
+				TimeGranularity: uint32(timeGranularity),
+			},
 		},
 	})
 	if err != nil {
@@ -671,7 +673,7 @@ func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdco
 		Msg: &hummingbird.StatisticsRequest{
 			Start:       timestamppb.New(startsAt),
 			End:         timestamppb.New(stopsAt),
-			Step:        stepSize,
+			Step:        uint32(stepSize),
 			IfIdIngress: ingress,
 			IfIdEgress:  egress,
 		},
@@ -703,7 +705,7 @@ func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect
 	case "bw":
 		bwSplit := readUint64(reader, "bw split: ")
 		req.SplitOption = &hummingbird.SplitAssetRequest_BwSplit{
-			BwSplit: bwSplit,
+			BwSplit: uint32(bwSplit),
 		}
 	case "time":
 		timeSplit := readTime(reader, "time split (2006-01-02T15:04:05): ")
@@ -749,14 +751,14 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 	var ia *uint64
 	var ingress *uint32
 	var egress *uint32
-	var bw *uint64
+	var bw *uint32
 	var startsAt *time.Time
 	var stopsAt *time.Time
 	fmt.Println("Handle fetch reservation query. Filters are ignored if empty.")
 	ia = readOptionalIAUint64(reader, "IA: ")
 	ingress = readOptionalUint32(reader, "Ingress: ")
 	egress = readOptionalUint32(reader, "Egress: ")
-	bw = readOptionalUint64(reader, "BW: ")
+	bw = readOptionalUint32(reader, "BW: ")
 	startsAt = readOptionalTime(reader, "Starts At (2006-01-02T15:04:05): ")
 	stopsAt = readOptionalTime(reader, "Stops At (2006-01-02T15:04:05): ")
 
@@ -764,7 +766,7 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 		Ia:        ia,
 		IngressId: ingress,
 		EgressId:  egress,
-		Bw:        bw,
+		Bandwidth: bw,
 	}
 	if startsAt != nil {
 		req.StartsAt = timestamppb.New(*startsAt)
@@ -784,7 +786,7 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 		Ia        addr.IA
 		IngressId uint32
 		EgressId  uint32
-		Bw        uint64
+		Bw        uint32
 		StartsAt  time.Time
 		StopsAt   time.Time
 		Ak        []byte
@@ -792,14 +794,14 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 	transformed := make([]*Reservation, 0, len(rep.Msg.Reservations))
 	for _, res := range rep.Msg.Reservations {
 		transformed = append(transformed, &Reservation{
-			ResId:     res.ResId,
+			ResId:     res.ReservationId,
 			Ia:        addr.IA(res.Ia),
 			IngressId: res.IngressId,
 			EgressId:  res.EgressId,
-			Bw:        res.Bw,
+			Bw:        res.Bandwidth,
 			StartsAt:  res.StartsAt.AsTime(),
 			StopsAt:   res.StopsAt.AsTime(),
-			Ak:        res.Ak,
+			Ak:        res.AuthenticationKey,
 		})
 	}
 	j, err := json.MarshalIndent(transformed, "", "\t")
@@ -825,8 +827,12 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 		}
 		rep, err = c.RedeemAsset(ctx, &connect.Request[hummingbird.RedeemAssetRequest]{
 			Msg: &hummingbird.RedeemAssetRequest{
-				IngressAssetId: &ingressAssetID,
-				EgressAssetId:  &egressAssetID,
+				Interfaces: &hummingbird.RedeemAssetRequest_Pair{
+					Pair: &hummingbird.IngressEgressPair{
+						IngressAssetId: ingressAssetID,
+						EgressAssetId:  egressAssetID,
+					},
+				},
 			},
 		})
 	} else if *option == 1 {
@@ -836,7 +842,9 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 		}
 		rep, err = c.RedeemAsset(ctx, &connect.Request[hummingbird.RedeemAssetRequest]{
 			Msg: &hummingbird.RedeemAssetRequest{
-				IfPairAssetId: &assetID,
+				Interfaces: &hummingbird.RedeemAssetRequest_IfPairAssetId{
+					IfPairAssetId: assetID,
+				},
 			},
 		})
 	} else {
@@ -847,8 +855,7 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 		return
 	}
 	fmt.Println("Redemption Result:")
-	fmt.Printf("ResID: %d\nAk: %s\nBw: %d\nEncoding: %d\n", rep.Msg.ResId, rep.Msg.Ak, rep.Msg.BwRounded, rep.Msg.BwDataplaneEncoding)
-
+	fmt.Printf("ResID: %d\nAk: %s\nBw: %d\nEncoding: %d\n", rep.Msg.ReservationId, rep.Msg.AuthenticationKey, rep.Msg.BandwidthRounded, rep.Msg.BwDataplaneEncoding)
 }
 func printBuyOptions() {
 	fmt.Println("-> add")
@@ -875,7 +882,7 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 				AssetId:         readString(reader, "AssetID: "),
 				StartsAtExactly: timestamppb.New(readTime(reader, "Starts at exactly (2006-01-02T15:04:05): ")),
 				StopsAtExactly:  timestamppb.New(readTime(reader, "Stops at exactly (2006-01-02T15:04:05): ")),
-				BwExact:         readUint64(reader, "BW exact: "),
+				BandwidthExact:  uint32(readUint64(reader, "BW exact: ")),
 			}
 			buyAssets = append(buyAssets, buyAsset)
 		case option == "remove":
@@ -923,8 +930,8 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 	var ia *uint64
 	var ingress *uint32
 	var egress *uint32
-	var minReqBw *uint64
-	var price *uint64
+	var minReqBw *uint32
+	var price *uint32
 	var startsAtLatest *time.Time
 	var stopsAtEarliest *time.Time
 	fmt.Println("Search Query. Owned is mandatory, other filters are ignored if empty.")
@@ -933,8 +940,8 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 	ia = readOptionalIAUint64(reader, "IA: ")
 	ingress = readOptionalUint32(reader, "Ingress: ")
 	egress = readOptionalUint32(reader, "Egress: ")
-	minReqBw = readOptionalUint64(reader, "Min Required BW: ")
-	price = readOptionalUint64(reader, "Price: ")
+	minReqBw = readOptionalUint32(reader, "Min Required BW: ")
+	price = readOptionalUint32(reader, "Price: ")
 	startsAtLatest = readOptionalTime(reader, "Starts At Latest (2006-01-02T15:04:05): ")
 	stopsAtEarliest = readOptionalTime(reader, "Stops At Earliest (2006-01-02T15:04:05): ")
 	if owned == nil {
@@ -967,7 +974,10 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 		transformed = append(transformed, Asset{
 			ID:              asset.AssetId,
 			IA:              addr.IA(asset.Ia),
-			Bandwidth:       asset.Bw,
+			Bandwidth:       asset.Bandwidth,
+			BandwidthMin:    asset.BandwidthMin,
+			BandwidthMax:    asset.BandwidthMax,
+			TimeMinDuration: asset.TimeMinDuration,
 			StartAt:         asset.StartsAt.AsTime(),
 			StopsAt:         asset.StopsAt.AsTime(),
 			Price:           asset.Price,
@@ -1171,11 +1181,14 @@ func main() {
 type Asset struct {
 	ID              string
 	IA              addr.IA
-	Bandwidth       uint64
+	Bandwidth       uint32
+	BandwidthMin    uint32
+	BandwidthMax    uint32
 	StartAt         time.Time
 	StopsAt         time.Time
-	Price           uint64
-	TimeGranularity uint64
+	Price           uint32
+	TimeGranularity uint32
+	TimeMinDuration uint32
 	IfIdIngress     *uint32
 	IfIdEgress      *uint32
 }

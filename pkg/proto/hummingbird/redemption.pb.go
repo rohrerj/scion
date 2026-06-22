@@ -31,7 +31,7 @@ type DelegateRedemptionRequest struct {
 	ExpirationTime          *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=expiration_time,json=expirationTime,proto3" json:"expiration_time,omitempty"`
 	ReservationIdUpperBound uint32                 `protobuf:"varint,2,opt,name=reservation_id_upper_bound,json=reservationIdUpperBound,proto3" json:"reservation_id_upper_bound,omitempty"`
 	Key                     []byte                 `protobuf:"bytes,3,opt,name=Key,proto3" json:"Key,omitempty"`
-	EncodingPoints          []uint64               `protobuf:"varint,4,rep,packed,name=encoding_points,json=encodingPoints,proto3" json:"encoding_points,omitempty"`
+	EncodingPoints          []uint32               `protobuf:"varint,4,rep,packed,name=encoding_points,json=encodingPoints,proto3" json:"encoding_points,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -87,7 +87,7 @@ func (x *DelegateRedemptionRequest) GetKey() []byte {
 	return nil
 }
 
-func (x *DelegateRedemptionRequest) GetEncodingPoints() []uint64 {
+func (x *DelegateRedemptionRequest) GetEncodingPoints() []uint32 {
 	if x != nil {
 		return x.EncodingPoints
 	}
@@ -142,7 +142,7 @@ type RedeemAssetFromASRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	IngressId     uint32                 `protobuf:"varint,1,opt,name=ingress_id,json=ingressId,proto3" json:"ingress_id,omitempty"`
 	EgressId      uint32                 `protobuf:"varint,2,opt,name=egress_id,json=egressId,proto3" json:"egress_id,omitempty"`
-	Bw            uint64                 `protobuf:"varint,3,opt,name=bw,proto3" json:"bw,omitempty"`
+	Bandwidth     uint32                 `protobuf:"varint,3,opt,name=bandwidth,proto3" json:"bandwidth,omitempty"`
 	StartsAt      *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
 	StopsAt       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
 	RequestId     uint64                 `protobuf:"varint,6,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -194,9 +194,9 @@ func (x *RedeemAssetFromASRequest) GetEgressId() uint32 {
 	return 0
 }
 
-func (x *RedeemAssetFromASRequest) GetBw() uint64 {
+func (x *RedeemAssetFromASRequest) GetBandwidth() uint32 {
 	if x != nil {
-		return x.Bw
+		return x.Bandwidth
 	}
 	return 0
 }
@@ -223,12 +223,12 @@ func (x *RedeemAssetFromASRequest) GetRequestId() uint64 {
 }
 
 type RedeemAssetFromASResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ResInfo       *ReservationInfo       `protobuf:"bytes,1,opt,name=res_info,json=resInfo,proto3" json:"res_info,omitempty"`
-	Ak            []byte                 `protobuf:"bytes,2,opt,name=ak,proto3" json:"ak,omitempty"`
-	RequestId     uint64                 `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ResInfo           *ReservationInfo       `protobuf:"bytes,1,opt,name=res_info,json=resInfo,proto3" json:"res_info,omitempty"`
+	AuthenticationKey []byte                 `protobuf:"bytes,2,opt,name=authentication_key,json=authenticationKey,proto3" json:"authentication_key,omitempty"`
+	RequestId         uint64                 `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *RedeemAssetFromASResponse) Reset() {
@@ -268,9 +268,9 @@ func (x *RedeemAssetFromASResponse) GetResInfo() *ReservationInfo {
 	return nil
 }
 
-func (x *RedeemAssetFromASResponse) GetAk() []byte {
+func (x *RedeemAssetFromASResponse) GetAuthenticationKey() []byte {
 	if x != nil {
-		return x.Ak
+		return x.AuthenticationKey
 	}
 	return nil
 }
@@ -284,8 +284,8 @@ func (x *RedeemAssetFromASResponse) GetRequestId() uint64 {
 
 type ReservationInfo struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
-	ResId               uint32                 `protobuf:"varint,1,opt,name=res_id,json=resId,proto3" json:"res_id,omitempty"`
-	BwRounded           uint64                 `protobuf:"varint,2,opt,name=bw_rounded,json=bwRounded,proto3" json:"bw_rounded,omitempty"`
+	ReservationId       uint32                 `protobuf:"varint,1,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	BandwithRounded     uint32                 `protobuf:"varint,2,opt,name=bandwith_rounded,json=bandwithRounded,proto3" json:"bandwith_rounded,omitempty"`
 	BwDataplaneEncoding uint32                 `protobuf:"varint,3,opt,name=bw_dataplane_encoding,json=bwDataplaneEncoding,proto3" json:"bw_dataplane_encoding,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
@@ -321,16 +321,16 @@ func (*ReservationInfo) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_redemption_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *ReservationInfo) GetResId() uint32 {
+func (x *ReservationInfo) GetReservationId() uint32 {
 	if x != nil {
-		return x.ResId
+		return x.ReservationId
 	}
 	return 0
 }
 
-func (x *ReservationInfo) GetBwRounded() uint64 {
+func (x *ReservationInfo) GetBandwithRounded() uint32 {
 	if x != nil {
-		return x.BwRounded
+		return x.BandwithRounded
 	}
 	return 0
 }
@@ -351,27 +351,26 @@ const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
 	"\x0fexpiration_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x0eexpirationTime\x12;\n" +
 	"\x1areservation_id_upper_bound\x18\x02 \x01(\rR\x17reservationIdUpperBound\x12\x10\n" +
 	"\x03Key\x18\x03 \x01(\fR\x03Key\x12'\n" +
-	"\x0fencoding_points\x18\x04 \x03(\x04R\x0eencodingPoints\"a\n" +
+	"\x0fencoding_points\x18\x04 \x03(\rR\x0eencodingPoints\"a\n" +
 	"\x1aDelegateRedemptionResponse\x12C\n" +
-	"\x0fexpiration_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x0eexpirationTime\"\xf5\x01\n" +
+	"\x0fexpiration_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x0eexpirationTime\"\x83\x02\n" +
 	"\x18RedeemAssetFromASRequest\x12\x1d\n" +
 	"\n" +
 	"ingress_id\x18\x01 \x01(\rR\tingressId\x12\x1b\n" +
-	"\tegress_id\x18\x02 \x01(\rR\begressId\x12\x0e\n" +
-	"\x02bw\x18\x03 \x01(\x04R\x02bw\x127\n" +
+	"\tegress_id\x18\x02 \x01(\rR\begressId\x12\x1c\n" +
+	"\tbandwidth\x18\x03 \x01(\rR\tbandwidth\x127\n" +
 	"\tstarts_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
 	"\bstops_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x06 \x01(\x04R\trequestId\"\x8c\x01\n" +
+	"request_id\x18\x06 \x01(\x04R\trequestId\"\xab\x01\n" +
 	"\x19RedeemAssetFromASResponse\x12@\n" +
-	"\bres_info\x18\x01 \x01(\v2%.proto.hummingbird.v1.ReservationInfoR\aresInfo\x12\x0e\n" +
-	"\x02ak\x18\x02 \x01(\fR\x02ak\x12\x1d\n" +
+	"\bres_info\x18\x01 \x01(\v2%.proto.hummingbird.v1.ReservationInfoR\aresInfo\x12-\n" +
+	"\x12authentication_key\x18\x02 \x01(\fR\x11authenticationKey\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x03 \x01(\x04R\trequestId\"{\n" +
-	"\x0fReservationInfo\x12\x15\n" +
-	"\x06res_id\x18\x01 \x01(\rR\x05resId\x12\x1d\n" +
-	"\n" +
-	"bw_rounded\x18\x02 \x01(\x04R\tbwRounded\x122\n" +
+	"request_id\x18\x03 \x01(\x04R\trequestId\"\x97\x01\n" +
+	"\x0fReservationInfo\x12%\n" +
+	"\x0ereservation_id\x18\x01 \x01(\rR\rreservationId\x12)\n" +
+	"\x10bandwith_rounded\x18\x02 \x01(\rR\x0fbandwithRounded\x122\n" +
 	"\x15bw_dataplane_encoding\x18\x03 \x01(\rR\x13bwDataplaneEncoding2\x86\x02\n" +
 	"\x11RedemptionService\x12v\n" +
 	"\rRedeemASAsset\x12/.proto.hummingbird.v1.RedeemAssetFromASResponse\x1a..proto.hummingbird.v1.RedeemAssetFromASRequest\"\x00(\x010\x01\x12y\n" +

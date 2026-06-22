@@ -49,7 +49,7 @@ type RedemptionService struct {
 	cipher              cipher.Block
 	resLimit            uint32
 	resIdStore          ReservationIdStore
-	encodingPoints      []uint64
+	encodingPoints      []uint32
 	expiration          time.Time
 }
 
@@ -57,7 +57,7 @@ type RedemptionDelegationUpdate struct {
 	ExpirationTime     time.Time
 	ReservationIdLimit uint32
 	Key                []byte
-	EncodingPoints     []uint64
+	EncodingPoints     []uint32
 }
 
 type RedemptionDelegationUpdateResult struct {
@@ -169,7 +169,7 @@ func (s *RedemptionService) handleRequest(r *hummingbird.RedeemAssetFromASReques
 	unixStart := uint32(r.StartsAt.Seconds)
 	unixEnd := uint32(r.StopsAt.Seconds)
 	durSeconds := unixEnd - unixStart
-	encoded_bw := s.encodeBandwidth(r.Bw)
+	encoded_bw := s.encodeBandwidth(r.Bandwidth)
 
 	var buff [16]byte
 	ak := s.deriveAuthKey(s.cipher, resId, encoded_bw, uint16(r.IngressId), uint16(r.EgressId), unixStart, uint16(durSeconds), buff[:])
@@ -178,12 +178,12 @@ func (s *RedemptionService) handleRequest(r *hummingbird.RedeemAssetFromASReques
 	if ok {
 		ch <- &hummingbird.RedeemAssetFromASResponse{
 			ResInfo: &hummingbird.ReservationInfo{
-				ResId:               resId,
-				BwRounded:           s.encodingPoints[encoded_bw],
+				ReservationId:       resId,
+				BandwithRounded:     s.encodingPoints[encoded_bw],
 				BwDataplaneEncoding: uint32(encoded_bw),
 			},
-			Ak:        ak,
-			RequestId: r.RequestId,
+			AuthenticationKey: ak,
+			RequestId:         r.RequestId,
 		}
 		close(ch)
 		delete(s.client.pending, r.RequestId)
@@ -192,7 +192,7 @@ func (s *RedemptionService) handleRequest(r *hummingbird.RedeemAssetFromASReques
 	return nil
 }
 
-func (s *RedemptionService) encodeBandwidth(bw uint64) uint16 {
+func (s *RedemptionService) encodeBandwidth(bw uint32) uint16 {
 	return uint16(sort.Search(len(s.encodingPoints), func(i int) bool {
 		return s.encodingPoints[i] >= bw
 	}))

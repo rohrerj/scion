@@ -26,13 +26,13 @@ import (
 type RequestedSplit struct {
 	ExactFrom      time.Time
 	ExactTo        time.Time
-	ExactBandwidth uint64
+	ExactBandwidth uint32
 }
 
 type AssetSegment struct {
 	StartAt   time.Time
 	StopAt    time.Time
-	Bandwidth uint64
+	Bandwidth uint32
 	Used      bool
 
 	requestIndex *int
@@ -225,7 +225,7 @@ func SplitAsset(
 	for i := 0; i < len(points)-1; i++ {
 		segFrom := time.Unix(points[i], 0).UTC()
 		segTo := time.Unix(points[i+1], 0).UTC()
-		cursor := uint64(0)
+		cursor := uint32(0)
 
 		for reqIdx, p := range purchases {
 			if !overlaps(segFrom, segTo, p) {

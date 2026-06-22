@@ -27,10 +27,10 @@ type AssetQuery struct {
 	IA                   *addr.IA
 	Ingress              *uint32
 	Egress               *uint32
-	MinRequiredBandwidth *uint64
+	MinRequiredBandwidth *uint32
 	StartsAt             *string
 	StopsAt              *string
-	Price                *uint64
+	Price                *uint32
 }
 
 type UsedReservationsQuery struct {
@@ -77,11 +77,11 @@ type DBStat struct {
 }
 
 type DBReservation struct {
-	ID        int64
+	ID        uint32
 	IA        addr.IA
-	Ingress   int64
-	Egress    int64
-	Bandwidth int64
+	Ingress   uint32
+	Egress    uint32
+	Bandwidth uint32
 	StartsAt  time.Time
 	StopsAt   time.Time
 	OwnerId   int64
@@ -92,13 +92,14 @@ type DBAsset struct {
 	ID              int64
 	OwnerId         sql.NullInt64
 	IA              addr.IA
-	Bandwidth       uint64
-	BandwidthMin    uint64
+	Bandwidth       uint32
+	BandwidthMin    uint32
+	BandwidthMax    uint32
 	StartAt         time.Time
 	StopsAt         time.Time
-	Price           uint64
-	TimeGranularity uint64
-	TimeMinDuration uint64
+	Price           uint32
+	TimeGranularity uint32
+	TimeMinDuration uint32
 	IfIdIngress     sql.NullInt64
 	IfIdEgress      sql.NullInt64
 }
@@ -117,21 +118,21 @@ type DBASUser struct {
 	Balance      int64
 }
 
-func (r *RedemptionDelegation) EncodingsToInts() []uint64 {
-	if len(r.Encodings)%8 != 0 {
+func (r *RedemptionDelegation) EncodingsToInts() []uint32 {
+	if len(r.Encodings)%4 != 0 {
 		panic("invalid data length")
 	}
-	nums := make([]uint64, len(r.Encodings)/8)
+	nums := make([]uint32, len(r.Encodings)/4)
 	for i := range nums {
-		nums[i] = binary.LittleEndian.Uint64(r.Encodings[i*8:])
+		nums[i] = binary.LittleEndian.Uint32(r.Encodings[i*4:])
 	}
 	return nums
 }
 
-func (r *RedemptionDelegation) EncodeInts(nums []uint64) {
-	buf := make([]byte, len(nums)*8)
+func (r *RedemptionDelegation) EncodeInts(nums []uint32) {
+	buf := make([]byte, len(nums)*4)
 	for i, n := range nums {
-		binary.LittleEndian.PutUint64(buf[i*8:], n)
+		binary.LittleEndian.PutUint32(buf[i*4:], n)
 	}
 	r.Encodings = buf
 }

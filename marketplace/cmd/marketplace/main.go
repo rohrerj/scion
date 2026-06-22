@@ -57,8 +57,8 @@ import (
 	"github.com/scionproto/scion/private/trust"
 )
 
-const APIMajorVersion = uint64(0)
-const APIMinorVersion = uint64(1)
+const APIMajorVersion = uint32(0)
+const APIMinorVersion = uint32(1)
 
 var globalCfg marketplace.Config
 
@@ -144,7 +144,7 @@ func realMain(ctx context.Context) error {
 		ApiMajorVersion:              APIMajorVersion,
 		ApiMinorVersion:              APIMinorVersion,
 		Currency:                     globalCfg.Marketplace.Currency,
-		StatisticsTimeGranularity:    time.Duration(globalCfg.Marketplace.StatisticsTimeGranularity) * time.Second,
+		StatisticsTimeGranularity:    globalCfg.Marketplace.StatisticsTimeGranularity,
 		SupportsRedemptionDelegation: globalCfg.Marketplace.SupportsRedemptionDelegation,
 	}, store, regService, jwtSigner)
 	if err != nil {

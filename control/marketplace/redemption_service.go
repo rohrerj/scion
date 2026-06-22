@@ -82,9 +82,9 @@ func (c *RedemptionClient) Init() error {
 		bw := 100.0 * math.Pow(step, float64(i))
 		return int(math.Ceil(bw))
 	}
-	encodings := make([]uint64, 1024)
+	encodings := make([]uint32, 1024)
 	for i := 0; i < 1024; i++ {
-		encodings[i] = uint64(indexToBwKbps(i))
+		encodings[i] = uint32(indexToBwKbps(i))
 	}
 	startDelegation := func(exp time.Time) error {
 		rep, err := client.DelegateRedemption(ctx, &connect.Request[hummingbird.DelegateRedemptionRequest]{
@@ -119,12 +119,12 @@ func (c *RedemptionClient) Init() error {
 
 			rep := &hummingbird.RedeemAssetFromASResponse{
 				ResInfo: &hummingbird.ReservationInfo{
-					ResId:               resID,
-					BwRounded:           1,
+					ReservationId:       resID,
+					BandwithRounded:     1,
 					BwDataplaneEncoding: 0xFF,
 				},
-				Ak:        []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-				RequestId: msg.RequestId,
+				AuthenticationKey: []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+				RequestId:         msg.RequestId,
 			}
 			resID++
 
