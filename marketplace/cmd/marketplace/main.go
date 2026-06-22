@@ -47,6 +47,7 @@ import (
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/pkg/snet/squic"
@@ -146,6 +147,12 @@ func realMain(ctx context.Context) error {
 		Currency:                     globalCfg.Marketplace.Currency,
 		StatisticsTimeGranularity:    globalCfg.Marketplace.StatisticsTimeGranularity,
 		SupportsRedemptionDelegation: globalCfg.Marketplace.SupportsRedemptionDelegation,
+		CurrencyExponent:             globalCfg.Marketplace.CurrencyExponent,
+		PricingStrategy:              hummingbird.PricingStrategy_static_pricing,
+		TransactionFeeRelative:       globalCfg.Marketplace.TransactionFeeRelative,
+		TransactionFeeAbsolute:       globalCfg.Marketplace.TransactionFeeAbsolute,
+		SplitCombineFeeAbsolute:      globalCfg.Marketplace.SplitCombineFeeAbsolute,
+		DelegationHourlyFee:          globalCfg.Marketplace.DelegationHourlyFee,
 	}, store, regService, jwtSigner)
 	if err != nil {
 		return err

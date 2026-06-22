@@ -48,6 +48,12 @@ type MarketplaceInfo struct {
 	Currency                     string
 	StatisticsTimeGranularity    uint32
 	SupportsRedemptionDelegation bool
+	CurrencyExponent             uint32
+	PricingStrategy              hummingbird.PricingStrategy
+	TransactionFeeRelative       float32
+	TransactionFeeAbsolute       uint32
+	SplitCombineFeeAbsolute      uint32
+	DelegationHourlyFee          uint32
 }
 
 func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.MarketplaceStorage, regService *registration.Service, signer *registration.Signer) (*Service, error) {
@@ -222,6 +228,12 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 			Currency:                     s.info.Currency,
 			MaxStatisticsGranularity:     s.info.StatisticsTimeGranularity,
 			SupportsRedemptionDelegation: s.info.SupportsRedemptionDelegation,
+			CurrencyExponent:             s.info.CurrencyExponent,
+			PricingStrategy:              s.info.PricingStrategy,
+			TransactionFeeRelative:       s.info.TransactionFeeRelative,
+			TransactionFeeAbsolute:       s.info.TransactionFeeAbsolute,
+			SplitCombineFeeAbsolute:      s.info.SplitCombineFeeAbsolute,
+			DelegationHourlyFee:          s.info.DelegationHourlyFee,
 		},
 	}, nil
 }
@@ -238,7 +250,7 @@ func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[humming
 			return "", err
 		}
 		switch t := update.Operation.(type) {
-		case *hummingbird.AssetUpdate_Delete:
+		case *hummingbird.AssetUpdate_Remove:
 			x, err := s.store.DeleteListedAsset(ctx, ia, assetId)
 			if err != nil {
 				return "", err

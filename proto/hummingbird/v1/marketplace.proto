@@ -40,10 +40,10 @@ message AssetUpdate {
     string asset_id = 1;
     oneof operation {
         PublisherAsset update = 2;
-        Delete delete = 3;
+        Remove remove = 3;
     }
 }
-message Delete {}
+message Remove {}
 message UpdateAssetsResponse {
     repeated UpdateAssetResult result = 1;
 }
@@ -105,8 +105,19 @@ message MarketplaceInfoResponse {
     uint32 api_major_version = 1;
     uint32 api_minor_version = 2;
     string currency = 3;
-    uint32 max_statistics_granularity = 4;
-    bool supports_redemption_delegation = 5;
+    uint32 currency_exponent = 4;
+    uint32 max_statistics_granularity = 5;
+    PricingStrategy pricing_strategy = 6;
+    float transaction_fee_relative = 7;
+    uint32 transaction_fee_absolute = 8;
+    uint32 split_combine_fee_absolute = 9;
+    bool supports_redemption_delegation = 10;
+    uint32 delegation_hourly_fee = 11;
+}
+
+enum PricingStrategy {
+  static_pricing = 0;
+  dynamic_pricing = 1;
 }
 
 message PublishAssetRequest {

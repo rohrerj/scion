@@ -49,11 +49,16 @@ func (cfg *Config) Sample(dst io.Writer, path config.Path, _ config.CtxMap) {
 }
 
 type MarketplaceConfig struct {
-	APIAddr                      string `toml:"api_addr,omitempty"`
-	SCIONAPIAddr                 string `toml:"scion_api_addr,omitempty"`
-	Currency                     string `toml:"currency,omitempty"`
-	StatisticsTimeGranularity    uint32 `toml:"statistics_time_granularity,omitempty"`
-	SupportsRedemptionDelegation bool   `toml:"supports_redemption_delegation,omitempty"`
+	APIAddr                      string  `toml:"api_addr,omitempty"`
+	SCIONAPIAddr                 string  `toml:"scion_api_addr,omitempty"`
+	Currency                     string  `toml:"currency,omitempty"`
+	StatisticsTimeGranularity    uint32  `toml:"statistics_time_granularity,omitempty"`
+	SupportsRedemptionDelegation bool    `toml:"supports_redemption_delegation,omitempty"`
+	CurrencyExponent             uint32  `toml:"currency_exponent,omitempty"`
+	TransactionFeeRelative       float32 `toml:"transaction_fee_relative,omitempty"`
+	TransactionFeeAbsolute       uint32  `toml:"transaction_fee_absolute,omitempty"`
+	SplitCombineFeeAbsolute      uint32  `toml:"split_combine_fee_absolute,omitempty"`
+	DelegationHourlyFee          uint32  `toml:"delegation_hourly_fee,omitempty"`
 }
 
 func (cfg *MarketplaceConfig) InitDefaults() {

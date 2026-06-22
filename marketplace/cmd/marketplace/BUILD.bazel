@@ -15,6 +15,7 @@ go_library(
         "//pkg/hummingbird/registration:go_default_library",
         "//pkg/log:go_default_library",
         "//pkg/private/serrors:go_default_library",
+        "//pkg/proto/hummingbird:go_default_library",
         "//pkg/snet:go_default_library",
         "//pkg/snet/squic:go_default_library",
         "//private/app/appnet:go_default_library",

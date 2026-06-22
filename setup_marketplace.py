@@ -39,6 +39,13 @@ level = "debug"
 [marketplace]
 api_addr = "localhost:8888"
 scion_api_addr = "localhost:9888"
+currency = "CHF"
+currency_exponent = 2
+supports_redemption_delegation = true
+delegation_hourly_fee = 10000
+transaction_fee_relative = 0.01
+transaction_fee_absolute = 10
+split_combine_fee_absolute = 10
 
 [marketplace_db]
 connection = "gen-cache/marketplace.db"

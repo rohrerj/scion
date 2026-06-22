@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/netip"
@@ -667,7 +668,7 @@ func handleUpdate(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 			case subOption == "delete":
 				assetUpdates = append(assetUpdates, &hummingbird.AssetUpdate{
 					AssetId:   readString(reader, "AssetID: "),
-					Operation: &hummingbird.AssetUpdate_Delete{},
+					Operation: &hummingbird.AssetUpdate_Remove{},
 				})
 			case subOption == "update":
 				assetUpdates = append(assetUpdates, &hummingbird.AssetUpdate{
@@ -1082,7 +1083,18 @@ func handleInfo(ctx context.Context, c hummingbirdconnect.MarketplaceServiceClie
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("Version: %d.%d, Currency: %s\n", info.Msg.ApiMajorVersion, info.Msg.ApiMinorVersion, info.Msg.Currency)
+	transform := func(base uint32) string {
+		return fmt.Sprintf("%g%s", float64(base)*math.Pow10(-int(info.Msg.CurrencyExponent)), info.Msg.Currency)
+	}
+	fmt.Printf("Version: %d.%d\nCurrency: %g %s\nPricing strategy: %s\n",
+		info.Msg.ApiMajorVersion, info.Msg.ApiMinorVersion, math.Pow10(-int(info.Msg.CurrencyExponent)),
+		info.Msg.Currency, info.Msg.PricingStrategy)
+	fmt.Printf("Transaction fees: %g%% + %s\nSplit or combine assets: %s\n",
+		info.Msg.TransactionFeeRelative, transform(info.Msg.TransactionFeeAbsolute), transform(info.Msg.SplitCombineFeeAbsolute))
+	if info.Msg.SupportsRedemptionDelegation {
+		fmt.Printf("Redemption delegation hourly fee: %s\n", transform(info.Msg.DelegationHourlyFee))
+	}
+	fmt.Printf("Statistics granularity: %s\n", (time.Duration(info.Msg.MaxStatisticsGranularity) * time.Second).String())
 }
 
 func readConfirm(reader *bufio.Reader) bool {
