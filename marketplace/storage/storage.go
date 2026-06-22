@@ -64,6 +64,31 @@ func (s *MarketplaceStorage) FetchReservations(ctx context.Context, params *mark
 func (s *MarketplaceStorage) PublishAsset(ctx context.Context, a *marketplacedb.DBAsset) (int64, error) {
 	return s.db.InsertAsset(ctx, a)
 }
+func (s *MarketplaceStorage) UpdateListedAsset(ctx context.Context, a *marketplacedb.DBAsset) (int64, error) {
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	x, err := tx.DeleteListedAsset(ctx, a.IA, a.ID)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	if x != 1 {
+		return 0, serrors.Join(serrors.New("no modifiable asset with that ID found"), tx.Rollback())
+	}
+	newId, err := tx.InsertAsset(ctx, a)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	return newId, nil
+}
+func (s *MarketplaceStorage) DeleteListedAsset(ctx context.Context, ia addr.IA, assetID int64) (int64, error) {
+	return s.db.DeleteListedAsset(ctx, ia, assetID)
+}
 
 func (s *MarketplaceStorage) GetUser(ctx context.Context, id int64) (*marketplacedb.DBUser, error) {
 	return s.db.GetUser(ctx, id)
@@ -119,10 +144,10 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 	if a1.IA != a2.IA {
 		return 0, serrors.Join(serrors.New("asset must have same IA"), tx.Rollback())
 	}
-	if a1.IfIdIngress.Valid && a1.IfIdIngress.Int64 != a2.IfIdIngress.Int64 {
+	if a1.IfIdIngress.Valid && a1.IfIdIngress.Int32 != a2.IfIdIngress.Int32 {
 		return 0, serrors.Join(serrors.New("asset must have same ingress"), tx.Rollback())
 	}
-	if a1.IfIdEgress.Valid && a1.IfIdEgress.Int64 != a2.IfIdEgress.Int64 {
+	if a1.IfIdEgress.Valid && a1.IfIdEgress.Int32 != a2.IfIdEgress.Int32 {
 		return 0, serrors.Join(serrors.New("asset must have same egress"), tx.Rollback())
 	}
 	var combinedAsset *marketplacedb.DBAsset

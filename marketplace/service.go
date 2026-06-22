@@ -226,8 +226,83 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 	}, nil
 }
 
-func (s *Service) UpdateAssets(context.Context, *connect.Request[hummingbird.UpdateAssetsRequest]) (*connect.Response[hummingbird.UpdateAssetsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, serrors.New("UpdateAssets currently not implemented"))
+func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[hummingbird.UpdateAssetsRequest]) (*connect.Response[hummingbird.UpdateAssetsResponse], error) {
+	fmt.Println("UpdateAssets")
+	ia, ok := ctx.Value("user").(addr.IA)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
+	}
+	handleAsset := func(update *hummingbird.AssetUpdate) (string, error) {
+		assetId, err := strconv.ParseInt(update.AssetId, 10, 64)
+		if err != nil {
+			return "", err
+		}
+		switch t := update.Operation.(type) {
+		case *hummingbird.AssetUpdate_Delete:
+			x, err := s.store.DeleteListedAsset(ctx, ia, assetId)
+			if err != nil {
+				return "", err
+			}
+			if x != 1 {
+				return "", serrors.New("no modifiable asset with that ID found")
+			}
+			return "", nil
+		case *hummingbird.AssetUpdate_Update:
+			dbAsset := &db.DBAsset{
+				ID:              assetId,
+				IA:              ia,
+				Bandwidth:       t.Update.Bandwidth,
+				BandwidthMin:    t.Update.BandwidthMin,
+				BandwidthMax:    t.Update.BandwidthMax,
+				StartAt:         t.Update.StartsAt.AsTime(),
+				StopsAt:         t.Update.StopsAt.AsTime(),
+				Price:           t.Update.Price,
+				TimeGranularity: t.Update.TimeGranularity,
+				TimeMinDuration: t.Update.TimeMinDuration,
+			}
+			if t.Update.IfIdIngress != nil {
+				dbAsset.IfIdIngress = sql.NullInt32{
+					Valid: true,
+					Int32: int32(*t.Update.IfIdIngress),
+				}
+			}
+			if t.Update.IfIdEgress != nil {
+				dbAsset.IfIdEgress = sql.NullInt32{
+					Valid: true,
+					Int32: int32(*t.Update.IfIdEgress),
+				}
+			}
+			newId, err := s.store.UpdateListedAsset(ctx, dbAsset)
+			if err != nil {
+				return "", err
+			}
+			return strconv.FormatInt(newId, 10), nil
+		default:
+			return "", serrors.New("unkown update")
+		}
+	}
+	res := make([]*hummingbird.UpdateAssetResult, 0, len(req.Msg.Assets))
+	for _, update := range req.Msg.Assets {
+		newId, err := handleAsset(update)
+		if err != nil {
+			res = append(res, &hummingbird.UpdateAssetResult{
+				ResultType: &hummingbird.UpdateAssetResult_Error{
+					Error: err.Error(),
+				},
+			})
+		} else {
+			res = append(res, &hummingbird.UpdateAssetResult{
+				ResultType: &hummingbird.UpdateAssetResult_NewId{
+					NewId: newId,
+				},
+			})
+		}
+	}
+	return &connect.Response[hummingbird.UpdateAssetsResponse]{
+		Msg: &hummingbird.UpdateAssetsResponse{
+			Result: res,
+		},
+	}, nil
 }
 
 func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[hummingbird.PublishAssetRequest]) (*connect.Response[hummingbird.PublishAssetResponse], error) {
@@ -245,18 +320,18 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 		Price:           req.Msg.Asset.Price,
 		TimeGranularity: req.Msg.Asset.TimeGranularity,
 		TimeMinDuration: req.Msg.Asset.TimeMinDuration,
-		IfIdIngress:     sql.NullInt64{},
-		IfIdEgress:      sql.NullInt64{},
+		IfIdIngress:     sql.NullInt32{},
+		IfIdEgress:      sql.NullInt32{},
 	}
 	if !dbAsset.StopsAt.After(dbAsset.StartAt) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("stopsAt must come after startsAt"))
 	}
 	if req.Msg.Asset.IfIdIngress != nil {
-		dbAsset.IfIdIngress.Int64 = int64(*req.Msg.Asset.IfIdIngress)
+		dbAsset.IfIdIngress.Int32 = int32(*req.Msg.Asset.IfIdIngress)
 		dbAsset.IfIdIngress.Valid = true
 	}
 	if req.Msg.Asset.IfIdEgress != nil {
-		dbAsset.IfIdEgress.Int64 = int64(*req.Msg.Asset.IfIdEgress)
+		dbAsset.IfIdEgress.Int32 = int32(*req.Msg.Asset.IfIdEgress)
 		dbAsset.IfIdEgress.Valid = true
 	}
 	assetID, err := s.store.PublishAsset(ctx, dbAsset)
@@ -300,8 +375,8 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 		// interface pair
 		pairAsset := assets[0]
 		bw = pairAsset.Bandwidth
-		ingressID = uint32(pairAsset.IfIdIngress.Int64)
-		egressID = uint32(pairAsset.IfIdEgress.Int64)
+		ingressID = uint32(pairAsset.IfIdIngress.Int32)
+		egressID = uint32(pairAsset.IfIdEgress.Int32)
 		startsAt = pairAsset.StartAt
 		stopsAt = pairAsset.StopsAt
 		ia = pairAsset.IA
@@ -310,8 +385,8 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 		ingressAsset := assets[0]
 		egressAsset := assets[1]
 		bw = min(ingressAsset.Bandwidth, egressAsset.Bandwidth)
-		ingressID = uint32(ingressAsset.IfIdIngress.Int64)
-		egressID = uint32(egressAsset.IfIdEgress.Int64)
+		ingressID = uint32(ingressAsset.IfIdIngress.Int32)
+		egressID = uint32(egressAsset.IfIdEgress.Int32)
 		ia = ingressAsset.IA
 		if ingressAsset.StartAt.Before(egressAsset.StartAt) {
 			startsAt = egressAsset.StartAt
@@ -488,16 +563,18 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 
 func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[hummingbird.SearchAssetsRequest]) (*connect.Response[hummingbird.SearchAssetsResponse], error) {
 	fmt.Println("SearchAssets")
-	user, ok := ctx.Value("user").(int64)
-	if !ok {
+	var owner_id *int64
+	switch user := ctx.Value("user").(type) {
+	case int64:
+		if req.Msg.Owned {
+			owner_id = &user
+		}
+	case addr.IA:
+	default:
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
 	}
-	var owner_id *int64
 	var startsAt *string
 	var stopsAt *string
-	if req.Msg.Owned {
-		owner_id = &user
-	}
 	if req.Msg.StartsAtLatest != nil {
 		start := req.Msg.StartsAtLatest.AsTime().UTC().Format(time.RFC3339)
 		startsAt = &start
@@ -539,11 +616,11 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 			Price:           asset.Price,
 		}
 		if asset.IfIdIngress.Valid {
-			ingress := uint32(asset.IfIdIngress.Int64)
+			ingress := uint32(asset.IfIdIngress.Int32)
 			a.IfIdIngress = &ingress
 		}
 		if asset.IfIdEgress.Valid {
-			egress := uint32(asset.IfIdEgress.Int64)
+			egress := uint32(asset.IfIdEgress.Int32)
 			a.IfIdEgress = &egress
 		}
 		repAssets = append(repAssets, a)

@@ -100,8 +100,8 @@ type DBAsset struct {
 	Price           uint32
 	TimeGranularity uint32
 	TimeMinDuration uint32
-	IfIdIngress     sql.NullInt64
-	IfIdEgress      sql.NullInt64
+	IfIdIngress     sql.NullInt32
+	IfIdEgress      sql.NullInt32
 }
 
 type DBUser struct {

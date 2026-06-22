@@ -29,8 +29,9 @@ import (
 
 var methodScopes = map[string]string{
 	"/proto.hummingbird.v1.MarketplaceService/PublishAsset":      "AssetPublisher",
+	"/proto.hummingbird.v1.MarketplaceService/UpdateAssets":      "AssetPublisher",
 	"/proto.hummingbird.v1.MarketplaceService/Statistics":        "AssetPublisher",
-	"/proto.hummingbird.v1.MarketplaceService/SearchAssets":      "User",
+	"/proto.hummingbird.v1.MarketplaceService/SearchAssets":      "User,AssetPublisher",
 	"/proto.hummingbird.v1.MarketplaceService/SplitAsset":        "User",
 	"/proto.hummingbird.v1.MarketplaceService/CombineAssets":     "User",
 	"/proto.hummingbird.v1.MarketplaceService/BuyAssets":         "User",
@@ -130,10 +131,18 @@ func (t *TokenVerifier) contextFromJwt(ctx context.Context, tokenStr string, req
 		)
 	}
 	scopes := parseScopes(scopeStr)
-
-	if requiredScope != "" && !scopes[requiredScope] {
-		return nil, connect.NewError(connect.CodePermissionDenied,
-			fmt.Errorf("missing scope: %s", requiredScope))
+	if requiredScope != "" {
+		found := false
+		for _, r := range strings.Split(requiredScope, ",") {
+			if scopes[r] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("missing scope: %s", requiredScope))
+		}
 	}
 	if scopes["User"] {
 		userid, err := strconv.ParseInt(user, 10, 64)

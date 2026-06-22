@@ -78,7 +78,9 @@ func printOptions(t jwtType) {
 		fmt.Println("-> redeem")
 		fmt.Println("-> reservation")
 	case Publisher:
+		fmt.Println("-> search")
 		fmt.Println("-> publish")
+		fmt.Println("-> update")
 		fmt.Println("-> statistics")
 	case RedemptionService:
 		fmt.Println("-> delegate")
@@ -501,6 +503,8 @@ func userInteraction() {
 			handleStatistics(ctx, reader, marketplaceClient)
 		case option == "delegate":
 			handleDelegate(ctx, reader, redemptionClient)
+		case option == "update":
+			handleUpdate(ctx, reader, marketplaceClient)
 		case option == "reset":
 			if success := handleResetJwt(ctx, reader, accountClient, t); success {
 				return
@@ -588,49 +592,23 @@ func handleDelegate(ctx context.Context, reader *bufio.Reader, c hummingbirdconn
 }
 func handlePublish(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	fmt.Println("Handle publish asset query.")
-	option := readOptionalUint32(reader, "Select option:\n0: ingress asset\n1: egress asset\n2: interface-pair asset:\n")
-	var ingress *uint32
-	var egress *uint32
-	if option == nil {
-		return
-	} else if *option == 0 {
-		tmp := uint32(readUint64(reader, "ingress: "))
-		ingress = &tmp
-	} else if *option == 1 {
-		tmp := uint32(readUint64(reader, "egress: "))
-		egress = &tmp
-	} else if *option == 2 {
-		tmp1 := uint32(readUint64(reader, "ingress: "))
-		ingress = &tmp1
-		tmp2 := uint32(readUint64(reader, "egress: "))
-		egress = &tmp2
-	} else {
-		fmt.Println("invalid option")
-		return
+	asset := &hummingbird.PublisherAsset{
+		IfIdIngress:     readOptionalUint32(reader, "ingress: "),
+		IfIdEgress:      readOptionalUint32(reader, "egress: "),
+		Bandwidth:       uint32(readUint64(reader, "bandwidth: ")),
+		BandwidthMin:    uint32(readUint64(reader, "minimum bandwidth: ")),
+		StartsAt:        timestamppb.New(readTime(reader, "Starts at (2006-01-02T15:04:05): ")),
+		StopsAt:         timestamppb.New(readTime(reader, "Stops at (2006-01-02T15:04:05): ")),
+		Price:           uint32(readUint64(reader, "price per kbit per second: ")),
+		TimeMinDuration: uint32(readUint64(reader, "minimum time duration: ")),
+		TimeGranularity: uint32(readUint64(reader, "time granularity: ")),
 	}
-	bandwidth := readUint64(reader, "bandwidth: ")
-	startsAt := readTime(reader, "Starts at (2006-01-02T15:04:05): ")
-	stopsAt := readTime(reader, "Stops at (2006-01-02T15:04:05): ")
-	price := readUint64(reader, "price per kbit per second: ")
-	bandwidthMin := readUint64(reader, "minimum bandwidth: ")
-	timeMinDuration := readUint64(reader, "minimum time duration: ")
-	timeGranularity := readUint64(reader, "time granularity: ")
 	if !readConfirm(reader) {
 		return
 	}
 	resp, err := c.PublishAsset(ctx, &connect.Request[hummingbird.PublishAssetRequest]{
 		Msg: &hummingbird.PublishAssetRequest{
-			Asset: &hummingbird.PublisherAsset{
-				IfIdIngress:     ingress,
-				IfIdEgress:      egress,
-				Bandwidth:       uint32(bandwidth),
-				BandwidthMin:    uint32(bandwidthMin),
-				StartsAt:        timestamppb.New(startsAt),
-				StopsAt:         timestamppb.New(stopsAt),
-				Price:           uint32(price),
-				TimeMinDuration: uint32(timeMinDuration),
-				TimeGranularity: uint32(timeGranularity),
-			},
+			Asset: asset,
 		},
 	})
 	if err != nil {
@@ -655,7 +633,111 @@ func ceilTime(base time.Time, multiple time.Duration) time.Time {
 	return truncated.Add(multiple)
 }
 
+func printUpdateAssetOptions() {
+	fmt.Println("-> add")
+	fmt.Println("-> remove")
+	fmt.Println("-> list")
+	fmt.Println("-> submit")
+	fmt.Println("-> cancel")
+}
+
+func handleUpdate(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	fmt.Println("Handle update assets query")
+	assetUpdates := make([]*hummingbird.AssetUpdate, 0, 1)
+	for {
+		fmt.Printf("Currently %d assets in update query.\n", len(assetUpdates))
+		printUpdateAssetOptions()
+		option, err := reader.ReadString('\n')
+		option = strings.TrimSpace(option)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		switch {
+		case option == "add":
+			fmt.Println("-> delete")
+			fmt.Println("-> update")
+			subOption, err := reader.ReadString('\n')
+			subOption = strings.TrimSpace(subOption)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			switch {
+			case subOption == "delete":
+				assetUpdates = append(assetUpdates, &hummingbird.AssetUpdate{
+					AssetId:   readString(reader, "AssetID: "),
+					Operation: &hummingbird.AssetUpdate_Delete{},
+				})
+			case subOption == "update":
+				assetUpdates = append(assetUpdates, &hummingbird.AssetUpdate{
+					AssetId: readString(reader, "AssetID: "),
+					Operation: &hummingbird.AssetUpdate_Update{
+						Update: &hummingbird.PublisherAsset{IfIdIngress: readOptionalUint32(reader, "ingress: "),
+							IfIdEgress:      readOptionalUint32(reader, "egress: "),
+							Bandwidth:       uint32(readUint64(reader, "bandwidth: ")),
+							BandwidthMin:    uint32(readUint64(reader, "minimum bandwidth: ")),
+							StartsAt:        timestamppb.New(readTime(reader, "Starts at (2006-01-02T15:04:05): ")),
+							StopsAt:         timestamppb.New(readTime(reader, "Stops at (2006-01-02T15:04:05): ")),
+							Price:           uint32(readUint64(reader, "price per kbit per second: ")),
+							TimeMinDuration: uint32(readUint64(reader, "minimum time duration: ")),
+							TimeGranularity: uint32(readUint64(reader, "time granularity: "))},
+					},
+				})
+			default:
+				break
+			}
+		case option == "remove":
+			index := readUint64(reader, "List index to remove: ")
+			if int(index) >= len(assetUpdates) {
+				fmt.Println("index invalid")
+				break
+			}
+			assetUpdates = append(assetUpdates[:index], assetUpdates[index+1:]...)
+		case option == "list":
+			for index, asset := range assetUpdates {
+				jsonAsset, _ := json.Marshal(asset)
+				fmt.Printf("%d:%s\n", index, string(jsonAsset))
+			}
+		case option == "submit":
+			if !readConfirm(reader) {
+				continue
+			}
+			rep, err := c.UpdateAssets(ctx, &connect.Request[hummingbird.UpdateAssetsRequest]{
+				Msg: &hummingbird.UpdateAssetsRequest{
+					Assets: assetUpdates,
+				},
+			})
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			for i, res := range rep.Msg.Result {
+				if i >= len(assetUpdates) {
+					break
+				}
+				switch t := res.ResultType.(type) {
+				case *hummingbird.UpdateAssetResult_NewId:
+					if t.NewId == "" {
+						fmt.Printf("%s: deleted\n", assetUpdates[i].AssetId)
+					} else {
+						fmt.Printf("%s: updated to -> %s\n", assetUpdates[i].AssetId, t.NewId)
+					}
+				case *hummingbird.UpdateAssetResult_Error:
+					fmt.Printf("%s: error: %s\n", assetUpdates[i].AssetId, t.Error)
+				default:
+					fmt.Printf("%s: unkown result", assetUpdates[i].AssetId)
+				}
+			}
+			return
+		case option == "cancel":
+			return
+		}
+	}
+}
+
 func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
+	fmt.Println("Handle statistics query")
 	infoRep, err := c.Info(ctx, &connect.Request[hummingbird.MarketplaceInfoRequest]{})
 	if err != nil {
 		fmt.Println(err)

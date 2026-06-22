@@ -45,6 +45,7 @@ type MarketplaceDB interface {
 	IncrementASJWTVersion(ctx context.Context, ia addr.IA, current int64) (int64, error)
 	IncrementUserJWTVersion(ctx context.Context, userid int64, current int64) (int64, error)
 	GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error)
+	DeleteListedAsset(ctx context.Context, ia addr.IA, assetID int64) (int64, error)
 	BeginTransaction(ctx context.Context, opts *sql.TxOptions) (*transaction, error)
 }
 
@@ -712,6 +713,18 @@ func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+func (e *executor) DeleteListedAsset(ctx context.Context, ia addr.IA, assetID int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `DELETE FROM Assets WHERE id = ? AND isd_id = ? AND as_id = ? AND owner_id IS NULL AND state = 0`
+	res, err := e.write.ExecContext(ctx, inst, assetID, ia.ISD(), ia.AS())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (e *executor) RemoveAsset(ctx context.Context, assetID int64) error {
