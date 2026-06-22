@@ -1090,7 +1090,7 @@ func handleInfo(ctx context.Context, c hummingbirdconnect.MarketplaceServiceClie
 		info.Msg.ApiMajorVersion, info.Msg.ApiMinorVersion, math.Pow10(-int(info.Msg.CurrencyExponent)),
 		info.Msg.Currency, info.Msg.PricingStrategy)
 	fmt.Printf("Transaction fees: %g%% + %s\nSplit or combine assets: %s\n",
-		info.Msg.TransactionFeeRelative, transform(info.Msg.TransactionFeeAbsolute), transform(info.Msg.SplitCombineFeeAbsolute))
+		100*info.Msg.TransactionFeeRelative, transform(info.Msg.TransactionFeeAbsolute), transform(info.Msg.SplitCombineFeeAbsolute))
 	if info.Msg.SupportsRedemptionDelegation {
 		fmt.Printf("Redemption delegation hourly fee: %s\n", transform(info.Msg.DelegationHourlyFee))
 	}
