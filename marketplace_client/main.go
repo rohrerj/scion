@@ -83,6 +83,7 @@ func printOptions(t jwtType) {
 		fmt.Println("-> publish")
 		fmt.Println("-> update")
 		fmt.Println("-> statistics")
+		fmt.Println("-> password")
 	case RedemptionService:
 		fmt.Println("-> delegate")
 	}
@@ -506,6 +507,8 @@ func userInteraction() {
 			handleDelegate(ctx, reader, redemptionClient)
 		case option == "update":
 			handleUpdate(ctx, reader, marketplaceClient)
+		case option == "password":
+			handlePassword(ctx, reader, accountClient)
 		case option == "reset":
 			if success := handleResetJwt(ctx, reader, accountClient, t); success {
 				return
@@ -515,6 +518,21 @@ func userInteraction() {
 		}
 		fmt.Println("----------")
 	}
+}
+
+func handlePassword(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.AccountServiceClient) {
+	fmt.Println("Handle set authentication token query")
+	auth := readString(reader, "auth: ")
+	_, err := c.SetAuthenticationToken(ctx, &connect.Request[hummingbird.SetAuthenticationTokenRequest]{
+		Msg: &hummingbird.SetAuthenticationTokenRequest{
+			Token: auth,
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("Authentication Token updated!")
 }
 
 func handleResetJwt(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.AccountServiceClient, t jwtType) bool {
@@ -536,7 +554,7 @@ func handleResetJwt(ctx context.Context, reader *bufio.Reader, c hummingbirdconn
 
 func handleDelegate(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.RedemptionServiceClient) {
 	fmt.Println("Handle redemption delegation query")
-	expTime := readTime(reader, "Redemption until (2006-01-02T15:04:05): ")
+	expTime := readTime(reader, "Redemption until (2026-06-23T13:25:36Z): ")
 	idUpperBound := uint32(readUint64(reader, "Reservation ID upper bound: "))
 	hexStr := readString(reader, "Key in hexadecimal (a1b2c3): ")
 	key, err := hex.DecodeString(hexStr)
@@ -589,7 +607,7 @@ func handleDelegate(ctx context.Context, reader *bufio.Reader, c hummingbirdconn
 		fmt.Println(err)
 		return
 	}
-	fmt.Println("Delegated until:", resp.Msg.ExpirationTime)
+	fmt.Println("Delegated until:", resp.Msg.ExpirationTime.AsTime())
 }
 func handlePublish(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	fmt.Println("Handle publish asset query.")
@@ -598,8 +616,8 @@ func handlePublish(ctx context.Context, reader *bufio.Reader, c hummingbirdconne
 		IfIdEgress:      readOptionalUint32(reader, "egress: "),
 		Bandwidth:       uint32(readUint64(reader, "bandwidth: ")),
 		BandwidthMin:    uint32(readUint64(reader, "minimum bandwidth: ")),
-		StartsAt:        timestamppb.New(readTime(reader, "Starts at (2006-01-02T15:04:05): ")),
-		StopsAt:         timestamppb.New(readTime(reader, "Stops at (2006-01-02T15:04:05): ")),
+		StartsAt:        timestamppb.New(readTime(reader, "Starts at (2026-06-23T13:25:36Z): ")),
+		StopsAt:         timestamppb.New(readTime(reader, "Stops at (2026-06-23T13:25:36Z): ")),
 		Price:           uint32(readUint64(reader, "price per kbit per second: ")),
 		TimeMinDuration: uint32(readUint64(reader, "minimum time duration: ")),
 		TimeGranularity: uint32(readUint64(reader, "time granularity: ")),
@@ -678,8 +696,8 @@ func handleUpdate(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 							IfIdEgress:      readOptionalUint32(reader, "egress: "),
 							Bandwidth:       uint32(readUint64(reader, "bandwidth: ")),
 							BandwidthMin:    uint32(readUint64(reader, "minimum bandwidth: ")),
-							StartsAt:        timestamppb.New(readTime(reader, "Starts at (2006-01-02T15:04:05): ")),
-							StopsAt:         timestamppb.New(readTime(reader, "Stops at (2006-01-02T15:04:05): ")),
+							StartsAt:        timestamppb.New(readTime(reader, "Starts at (2026-06-23T13:25:36Z): ")),
+							StopsAt:         timestamppb.New(readTime(reader, "Stops at (2026-06-23T13:25:36Z): ")),
 							Price:           uint32(readUint64(reader, "price per kbit per second: ")),
 							TimeMinDuration: uint32(readUint64(reader, "minimum time duration: ")),
 							TimeGranularity: uint32(readUint64(reader, "time granularity: "))},
@@ -744,8 +762,8 @@ func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdco
 		fmt.Println(err)
 		return
 	}
-	startsAt := readTime(reader, "Starts at (2006-01-02T15:04:05): ").UTC().Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity))
-	stopsAt := ceilTime(readTime(reader, "Stops at (2006-01-02T15:04:05): ").UTC(), time.Duration(infoRep.Msg.MaxStatisticsGranularity))
+	startsAt := readTime(reader, "Starts at (2026-06-23T13:25:36Z): ").UTC().Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity))
+	stopsAt := ceilTime(readTime(reader, "Stops at (2026-06-23T13:25:36Z): ").UTC(), time.Duration(infoRep.Msg.MaxStatisticsGranularity))
 	stepSize := readUint64(reader, "Step size: ")
 	ingress := readOptionalUint32(reader, "Ingress: ")
 	egress := readOptionalUint32(reader, "Egress: ")
@@ -791,7 +809,7 @@ func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect
 			BwSplit: uint32(bwSplit),
 		}
 	case "time":
-		timeSplit := readTime(reader, "time split (2006-01-02T15:04:05): ")
+		timeSplit := readTime(reader, "time split (2026-06-23T13:25:36Z): ")
 		req.SplitOption = &hummingbird.SplitAssetRequest_TimeSplit{
 			TimeSplit: timestamppb.New(timeSplit),
 		}
@@ -963,8 +981,8 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 		case option == "add":
 			buyAsset := &hummingbird.BuyAsset{
 				AssetId:         readString(reader, "AssetID: "),
-				StartsAtExactly: timestamppb.New(readTime(reader, "Starts at exactly (2006-01-02T15:04:05): ")),
-				StopsAtExactly:  timestamppb.New(readTime(reader, "Stops at exactly (2006-01-02T15:04:05): ")),
+				StartsAtExactly: timestamppb.New(readTime(reader, "Starts at exactly (2026-06-23T13:25:36Z): ")),
+				StopsAtExactly:  timestamppb.New(readTime(reader, "Stops at exactly (2026-06-23T13:25:36Z): ")),
 				BandwidthExact:  uint32(readUint64(reader, "BW exact: ")),
 			}
 			buyAssets = append(buyAssets, buyAsset)
@@ -1233,7 +1251,7 @@ func readTime(reader *bufio.Reader, prompt string) time.Time {
 	}
 
 	// Example format: 2026-05-20T15:04:05
-	t, err := time.Parse("2006-01-02T15:04:05", text)
+	t, err := time.Parse(time.RFC3339, text)
 	if err != nil {
 		fmt.Println("Invalid time format")
 		return time.Time{}

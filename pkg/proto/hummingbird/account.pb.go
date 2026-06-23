@@ -26,6 +26,86 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type SetAuthenticationTokenRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAuthenticationTokenRequest) Reset() {
+	*x = SetAuthenticationTokenRequest{}
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAuthenticationTokenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAuthenticationTokenRequest) ProtoMessage() {}
+
+func (x *SetAuthenticationTokenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAuthenticationTokenRequest.ProtoReflect.Descriptor instead.
+func (*SetAuthenticationTokenRequest) Descriptor() ([]byte, []int) {
+	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SetAuthenticationTokenRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+type SetAuthenticationTokenResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAuthenticationTokenResponse) Reset() {
+	*x = SetAuthenticationTokenResponse{}
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAuthenticationTokenResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAuthenticationTokenResponse) ProtoMessage() {}
+
+func (x *SetAuthenticationTokenResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAuthenticationTokenResponse.ProtoReflect.Descriptor instead.
+func (*SetAuthenticationTokenResponse) Descriptor() ([]byte, []int) {
+	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{1}
+}
+
 type RegisterASRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -36,7 +116,7 @@ type RegisterASRequest struct {
 
 func (x *RegisterASRequest) Reset() {
 	*x = RegisterASRequest{}
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[0]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +128,7 @@ func (x *RegisterASRequest) String() string {
 func (*RegisterASRequest) ProtoMessage() {}
 
 func (x *RegisterASRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[0]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,7 +141,7 @@ func (x *RegisterASRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterASRequest.ProtoReflect.Descriptor instead.
 func (*RegisterASRequest) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{0}
+	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *RegisterASRequest) GetId() string {
@@ -88,7 +168,7 @@ type RegisterASResponse struct {
 
 func (x *RegisterASResponse) Reset() {
 	*x = RegisterASResponse{}
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[1]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -100,7 +180,7 @@ func (x *RegisterASResponse) String() string {
 func (*RegisterASResponse) ProtoMessage() {}
 
 func (x *RegisterASResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[1]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -113,7 +193,7 @@ func (x *RegisterASResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterASResponse.ProtoReflect.Descriptor instead.
 func (*RegisterASResponse) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{1}
+	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RegisterASResponse) GetJwtPublisher() string {
@@ -139,7 +219,7 @@ type CreateChallengeRequest struct {
 
 func (x *CreateChallengeRequest) Reset() {
 	*x = CreateChallengeRequest{}
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[2]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -151,7 +231,7 @@ func (x *CreateChallengeRequest) String() string {
 func (*CreateChallengeRequest) ProtoMessage() {}
 
 func (x *CreateChallengeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[2]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -164,7 +244,7 @@ func (x *CreateChallengeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateChallengeRequest.ProtoReflect.Descriptor instead.
 func (*CreateChallengeRequest) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{2}
+	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CreateChallengeRequest) GetIa() uint64 {
@@ -184,7 +264,7 @@ type CreateChallengeResponse struct {
 
 func (x *CreateChallengeResponse) Reset() {
 	*x = CreateChallengeResponse{}
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[3]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -196,7 +276,7 @@ func (x *CreateChallengeResponse) String() string {
 func (*CreateChallengeResponse) ProtoMessage() {}
 
 func (x *CreateChallengeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[3]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -209,7 +289,7 @@ func (x *CreateChallengeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateChallengeResponse.ProtoReflect.Descriptor instead.
 func (*CreateChallengeResponse) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{3}
+	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CreateChallengeResponse) GetId() string {
@@ -234,7 +314,7 @@ type JWTResetRequest struct {
 
 func (x *JWTResetRequest) Reset() {
 	*x = JWTResetRequest{}
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[4]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -246,7 +326,7 @@ func (x *JWTResetRequest) String() string {
 func (*JWTResetRequest) ProtoMessage() {}
 
 func (x *JWTResetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[4]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -259,7 +339,7 @@ func (x *JWTResetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JWTResetRequest.ProtoReflect.Descriptor instead.
 func (*JWTResetRequest) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{4}
+	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{6}
 }
 
 type JWTResetResponse struct {
@@ -270,7 +350,7 @@ type JWTResetResponse struct {
 
 func (x *JWTResetResponse) Reset() {
 	*x = JWTResetResponse{}
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[5]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -282,7 +362,7 @@ func (x *JWTResetResponse) String() string {
 func (*JWTResetResponse) ProtoMessage() {}
 
 func (x *JWTResetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[5]
+	mi := &file_proto_hummingbird_v1_account_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -295,14 +375,17 @@ func (x *JWTResetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JWTResetResponse.ProtoReflect.Descriptor instead.
 func (*JWTResetResponse) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{5}
+	return file_proto_hummingbird_v1_account_proto_rawDescGZIP(), []int{7}
 }
 
 var File_proto_hummingbird_v1_account_proto protoreflect.FileDescriptor
 
 const file_proto_hummingbird_v1_account_proto_rawDesc = "" +
 	"\n" +
-	"\"proto/hummingbird/v1/account.proto\x12\x14proto.hummingbird.v1\x1a\x1cproto/crypto/v1/signed.proto\"n\n" +
+	"\"proto/hummingbird/v1/account.proto\x12\x14proto.hummingbird.v1\x1a\x1cproto/crypto/v1/signed.proto\"5\n" +
+	"\x1dSetAuthenticationTokenRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\" \n" +
+	"\x1eSetAuthenticationTokenResponse\"n\n" +
 	"\x11RegisterASRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12I\n" +
 	"\x10signed_challenge\x18\x02 \x01(\v2\x1e.proto.crypto.v1.SignedMessageR\x0fsignedChallenge\"`\n" +
@@ -315,12 +398,13 @@ const file_proto_hummingbird_v1_account_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05value\"\x11\n" +
 	"\x0fJWTResetRequest\"\x12\n" +
-	"\x10JWTResetResponse2\xc2\x02\n" +
+	"\x10JWTResetResponse2\xca\x03\n" +
 	"\x0eAccountService\x12[\n" +
 	"\bResetJWT\x12%.proto.hummingbird.v1.JWTResetRequest\x1a&.proto.hummingbird.v1.JWTResetResponse\"\x00\x12p\n" +
 	"\x0fCreateChallenge\x12,.proto.hummingbird.v1.CreateChallengeRequest\x1a-.proto.hummingbird.v1.CreateChallengeResponse\"\x00\x12a\n" +
 	"\n" +
-	"RegisterAS\x12'.proto.hummingbird.v1.RegisterASRequest\x1a(.proto.hummingbird.v1.RegisterASResponse\"\x00B3Z1github.com/scionproto/scion/pkg/proto/hummingbirdb\x06proto3"
+	"RegisterAS\x12'.proto.hummingbird.v1.RegisterASRequest\x1a(.proto.hummingbird.v1.RegisterASResponse\"\x00\x12\x85\x01\n" +
+	"\x16SetAuthenticationToken\x123.proto.hummingbird.v1.SetAuthenticationTokenRequest\x1a4.proto.hummingbird.v1.SetAuthenticationTokenResponse\"\x00B3Z1github.com/scionproto/scion/pkg/proto/hummingbirdb\x06proto3"
 
 var (
 	file_proto_hummingbird_v1_account_proto_rawDescOnce sync.Once
@@ -334,26 +418,30 @@ func file_proto_hummingbird_v1_account_proto_rawDescGZIP() []byte {
 	return file_proto_hummingbird_v1_account_proto_rawDescData
 }
 
-var file_proto_hummingbird_v1_account_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_proto_hummingbird_v1_account_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_proto_hummingbird_v1_account_proto_goTypes = []any{
-	(*RegisterASRequest)(nil),       // 0: proto.hummingbird.v1.RegisterASRequest
-	(*RegisterASResponse)(nil),      // 1: proto.hummingbird.v1.RegisterASResponse
-	(*CreateChallengeRequest)(nil),  // 2: proto.hummingbird.v1.CreateChallengeRequest
-	(*CreateChallengeResponse)(nil), // 3: proto.hummingbird.v1.CreateChallengeResponse
-	(*JWTResetRequest)(nil),         // 4: proto.hummingbird.v1.JWTResetRequest
-	(*JWTResetResponse)(nil),        // 5: proto.hummingbird.v1.JWTResetResponse
-	(*crypto.SignedMessage)(nil),    // 6: proto.crypto.v1.SignedMessage
+	(*SetAuthenticationTokenRequest)(nil),  // 0: proto.hummingbird.v1.SetAuthenticationTokenRequest
+	(*SetAuthenticationTokenResponse)(nil), // 1: proto.hummingbird.v1.SetAuthenticationTokenResponse
+	(*RegisterASRequest)(nil),              // 2: proto.hummingbird.v1.RegisterASRequest
+	(*RegisterASResponse)(nil),             // 3: proto.hummingbird.v1.RegisterASResponse
+	(*CreateChallengeRequest)(nil),         // 4: proto.hummingbird.v1.CreateChallengeRequest
+	(*CreateChallengeResponse)(nil),        // 5: proto.hummingbird.v1.CreateChallengeResponse
+	(*JWTResetRequest)(nil),                // 6: proto.hummingbird.v1.JWTResetRequest
+	(*JWTResetResponse)(nil),               // 7: proto.hummingbird.v1.JWTResetResponse
+	(*crypto.SignedMessage)(nil),           // 8: proto.crypto.v1.SignedMessage
 }
 var file_proto_hummingbird_v1_account_proto_depIdxs = []int32{
-	6, // 0: proto.hummingbird.v1.RegisterASRequest.signed_challenge:type_name -> proto.crypto.v1.SignedMessage
-	4, // 1: proto.hummingbird.v1.AccountService.ResetJWT:input_type -> proto.hummingbird.v1.JWTResetRequest
-	2, // 2: proto.hummingbird.v1.AccountService.CreateChallenge:input_type -> proto.hummingbird.v1.CreateChallengeRequest
-	0, // 3: proto.hummingbird.v1.AccountService.RegisterAS:input_type -> proto.hummingbird.v1.RegisterASRequest
-	5, // 4: proto.hummingbird.v1.AccountService.ResetJWT:output_type -> proto.hummingbird.v1.JWTResetResponse
-	3, // 5: proto.hummingbird.v1.AccountService.CreateChallenge:output_type -> proto.hummingbird.v1.CreateChallengeResponse
-	1, // 6: proto.hummingbird.v1.AccountService.RegisterAS:output_type -> proto.hummingbird.v1.RegisterASResponse
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
+	8, // 0: proto.hummingbird.v1.RegisterASRequest.signed_challenge:type_name -> proto.crypto.v1.SignedMessage
+	6, // 1: proto.hummingbird.v1.AccountService.ResetJWT:input_type -> proto.hummingbird.v1.JWTResetRequest
+	4, // 2: proto.hummingbird.v1.AccountService.CreateChallenge:input_type -> proto.hummingbird.v1.CreateChallengeRequest
+	2, // 3: proto.hummingbird.v1.AccountService.RegisterAS:input_type -> proto.hummingbird.v1.RegisterASRequest
+	0, // 4: proto.hummingbird.v1.AccountService.SetAuthenticationToken:input_type -> proto.hummingbird.v1.SetAuthenticationTokenRequest
+	7, // 5: proto.hummingbird.v1.AccountService.ResetJWT:output_type -> proto.hummingbird.v1.JWTResetResponse
+	5, // 6: proto.hummingbird.v1.AccountService.CreateChallenge:output_type -> proto.hummingbird.v1.CreateChallengeResponse
+	3, // 7: proto.hummingbird.v1.AccountService.RegisterAS:output_type -> proto.hummingbird.v1.RegisterASResponse
+	1, // 8: proto.hummingbird.v1.AccountService.SetAuthenticationToken:output_type -> proto.hummingbird.v1.SetAuthenticationTokenResponse
+	5, // [5:9] is the sub-list for method output_type
+	1, // [1:5] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -370,7 +458,7 @@ func file_proto_hummingbird_v1_account_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_hummingbird_v1_account_proto_rawDesc), len(file_proto_hummingbird_v1_account_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
@@ -398,6 +486,7 @@ type AccountServiceClient interface {
 	ResetJWT(ctx context.Context, in *JWTResetRequest, opts ...grpc.CallOption) (*JWTResetResponse, error)
 	CreateChallenge(ctx context.Context, in *CreateChallengeRequest, opts ...grpc.CallOption) (*CreateChallengeResponse, error)
 	RegisterAS(ctx context.Context, in *RegisterASRequest, opts ...grpc.CallOption) (*RegisterASResponse, error)
+	SetAuthenticationToken(ctx context.Context, in *SetAuthenticationTokenRequest, opts ...grpc.CallOption) (*SetAuthenticationTokenResponse, error)
 }
 
 type accountServiceClient struct {
@@ -435,11 +524,21 @@ func (c *accountServiceClient) RegisterAS(ctx context.Context, in *RegisterASReq
 	return out, nil
 }
 
+func (c *accountServiceClient) SetAuthenticationToken(ctx context.Context, in *SetAuthenticationTokenRequest, opts ...grpc.CallOption) (*SetAuthenticationTokenResponse, error) {
+	out := new(SetAuthenticationTokenResponse)
+	err := c.cc.Invoke(ctx, "/proto.hummingbird.v1.AccountService/SetAuthenticationToken", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AccountServiceServer is the server API for AccountService service.
 type AccountServiceServer interface {
 	ResetJWT(context.Context, *JWTResetRequest) (*JWTResetResponse, error)
 	CreateChallenge(context.Context, *CreateChallengeRequest) (*CreateChallengeResponse, error)
 	RegisterAS(context.Context, *RegisterASRequest) (*RegisterASResponse, error)
+	SetAuthenticationToken(context.Context, *SetAuthenticationTokenRequest) (*SetAuthenticationTokenResponse, error)
 }
 
 // UnimplementedAccountServiceServer can be embedded to have forward compatible implementations.
@@ -454,6 +553,9 @@ func (*UnimplementedAccountServiceServer) CreateChallenge(context.Context, *Crea
 }
 func (*UnimplementedAccountServiceServer) RegisterAS(context.Context, *RegisterASRequest) (*RegisterASResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterAS not implemented")
+}
+func (*UnimplementedAccountServiceServer) SetAuthenticationToken(context.Context, *SetAuthenticationTokenRequest) (*SetAuthenticationTokenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetAuthenticationToken not implemented")
 }
 
 func RegisterAccountServiceServer(s *grpc.Server, srv AccountServiceServer) {
@@ -514,6 +616,24 @@ func _AccountService_RegisterAS_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AccountService_SetAuthenticationToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetAuthenticationTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AccountServiceServer).SetAuthenticationToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.hummingbird.v1.AccountService/SetAuthenticationToken",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AccountServiceServer).SetAuthenticationToken(ctx, req.(*SetAuthenticationTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var _AccountService_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "proto.hummingbird.v1.AccountService",
 	HandlerType: (*AccountServiceServer)(nil),
@@ -529,6 +649,10 @@ var _AccountService_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterAS",
 			Handler:    _AccountService_RegisterAS_Handler,
+		},
+		{
+			MethodName: "SetAuthenticationToken",
+			Handler:    _AccountService_SetAuthenticationToken_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

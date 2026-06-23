@@ -174,7 +174,7 @@ func realMain(ctx context.Context) error {
 		},
 	}
 
-	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(service, connect.WithInterceptors(marketplace.ASAccountManagerInterceptor(tokenVerifier)))
+	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(service, connect.WithInterceptors(marketplace.AccountManagerInterceptor(tokenVerifier)))
 
 	webapp.Init(jwtSigner, store, mux)
 	mux.Handle(accountPath, accountHandler)

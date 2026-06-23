@@ -107,6 +107,10 @@ func (s *MarketplaceStorage) GetASUser(ctx context.Context, ia addr.IA) (*market
 	return s.db.GetASUser(ctx, ia)
 }
 
+func (s *MarketplaceStorage) SetASAuthenticationToken(ctx context.Context, ia addr.IA, auth string) (int64, error) {
+	return s.db.SetASAuthenticationToken(ctx, ia, auth)
+}
+
 func (s *MarketplaceStorage) GetUserByName(ctx context.Context, name string) (*marketplacedb.DBUser, error) {
 	return s.db.GetUserByName(ctx, name)
 }
@@ -140,17 +144,26 @@ func (s *MarketplaceStorage) CreateOrUpdateRedemptionDelegations(ctx context.Con
 	} else {
 		paidUntil = dbDelegation.PaidUntil
 	}
-	if r.Expiration.After(paidUntil) {
-		// needs payment
-		paymentDuration := ceilDuration(r.Expiration.Sub(paidUntil), time.Hour)
-		numHours := paymentDuration / time.Hour
-		_, err = tx.UpdateASMoney(ctx, r.IA, -int64(uint32(numHours)*s.delegationHourlyFee))
-		if err != nil {
-			return 0, serrors.Join(err, tx.Rollback())
+	if s.delegationHourlyFee == 0 {
+		// service is free, just update paidUntil accordingly to ensure database constraints do not complain
+		if r.Expiration.After(paidUntil) {
+			r.PaidUntil = r.Expiration
 		}
-		r.PaidUntil = paidUntil.Add(paymentDuration)
 	} else {
-		r.PaidUntil = dbDelegation.PaidUntil
+		// service requires payment
+		if r.Expiration.After(paidUntil) {
+			// expiration is later than currently paid period, so requires further payment
+			paymentDuration := ceilDuration(r.Expiration.Sub(paidUntil), time.Hour)
+			numHours := uint32(paymentDuration / time.Hour)
+			_, err = tx.UpdateASMoney(ctx, r.IA, -int64(numHours*s.delegationHourlyFee))
+			if err != nil {
+				return 0, serrors.Join(err, tx.Rollback())
+			}
+			r.PaidUntil = paidUntil.Add(paymentDuration)
+		} else {
+			// user updated expiration but this is still within the period he already paid, so skip billing.
+			r.PaidUntil = paidUntil
+		}
 	}
 	id, err := tx.CreateOrUpdateRedemptionDelegations(ctx, r)
 	if err != nil {
@@ -177,6 +190,17 @@ func (s *MarketplaceStorage) IncrementASJWTVersion(ctx context.Context, ia addr.
 }
 func (s *MarketplaceStorage) IncrementUserJWTVersion(ctx context.Context, userid int64, current int64) (int64, error) {
 	return s.db.IncrementUserJWTVersion(ctx, userid, current)
+}
+
+func gcd(a, b uint32) uint32 {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
+}
+
+func lcm(a, b uint32) uint32 {
+	return a / gcd(a, b) * b
 }
 
 func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, assetId1 int64, assetId2 int64) (int64, error) {
@@ -211,12 +235,12 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 			OwnerId:         a1.OwnerId,
 			IA:              a1.IA,
 			Bandwidth:       a1.Bandwidth + a2.Bandwidth,
-			BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
+			BandwidthMin:    max(a1.BandwidthMin, a2.BandwidthMin),
 			StartAt:         a1.StartAt,
 			StopsAt:         a1.StopsAt,
 			Price:           0,
-			TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
-			TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
+			TimeGranularity: lcm(a1.TimeGranularity, a2.TimeGranularity),
+			TimeMinDuration: max(a1.TimeMinDuration, a2.TimeMinDuration),
 			IfIdIngress:     a1.IfIdIngress,
 			IfIdEgress:      a1.IfIdEgress,
 		}
@@ -226,12 +250,12 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 				OwnerId:         a1.OwnerId,
 				IA:              a1.IA,
 				Bandwidth:       a1.Bandwidth,
-				BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
+				BandwidthMin:    max(a1.BandwidthMin, a2.BandwidthMin),
 				StartAt:         a2.StartAt,
 				StopsAt:         a1.StopsAt,
 				Price:           0,
-				TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
-				TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
+				TimeGranularity: lcm(a1.TimeGranularity, a2.TimeGranularity),
+				TimeMinDuration: max(a1.TimeMinDuration, a2.TimeMinDuration),
 				IfIdIngress:     a1.IfIdIngress,
 				IfIdEgress:      a1.IfIdEgress,
 			}
@@ -240,12 +264,12 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 				OwnerId:         a1.OwnerId,
 				IA:              a1.IA,
 				Bandwidth:       a1.Bandwidth,
-				BandwidthMin:    min(a1.BandwidthMin, a2.BandwidthMin),
+				BandwidthMin:    max(a1.BandwidthMin, a2.BandwidthMin),
 				StartAt:         a1.StartAt,
 				StopsAt:         a2.StopsAt,
 				Price:           0,
-				TimeGranularity: max(a1.TimeGranularity, a2.TimeGranularity),
-				TimeMinDuration: min(a1.TimeMinDuration, a2.TimeMinDuration),
+				TimeGranularity: lcm(a1.TimeGranularity, a2.TimeGranularity),
+				TimeMinDuration: max(a1.TimeMinDuration, a2.TimeMinDuration),
 				IfIdIngress:     a1.IfIdIngress,
 				IfIdEgress:      a1.IfIdEgress,
 			}
@@ -597,6 +621,26 @@ func (s *MarketplaceStorage) DepositMoneyAndGet(ctx context.Context, id int64, a
 		return nil, serrors.Join(err, tx.Rollback())
 	}
 	user, err := tx.GetUser(ctx, id)
+	if err != nil {
+		return nil, serrors.Join(err, tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return nil, serrors.Join(err, tx.Rollback())
+	}
+	return user, nil
+}
+
+func (s *MarketplaceStorage) DepositMoneyAndGetAS(ctx context.Context, ia addr.IA, amount int64) (*marketplacedb.DBASUser, error) {
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.UpdateASMoney(ctx, ia, amount)
+	if err != nil {
+		return nil, serrors.Join(err, tx.Rollback())
+	}
+	user, err := tx.GetASUser(ctx, ia)
 	if err != nil {
 		return nil, serrors.Join(err, tx.Rollback())
 	}

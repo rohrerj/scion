@@ -27,6 +27,7 @@ import (
 	"github.com/golang-jwt/jwt"
 	"github.com/scionproto/scion/marketplace/db"
 	"github.com/scionproto/scion/marketplace/storage"
+	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -35,22 +36,26 @@ var templates = template.Must(template.ParseGlob("marketplace/templates/*.html")
 
 func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *http.ServeMux) {
 	h := &Handler{
-		sessions: make(map[string]int64),
-		signer:   signer,
-		store:    store,
+		sessions:   make(map[string]int64),
+		asSessions: make(map[string]addr.IA),
+		signer:     signer,
+		store:      store,
 	}
 	mux.HandleFunc("/", h.tokenHandler)
 	mux.HandleFunc("/token", h.tokenHandler)
 	mux.HandleFunc("/login", h.loginHandler)
 	mux.HandleFunc("/register", h.registerHandler)
 	mux.HandleFunc("/balance", h.balanceHandler)
+	mux.HandleFunc("/aslogin", h.asLoginHandler)
+	mux.HandleFunc("/asbalance", h.asBalanceHandler)
 }
 
 type Handler struct {
-	store    *storage.MarketplaceStorage
-	sessions map[string]int64
-	mu       sync.Mutex
-	signer   *registration.Signer
+	store      *storage.MarketplaceStorage
+	sessions   map[string]int64
+	asSessions map[string]addr.IA
+	mu         sync.Mutex
+	signer     *registration.Signer
 }
 
 func (h *Handler) getSessionUser(r *http.Request) (int64, bool) {
@@ -64,6 +69,113 @@ func (h *Handler) getSessionUser(r *http.Request) (int64, bool) {
 
 	userId, ok := h.sessions[cookie.Value]
 	return userId, ok
+}
+
+func (h *Handler) getSessionAS(r *http.Request) (addr.IA, bool) {
+	cookie, err := r.Cookie("as_session_id")
+	if err != nil {
+		return 0, false
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	userId, ok := h.asSessions[cookie.Value]
+	return userId, ok
+}
+
+func (h *Handler) asLoginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		templates.ExecuteTemplate(w, "aslogin.html", map[string]any{})
+		return
+	}
+
+	r.ParseForm()
+	username := r.FormValue("username")
+	password := r.FormValue("password")
+	ia, err := addr.ParseIA(username)
+	dbUser, err := h.store.GetASUser(r.Context(), ia)
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	if dbUser == nil {
+		templates.ExecuteTemplate(w, "aslogin.html", map[string]any{
+			"Error": "invalid credentials",
+		})
+		return
+	}
+	err = bcrypt.CompareHashAndPassword(
+		[]byte(dbUser.PasswordHash),
+		[]byte(password),
+	)
+	if err != nil {
+		templates.ExecuteTemplate(w, "aslogin.html", map[string]any{
+			"Error": "invalid credentials",
+		})
+		return
+	}
+
+	sessionID := h.generateSessionID()
+	h.asSessions[sessionID] = dbUser.IA
+
+	http.SetCookie(w, &http.Cookie{
+		Name:  "as_session_id",
+		Value: sessionID,
+		Path:  "/",
+	})
+	http.Redirect(w, r, "/asbalance", http.StatusSeeOther)
+}
+
+func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
+	ia, ok := h.getSessionAS(r)
+	if !ok {
+		http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
+		return
+	}
+	if r.Method == http.MethodGet {
+		dbUser, err := h.store.GetASUser(r.Context(), ia)
+		if err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		if dbUser == nil {
+			http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
+			return
+		}
+		templates.ExecuteTemplate(w, "asbalance.html", map[string]any{
+			"Balance": strconv.Itoa(int(dbUser.Balance)),
+		})
+		return
+	}
+	r.ParseForm()
+	deposit := r.FormValue("deposit")
+	depositInt, err := strconv.Atoi(deposit)
+	if err != nil || depositInt < 0 {
+		dbUser, err := h.store.GetASUser(r.Context(), ia)
+		if err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		if dbUser == nil {
+			http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
+			return
+		}
+		templates.ExecuteTemplate(w, "asbalance.html", map[string]any{
+			"Error":   "Invalid deposit amount",
+			"Balance": strconv.Itoa(int(dbUser.Balance)),
+		})
+		return
+	}
+
+	user, err := h.store.DepositMoneyAndGetAS(r.Context(), ia, int64(depositInt))
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	templates.ExecuteTemplate(w, "asbalance.html", map[string]any{
+		"Balance": strconv.Itoa(int(user.Balance)),
+	})
 }
 
 func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {

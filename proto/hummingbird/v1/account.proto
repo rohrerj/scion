@@ -24,6 +24,14 @@ service AccountService {
     rpc ResetJWT(JWTResetRequest) returns (JWTResetResponse) {}
     rpc CreateChallenge(CreateChallengeRequest) returns (CreateChallengeResponse) {}
     rpc RegisterAS(RegisterASRequest) returns (RegisterASResponse) {}
+    rpc SetAuthenticationToken(SetAuthenticationTokenRequest) returns (SetAuthenticationTokenResponse) {}
+}
+
+message SetAuthenticationTokenRequest {
+    string token = 1;
+}
+message SetAuthenticationTokenResponse {
+
 }
 
 message RegisterASRequest {

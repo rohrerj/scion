@@ -65,6 +65,7 @@ const (
 	CREATE TABLE Ases(
 		isd_id INTEGER NOT NULL,
 		as_id INTEGER NOT NULL,
+		pw_hash TEXT NOT NULL DEFAULT '',
 		jwt_version INTEGER NOT NULL DEFAULT 0,
 		balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
 		PRIMARY KEY(isd_id, as_id)

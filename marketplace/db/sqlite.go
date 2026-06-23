@@ -47,6 +47,7 @@ type MarketplaceDB interface {
 	IncrementUserJWTVersion(ctx context.Context, userid int64, current int64) (int64, error)
 	GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error)
 	DeleteListedAsset(ctx context.Context, ia addr.IA, assetID int64) (int64, error)
+	SetASAuthenticationToken(ctx context.Context, ia addr.IA, auth string) (int64, error)
 	BeginTransaction(ctx context.Context, opts *sql.TxOptions) (*transaction, error)
 }
 
@@ -848,7 +849,7 @@ func (e *executor) GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error)
 	if e.read == nil {
 		return nil, serrors.New("No database open")
 	}
-	q := `SELECT isd_id, as_id, jwt_version, balance FROM Ases WHERE isd_id=? AND as_id=?`
+	q := `SELECT isd_id, as_id, pw_hash, jwt_version, balance FROM Ases WHERE isd_id=? AND as_id=?`
 	rows, err := e.read.QueryContext(ctx, q, ia.ISD(), ia.AS())
 	if err != nil {
 		return nil, err
@@ -860,7 +861,7 @@ func (e *executor) GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error)
 	user := &DBASUser{}
 	var isd uint16
 	var as uint64
-	err = rows.Scan(&isd, &as, &user.TokenVersion, &user.Balance)
+	err = rows.Scan(&isd, &as, &user.PasswordHash, &user.TokenVersion, &user.Balance)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
@@ -889,6 +890,17 @@ func (e *executor) UpdateASMoney(ctx context.Context, ia addr.IA, amount int64) 
 	}
 	inst := `UPDATE Ases SET balance = balance + ? WHERE isd_id = ? AND as_id = ?`
 	res, err := e.write.ExecContext(ctx, inst, amount, ia.ISD(), ia.AS())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+func (e *executor) SetASAuthenticationToken(ctx context.Context, ia addr.IA, auth string) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `UPDATE Ases SET pw_hash = ? WHERE isd_id = ? AND as_id = ?`
+	res, err := e.write.ExecContext(ctx, inst, auth, ia.ISD(), ia.AS())
 	if err != nil {
 		return 0, err
 	}

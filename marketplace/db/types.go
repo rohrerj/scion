@@ -115,6 +115,7 @@ type DBUser struct {
 
 type DBASUser struct {
 	IA           addr.IA
+	PasswordHash string
 	TokenVersion int64
 	Balance      int64
 }

@@ -7,11 +7,6 @@
 </head>
 
 <body>
-    <a href="/aslogin">Login as AS</a><br>
-    <a href="/login">Login with existing account</a><br>
-    <a href="/register">Register new account</a><br>
-    <a href="/token">Request new token</a><br>
-    <a href="/balance">Check your balance</a><br>
     {{if .Error}}
     <p style="color:red;">{{.Error}}</p>
     {{end}}
@@ -21,7 +16,7 @@
         {{.Balance}}
         {{end}}
     </p>
-    <form method="POST" action="/balance">
+    <form method="POST" action="/asbalance">
         <input name="deposit" type="text">
         <button type="submit">Deposit</button>
     </form>

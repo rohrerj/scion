@@ -27,9 +27,10 @@ import (
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
+	"golang.org/x/crypto/bcrypt"
 )
 
-func ASAccountManagerInterceptor(verifier *TokenVerifier) connect.UnaryInterceptorFunc {
+func AccountManagerInterceptor(verifier *TokenVerifier) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			authority := req.Header().Get(":authority")
@@ -39,12 +40,19 @@ func ASAccountManagerInterceptor(verifier *TokenVerifier) connect.UnaryIntercept
 
 			ctx = context.WithValue(ctx, "authority", authority)
 			authHeader := req.Header().Get("Authorization")
-
+			method := req.Spec().Procedure
+			fmt.Printf("AccountManagerInterceptor Interceptor for %s\n", method)
+			requiredScope, found := methodScopes[method]
+			if !found {
+				//no rules apply
+				fmt.Println("no rules apply for", method)
+				return next(ctx, req)
+			}
 			if strings.HasPrefix(authHeader, "Bearer ") {
 				tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 				if tokenStr != "" {
 					var err error
-					ctx, err = verifier.contextFromJwt(ctx, tokenStr, "")
+					ctx, err = verifier.contextFromJwt(ctx, tokenStr, requiredScope)
 					if err != nil {
 						return nil, err
 					}
@@ -160,4 +168,25 @@ func (s *Service) ResetJWT(ctx context.Context, req *connect.Request[hummingbird
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid token"))
 	}
 	return &connect.Response[hummingbird.JWTResetResponse]{Msg: &hummingbird.JWTResetResponse{}}, nil
+}
+
+func (s *Service) SetAuthenticationToken(ctx context.Context, req *connect.Request[hummingbird.SetAuthenticationTokenRequest]) (*connect.Response[hummingbird.SetAuthenticationTokenResponse], error) {
+	ia, ok := ctx.Value("user").(addr.IA)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, serrors.New("invalid token"))
+	}
+	hash, err := bcrypt.GenerateFromPassword(
+		[]byte(req.Msg.Token),
+		12,
+	)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid token"))
+	}
+	_, err = s.store.SetASAuthenticationToken(ctx, ia, string(hash))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	return &connect.Response[hummingbird.SetAuthenticationTokenResponse]{
+		Msg: &hummingbird.SetAuthenticationTokenResponse{},
+	}, nil
 }

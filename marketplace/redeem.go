@@ -70,7 +70,7 @@ func (c *RedemptionServerPeer) ReturnResponse(msg *hummingbird.RedeemAssetFromAS
 	}
 }
 
-func (s *Service) startOrUpdateRedemptionDelegation(ctx context.Context, clientID addr.IA, state *RedemptionDelegationUpdate, persist bool) error {
+func (s *Service) startOrUpdateRedemptionDelegation(ctx context.Context, clientID addr.IA, state *RedemptionDelegationUpdate, dbSync bool) error {
 	fmt.Println("startOrUpdateRedemptionDelegation", clientID)
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -82,7 +82,7 @@ func (s *Service) startOrUpdateRedemptionDelegation(ctx context.Context, clientI
 		client.mtx.Lock()
 		defer client.mtx.Unlock()
 		s.redemptionServerPeers[clientID] = client
-		if persist {
+		if dbSync {
 			dbDelegation := &db.RedemptionDelegation{
 				IA:                 clientID,
 				Expiration:         state.ExpirationTime,
@@ -104,7 +104,7 @@ func (s *Service) startOrUpdateRedemptionDelegation(ctx context.Context, clientI
 		// the redemption server was already delegated, but we received an update request
 		client.mtx.Lock()
 		defer client.mtx.Unlock()
-		if persist {
+		if dbSync {
 			dbDelegation := &db.RedemptionDelegation{
 				IA:                 clientID,
 				Expiration:         state.ExpirationTime,
@@ -129,7 +129,7 @@ func (s *Service) startOrUpdateRedemptionDelegation(ctx context.Context, clientI
 		if client.cancelOldConnection != nil {
 			client.cancelOldConnection()
 		}
-		if persist {
+		if dbSync {
 			dbDelegation := &db.RedemptionDelegation{
 				IA:                 clientID,
 				Expiration:         state.ExpirationTime,

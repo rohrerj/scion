@@ -41,6 +41,9 @@ const (
 	// AccountServiceRegisterASProcedure is the fully-qualified name of the AccountService's RegisterAS
 	// RPC.
 	AccountServiceRegisterASProcedure = "/proto.hummingbird.v1.AccountService/RegisterAS"
+	// AccountServiceSetAuthenticationTokenProcedure is the fully-qualified name of the AccountService's
+	// SetAuthenticationToken RPC.
+	AccountServiceSetAuthenticationTokenProcedure = "/proto.hummingbird.v1.AccountService/SetAuthenticationToken"
 )
 
 // AccountServiceClient is a client for the proto.hummingbird.v1.AccountService service.
@@ -48,6 +51,7 @@ type AccountServiceClient interface {
 	ResetJWT(context.Context, *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error)
 	CreateChallenge(context.Context, *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error)
 	RegisterAS(context.Context, *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error)
+	SetAuthenticationToken(context.Context, *connect.Request[hummingbird.SetAuthenticationTokenRequest]) (*connect.Response[hummingbird.SetAuthenticationTokenResponse], error)
 }
 
 // NewAccountServiceClient constructs a client for the proto.hummingbird.v1.AccountService service.
@@ -79,14 +83,21 @@ func NewAccountServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(accountServiceMethods.ByName("RegisterAS")),
 			connect.WithClientOptions(opts...),
 		),
+		setAuthenticationToken: connect.NewClient[hummingbird.SetAuthenticationTokenRequest, hummingbird.SetAuthenticationTokenResponse](
+			httpClient,
+			baseURL+AccountServiceSetAuthenticationTokenProcedure,
+			connect.WithSchema(accountServiceMethods.ByName("SetAuthenticationToken")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // accountServiceClient implements AccountServiceClient.
 type accountServiceClient struct {
-	resetJWT        *connect.Client[hummingbird.JWTResetRequest, hummingbird.JWTResetResponse]
-	createChallenge *connect.Client[hummingbird.CreateChallengeRequest, hummingbird.CreateChallengeResponse]
-	registerAS      *connect.Client[hummingbird.RegisterASRequest, hummingbird.RegisterASResponse]
+	resetJWT               *connect.Client[hummingbird.JWTResetRequest, hummingbird.JWTResetResponse]
+	createChallenge        *connect.Client[hummingbird.CreateChallengeRequest, hummingbird.CreateChallengeResponse]
+	registerAS             *connect.Client[hummingbird.RegisterASRequest, hummingbird.RegisterASResponse]
+	setAuthenticationToken *connect.Client[hummingbird.SetAuthenticationTokenRequest, hummingbird.SetAuthenticationTokenResponse]
 }
 
 // ResetJWT calls proto.hummingbird.v1.AccountService.ResetJWT.
@@ -104,11 +115,17 @@ func (c *accountServiceClient) RegisterAS(ctx context.Context, req *connect.Requ
 	return c.registerAS.CallUnary(ctx, req)
 }
 
+// SetAuthenticationToken calls proto.hummingbird.v1.AccountService.SetAuthenticationToken.
+func (c *accountServiceClient) SetAuthenticationToken(ctx context.Context, req *connect.Request[hummingbird.SetAuthenticationTokenRequest]) (*connect.Response[hummingbird.SetAuthenticationTokenResponse], error) {
+	return c.setAuthenticationToken.CallUnary(ctx, req)
+}
+
 // AccountServiceHandler is an implementation of the proto.hummingbird.v1.AccountService service.
 type AccountServiceHandler interface {
 	ResetJWT(context.Context, *connect.Request[hummingbird.JWTResetRequest]) (*connect.Response[hummingbird.JWTResetResponse], error)
 	CreateChallenge(context.Context, *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error)
 	RegisterAS(context.Context, *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error)
+	SetAuthenticationToken(context.Context, *connect.Request[hummingbird.SetAuthenticationTokenRequest]) (*connect.Response[hummingbird.SetAuthenticationTokenResponse], error)
 }
 
 // NewAccountServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -136,6 +153,12 @@ func NewAccountServiceHandler(svc AccountServiceHandler, opts ...connect.Handler
 		connect.WithSchema(accountServiceMethods.ByName("RegisterAS")),
 		connect.WithHandlerOptions(opts...),
 	)
+	accountServiceSetAuthenticationTokenHandler := connect.NewUnaryHandler(
+		AccountServiceSetAuthenticationTokenProcedure,
+		svc.SetAuthenticationToken,
+		connect.WithSchema(accountServiceMethods.ByName("SetAuthenticationToken")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/proto.hummingbird.v1.AccountService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AccountServiceResetJWTProcedure:
@@ -144,6 +167,8 @@ func NewAccountServiceHandler(svc AccountServiceHandler, opts ...connect.Handler
 			accountServiceCreateChallengeHandler.ServeHTTP(w, r)
 		case AccountServiceRegisterASProcedure:
 			accountServiceRegisterASHandler.ServeHTTP(w, r)
+		case AccountServiceSetAuthenticationTokenProcedure:
+			accountServiceSetAuthenticationTokenHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -163,4 +188,8 @@ func (UnimplementedAccountServiceHandler) CreateChallenge(context.Context, *conn
 
 func (UnimplementedAccountServiceHandler) RegisterAS(context.Context, *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.hummingbird.v1.AccountService.RegisterAS is not implemented"))
+}
+
+func (UnimplementedAccountServiceHandler) SetAuthenticationToken(context.Context, *connect.Request[hummingbird.SetAuthenticationTokenRequest]) (*connect.Response[hummingbird.SetAuthenticationTokenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("proto.hummingbird.v1.AccountService.SetAuthenticationToken is not implemented"))
 }
