@@ -170,13 +170,13 @@ func (s *Service) ResetJWT(ctx context.Context, req *connect.Request[hummingbird
 	return &connect.Response[hummingbird.JWTResetResponse]{Msg: &hummingbird.JWTResetResponse{}}, nil
 }
 
-func (s *Service) SetAuthenticationToken(ctx context.Context, req *connect.Request[hummingbird.SetAuthenticationTokenRequest]) (*connect.Response[hummingbird.SetAuthenticationTokenResponse], error) {
+func (s *Service) SetPassword(ctx context.Context, req *connect.Request[hummingbird.SetPasswordRequest]) (*connect.Response[hummingbird.SetPasswordResponse], error) {
 	ia, ok := ctx.Value("user").(addr.IA)
 	if !ok {
 		return nil, connect.NewError(connect.CodeUnauthenticated, serrors.New("invalid token"))
 	}
 	hash, err := bcrypt.GenerateFromPassword(
-		[]byte(req.Msg.Token),
+		[]byte(req.Msg.Password),
 		12,
 	)
 	if err != nil {
@@ -186,7 +186,7 @@ func (s *Service) SetAuthenticationToken(ctx context.Context, req *connect.Reque
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	return &connect.Response[hummingbird.SetAuthenticationTokenResponse]{
-		Msg: &hummingbird.SetAuthenticationTokenResponse{},
+	return &connect.Response[hummingbird.SetPasswordResponse]{
+		Msg: &hummingbird.SetPasswordResponse{},
 	}, nil
 }

@@ -522,10 +522,10 @@ func userInteraction() {
 
 func handlePassword(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.AccountServiceClient) {
 	fmt.Println("Handle set authentication token query")
-	auth := readString(reader, "auth: ")
-	_, err := c.SetAuthenticationToken(ctx, &connect.Request[hummingbird.SetAuthenticationTokenRequest]{
-		Msg: &hummingbird.SetAuthenticationTokenRequest{
-			Token: auth,
+	password := readString(reader, "password: ")
+	_, err := c.SetPassword(ctx, &connect.Request[hummingbird.SetPasswordRequest]{
+		Msg: &hummingbird.SetPasswordRequest{
+			Password: password,
 		},
 	})
 	if err != nil {
