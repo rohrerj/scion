@@ -24,7 +24,7 @@ const (
 		as_id INTEGER NOT NULL,
 		bandwidth INTEGER NOT NULL,
 		bandwidth_min INTEGER NOT NULL,
-		bandwidth_max INTEGER NOT NULL,
+		bandwidth_max INTEGER NOT NULL CHECK (bandwidth_max >= bandwidth_min),
 		price INTEGER NOT NULL,
 		time_granularity INTEGER NOT NULL,
 		time_min_duration INTEGER NOT NULL,

@@ -41,96 +41,27 @@ type AssetSegment struct {
 type SplitResult struct {
 	Bought []AssetSegment
 	Unused []AssetSegment
-	Remove []AssetSegment
 }
 
 func overlaps(segFrom time.Time, segTo time.Time, req RequestedSplit) bool {
 	return segFrom.Before(req.ExactTo) && segTo.After(req.ExactFrom)
 }
 
-func validateAsset(asset *db.DBAsset) error {
-	if !asset.StartAt.Before(asset.StopsAt) {
-		return fmt.Errorf("invalid asset range")
-	}
-
-	if asset.Bandwidth <= 0 {
-		return fmt.Errorf("invalid amount")
-	}
-
-	if asset.BandwidthMin <= 0 {
-		return fmt.Errorf("invalid MinAmount")
-	}
-
-	if asset.BandwidthMin > asset.Bandwidth {
-		return fmt.Errorf("MinAmount > Amount")
-	}
-
-	if asset.TimeGranularity <= 0 {
-		return fmt.Errorf("invalid TimeGranularity")
-	}
-
-	if asset.TimeMinDuration <= 0 {
-		return fmt.Errorf("invalid TimeMinDuration")
-	}
-
-	if asset.TimeMinDuration%asset.TimeGranularity != 0 {
-		return fmt.Errorf(
-			"TimeMinDuration must be multiple of TimeGranularity",
-		)
-	}
-	assetDuration := int64(asset.StopsAt.Sub(asset.StartAt).Seconds())
-
-	if assetDuration%int64(asset.TimeGranularity) != 0 {
-		return fmt.Errorf("asset duration misaligned with granularity")
-	}
-
-	return nil
-}
-
-func validatePurchase(asset *db.DBAsset, p RequestedSplit) error {
+func validateSplit(asset *db.DBAsset, p RequestedSplit) error {
 	if p.ExactFrom.Before(asset.StartAt) || p.ExactTo.After(asset.StopsAt) {
 		return fmt.Errorf("purchase outside asset bounds")
 	}
 	if !p.ExactFrom.Before(p.ExactTo) {
-		return fmt.Errorf("invalid purchase range")
+		return fmt.Errorf("invalid validity range")
 	}
-
 	if p.ExactFrom.Nanosecond() != 0 || p.ExactTo.Nanosecond() != 0 {
 		return fmt.Errorf("timestamps must be second precision")
-	}
-
-	duration := int64(p.ExactTo.Sub(p.ExactFrom).Seconds())
-
-	if duration%int64(asset.TimeGranularity) != 0 {
-		return fmt.Errorf("purchase duration must be multiple of granularity")
-	}
-	if duration < int64(asset.TimeMinDuration) {
-		return fmt.Errorf("purchase duration below minimum")
-	}
-	if p.ExactBandwidth < asset.BandwidthMin {
-		return fmt.Errorf("purchase amount below minimum")
 	}
 	if p.ExactBandwidth > asset.Bandwidth {
 		return fmt.Errorf("purchase amount exceeds asset amount")
 	}
 
 	return nil
-}
-
-func isInvalidDerivedSegment(asset *db.DBAsset, s AssetSegment) bool {
-	duration := int64(s.StopAt.Sub(s.StartAt).Seconds())
-	if s.Bandwidth < asset.BandwidthMin {
-		return true
-	}
-	if duration < int64(asset.TimeMinDuration) {
-		return true
-	}
-	// TODO: this condition probably needs some additional logic
-	// while merging to ensure only valid splits are returned after a merge
-	/*if duration%int64(asset.TimeGranularity) != 0 {
-		return true
-	}*/
-	return false
 }
 
 func sameRequest(a *int, b *int) bool {
@@ -198,8 +129,8 @@ func SplitAsset(
 	purchases []RequestedSplit,
 ) (*SplitResult, error) {
 
-	if err := validateAsset(asset); err != nil {
-		return nil, err
+	if !asset.StartAt.Before(asset.StopsAt) {
+		return nil, fmt.Errorf("invalid asset range")
 	}
 
 	pointsMap := map[int64]struct{}{
@@ -207,7 +138,7 @@ func SplitAsset(
 		asset.StopsAt.Unix(): {},
 	}
 	for _, p := range purchases {
-		if err := validatePurchase(asset, p); err != nil {
+		if err := validateSplit(asset, p); err != nil {
 			return nil, err
 		}
 		pointsMap[p.ExactFrom.Unix()] = struct{}{}
@@ -247,11 +178,7 @@ func SplitAsset(
 				requestIndex: &reqCopy,
 			}
 
-			if isInvalidDerivedSegment(asset, s) {
-				result.Remove = append(result.Remove, s)
-			} else {
-				result.Bought = append(result.Bought, s)
-			}
+			result.Bought = append(result.Bought, s)
 		}
 
 		// leftover capacity
@@ -264,15 +191,10 @@ func SplitAsset(
 				Bandwidth: remaining,
 				Used:      false,
 			}
-			if isInvalidDerivedSegment(asset, s) {
-				result.Remove = append(result.Remove, s)
-			} else {
-				result.Unused = append(result.Unused, s)
-			}
+			result.Unused = append(result.Unused, s)
 		}
 	}
 	result.Bought = mergeAdjacent(result.Bought)
 	result.Unused = mergeAdjacent(result.Unused)
-	result.Remove = mergeAdjacent(result.Remove)
 	return result, nil
 }

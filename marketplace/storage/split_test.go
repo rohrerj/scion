@@ -161,17 +161,6 @@ func TestSplit(t *testing.T) {
 			s.Bandwidth,
 		)
 	}
-
-	fmt.Println("\n=== REMOVE ===")
-	for _, s := range result.Remove {
-		fmt.Printf(
-			"%s -> %s amount=%d used=%v\n",
-			s.StartAt.Format(time.RFC3339),
-			s.StopAt.Format(time.RFC3339),
-			s.Bandwidth,
-			s.Used,
-		)
-	}
 	t.Fail()
 }
 

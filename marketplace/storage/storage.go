@@ -236,6 +236,7 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 			IA:              a1.IA,
 			Bandwidth:       a1.Bandwidth + a2.Bandwidth,
 			BandwidthMin:    max(a1.BandwidthMin, a2.BandwidthMin),
+			BandwidthMax:    min(a1.BandwidthMax, a2.BandwidthMax),
 			StartAt:         a1.StartAt,
 			StopsAt:         a1.StopsAt,
 			Price:           0,
@@ -251,6 +252,7 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 				IA:              a1.IA,
 				Bandwidth:       a1.Bandwidth,
 				BandwidthMin:    max(a1.BandwidthMin, a2.BandwidthMin),
+				BandwidthMax:    min(a1.BandwidthMax, a2.BandwidthMax),
 				StartAt:         a2.StartAt,
 				StopsAt:         a1.StopsAt,
 				Price:           0,
@@ -265,6 +267,7 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 				IA:              a1.IA,
 				Bandwidth:       a1.Bandwidth,
 				BandwidthMin:    max(a1.BandwidthMin, a2.BandwidthMin),
+				BandwidthMax:    min(a1.BandwidthMax, a2.BandwidthMax),
 				StartAt:         a1.StartAt,
 				StopsAt:         a2.StopsAt,
 				Price:           0,
@@ -347,13 +350,14 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 	if err != nil {
 		return 0, 0, serrors.Join(err, tx.Rollback())
 	}
-	if !(len(splitResult.Bought) == 2 && len(splitResult.Unused) == 0 && len(splitResult.Remove) == 0) {
+	if !(len(splitResult.Bought) == 2 && len(splitResult.Unused) == 0) {
 		return 0, 0, serrors.Join(serrors.New("invalid split result"), tx.Rollback())
 	}
 	asset1 := &marketplacedb.DBAsset{
 		OwnerId:         dbAsset.OwnerId,
 		IA:              dbAsset.IA,
 		BandwidthMin:    dbAsset.BandwidthMin,
+		BandwidthMax:    dbAsset.BandwidthMax,
 		Price:           dbAsset.Price,
 		TimeGranularity: dbAsset.TimeGranularity,
 		TimeMinDuration: dbAsset.TimeMinDuration,
@@ -367,6 +371,7 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 		OwnerId:         dbAsset.OwnerId,
 		IA:              dbAsset.IA,
 		BandwidthMin:    dbAsset.BandwidthMin,
+		BandwidthMax:    dbAsset.BandwidthMax,
 		Price:           dbAsset.Price,
 		TimeGranularity: dbAsset.TimeGranularity,
 		TimeMinDuration: dbAsset.TimeMinDuration,
@@ -449,6 +454,7 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, asset
 				},
 				IA:              dbAsset.IA,
 				BandwidthMin:    dbAsset.BandwidthMin,
+				BandwidthMax:    dbAsset.BandwidthMax,
 				TimeGranularity: dbAsset.TimeGranularity,
 				TimeMinDuration: dbAsset.TimeMinDuration,
 				IfIdIngress:     dbAsset.IfIdIngress,
@@ -474,6 +480,7 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, asset
 			newAsset := &marketplacedb.DBAsset{
 				IA:              dbAsset.IA,
 				BandwidthMin:    dbAsset.BandwidthMin,
+				BandwidthMax:    dbAsset.BandwidthMax,
 				TimeGranularity: dbAsset.TimeGranularity,
 				TimeMinDuration: dbAsset.TimeMinDuration,
 				IfIdIngress:     dbAsset.IfIdIngress,
@@ -556,6 +563,22 @@ func (s *MarketplaceStorage) UndoRedemption(ctx context.Context, user_id int64, 
 	}
 	return serrors.Join(serrors.New("invalid asset IDs"), tx.Rollback())
 }
+func validateAsset(a *marketplacedb.DBAsset) error {
+	duration := a.StopsAt.Sub(a.StartAt)
+	if a.Bandwidth < a.BandwidthMin {
+		return serrors.New("bandwidth < min_bandwidth")
+	}
+	if a.Bandwidth > a.BandwidthMax {
+		return serrors.New("bandwith > max_bandiwdth")
+	}
+	if duration < time.Duration(a.TimeMinDuration)*time.Second {
+		return serrors.New("duration < time_min_duration")
+	}
+	if duration%(time.Duration(a.TimeGranularity)*time.Second) != 0 {
+		return serrors.New("duration not multiple of time granularity")
+	}
+	return nil
+}
 func (s *MarketplaceStorage) PrepareRedemption(ctx context.Context, user_id int64, ingressIDString *string, egressIDString *string, pairIDString *string) ([]*marketplacedb.DBAsset, error) {
 	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
 	if err != nil {
@@ -577,12 +600,18 @@ func (s *MarketplaceStorage) PrepareRedemption(ctx context.Context, user_id int6
 		if !ingressAsset.IfIdIngress.Valid || ingressAsset.IfIdEgress.Valid {
 			return nil, serrors.Join(serrors.New("ingress asset is not an ingress asset"), tx.Rollback())
 		}
+		if err = validateAsset(ingressAsset); err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
+		}
 		egressAsset, err := tx.PrepareRedemption(ctx, user_id, egressID)
 		if err != nil {
 			return nil, serrors.Join(err, tx.Rollback())
 		}
 		if !egressAsset.IfIdEgress.Valid || egressAsset.IfIdIngress.Valid {
 			return nil, serrors.Join(serrors.New("egress asset is not an egress asset"), tx.Rollback())
+		}
+		if err = validateAsset(egressAsset); err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
 		}
 		err = tx.Commit()
 		if err != nil {
@@ -600,6 +629,9 @@ func (s *MarketplaceStorage) PrepareRedemption(ctx context.Context, user_id int6
 		}
 		if !pairAsset.IfIdIngress.Valid || !pairAsset.IfIdEgress.Valid {
 			return nil, serrors.Join(serrors.New("pair asset is not a pair asset"), tx.Rollback())
+		}
+		if err = validateAsset(pairAsset); err != nil {
+			return nil, serrors.Join(err, tx.Rollback())
 		}
 		err = tx.Commit()
 		if err != nil {

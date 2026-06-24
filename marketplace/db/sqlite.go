@@ -507,6 +507,7 @@ func (e *executor) PrepareCombine(ctx context.Context, id int64, userId int64) (
 		as_id,
 		bandwidth,
 		bandwidth_min,
+		bandwidth_max,
 		price,
 		time_granularity,
 		time_min_duration,
@@ -527,7 +528,7 @@ func (e *executor) PrepareCombine(ctx context.Context, id int64, userId int64) (
 	var stopsAtString string
 	var isd uint16
 	var as uint64
-	err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
@@ -560,6 +561,7 @@ func (e *executor) PrepareSplit(ctx context.Context, id int64, userId int64) (*D
 		as_id,
 		bandwidth,
 		bandwidth_min,
+		bandwidth_max,
 		price,
 		time_granularity,
 		time_min_duration,
@@ -580,7 +582,7 @@ func (e *executor) PrepareSplit(ctx context.Context, id int64, userId int64) (*D
 	var stopsAtString string
 	var isd uint16
 	var as uint64
-	err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
@@ -612,6 +614,7 @@ func (e *executor) CheckoutAsset(ctx context.Context, id int64) (*DBAsset, error
 		as_id,
 		bandwidth,
 		bandwidth_min,
+		bandwidth_max,
 		price,
 		time_granularity,
 		time_min_duration,
@@ -632,7 +635,7 @@ func (e *executor) CheckoutAsset(ctx context.Context, id int64) (*DBAsset, error
 	var stopsAtString string
 	var isd uint16
 	var as uint64
-	err = rows.Scan(&a.ID, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	err = rows.Scan(&a.ID, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
@@ -682,6 +685,7 @@ func (e *executor) PrepareRedemption(ctx context.Context, user_id int64, id int6
 		as_id,
 		bandwidth,
 		bandwidth_min,
+		bandwidth_max,
 		price,
 		time_granularity,
 		time_min_duration,
@@ -702,7 +706,7 @@ func (e *executor) PrepareRedemption(ctx context.Context, user_id int64, id int6
 	var stopsAtString string
 	var isd uint16
 	var as uint64
-	err = rows.Scan(&a.ID, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	err = rows.Scan(&a.ID, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
