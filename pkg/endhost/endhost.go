@@ -208,7 +208,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 		}
 		localIA = c.Topology.LocalIA
 		c.TrustService = NewTrustService(c.api, c.trustDB, c.httpClient)
-		_, err := c.TrustService.TRC(ctx, uint32(localIA.ISD()), 0, 0)
+		_, err := c.TrustService.GetTRC(ctx, uint32(localIA.ISD()), 0, 0)
 		if err != nil {
 			return nil, err
 		}
