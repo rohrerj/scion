@@ -338,9 +338,8 @@ func Run(ctx context.Context, dst addr.IA, cfg Config) (*Result, error) {
 	if cfg.EndhostConnector != nil {
 		connector := cfg.EndhostConnector
 		topo = connector.Topology
-		allPaths, err = connector.PathService.Paths(ctx, dst, topo.LocalIA,
+		allPaths, err = connector.PathService.Paths(ctx, dst,
 			endhost.WithNumberOfPaths(uint32(cfg.MaxPaths)),
-			endhost.WithVerifyPathSegments(),
 			endhost.WithSkipSegmentVerificationIfUnsupportedByAS())
 		if err != nil {
 			return nil, serrors.Wrap("retrieving paths from endhost API", err)

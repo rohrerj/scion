@@ -209,9 +209,7 @@ func fetchPathsFromEndhostApi(
 	remote addr.IA,
 	seq string,
 ) ([]snet.Path, error) {
-	topo := conn.Topology
-	paths, err := conn.PathService.Paths(ctx, remote, topo.LocalIA,
-		endhost.WithVerifyPathSegments(),
+	paths, err := conn.PathService.Paths(ctx, remote,
 		endhost.WithSkipSegmentVerificationIfUnsupportedByAS())
 	if err != nil {
 		return nil, serrors.Wrap("retrieving paths", err)

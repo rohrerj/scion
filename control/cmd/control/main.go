@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -858,8 +859,15 @@ func realMain(ctx context.Context) error {
 			globalCfg.General.ConfigDir,
 		).GetCertificate,
 	}
+	versionHeader := func(next http.Handler) http.Handler {
+		const version = "1.0.0"
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Endhost-API-Server-Version", fmt.Sprintf("ethz-%s", version))
+			next.ServeHTTP(w, r)
+		})
+	}
 	endhostServer := http.Server{
-		Handler:   libconnect.AttachPeer(connectEndhost),
+		Handler:   versionHeader(libconnect.AttachPeer(connectEndhost)),
 		TLSConfig: endhostTLSConfig,
 	}
 	endhost_api, found := topo.EndhostAPI()[globalCfg.General.ID]

@@ -34,7 +34,6 @@ import (
 	"github.com/scionproto/scion/pkg/scrypto/signed"
 	seg "github.com/scionproto/scion/pkg/segment"
 	"github.com/scionproto/scion/pkg/slayers/path"
-	"github.com/scionproto/scion/private/storage"
 	"github.com/scionproto/scion/private/trust"
 )
 
@@ -100,24 +99,22 @@ func (p *trustServiceProvider) GetSignedTRC(ctx context.Context, id cppki.TRCID,
 }
 
 type TrustService struct {
-	url        string
-	httpClient *http.Client
-	verifier   trust.Verifier
-	provider   *trustServiceProvider
-	trustDB    storage.TrustDB
+	verifier trust.Verifier
+	provider *trustServiceProvider
+	trustDB  trust.DB
+	client   endhostconnect.TrustServiceClient
 }
 
-func (c *Connector) NewTrustService() *TrustService {
+func NewTrustService(url string, trustDB trust.DB, httpClient *http.Client) *TrustService {
 	provider := &trustServiceProvider{}
 	t := &TrustService{
-		url:        c.api,
-		httpClient: c.httpClient,
-		provider:   provider,
+		client:   endhostconnect.NewTrustServiceClient(httpClient, url),
+		provider: provider,
 		verifier: trust.Verifier{
 			Engine: provider,
 			Cache:  cache.New(time.Minute, time.Minute),
 		},
-		trustDB: c.trustDB,
+		trustDB: trustDB,
 	}
 	provider.ts = t
 	return t
@@ -145,7 +142,6 @@ type Chain struct {
 func (t *TrustService) ListChains(ctx context.Context, subjects []Subject,
 	validity cppki.Validity) (*Chains, error) {
 
-	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url)
 	req := &connect.Request[endhost.ListChainsRequest]{
 		Msg: &endhost.ListChainsRequest{
 			Subjects:          make([]*endhost.Subject, 0, len(subjects)),
@@ -187,7 +183,7 @@ func (t *TrustService) ListChains(ctx context.Context, subjects []Subject,
 	if len(req.Msg.Subjects) == 0 {
 		return chains, nil
 	}
-	repChains, err := client.ListChains(ctx, req)
+	repChains, err := t.client.ListChains(ctx, req)
 	if err != nil {
 		return nil, serrors.Wrap("on ListChains", err)
 	}
@@ -231,8 +227,7 @@ func (t *TrustService) TRC(ctx context.Context, isd uint32, base uint64, serial 
 	if !trc.IsZero() {
 		return trc.Raw, nil
 	}
-	client := endhostconnect.NewTrustServiceClient(t.httpClient, t.url)
-	rep, err := client.GetTrc(ctx, &connect.Request[endhost.TRCRequest]{
+	rep, err := t.client.GetTrc(ctx, &connect.Request[endhost.TRCRequest]{
 		Msg: &endhost.TRCRequest{
 			Isd:    isd,
 			Base:   base,

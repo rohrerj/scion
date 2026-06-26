@@ -142,9 +142,11 @@ func (s server) run() {
 		if err != nil {
 			integration.LogFatal("Error initializing endhost api", "err", err)
 		}
+		defer connector.Close()
 		sn = &snet.SCIONNetwork{
 			SCMPHandler: snet.DefaultSCMPHandler{
-				SCMPErrors: scmpErrorsCounter,
+				RevocationHandler: connector.PathService.EndhostRevocationHandler,
+				SCMPErrors:        scmpErrorsCounter,
 			},
 			PacketConnMetrics: scionPacketConnMetrics,
 			Topology:          connector.Topology,
@@ -265,6 +267,7 @@ func (c *client) run() int {
 		if err != nil {
 			integration.LogFatal("Error initializing endhost api", "err", err)
 		}
+		defer c.endhostAPI.Close()
 		c.network = &snet.SCIONNetwork{
 			SCMPHandler: snet.DefaultSCMPHandler{
 				SCMPErrors: scmpErrorsCounter,
@@ -382,8 +385,7 @@ func (c *client) getRemote(ctx context.Context, n int) (snet.Path, error) {
 	var paths []snet.Path
 	var err error
 	if c.endhostAPI != nil {
-		paths, err = c.endhostAPI.PathService.Paths(ctx, remote.IA, integration.Local.IA,
-			endhost.WithVerifyPathSegments())
+		paths, err = c.endhostAPI.PathService.Paths(ctx, remote.IA)
 	} else {
 		paths, err = c.sdConn.Paths(ctx, remote.IA, integration.Local.IA,
 			daemontypes.PathReqFlags{Refresh: n != 0})
