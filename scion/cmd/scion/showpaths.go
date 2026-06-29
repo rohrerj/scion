@@ -117,7 +117,7 @@ On other errors, showpaths will exit with code 2.
 				if envFlags.ConfigDir() != "" {
 					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")
 					if stat, err := os.Stat(trcDir); err == nil && stat.IsDir() {
-						endhostOpts = append(endhostOpts, endhost.WithTRCDir(trcDir))
+						endhostOpts = append(endhostOpts, endhost.WithCertsDir(trcDir))
 					}
 				}
 				connector, err := endhost.NewConnector(traceCtx, envFlags.EndhostApi(),
@@ -126,6 +126,12 @@ On other errors, showpaths will exit with code 2.
 					return serrors.Wrap("init endhost api connector", err)
 				}
 				flags.cfg.EndhostConnector = connector
+				defer func(c *endhost.Connector) {
+					err := c.Close()
+					if err != nil {
+						log.Error("Closing SCION endhost API connector", "err", err)
+					}
+				}(connector)
 			} else if envFlags.Daemon() != "" || envFlags.ConfigDir() != "" {
 				sd, err := daemon.NewAutoConnector(ctx,
 					daemon.WithDaemon(envFlags.Daemon()),

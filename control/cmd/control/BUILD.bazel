@@ -41,6 +41,7 @@ go_library(
         "//pkg/connect/happy:go_default_library",
         "//pkg/experimental/hiddenpath:go_default_library",
         "//pkg/grpc:go_default_library",
+        "//pkg/jwt:go_default_library",
         "//pkg/log:go_default_library",
         "//pkg/metrics:go_default_library",
         "//pkg/private/prom:go_default_library",

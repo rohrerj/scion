@@ -16,14 +16,18 @@ package endhost
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/pkg/private/ctrl/path_mgmt"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/proto/endhost/v1/endhostconnect"
@@ -31,57 +35,94 @@ import (
 	"github.com/scionproto/scion/pkg/snet"
 	snetpath "github.com/scionproto/scion/pkg/snet/path"
 	"github.com/scionproto/scion/private/path/combinator"
+	"github.com/scionproto/scion/private/periodic"
+	"github.com/scionproto/scion/private/revcache"
+	"github.com/scionproto/scion/private/revcache/memrevcache"
 )
 
 type PathService struct {
-	url                     string
-	httpClient              *http.Client
-	trustService            *TrustService
-	topo                    snet.Topology
-	verificationUnsupported bool
-	token                   string
+	client                   endhostconnect.SegmentsServiceClient
+	trustService             *TrustService
+	topo                     snet.Topology
+	verificationUnsupported  bool
+	localIA                  addr.IA
+	revCache                 revcache.RevCache
+	EndhostRevocationHandler *endhostRevocationHandler
+	revCleaner               *periodic.Runner
 }
 
-func (c *Connector) NewPathService() *PathService {
+type endhostRevocationHandler struct {
+	revCache revcache.RevCache
+}
+
+func (e *endhostRevocationHandler) Revoke(ctx context.Context, revInfo *path_mgmt.RevInfo) error {
+	_, err := e.revCache.Insert(ctx, revInfo)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func NewPathService(url string, topo snet.Topology, httpClient *http.Client, localIA addr.IA, trustService *TrustService) *PathService {
+	revCache := memrevcache.New()
 	p := &PathService{
-		url:          c.api,
-		topo:         c.Topology,
-		httpClient:   c.httpClient,
-		trustService: c.TrustService,
-		token:        c.token,
+		client:       endhostconnect.NewSegmentsServiceClient(httpClient, url),
+		topo:         topo,
+		trustService: trustService,
+		localIA:      localIA,
+		revCache:     revCache,
+		EndhostRevocationHandler: &endhostRevocationHandler{
+			revCache: revCache,
+		},
+		revCleaner: periodic.Start(revcache.NewCleaner(revCache, "endhost_revocation"), 10*time.Second, 10*time.Second),
 	}
 	return p
+}
+func (p *PathService) Close() error {
+	if p.revCleaner != nil {
+		p.revCleaner.Stop()
+	}
+	if p.revCache != nil {
+		err := p.revCache.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type PathReqOption func(*pathReqOptions)
 type pathReqOptions struct {
-	verifyPathSegments                     bool
+	disableVerifyPathSegments              bool
 	numPaths                               uint32
 	skipSegmentVerificationIfUnimplemented bool
 }
 
-// WithVerifyPathSegments filters out all path segments for which
-// verification fails.
-func WithVerifyPathSegments() PathReqOption {
+func WithDisabledSegVerification() PathReqOption {
 	return func(o *pathReqOptions) {
-		o.verifyPathSegments = true
+		o.disableVerifyPathSegments = true
 	}
 }
 
 // WithNumberOfPaths sets the maximum number of paths to return.
 // If the limit is not reached after requesting a page, further
-// pages are requested. Setting this option to 0 ensures
-// that all paths are returned.
+// pages are requested.
 func WithNumberOfPaths(n uint32) PathReqOption {
 	return func(o *pathReqOptions) {
 		o.numPaths = n
 	}
 }
 
+// TODO: this option should entirely be removed once all ASes that support the endhost API also support the trust endpoint
 func WithSkipSegmentVerificationIfUnsupportedByAS() PathReqOption {
 	return func(o *pathReqOptions) {
 		o.skipSegmentVerificationIfUnimplemented = true
 	}
+}
+
+// Query exists to implement snet.PathQuerier and just calls the Path function without options.
+func (s *PathService) Query(ctx context.Context, dst addr.IA) ([]snet.Path, error) {
+	return s.Paths(ctx, dst)
 }
 
 func (s *PathService) filterVerifiedSegments(ctx context.Context, up []*seg.PathSegment,
@@ -148,12 +189,55 @@ func (s *PathService) filterVerifiedSegments(ctx context.Context, up []*seg.Path
 	return verifiedUp, verifiedCore, verifiedDown, nil
 }
 
-// Paths returns all paths from the src IA to the dst IA.
+func (s *PathService) filterRevoked(ctx context.Context,
+	paths []combinator.Path) []combinator.Path {
+
+	logger := log.FromCtx(ctx)
+	var newPaths []combinator.Path
+	debugOn := logger.Enabled(log.DebugLevel)
+	revokedInterfaces := make(map[snet.PathInterface]struct{})
+	for _, path := range paths {
+		revoked := false
+		for _, iface := range path.Metadata.Interfaces {
+			// cache automatically expires outdated revocations every second,
+			// so a cache hit implies revocation is still active.
+			rev, err := s.revCache.Get(ctx, revcache.NewKey(iface.IA, iface.ID))
+			if err != nil {
+				logger.Error("Failed to get revocation", "err", err)
+				// continue, the client might still get some usable paths like this.
+			}
+			if rev != nil && debugOn {
+				revokedInterfaces[snet.PathInterface{IA: iface.IA, ID: iface.ID}] = struct{}{}
+			}
+			revoked = revoked || rev != nil
+		}
+		if !revoked {
+			newPaths = append(newPaths, path)
+		}
+	}
+	if len(paths) != len(newPaths) {
+		logger.Debug("Filtered paths with revocations",
+			"num_paths", len(paths), "num_revoked_paths", len(paths)-len(newPaths),
+			"revoked_due_to", revocationsString(revokedInterfaces))
+	}
+	return newPaths
+}
+
+func revocationsString(revocations map[snet.PathInterface]struct{}) string {
+	r := make([]string, 0, len(revocations))
+	for i := range revocations {
+		r = append(r, i.String())
+	}
+	sort.Strings(r)
+	return fmt.Sprint(r)
+}
+
+// Paths returns paths from the local IA to the destination IA.
 // It asks for the corresponding path segments from the endhost API endpoint and combines them
 // into end to end paths. The maximum number of paths returned can be configured via the
 // WithNumberOfPaths options. Additionally, the VerifyPathSegments option can be used to filter
 // out all path segments that fail verification.
-func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts ...PathReqOption) (
+func (s *PathService) Paths(ctx context.Context, dst addr.IA, opts ...PathReqOption) (
 	[]snet.Path, error) {
 
 	interfacesToString := func(elems []snet.PathInterface) string {
@@ -167,33 +251,35 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts 
 	for _, opt := range opts {
 		opt(options)
 	}
-	maxRequestedPaths := uint32(1)
+	maxRequestedPaths := uint32(64)
 	if options.numPaths != 0 {
 		maxRequestedPaths = options.numPaths
 	}
-	paginator := s.NewPaginator(dst, src, 64, s.token)
+	paginator := s.newPaginator(dst, 64)
 	paths := make([]snet.Path, 0, 64)
 	seen := make(map[string]struct{})
 
 	for len(paths) < int(maxRequestedPaths) && paginator.HasNext() {
 		up, core, down, err := paginator.NextPage(ctx)
+		metricListSegmentsTotal.Increment(err, "dst", dst.String())
 		if err != nil {
 			return nil, err
 		}
-		if options.verifyPathSegments && !s.verificationUnsupported {
+		if !options.disableVerifyPathSegments && !s.verificationUnsupported {
 			up, core, down, err = s.filterVerifiedSegments(ctx, up, core, down, options)
 			if err != nil {
 				return nil, err
 			}
 		}
-		combinedPaths := combinator.Combine(src, dst, up, core, down, false)
+		combinedPaths := combinator.Combine(s.localIA, dst, up, core, down, false)
+		combinedPaths = s.filterRevoked(ctx, combinedPaths)
 		for _, p := range combinedPaths {
 			mapKey := interfacesToString(p.Metadata.Interfaces)
 			if _, isSeen := seen[mapKey]; isSeen {
 				continue
 			}
 			path := snetpath.Path{
-				Src:           src,
+				Src:           s.localIA,
 				Dst:           dst,
 				DataplanePath: p.SCIONPath,
 				Meta:          p.Metadata,
@@ -225,41 +311,36 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, src addr.IA, opts 
 	return paths, nil
 }
 
-type Paginator struct {
-	url          string
-	httpClient   *http.Client
+type paginator struct {
+	client       endhostconnect.SegmentsServiceClient
 	pageSize     int32
 	pageToken    string
 	hasNext      bool
 	src          addr.IA
 	dst          addr.IA
 	trustService *TrustService
-	token        string
 }
 
-func (s *PathService) NewPaginator(dst, src addr.IA, pageSize int32, jwtToken string) *Paginator {
-	return &Paginator{
-		url:          s.url,
-		httpClient:   s.httpClient,
+func (s *PathService) newPaginator(dst addr.IA, pageSize int32) *paginator {
+	return &paginator{
+		client:       s.client,
 		pageSize:     pageSize,
 		pageToken:    "",
 		hasNext:      true,
-		src:          src,
+		src:          s.localIA,
 		dst:          dst,
 		trustService: s.trustService,
-		token:        jwtToken,
 	}
 }
 
-func (s *Paginator) HasNext() bool {
+func (s *paginator) HasNext() bool {
 	return s.hasNext
 }
 
-func (s *Paginator) NextPage(ctx context.Context) (
+func (s *paginator) NextPage(ctx context.Context) (
 	[]*seg.PathSegment, []*seg.PathSegment, []*seg.PathSegment, error) {
 
-	client := endhostconnect.NewSegmentsServiceClient(s.httpClient, s.url, connect.WithInterceptors(authInterceptor(s.token)))
-	res, err := client.ListSegments(ctx, &connect.Request[endhost.ListSegmentsRequest]{
+	res, err := s.client.ListSegments(ctx, &connect.Request[endhost.ListSegmentsRequest]{
 		Msg: &endhost.ListSegmentsRequest{
 			SrcIsdAs:  uint64(s.src),
 			DstIsdAs:  uint64(s.dst),

@@ -27,16 +27,12 @@ import (
 )
 
 type UnderlayService struct {
-	url        string
-	httpClient *http.Client
-	token      string
+	client endhostconnect.UnderlayServiceClient
 }
 
-func (c *Connector) NewUnderlayService() *UnderlayService {
+func NewUnderlayService(url string, httpClient *http.Client) *UnderlayService {
 	u := &UnderlayService{
-		url:        c.api,
-		httpClient: c.httpClient,
-		token:      c.token,
+		client: endhostconnect.NewUnderlayServiceClient(httpClient, url),
 	}
 	return u
 }
@@ -64,17 +60,17 @@ type Snap struct {
 }
 
 func (u *UnderlayService) ListUnderlays(ctx context.Context, isdAs *addr.IA) (*Underlays, error) {
-	client := endhostconnect.NewUnderlayServiceClient(u.httpClient, u.url, connect.WithInterceptors(authInterceptor(u.token)))
 	var targetIsdAs *uint64
 	if isdAs != nil {
 		tmp := uint64(*isdAs)
 		targetIsdAs = &tmp
 	}
-	res, err := client.ListUnderlays(ctx, &connect.Request[endhost.ListUnderlaysRequest]{
+	res, err := u.client.ListUnderlays(ctx, &connect.Request[endhost.ListUnderlaysRequest]{
 		Msg: &endhost.ListUnderlaysRequest{
 			IsdAs: targetIsdAs,
 		},
 	})
+	metricListUnderlaysTotal.Increment(err)
 	if err != nil {
 		return nil, serrors.Wrap("on ListUnderlays", err)
 	}
@@ -92,7 +88,7 @@ func (u *UnderlayService) ListUnderlays(ctx context.Context, isdAs *addr.IA) (*U
 				newRouter.DispatchedPortStart = router.DispatchedRange.DispatchedPortStart
 				newRouter.DispatchedPortEnd = router.DispatchedRange.DispatchedPortEnd
 			} else {
-				newRouter.DispatchedPortStart = 1024
+				newRouter.DispatchedPortStart = 1
 				newRouter.DispatchedPortEnd = 65535
 			}
 			underlays.Udp.Routers = append(underlays.Udp.Routers, newRouter)
