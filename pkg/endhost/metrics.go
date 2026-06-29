@@ -53,7 +53,6 @@ var metricHostASKeyTotal = newRequestMetric("host_as_key", "Host-AS key", []stri
 var metricHostHostKeyTotal = newRequestMetric("host_host_key", "Host-Host key", []string{prom.LabelResult})
 
 func newRequestMetric(subsystem string, description string, labels []string) RequestMetric {
-	fmt.Println(subsystem, description, labels)
 	return RequestMetric{
 		Requests: metrics.NewPromCounterFrom(
 			prometheus.CounterOpts{

@@ -121,84 +121,44 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(req)
 }
 
-// NewConnector initializes the endhost API connector using the provided api URL.
-// When no TRCs are provided, the connector will try to fetch the local ISD TRC from the
-// endhost API. However, since the client does not have the trust material to verify the connection
-// to the endhost-api server, a man-in-the-middle attacks could theoretically happen.
-func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Connector, error) {
-	options := &connectOptions{}
-	for _, opt := range opts {
-		opt(options)
+func (c *Connector) setupWebPKI(ctx context.Context, clientCerts []tls.Certificate, dialContext func(ctx context.Context, network string, addr string) (net.Conn, error),
+	options *connectOptions) error {
+	log.Debug("endhostAPI try connection using webPKI")
+	var err error
+	c.httpClient = &http.Client{
+		Transport: &authTransport{
+			token: c.token,
+			base: &http.Transport{
+				DialContext: dialContext,
+				TLSClientConfig: &tls.Config{
+					Certificates: clientCerts,
+				},
+			},
+		},
 	}
-	u, err := url.Parse(api)
+	c.UnderlayService = NewUnderlayService(c.api, c.httpClient)
+	c.Topology, err = c.loadTopology(ctx, options.localIA, options.localIASelector)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	c.TrustService = NewTrustService(c.api, c.trustDB, c.httpClient)
+	c.PathService = NewPathService(c.api, c.Topology, c.httpClient, c.Topology.LocalIA, c.TrustService)
+	c.DRKeyService = NewDRKeyService(c.api, c.httpClient)
+	return nil
+}
+func (c *Connector) setupSCIONPKI(ctx context.Context, clientCerts []tls.Certificate, dialContext func(ctx context.Context, network string, addr string) (net.Conn, error),
+	options *connectOptions) error {
+	log.Debug("endhostAPI try connection using scion PKI")
+	u, err := url.Parse(c.api)
+	if err != nil {
+		return err
 	}
 	endhostApiAddr, err := net.ResolveTCPAddr("tcp", u.Host)
 	if err != nil {
-		return nil, err
-	}
-	c := &Connector{
-		api:   api,
-		token: options.token,
-	}
-	clientCerts := []tls.Certificate{}
-	if options.tlsCertificate != nil {
-		clientCerts = append(clientCerts, *options.tlsCertificate)
-	}
-
-	c.trustDB, err = storage.NewInMemoryTrustStorage()
-	if err != nil {
-		return nil, err
-	}
-	var dialContext func(ctx context.Context, network string, addr string) (net.Conn, error)
-	if options.localIP != nil {
-		dialer := net.Dialer{
-			LocalAddr: &net.TCPAddr{
-				IP: options.localIP,
-			},
-		}
-		dialContext = dialer.DialContext
-	}
-
-	if options.insecure {
-		log.Debug("setting up endhost-api client in insecure mode")
-		// accept any TLS certificate or non-tls connection
-		c.httpClient = &http.Client{
-			Transport: &authTransport{
-				token: c.token,
-				base: &http.Transport{
-					TLSClientConfig: &tls.Config{
-						InsecureSkipVerify: true,
-						Certificates:       clientCerts,
-					},
-					DialContext: dialContext,
-				},
-			},
-		}
-		c.UnderlayService = NewUnderlayService(c.api, c.httpClient)
-		c.Topology, err = c.loadTopology(ctx, options.localIA, options.localIASelector)
-		if err != nil {
-			return nil, err
-		}
-		c.TrustService = NewTrustService(c.api, c.trustDB, c.httpClient)
-		c.PathService = NewPathService(c.api, c.Topology, c.httpClient, c.Topology.LocalIA, c.TrustService)
-		c.DRKeyService = NewDRKeyService(c.api, c.httpClient)
-		return c, nil
+		return err
 	}
 	localIA := options.localIA
-	if options.trcDir != "" {
-		log.Debug("setting up endhost-api client using stored TRCs")
-		// Load TRC from local folder
-		trcLoader := trust.TRCLoader{
-			Dir: options.trcDir,
-			DB:  c.trustDB,
-		}
-		_, err = trcLoader.Load(ctx)
-		if err != nil {
-			return nil, err
-		}
-	} else {
+	if options.trcDir == "" {
 		// We want to use tls but have no local trust root configuration
 		// so we can try to retrieve the local ISD TRC from the endhost api.
 		// But since we cannot use a TRC to verify the connection to retrieve the TRC,
@@ -219,13 +179,13 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 		c.UnderlayService = NewUnderlayService(c.api, c.httpClient)
 		c.Topology, err = c.loadTopology(ctx, options.localIA, options.localIASelector)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		localIA = c.Topology.LocalIA
 		c.TrustService = NewTrustService(c.api, c.trustDB, c.httpClient)
 		_, err := c.TrustService.GetTRC(ctx, uint32(localIA.ISD()), 0, 0)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		c.DRKeyService = NewDRKeyService(c.api, c.httpClient)
 	}
@@ -252,7 +212,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 		c.UnderlayService = NewUnderlayService(c.api, c.httpClient)
 		c.Topology, err = c.loadTopology(ctx, options.localIA, options.localIASelector)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		// now we know the local IA, so we can modify the tls configuration
 		c.httpClient = &http.Client{
@@ -291,12 +251,93 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 		c.UnderlayService = NewUnderlayService(c.api, c.httpClient)
 		c.Topology, err = c.loadTopology(ctx, options.localIA, options.localIASelector)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 	c.TrustService = NewTrustService(c.api, c.trustDB, c.httpClient)
 	c.PathService = NewPathService(c.api, c.Topology, c.httpClient, c.Topology.LocalIA, c.TrustService)
 	c.DRKeyService = NewDRKeyService(c.api, c.httpClient)
+	return nil
+}
+
+// NewConnector initializes the endhost API connector using the provided api URL.
+// When no TRCs are provided, the connector will try to fetch the local ISD TRC from the
+// endhost API. However, since the client does not have the trust material to verify the connection
+// to the endhost-api server, a man-in-the-middle attacks could theoretically happen.
+func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Connector, error) {
+	options := &connectOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	c := &Connector{
+		api:   api,
+		token: options.token,
+	}
+	clientCerts := []tls.Certificate{}
+	if options.tlsCertificate != nil {
+		clientCerts = append(clientCerts, *options.tlsCertificate)
+	}
+	var err error
+	c.trustDB, err = storage.NewInMemoryTrustStorage()
+	if err != nil {
+		return nil, err
+	}
+	if options.trcDir != "" {
+		// Load TRC from local folder
+		trcLoader := trust.TRCLoader{
+			Dir: options.trcDir,
+			DB:  c.trustDB,
+		}
+		_, err = trcLoader.Load(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var dialContext func(ctx context.Context, network string, addr string) (net.Conn, error)
+	if options.localIP != nil {
+		dialer := net.Dialer{
+			LocalAddr: &net.TCPAddr{
+				IP: options.localIP,
+			},
+		}
+		dialContext = dialer.DialContext
+	}
+
+	if options.insecure {
+		log.Debug("setting up endhost-api client in insecure mode")
+		// accept any TLS certificate or non-tls connection
+		c.httpClient = &http.Client{
+			Transport: &authTransport{
+				token: c.token,
+				base: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true,
+						Certificates:       clientCerts,
+					},
+					DialContext: dialContext,
+				},
+			},
+		}
+		c.UnderlayService = NewUnderlayService(c.api, c.httpClient)
+		c.Topology, err = c.loadTopology(ctx, options.localIA, options.localIASelector)
+		if err != nil {
+			return nil, err
+		}
+		c.TrustService = NewTrustService(c.api, c.trustDB, c.httpClient)
+		c.PathService = NewPathService(c.api, c.Topology, c.httpClient, c.Topology.LocalIA, c.TrustService)
+		c.DRKeyService = NewDRKeyService(c.api, c.httpClient)
+		return c, nil
+	}
+	// test whether endhost API server uses certificate signed by WebPKI CA
+	// If an error occurs, try again using SCION PKI
+	err = c.setupWebPKI(ctx, clientCerts, dialContext, options)
+	if err != nil {
+		err = c.setupSCIONPKI(ctx, clientCerts, dialContext, options)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return c, nil
 }
 
