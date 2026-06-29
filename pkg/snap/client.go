@@ -28,7 +28,6 @@ import (
 )
 
 type SnapControlClient struct {
-	//client     snapconnect.SnapControlClient
 	httpClient *http.Client
 	token      string
 	api        string

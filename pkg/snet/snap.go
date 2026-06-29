@@ -28,8 +28,8 @@ import (
 type SnapConn struct {
 	SCMPHandler    SCMPHandler
 	tunnel         *snap.SnapTunnel
-	readDeadline   time.Time
-	writeDeadline  time.Time
+	readTimer      *time.Timer
+	writeTimer     *time.Timer
 	sendChannel    chan []byte
 	receiveChannel chan []byte
 }
@@ -48,12 +48,10 @@ func (n *SCIONNetwork) newSnapConn(ctx context.Context, snapControlURL string, t
 	return conn, nil
 }
 
-// Close implements [PacketConn].
 func (s *SnapConn) Close() error {
 	return s.tunnel.Close()
 }
 
-// LocalAddr implements [PacketConn].
 func (s *SnapConn) LocalAddr() net.Addr {
 	return s.tunnel.LocalAddr
 }
@@ -68,18 +66,12 @@ func (s *SnapConn) ReadFrom(pkt *Packet, ov *net.UDPAddr) error {
 	addr := *s.tunnel.DataplaneAddr
 	ov = &addr
 	var b []byte
-	if !s.readDeadline.IsZero() {
-		d := time.Until(s.readDeadline)
-		if d <= 0 {
-			return serrors.New("read deadline", "time", s.readDeadline)
-		}
-		timer := time.NewTimer(d)
-		defer timer.Stop()
+	if s.readTimer != nil {
 		select {
 		case b = <-s.receiveChannel:
 			copy(pkt.Bytes, b)
-		case <-timer.C:
-			return serrors.New("read deadline", "time", s.readDeadline)
+		case t := <-s.readTimer.C:
+			return serrors.New("read deadline", "time", t)
 		}
 	} else {
 		b = <-s.receiveChannel
@@ -102,26 +94,30 @@ func (s *SnapConn) ReadFrom(pkt *Packet, ov *net.UDPAddr) error {
 	return nil
 }
 
-// SetDeadline implements [PacketConn].
 func (s *SnapConn) SetDeadline(t time.Time) error {
 	s.SetReadDeadline(t)
 	s.SetWriteDeadline(t)
 	return nil
 }
 
-// SetReadDeadline implements [PacketConn].
 func (s *SnapConn) SetReadDeadline(t time.Time) error {
-	s.readDeadline = t
+	if s.readTimer != nil {
+		s.readTimer.Reset(time.Until(t))
+	} else {
+		s.readTimer = time.NewTimer(time.Until(t))
+	}
 	return nil
 }
 
-// SetWriteDeadline implements [PacketConn].
 func (s *SnapConn) SetWriteDeadline(t time.Time) error {
-	s.writeDeadline = t
+	if s.writeTimer != nil {
+		s.writeTimer.Reset(time.Until(t))
+	} else {
+		s.writeTimer = time.NewTimer(time.Until(t))
+	}
 	return nil
 }
 
-// SyscallConn implements [PacketConn].
 func (s *SnapConn) SyscallConn() (syscall.RawConn, error) {
 	return nil, serrors.New("snap does not support syscallConn")
 }
@@ -133,18 +129,11 @@ func (s *SnapConn) WriteTo(pkt *Packet, _ *net.UDPAddr) error {
 	}
 	b := make([]byte, len(pkt.Bytes))
 	copy(b, pkt.Bytes)
-	if !s.writeDeadline.IsZero() {
-		d := time.Until(s.readDeadline)
-		if d <= 0 {
-			return serrors.New("write deadline", "time", s.writeDeadline)
-		}
-
-		timer := time.NewTimer(d)
-		defer timer.Stop()
+	if s.writeTimer != nil {
 		select {
 		case s.sendChannel <- b:
-		case <-timer.C:
-			return serrors.New("write deadline", "time", s.writeDeadline)
+		case t := <-s.writeTimer.C:
+			return serrors.New("write deadline", "time", t)
 		}
 	} else {
 		s.sendChannel <- b

@@ -24,6 +24,7 @@ import (
 
 	"github.com/gopacket/gopacket"
 	"github.com/scionproto/scion/pkg/addr"
+	anapayaauth "github.com/scionproto/scion/pkg/anapaya_auth"
 	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/snap"
@@ -41,9 +42,10 @@ func TestSnap(t *testing.T) {
 func TestFullEndhost(t *testing.T) {
 	ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancelF()
-	token := ""
-	endhostAPIURL := "http://93.185.219.2:5001"
-	connector, err := endhost.NewConnector(ctx, endhostAPIURL, endhost.WithToken(token))
+	aaClient := anapayaauth.NewClient("")
+
+	endhostAPIURL := "https://s01.chgtg1.snap.anapaya.net:5001"
+	connector, err := endhost.NewConnector(ctx, endhostAPIURL, endhost.WithToken(aaClient.Token()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,13 +59,13 @@ func TestFullEndhost(t *testing.T) {
 	var targetSnap endhost.Snap
 	for _, snap := range underlays.Snap.Snaps {
 		fmt.Println(snap.Address, snap.IsdASes)
-		if snap.Address == "http://93.185.219.2:5001/" {
+		if snap.Address == "https://93.185.219.2:5001/" {
 			targetSnap = snap
 		}
 	}
 	fmt.Println(targetSnap)
 	dstIA := addr.MustParseIA("64-2:0:9")
-	paths, err := connector.PathService.Paths(ctx, dstIA, connector.Topology.LocalIA)
+	paths, err := connector.PathService.Paths(ctx, dstIA, endhost.WithDisabledSegVerification())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,16 +74,11 @@ func TestFullEndhost(t *testing.T) {
 	}
 	snapApi := connector.Topology.Snap.ControlApi
 
-	tunnel, err := snap.NewSnapTunnel(ctx, snapApi, token)
+	tunnel, err := snap.NewSnapTunnel(ctx, snapApi, aaClient.Token())
 	if err != nil {
 		t.Fatal(err)
 	}
 	remoteAddr, err := net.ResolveUDPAddr("udp", "129.132.175.104:30041")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// localAddr must be in tunnel namespace, not system loopback
-	localAddr, err := net.ResolveUDPAddr("udp", "188.60.224.160:8888")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +87,7 @@ func TestFullEndhost(t *testing.T) {
 		PacketInfo: snet.PacketInfo{
 			Source: snet.SCIONAddress{
 				IA:   connector.Topology.LocalIA,
-				Host: addr.HostIP(localAddr.AddrPort().Addr()),
+				Host: addr.HostIP(tunnel.LocalAddr.AddrPort().Addr()),
 			},
 			Destination: snet.SCIONAddress{
 				IA:   addr.MustParseIA("64-2:0:9"),
