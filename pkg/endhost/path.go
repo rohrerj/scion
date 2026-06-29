@@ -260,6 +260,7 @@ func (s *PathService) Paths(ctx context.Context, dst addr.IA, opts ...PathReqOpt
 
 	for len(paths) < int(maxRequestedPaths) && paginator.HasNext() {
 		up, core, down, err := paginator.NextPage(ctx)
+		metricListSegmentsTotal.Increment(err, "dst", dst.String())
 		if err != nil {
 			return nil, err
 		}

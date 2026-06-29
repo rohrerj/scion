@@ -182,6 +182,7 @@ func (t *TrustService) GetChains(ctx context.Context, subjects []Subject,
 		return chains, nil
 	}
 	repChains, err := t.client.ListChains(ctx, req)
+	metricListChainsTotal.Increment(err)
 	if err != nil {
 		return nil, serrors.Wrap("on ListChains", err)
 	}
@@ -232,6 +233,7 @@ func (t *TrustService) GetTRC(ctx context.Context, isd uint32, base uint64, seri
 			Serial: serial,
 		},
 	})
+	metricGetTRCTotal.Increment(err)
 	if err != nil {
 		return nil, serrors.Wrap("on TRC", err)
 	}

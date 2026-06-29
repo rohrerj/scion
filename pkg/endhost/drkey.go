@@ -29,14 +29,14 @@ import (
 )
 
 type DRKeyService struct {
-	url        string
-	httpClient *http.Client
+	url    string
+	client endhostconnect.DRKeyServiceClient
 }
 
 func NewDRKeyService(url string, httpClient *http.Client) *DRKeyService {
 	d := &DRKeyService{
-		url:        url,
-		httpClient: httpClient,
+		url:    url,
+		client: endhostconnect.NewDRKeyServiceClient(httpClient, url),
 	}
 	return d
 }
@@ -44,8 +44,7 @@ func NewDRKeyService(url string, httpClient *http.Client) *DRKeyService {
 func (d *DRKeyService) ASHostKey(ctx context.Context, req drkey.ASHostMeta) (
 	*drkey.ASHostKey, error) {
 
-	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url)
-	rep, err := client.DRKeyASHost(ctx, &connect.Request[endhost.DRKeyASHostRequest]{
+	rep, err := d.client.DRKeyASHost(ctx, &connect.Request[endhost.DRKeyASHostRequest]{
 		Msg: &endhost.DRKeyASHostRequest{
 			ValTime:    timestamppb.New(req.Validity),
 			ProtocolId: drpb.Protocol(req.ProtoId),
@@ -54,6 +53,7 @@ func (d *DRKeyService) ASHostKey(ctx context.Context, req drkey.ASHostMeta) (
 			DstHost:    req.DstHost,
 		},
 	})
+	metricASHostKeyTotal.Increment(err)
 	if err != nil {
 		return nil, serrors.Wrap("on ASHostKey", err)
 	}
@@ -71,8 +71,7 @@ func (d *DRKeyService) ASHostKey(ctx context.Context, req drkey.ASHostMeta) (
 func (d *DRKeyService) HostASKey(ctx context.Context, req drkey.HostASMeta) (
 	*drkey.HostASKey, error) {
 
-	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url)
-	rep, err := client.DRKeyHostAS(ctx, &connect.Request[endhost.DRKeyHostASRequest]{
+	rep, err := d.client.DRKeyHostAS(ctx, &connect.Request[endhost.DRKeyHostASRequest]{
 		Msg: &endhost.DRKeyHostASRequest{
 			ValTime:    timestamppb.New(req.Validity),
 			ProtocolId: drpb.Protocol(req.ProtoId),
@@ -81,6 +80,7 @@ func (d *DRKeyService) HostASKey(ctx context.Context, req drkey.HostASMeta) (
 			SrcHost:    req.SrcHost,
 		},
 	})
+	metricHostASKeyTotal.Increment(err)
 	if err != nil {
 		return nil, serrors.Wrap("on HostASKey", err)
 	}
@@ -98,8 +98,7 @@ func (d *DRKeyService) HostASKey(ctx context.Context, req drkey.HostASMeta) (
 func (d *DRKeyService) HostHostKey(ctx context.Context, req drkey.HostHostMeta) (
 	*drkey.HostHostKey, error) {
 
-	client := endhostconnect.NewDRKeyServiceClient(d.httpClient, d.url)
-	rep, err := client.DRKeyHostHost(ctx,
+	rep, err := d.client.DRKeyHostHost(ctx,
 		&connect.Request[endhost.DRKeyHostHostRequest]{
 			Msg: &endhost.DRKeyHostHostRequest{
 				ValTime:    timestamppb.New(req.Validity),
@@ -110,6 +109,7 @@ func (d *DRKeyService) HostHostKey(ctx context.Context, req drkey.HostHostMeta) 
 				DstHost:    req.DstHost,
 			},
 		})
+	metricHostHostKeyTotal.Increment(err)
 	if err != nil {
 		return nil, serrors.Wrap("on HostHostKey", err)
 	}

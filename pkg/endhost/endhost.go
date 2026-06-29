@@ -44,8 +44,8 @@ type connectOptions struct {
 	localIASelector func(*Underlays) addr.IA
 	// tls client certificate, might be required for drkey requests
 	tlsCertificate *tls.Certificate
-	useMetrics     bool
 	token          string
+	localIP        net.IP
 }
 
 // Disables all TLS verifications. Implies allow insecure.
@@ -79,15 +79,17 @@ func WithLocalIASelector(f func(*Underlays) addr.IA) ConnectOption {
 	}
 }
 
-func WithMetrics() ConnectOption {
-	return func(o *connectOptions) {
-		o.useMetrics = true
-	}
-}
-
+// If provided, injects the bearer token in the HTTP Authorization header.
 func WithToken(jwt string) ConnectOption {
 	return func(o *connectOptions) {
 		o.token = jwt
+	}
+}
+
+// Sets the local IP when dialing.
+func WithLocalIP(ip net.IP) ConnectOption {
+	return func(o *connectOptions) {
+		o.localIP = ip
 	}
 }
 
@@ -113,7 +115,9 @@ type authTransport struct {
 
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.Header.Set("Authorization", "Bearer "+t.token)
+	if t.token != "" {
+		req.Header.Set("Authorization", "Bearer "+t.token)
+	}
 	return t.base.RoundTrip(req)
 }
 
@@ -147,6 +151,15 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 	if err != nil {
 		return nil, err
 	}
+	var dialContext func(ctx context.Context, network string, addr string) (net.Conn, error)
+	if options.localIP != nil {
+		dialer := net.Dialer{
+			LocalAddr: &net.TCPAddr{
+				IP: options.localIP,
+			},
+		}
+		dialContext = dialer.DialContext
+	}
 
 	if options.insecure {
 		log.Debug("setting up endhost-api client in insecure mode")
@@ -159,6 +172,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 						InsecureSkipVerify: true,
 						Certificates:       clientCerts,
 					},
+					DialContext: dialContext,
 				},
 			},
 		}
@@ -198,6 +212,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 						InsecureSkipVerify: true,
 						Certificates:       clientCerts,
 					},
+					DialContext: dialContext,
 				},
 			},
 		}
@@ -230,6 +245,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 						VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
 						Certificates:          clientCerts,
 					},
+					DialContext: dialContext,
 				},
 			},
 		}
@@ -251,6 +267,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 						ServerName: fmt.Sprintf("%s,%s", c.Topology.LocalIA,
 							endhostApiAddr.IP.String()),
 					},
+					DialContext: dialContext,
 				},
 			},
 		}
@@ -267,6 +284,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 						ServerName: fmt.Sprintf("%s,%s", c.Topology.LocalIA,
 							endhostApiAddr.IP.String()),
 					},
+					DialContext: dialContext,
 				},
 			},
 		}

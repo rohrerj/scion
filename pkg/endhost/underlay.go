@@ -70,6 +70,7 @@ func (u *UnderlayService) ListUnderlays(ctx context.Context, isdAs *addr.IA) (*U
 			IsdAs: targetIsdAs,
 		},
 	})
+	metricListUnderlaysTotal.Increment(err)
 	if err != nil {
 		return nil, serrors.Wrap("on ListUnderlays", err)
 	}
