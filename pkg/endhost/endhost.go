@@ -331,11 +331,12 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 	}
 	// test whether endhost API server uses certificate signed by WebPKI CA
 	// If an error occurs, try again using SCION PKI
+	// If both fail, return both errors
 	err = c.setupWebPKI(ctx, clientCerts, dialContext, options)
 	if err != nil {
-		err = c.setupSCIONPKI(ctx, clientCerts, dialContext, options)
-		if err != nil {
-			return nil, err
+		err2 := c.setupSCIONPKI(ctx, clientCerts, dialContext, options)
+		if err2 != nil {
+			return nil, serrors.Join(err2, err)
 		}
 	}
 	return c, nil
