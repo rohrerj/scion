@@ -40,7 +40,7 @@ func FromTrustDB(db storage.TrustDB, client *endhost.TrustService) *DB_Wrapper {
 }
 
 func (d *DB_Wrapper) requestTRCFromEndhostAPI(ctx context.Context, isd uint32, base uint64, serial uint64) ([]byte, error) {
-	return d.client.TRC(ctx, isd, base, serial)
+	return d.client.GetTRC(ctx, isd, base, serial)
 }
 
 func (d *DB_Wrapper) Chain(ctx context.Context, b []byte) ([]*x509.Certificate, error) {

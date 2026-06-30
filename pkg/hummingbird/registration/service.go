@@ -66,7 +66,7 @@ func chainToCerts(c *endhost.Chain) ([]*x509.Certificate, error) {
 }
 
 func (f *fetcher) Chains(ctx context.Context, req trust.ChainQuery, _ net.Addr) ([][]*x509.Certificate, error) {
-	chains, err := f.trustService.ListChains(ctx, []endhost.Subject{
+	chains, err := f.trustService.GetChains(ctx, []endhost.Subject{
 		{
 			IA:           req.IA,
 			SubjectKeyId: req.SubjectKeyID,
@@ -76,7 +76,7 @@ func (f *fetcher) Chains(ctx context.Context, req trust.ChainQuery, _ net.Addr) 
 		return nil, err
 	}
 	certs := make([][]*x509.Certificate, 0, 1)
-	for _, chain := range chains.Chains {
+	for _, chain := range chains {
 		c, err := chainToCerts(&chain)
 		if err != nil {
 			return nil, err
@@ -87,7 +87,7 @@ func (f *fetcher) Chains(ctx context.Context, req trust.ChainQuery, _ net.Addr) 
 }
 
 func (f *fetcher) TRC(ctx context.Context, id cppki.TRCID, server net.Addr) (cppki.SignedTRC, error) {
-	raw, err := f.trustService.TRC(ctx, uint32(id.ISD), uint64(id.Base), uint64(id.Serial))
+	raw, err := f.trustService.GetTRC(ctx, uint32(id.ISD), uint64(id.Base), uint64(id.Serial))
 	trc, err := cppki.DecodeSignedTRC(raw)
 	if err != nil {
 		return cppki.SignedTRC{}, serrors.WrapNoStack("parsing TRC", err)

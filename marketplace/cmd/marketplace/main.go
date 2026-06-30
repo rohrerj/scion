@@ -101,11 +101,11 @@ func realMain(ctx context.Context) error {
 		}
 		return false
 	}
-	connector, err := endhost.NewConnector(ctx, endhostAPI, endhost.WithTRCDir(path.Join(globalCfg.General.ConfigDir, "certs")))
+	connector, err := endhost.NewConnector(ctx, endhostAPI, endhost.WithCertsDir(path.Join(globalCfg.General.ConfigDir, "certs")))
 	if err != nil {
 		for i := 0; i < 120 && shouldRetry(err); i++ {
 			time.Sleep(time.Second)
-			connector, err = endhost.NewConnector(ctx, endhostAPI, endhost.WithTRCDir(path.Join(globalCfg.General.ConfigDir, "certs")))
+			connector, err = endhost.NewConnector(ctx, endhostAPI, endhost.WithCertsDir(path.Join(globalCfg.General.ConfigDir, "certs")))
 		}
 		if err != nil {
 			return err

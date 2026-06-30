@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -73,6 +74,7 @@ import (
 	"github.com/scionproto/scion/pkg/connect/happy"
 	"github.com/scionproto/scion/pkg/experimental/hiddenpath"
 	libgrpc "github.com/scionproto/scion/pkg/grpc"
+	"github.com/scionproto/scion/pkg/jwt"
 	"github.com/scionproto/scion/pkg/log"
 	libmetrics "github.com/scionproto/scion/pkg/metrics"
 	"github.com/scionproto/scion/pkg/private/prom"
@@ -859,8 +861,41 @@ func realMain(ctx context.Context) error {
 			globalCfg.General.ConfigDir,
 		).GetCertificate,
 	}
+	versionHeader := func(next http.Handler) http.Handler {
+		const version = "1.0.0"
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Endhost-API-Server-Version", fmt.Sprintf("ethz-%s", version))
+			next.ServeHTTP(w, r)
+		})
+	}
+	endhostApiHandler := versionHeader(libconnect.AttachPeer(connectEndhost))
+	if globalCfg.EndhostApi.JwtVerifierKeyFile != "" {
+		jwtVerifier, err := jwt.VerifierFromFile(globalCfg.EndhostApi.JwtVerifierKeyFile)
+		if err != nil {
+			return err
+		}
+		verifyToken := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authHeader := r.Header.Get("Authorization")
+
+				if !strings.HasPrefix(authHeader, "Bearer ") {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+				_, err = jwtVerifier.VerifyToken(tokenStr)
+				if err != nil {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		}
+		endhostApiHandler = verifyToken(endhostApiHandler)
+	}
+
 	endhostServer := http.Server{
-		Handler:   libconnect.AttachPeer(connectEndhost),
+		Handler:   endhostApiHandler,
 		TLSConfig: endhostTLSConfig,
 	}
 	endhost_api, found := topo.EndhostAPI()[globalCfg.General.ID]

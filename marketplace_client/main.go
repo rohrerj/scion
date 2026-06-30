@@ -91,14 +91,6 @@ func printOptions(t jwtType) {
 	fmt.Println("-> exit")
 }
 
-type Querier struct {
-	Connector *endhost.Connector
-}
-
-func (q *Querier) Query(ctx context.Context, ia addr.IA) ([]snet.Path, error) {
-	return q.Connector.PathService.Paths(ctx, ia, q.Connector.Topology.LocalIA)
-}
-
 func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *snet.UDPAddr, serverName string, token string) (
 	hummingbirdconnect.MarketplaceServiceClient, hummingbirdconnect.RedemptionServiceClient, hummingbirdconnect.AccountServiceClient, error) {
 	var connector *endhost.Connector
@@ -128,7 +120,7 @@ func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *
 		dp = path.Empty{}
 		nextHop = remote.Host
 	} else {
-		paths, err := connector.PathService.Paths(ctx, remote.IA, connector.Topology.LocalIA)
+		paths, err := connector.PathService.Paths(ctx, remote.IA)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -176,9 +168,7 @@ func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *
 			},
 			Rewriter: &appnet.AddressRewriter{
 				Router: &snet.BaseRouter{
-					Querier: &Querier{
-						Connector: connector,
-					},
+					Querier: connector.PathService,
 				},
 			},
 		}).NewDialer
@@ -191,9 +181,7 @@ func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *
 			},
 			Rewriter: &appnet.AddressRewriter{
 				Router: &snet.BaseRouter{
-					Querier: &Querier{
-						Connector: connector,
-					},
+					Querier: connector.PathService,
 				},
 			},
 		}).NewDialer
@@ -243,7 +231,7 @@ func discoverMarketplaces(ctx context.Context, reader *bufio.Reader, endhostApi 
 	if err != nil {
 		return nil, err
 	}
-	paths, err := connector.PathService.Paths(ctx, ia, connector.Topology.LocalIA)
+	paths, err := connector.PathService.Paths(ctx, ia)
 	if err != nil {
 		return nil, err
 	}
