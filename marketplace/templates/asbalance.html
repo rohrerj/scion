@@ -4,22 +4,46 @@
 <head>
     <meta charset="UTF-8">
     <title>Deposit Money</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 
 <body>
-    {{if .Error}}
-    <p style="color:red;">{{.Error}}</p>
-    {{end}}
-    <h4>Current balance:</h4>
-    <p style="color:blue;">
-        {{if .Balance}}
-        {{.Balance}}
+    <nav>
+        <div class="nav-left">
+            {{if .Username}}
+            <a href="/asbalance">Balance</a>
+            {{else}}
+            <a href="/aslogin">AS Login</a>
+            <a href="/login">Login</a>
+            <a href="/register">Register</a>
+            {{end}}
+        </div>
+        {{if .Username}}
+        <div class="nav-right">
+            👤 {{.Username}}
+            <a class="logout-link" href="/logout">Logout</a>
+        </div>
         {{end}}
-    </p>
-    <form method="POST" action="/asbalance">
-        <input name="deposit" type="text">
-        <button type="submit">Deposit</button>
-    </form>
+    </nav>
+    <div class="container">
+        <h2>Account Balance</h2>
+
+        {{if .Error}}
+        <p class="error">{{.Error}}</p>
+        {{end}}
+
+        <h4>Current balance</h4>
+
+        {{if .Balance}}
+        <p class="success">{{.Balance}}</p>
+        {{end}}
+
+        <form method="POST" action="/asbalance">
+            <label>Deposit amount</label>
+            <input name="deposit" type="text">
+            <button type="submit">Deposit</button>
+        </form>
+    </div>
 </body>
 
 </html>

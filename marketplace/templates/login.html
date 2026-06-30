@@ -4,22 +4,47 @@
 <head>
     <meta charset="UTF-8">
     <title>Login</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 
 <body>
-    <a href="/aslogin">Login as AS</a><br>
-    <a href="/login">Login with existing account</a><br>
-    <a href="/register">Register new account</a><br>
-    <a href="/token">Request new token</a><br>
-    <a href="/balance">Check your balance</a><br>
-    {{if .Error}}
-    <p style="color:red;">{{.Error}}</p>
-    {{end}}
-    <form method="POST" action="/login">
-        User ID: <input name="username">
-        Password: <input name="password" type="password">
-        <button type="submit">Login</button>
-    </form>
+    <nav>
+        <div class="nav-left">
+            {{if .Username}}
+            <a href="/token">Token</a>
+            <a href="/balance">Balance</a>
+            {{else}}
+            <a href="/aslogin">AS Login</a>
+            <a href="/login">Login</a>
+            <a href="/register">Register</a>
+            {{end}}
+        </div>
+        {{if .Username}}
+        <div class="nav-right">
+            👤 {{.Username}}
+            <a class="logout-link" href="/logout">Logout</a>
+        </div>
+        {{end}}
+    </nav>
+
+    <div class="container">
+        <h2>Login</h2>
+
+        {{if .Error}}
+        <p class="error">{{.Error}}</p>
+        {{end}}
+
+        <form method="POST" action="/login">
+            <label>User ID</label>
+            <input name="username">
+
+            <label>Password</label>
+            <input name="password" type="password">
+
+            <button type="submit">Login</button>
+        </form>
+    </div>
+
 </body>
 
 </html>

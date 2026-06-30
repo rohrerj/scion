@@ -36,7 +36,7 @@ var templates = template.Must(template.ParseGlob("marketplace/templates/*.html")
 
 func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *http.ServeMux) {
 	h := &Handler{
-		sessions:   make(map[string]int64),
+		sessions:   make(map[string]User),
 		asSessions: make(map[string]addr.IA),
 		signer:     signer,
 		store:      store,
@@ -46,22 +46,30 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 	mux.HandleFunc("/login", h.loginHandler)
 	mux.HandleFunc("/register", h.registerHandler)
 	mux.HandleFunc("/balance", h.balanceHandler)
+	mux.HandleFunc("/logout", h.logoutHandler)
 	mux.HandleFunc("/aslogin", h.asLoginHandler)
 	mux.HandleFunc("/asbalance", h.asBalanceHandler)
+	mux.HandleFunc("/static/style.css", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "./marketplace/static/style.css")
+	})
 }
 
 type Handler struct {
 	store      *storage.MarketplaceStorage
-	sessions   map[string]int64
+	sessions   map[string]User
 	asSessions map[string]addr.IA
 	mu         sync.Mutex
 	signer     *registration.Signer
 }
+type User struct {
+	id   int64
+	name string
+}
 
-func (h *Handler) getSessionUser(r *http.Request) (int64, bool) {
+func (h *Handler) getSessionUser(r *http.Request) (User, bool) {
 	cookie, err := r.Cookie("session_id")
 	if err != nil {
-		return 0, false
+		return User{}, false
 	}
 
 	h.mu.Lock()
@@ -82,6 +90,18 @@ func (h *Handler) getSessionAS(r *http.Request) (addr.IA, bool) {
 
 	userId, ok := h.asSessions[cookie.Value]
 	return userId, ok
+}
+
+func (h *Handler) SetSessionUser(sessionId string, user User) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sessions[sessionId] = user
+}
+
+func (h *Handler) SetASSessionUser(sessionId string, user addr.IA) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.asSessions[sessionId] = user
 }
 
 func (h *Handler) asLoginHandler(w http.ResponseWriter, r *http.Request) {
@@ -117,8 +137,7 @@ func (h *Handler) asLoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := h.generateSessionID()
-	h.asSessions[sessionID] = dbUser.IA
-
+	h.SetASSessionUser(sessionID, dbUser.IA)
 	http.SetCookie(w, &http.Cookie{
 		Name:  "as_session_id",
 		Value: sessionID,
@@ -144,7 +163,8 @@ func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		templates.ExecuteTemplate(w, "asbalance.html", map[string]any{
-			"Balance": strconv.Itoa(int(dbUser.Balance)),
+			"Balance":  strconv.Itoa(int(dbUser.Balance)),
+			"Username": ia.String(),
 		})
 		return
 	}
@@ -162,8 +182,9 @@ func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		templates.ExecuteTemplate(w, "asbalance.html", map[string]any{
-			"Error":   "Invalid deposit amount",
-			"Balance": strconv.Itoa(int(dbUser.Balance)),
+			"Error":    "Invalid deposit amount",
+			"Balance":  strconv.Itoa(int(dbUser.Balance)),
+			"Username": ia.String(),
 		})
 		return
 	}
@@ -174,18 +195,19 @@ func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	templates.ExecuteTemplate(w, "asbalance.html", map[string]any{
-		"Balance": strconv.Itoa(int(user.Balance)),
+		"Balance":  strconv.Itoa(int(user.Balance)),
+		"Username": ia.String(),
 	})
 }
 
 func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
-	username, ok := h.getSessionUser(r)
+	user, ok := h.getSessionUser(r)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	if r.Method == http.MethodGet {
-		dbUser, err := h.store.GetUser(r.Context(), username)
+		dbUser, err := h.store.GetUser(r.Context(), user.id)
 		if err != nil {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
@@ -195,7 +217,8 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		templates.ExecuteTemplate(w, "balance.html", map[string]any{
-			"Balance": strconv.Itoa(int(dbUser.Balance)),
+			"Username": user.name,
+			"Balance":  strconv.Itoa(int(dbUser.Balance)),
 		})
 		return
 	}
@@ -203,7 +226,7 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 	deposit := r.FormValue("deposit")
 	depositInt, err := strconv.Atoi(deposit)
 	if err != nil || depositInt < 0 {
-		dbUser, err := h.store.GetUser(r.Context(), username)
+		dbUser, err := h.store.GetUser(r.Context(), user.id)
 		if err != nil {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
@@ -213,18 +236,20 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		templates.ExecuteTemplate(w, "balance.html", map[string]any{
-			"Error":   "Invalid deposit amount",
-			"Balance": strconv.Itoa(int(dbUser.Balance)),
+			"Username": user.name,
+			"Error":    "Invalid deposit amount",
+			"Balance":  strconv.Itoa(int(dbUser.Balance)),
 		})
 		return
 	}
-	user, err := h.store.DepositMoneyAndGet(r.Context(), username, int64(depositInt))
+	dbUser, err := h.store.DepositMoneyAndGet(r.Context(), user.id, int64(depositInt))
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 	templates.ExecuteTemplate(w, "balance.html", map[string]any{
-		"Balance": strconv.Itoa(int(user.Balance)),
+		"Username": user.name,
+		"Balance":  strconv.Itoa(int(dbUser.Balance)),
 	})
 }
 
@@ -269,7 +294,10 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := h.generateSessionID()
-	h.sessions[sessionID] = userId
+	h.SetSessionUser(sessionID, User{
+		id:   userId,
+		name: username,
+	})
 
 	http.SetCookie(w, &http.Cookie{
 		Name:  "session_id",
@@ -283,6 +311,36 @@ func (h *Handler) generateSessionID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func (h *Handler) logoutHandler(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session_id")
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.sessions, cookie.Value)
+	http.SetCookie(w, &http.Cookie{
+		Name:   "session_id",
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
+	ascookie, err := r.Cookie("as_session_id")
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	delete(h.asSessions, ascookie.Value)
+	http.SetCookie(w, &http.Cookie{
+		Name:   "as_session_id",
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 // POST /login
@@ -319,7 +377,10 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := h.generateSessionID()
-	h.sessions[sessionID] = dbUser.ID
+	h.SetSessionUser(sessionID, User{
+		id:   dbUser.ID,
+		name: username,
+	})
 
 	http.SetCookie(w, &http.Cookie{
 		Name:  "session_id",
@@ -331,30 +392,34 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
-	userId, ok := h.getSessionUser(r)
+	user, ok := h.getSessionUser(r)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	if r.Method == http.MethodGet {
-		templates.ExecuteTemplate(w, "token.html", map[string]any{})
-		return
-	}
-	dbUser, err := h.store.GetUser(r.Context(), userId)
-	if err != nil {
 		templates.ExecuteTemplate(w, "token.html", map[string]any{
-			"Error": err,
+			"Username": user.name,
 		})
 		return
 	}
-	token, err := h.createToken(strconv.FormatInt(userId, 10), dbUser.TokenVersion)
+	dbUser, err := h.store.GetUser(r.Context(), user.id)
+	if err != nil {
+		templates.ExecuteTemplate(w, "token.html", map[string]any{
+			"Username": user.name,
+			"Error":    err,
+		})
+		return
+	}
+	token, err := h.createToken(strconv.FormatInt(user.id, 10), dbUser.TokenVersion)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 
 	templates.ExecuteTemplate(w, "token.html", map[string]any{
-		"Token": token,
+		"Username": user.name,
+		"Token":    token,
 	})
 }
 
