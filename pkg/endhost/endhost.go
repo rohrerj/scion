@@ -27,6 +27,7 @@ import (
 	"slices"
 
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/endhost/token"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/snet"
@@ -44,7 +45,7 @@ type connectOptions struct {
 	localIASelector func(*Underlays) addr.IA
 	// tls client certificate, might be required for drkey requests
 	tlsCertificate *tls.Certificate
-	token          string
+	tokenProvider  token.Provider
 	localIP        net.IP
 }
 
@@ -79,10 +80,10 @@ func WithLocalIASelector(f func(*Underlays) addr.IA) ConnectOption {
 	}
 }
 
-// If provided, injects the bearer token in the HTTP Authorization header.
-func WithToken(jwt string) ConnectOption {
+// If provided, calls the token provider to retrieve jwt tokens
+func WithTokenProvider(provider token.Provider) ConnectOption {
 	return func(o *connectOptions) {
-		o.token = jwt
+		o.tokenProvider = provider
 	}
 }
 
@@ -109,14 +110,18 @@ func WithClientCert(certs []*x509.Certificate, privKey crypto.PrivateKey) Connec
 }
 
 type authTransport struct {
-	token string
-	base  http.RoundTripper
+	tokenProvider token.Provider
+	base          http.RoundTripper
 }
 
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	if t.token != "" {
-		req.Header.Set("Authorization", "Bearer "+t.token)
+	if t.tokenProvider != nil {
+		token, err := t.tokenProvider.Token(req.Context())
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	return t.base.RoundTrip(req)
 }
@@ -127,7 +132,7 @@ func (c *Connector) setupWebPKI(ctx context.Context, clientCerts []tls.Certifica
 	var err error
 	c.httpClient = &http.Client{
 		Transport: &authTransport{
-			token: c.token,
+			tokenProvider: c.tokenProvider,
 			base: &http.Transport{
 				DialContext: dialContext,
 				TLSClientConfig: &tls.Config{
@@ -166,7 +171,7 @@ func (c *Connector) setupSCIONPKI(ctx context.Context, clientCerts []tls.Certifi
 		log.Debug("setting up endhost-api client by fetching TRC from endhost API server")
 		c.httpClient = &http.Client{
 			Transport: &authTransport{
-				token: c.token,
+				tokenProvider: c.tokenProvider,
 				base: &http.Transport{
 					TLSClientConfig: &tls.Config{
 						InsecureSkipVerify: true,
@@ -198,7 +203,7 @@ func (c *Connector) setupSCIONPKI(ctx context.Context, clientCerts []tls.Certifi
 		// use tlsVerifier.VerifyConnection since this would require setting ServerName
 		c.httpClient = &http.Client{
 			Transport: &authTransport{
-				token: c.token,
+				tokenProvider: c.tokenProvider,
 				base: &http.Transport{
 					TLSClientConfig: &tls.Config{
 						InsecureSkipVerify:    true,
@@ -217,7 +222,7 @@ func (c *Connector) setupSCIONPKI(ctx context.Context, clientCerts []tls.Certifi
 		// now we know the local IA, so we can modify the tls configuration
 		c.httpClient = &http.Client{
 			Transport: &authTransport{
-				token: c.token,
+				tokenProvider: c.tokenProvider,
 				base: &http.Transport{
 					TLSClientConfig: &tls.Config{
 						InsecureSkipVerify:    true,
@@ -234,7 +239,7 @@ func (c *Connector) setupSCIONPKI(ctx context.Context, clientCerts []tls.Certifi
 	} else {
 		c.httpClient = &http.Client{
 			Transport: &authTransport{
-				token: c.token,
+				tokenProvider: c.tokenProvider,
 				base: &http.Transport{
 					TLSClientConfig: &tls.Config{
 						InsecureSkipVerify:    true,
@@ -271,8 +276,8 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 	}
 
 	c := &Connector{
-		api:   api,
-		token: options.token,
+		api:           api,
+		tokenProvider: options.tokenProvider,
 	}
 	clientCerts := []tls.Certificate{}
 	if options.tlsCertificate != nil {
@@ -309,7 +314,7 @@ func NewConnector(ctx context.Context, api string, opts ...ConnectOption) (*Conn
 		// accept any TLS certificate or non-tls connection
 		c.httpClient = &http.Client{
 			Transport: &authTransport{
-				token: c.token,
+				tokenProvider: c.tokenProvider,
 				base: &http.Transport{
 					TLSClientConfig: &tls.Config{
 						InsecureSkipVerify: true,
@@ -352,8 +357,8 @@ type Connector struct {
 	TrustService    *TrustService
 	DRKeyService    *DRKeyService
 	// cached values
-	interfaces map[uint16]netip.AddrPort
-	token      string
+	interfaces    map[uint16]netip.AddrPort
+	tokenProvider token.Provider
 }
 
 // loadTopology is called from NewConnector and uses the underlay service to determine the
