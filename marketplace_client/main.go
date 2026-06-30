@@ -752,8 +752,8 @@ func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdco
 		fmt.Println(err)
 		return
 	}
-	startsAt := readTime(reader, "Starts at (2026-06-23T13:25:36Z): ").UTC().Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity))
-	stopsAt := ceilTime(readTime(reader, "Stops at (2026-06-23T13:25:36Z): ").UTC(), time.Duration(infoRep.Msg.MaxStatisticsGranularity))
+	startsAt := readTime(reader, "Starts at (2026-06-23T13:25:36Z): ").UTC().Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity) * time.Second)
+	stopsAt := ceilTime(readTime(reader, "Stops at (2026-06-23T13:25:36Z): ").UTC(), time.Duration(infoRep.Msg.MaxStatisticsGranularity)*time.Second)
 	stepSize := readUint64(reader, "Step size: ")
 	ingress := readOptionalUint32(reader, "Ingress: ")
 	egress := readOptionalUint32(reader, "Egress: ")
@@ -773,7 +773,7 @@ func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdco
 		fmt.Println(err)
 		return
 	}
-	step := ceilDuration(time.Duration(stepSize)*time.Second, time.Duration(infoRep.Msg.MaxStatisticsGranularity))
+	step := ceilDuration(time.Duration(stepSize)*time.Second, time.Duration(infoRep.Msg.MaxStatisticsGranularity)*time.Second)
 	for i, stat := range resp.Msg.Statistics {
 		intervalStart := startsAt.Add(time.Duration(i) * step)
 		intervalEnd := intervalStart.Add(step)
@@ -1091,7 +1091,7 @@ func handleInfo(ctx context.Context, c hummingbirdconnect.MarketplaceServiceClie
 		fmt.Println(err)
 		return
 	}
-	transform := func(base uint32) string {
+	transform := func(base uint64) string {
 		return fmt.Sprintf("%g%s", float64(base)*math.Pow10(-int(info.Msg.CurrencyExponent)), info.Msg.Currency)
 	}
 	fmt.Printf("Version: %d.%d\nCurrency: %g %s\nPricing strategy: %s\n",
@@ -1170,25 +1170,6 @@ func readOptionalString(reader *bufio.Reader, prompt string, defaultStr *string)
 	}
 
 	return &text
-}
-
-func readOptionalUint64(reader *bufio.Reader, prompt string) *uint64 {
-	fmt.Print(prompt)
-
-	text, _ := reader.ReadString('\n')
-	text = strings.TrimSpace(text)
-
-	if text == "" {
-		return nil
-	}
-
-	v, err := strconv.ParseUint(text, 10, 64)
-	if err != nil {
-		fmt.Println("Invalid uint64")
-		return nil
-	}
-
-	return &v
 }
 
 func readOptionalUint32(reader *bufio.Reader, prompt string) *uint32 {

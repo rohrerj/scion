@@ -51,9 +51,9 @@ type MarketplaceInfo struct {
 	CurrencyExponent             uint32
 	PricingStrategy              hummingbird.PricingStrategy
 	TransactionFeeRelative       float32
-	TransactionFeeAbsolute       uint32
-	SplitCombineFeeAbsolute      uint32
-	DelegationHourlyFee          uint32
+	TransactionFeeAbsolute       uint64
+	SplitCombineFeeAbsolute      uint64
+	DelegationHourlyFee          uint64
 }
 
 func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.MarketplaceStorage, regService *registration.Service, signer *registration.Signer) (*Service, error) {
@@ -150,8 +150,7 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
 	}
-
-	boughtAssetIDs, totalCost, err := s.store.BuyAssets(ctx, user, req.Msg.Assets, req.Msg.MaxPrice, s.info.TransactionFeeAbsolute, s.info.TransactionFeeRelative)
+	boughtAssetIDs, totalCost, err := s.store.BuyAssets(ctx, user, req.Msg.Assets, req.Msg.MaxPrice)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}

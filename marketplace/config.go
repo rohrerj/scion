@@ -56,9 +56,9 @@ type MarketplaceConfig struct {
 	SupportsRedemptionDelegation bool    `toml:"supports_redemption_delegation,omitempty"`
 	CurrencyExponent             uint32  `toml:"currency_exponent,omitempty"`
 	TransactionFeeRelative       float32 `toml:"transaction_fee_relative,omitempty"`
-	TransactionFeeAbsolute       uint32  `toml:"transaction_fee_absolute,omitempty"`
-	SplitCombineFeeAbsolute      uint32  `toml:"split_combine_fee_absolute,omitempty"`
-	DelegationHourlyFee          uint32  `toml:"delegation_hourly_fee,omitempty"`
+	TransactionFeeAbsolute       uint64  `toml:"transaction_fee_absolute,omitempty"`
+	SplitCombineFeeAbsolute      uint64  `toml:"split_combine_fee_absolute,omitempty"`
+	DelegationHourlyFee          uint64  `toml:"delegation_hourly_fee,omitempty"`
 }
 
 func (cfg *MarketplaceConfig) InitDefaults() {

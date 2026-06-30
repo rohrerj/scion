@@ -823,10 +823,10 @@ type MarketplaceInfoResponse struct {
 	MaxStatisticsGranularity     uint32                 `protobuf:"varint,5,opt,name=max_statistics_granularity,json=maxStatisticsGranularity,proto3" json:"max_statistics_granularity,omitempty"`
 	PricingStrategy              PricingStrategy        `protobuf:"varint,6,opt,name=pricing_strategy,json=pricingStrategy,proto3,enum=proto.hummingbird.v1.PricingStrategy" json:"pricing_strategy,omitempty"`
 	TransactionFeeRelative       float32                `protobuf:"fixed32,7,opt,name=transaction_fee_relative,json=transactionFeeRelative,proto3" json:"transaction_fee_relative,omitempty"`
-	TransactionFeeAbsolute       uint32                 `protobuf:"varint,8,opt,name=transaction_fee_absolute,json=transactionFeeAbsolute,proto3" json:"transaction_fee_absolute,omitempty"`
-	SplitCombineFeeAbsolute      uint32                 `protobuf:"varint,9,opt,name=split_combine_fee_absolute,json=splitCombineFeeAbsolute,proto3" json:"split_combine_fee_absolute,omitempty"`
+	TransactionFeeAbsolute       uint64                 `protobuf:"varint,8,opt,name=transaction_fee_absolute,json=transactionFeeAbsolute,proto3" json:"transaction_fee_absolute,omitempty"`
+	SplitCombineFeeAbsolute      uint64                 `protobuf:"varint,9,opt,name=split_combine_fee_absolute,json=splitCombineFeeAbsolute,proto3" json:"split_combine_fee_absolute,omitempty"`
 	SupportsRedemptionDelegation bool                   `protobuf:"varint,10,opt,name=supports_redemption_delegation,json=supportsRedemptionDelegation,proto3" json:"supports_redemption_delegation,omitempty"`
-	DelegationHourlyFee          uint32                 `protobuf:"varint,11,opt,name=delegation_hourly_fee,json=delegationHourlyFee,proto3" json:"delegation_hourly_fee,omitempty"`
+	DelegationHourlyFee          uint64                 `protobuf:"varint,11,opt,name=delegation_hourly_fee,json=delegationHourlyFee,proto3" json:"delegation_hourly_fee,omitempty"`
 	unknownFields                protoimpl.UnknownFields
 	sizeCache                    protoimpl.SizeCache
 }
@@ -910,14 +910,14 @@ func (x *MarketplaceInfoResponse) GetTransactionFeeRelative() float32 {
 	return 0
 }
 
-func (x *MarketplaceInfoResponse) GetTransactionFeeAbsolute() uint32 {
+func (x *MarketplaceInfoResponse) GetTransactionFeeAbsolute() uint64 {
 	if x != nil {
 		return x.TransactionFeeAbsolute
 	}
 	return 0
 }
 
-func (x *MarketplaceInfoResponse) GetSplitCombineFeeAbsolute() uint32 {
+func (x *MarketplaceInfoResponse) GetSplitCombineFeeAbsolute() uint64 {
 	if x != nil {
 		return x.SplitCombineFeeAbsolute
 	}
@@ -931,7 +931,7 @@ func (x *MarketplaceInfoResponse) GetSupportsRedemptionDelegation() bool {
 	return false
 }
 
-func (x *MarketplaceInfoResponse) GetDelegationHourlyFee() uint32 {
+func (x *MarketplaceInfoResponse) GetDelegationHourlyFee() uint64 {
 	if x != nil {
 		return x.DelegationHourlyFee
 	}
@@ -2126,11 +2126,11 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x1amax_statistics_granularity\x18\x05 \x01(\rR\x18maxStatisticsGranularity\x12P\n" +
 	"\x10pricing_strategy\x18\x06 \x01(\x0e2%.proto.hummingbird.v1.PricingStrategyR\x0fpricingStrategy\x128\n" +
 	"\x18transaction_fee_relative\x18\a \x01(\x02R\x16transactionFeeRelative\x128\n" +
-	"\x18transaction_fee_absolute\x18\b \x01(\rR\x16transactionFeeAbsolute\x12;\n" +
-	"\x1asplit_combine_fee_absolute\x18\t \x01(\rR\x17splitCombineFeeAbsolute\x12D\n" +
+	"\x18transaction_fee_absolute\x18\b \x01(\x04R\x16transactionFeeAbsolute\x12;\n" +
+	"\x1asplit_combine_fee_absolute\x18\t \x01(\x04R\x17splitCombineFeeAbsolute\x12D\n" +
 	"\x1esupports_redemption_delegation\x18\n" +
 	" \x01(\bR\x1csupportsRedemptionDelegation\x122\n" +
-	"\x15delegation_hourly_fee\x18\v \x01(\rR\x13delegationHourlyFee\"Q\n" +
+	"\x15delegation_hourly_fee\x18\v \x01(\x04R\x13delegationHourlyFee\"Q\n" +
 	"\x13PublishAssetRequest\x12:\n" +
 	"\x05asset\x18\x01 \x01(\v2$.proto.hummingbird.v1.PublisherAssetR\x05asset\"1\n" +
 	"\x14PublishAssetResponse\x12\x19\n" +

@@ -109,10 +109,10 @@ message MarketplaceInfoResponse {
     uint32 max_statistics_granularity = 5;
     PricingStrategy pricing_strategy = 6;
     float transaction_fee_relative = 7;
-    uint32 transaction_fee_absolute = 8;
-    uint32 split_combine_fee_absolute = 9;
+    uint64 transaction_fee_absolute = 8;
+    uint64 split_combine_fee_absolute = 9;
     bool supports_redemption_delegation = 10;
-    uint32 delegation_hourly_fee = 11;
+    uint64 delegation_hourly_fee = 11;
 }
 
 enum PricingStrategy {
