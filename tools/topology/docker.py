@@ -25,6 +25,8 @@ from topology.common import (
     ArgsTopoDicts,
     docker_host,
     docker_image,
+    http_url,
+    prom_addr,
     sciond_name,
 )
 from topology.docker_utils import DockerUtilsGenArgs, DockerUtilsGenerator
@@ -90,6 +92,7 @@ class DockerGenerator(object):
         self._dispatcher_conf(topo_id, topo, base)
         self._br_conf(topo_id, topo, base)
         self._control_service_conf(topo_id, topo, base)
+        self._hummingbird_conf(topo_id, topo, base)
         self._sciond_conf(topo_id, base)
 
     def _gen_sig(self):
@@ -163,7 +166,7 @@ class DockerGenerator(object):
             self.dc_conf['services'][k] = entry
 
     def _control_service_conf(self, topo_id, topo, base):
-        for k in topo.get("control_service", {}).keys():
+        for k, elem in topo.get("control_service", {}).items():
             entry = {
                 'image':
                 docker_image(self.args, 'control'),
@@ -176,9 +179,48 @@ class DockerGenerator(object):
                     self._cache_vol(),
                     '%s:/etc/scion:ro' % base,
                 ],
-                'command': ['--config', '/etc/scion/%s.toml' % k]
+                'command': ['--config', '/etc/scion/%s.toml' % k],
+                'healthcheck': {
+                    'test': [
+                        'CMD',
+                        '/app/http_ready',
+                        '--url',
+                        http_url(prom_addr(elem['addr'], 30452), '/metrics'),
+                        '--timeout',
+                        '2s',
+                    ],
+                    'interval': '1s',
+                    'timeout': '3s',
+                    'retries': 60,
+                    'start_period': '1s',
+                },
             }
             self.dc_conf['services'][k] = entry
+
+    def _hummingbird_conf(self, topo_id, topo, base):
+        for k in topo.get("control_service", {}).keys():
+            if not k.endswith("-1"):
+                continue
+            name = 'hbird%s' % topo_id.file_fmt()
+            entry = {
+                'image':
+                docker_image(self.args, 'hummingbird'),
+                'depends_on': {
+                    k: {
+                        'condition': 'service_healthy',
+                    },
+                },
+                'network_mode':
+                'service:disp_%s' % k,
+                'user':
+                self.user,
+                'volumes': [
+                    self._cache_vol(),
+                    '%s:/etc/scion:ro' % base,
+                ],
+                'command': ['--config', '/etc/scion/hbird.toml']
+            }
+            self.dc_conf['services'][name] = entry
 
     def _dispatcher_conf(self, topo_id, topo, base):
         image = 'dispatcher'

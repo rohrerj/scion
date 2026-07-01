@@ -19,6 +19,7 @@ package router_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/netip"
@@ -41,6 +42,7 @@ import (
 	"github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/pkg/slayers/path/empty"
 	"github.com/scionproto/scion/pkg/slayers/path/epic"
+	"github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	"github.com/scionproto/scion/pkg/slayers/path/onehop"
 	"github.com/scionproto/scion/pkg/slayers/path/scion"
 	"github.com/scionproto/scion/private/topology"
@@ -48,6 +50,7 @@ import (
 	"github.com/scionproto/scion/router"
 	"github.com/scionproto/scion/router/control"
 	"github.com/scionproto/scion/router/mock_router"
+	pr "github.com/scionproto/scion/router/priority"
 )
 
 var (
@@ -104,6 +107,8 @@ func TestDataPlaneSetKey(t *testing.T) {
 		assert.Error(t, d.SetKey([]byte("dummy key xxxxxx")))
 	})
 }
+
+// deleteme test SetHbirdKey
 
 func TestDataPlaneAddExternalInterface(t *testing.T) {
 	l := control.LinkEnd{
@@ -420,6 +425,7 @@ func TestDataPlaneRun(t *testing.T) {
 
 				assert.NoError(t, ret.SetIA(local))
 				assert.NoError(t, ret.SetKey(key))
+				assert.NoError(t, ret.SetHbirdKey(key))
 				return ret
 			},
 		},
@@ -454,6 +460,7 @@ func TestDataPlaneRun(t *testing.T) {
 					return buffer.Bytes()
 				}
 				assert.NoError(t, ret.SetKey([]byte("randomkeyformacs")))
+				assert.NoError(t, ret.SetHbirdKey([]byte("randomkeyformacs")))
 
 				// We don't care what happens on the internal connection. Sink it.
 				mInternal := mock_router.NewMockBatchConn(ctrl)
@@ -605,6 +612,7 @@ func TestDataPlaneRun(t *testing.T) {
 				mInternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 				assert.NoError(t, ret.SetKey([]byte("randomkeyformacs")))
+				assert.NoError(t, ret.SetHbirdKey([]byte("randomkeyformacs")))
 				// Let the same connection be used for internal and sibling. We only send on the
 				// latter and we don't care what we receive or where.
 				ret.SetConnOpener("udpip", router.MockConnOpener{Ctrl: ctrl, Conn: mInternal})
@@ -678,6 +686,7 @@ func TestDataPlaneRun(t *testing.T) {
 				}
 
 				assert.NoError(t, ret.SetKey([]byte("randomkeyformacs")))
+				assert.NoError(t, ret.SetHbirdKey([]byte("randomkeyformacs")))
 				ret.SetConnOpener("udpip", router.MockConnOpener{Ctrl: ctrl, Conn: mInternal})
 				assert.NoError(t, ret.AddInternalInterface(addr.Host{}, "udpip", "127.0.0.1:0"))
 				ret.SetConnOpener("udpip", router.MockConnOpener{Ctrl: ctrl, Conn: mExternal})
@@ -773,6 +782,7 @@ func TestDataPlaneRun(t *testing.T) {
 				}
 
 				assert.NoError(t, ret.SetKey([]byte("randomkeyformacs")))
+				assert.NoError(t, ret.SetHbirdKey([]byte("randomkeyformacs")))
 				ret.SetConnOpener("udpip", router.MockConnOpener{Ctrl: ctrl, Conn: mInternal})
 				assert.NoError(t, ret.AddInternalInterface(addr.Host{}, "udpip", "127.0.0.1:0"))
 				ret.SetConnOpener("udpip", router.MockConnOpener{Ctrl: ctrl, Conn: mExternal})
@@ -868,7 +878,7 @@ func TestProcessPkt(t *testing.T) {
 				if afterProcessing {
 					dstAddr = &net.UDPAddr{IP: dst.IP().AsSlice(), Port: dstUDPPort}
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -911,7 +921,7 @@ func TestProcessPkt(t *testing.T) {
 				if afterProcessing {
 					dstAddr = &net.UDPAddr{IP: dst.IP().AsSlice(), Port: topology.EndhostPort}
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: discarded,
 		},
@@ -943,7 +953,7 @@ func TestProcessPkt(t *testing.T) {
 					dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].Mac)
 					egress = 1
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -975,7 +985,7 @@ func TestProcessPkt(t *testing.T) {
 					dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].Mac)
 					egress = 2
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1009,7 +1019,7 @@ func TestProcessPkt(t *testing.T) {
 				} else {
 					dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].Mac)
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1076,7 +1086,7 @@ func TestProcessPkt(t *testing.T) {
 					// it is still the same. That is the key behavior.
 					egress = 2
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1148,7 +1158,7 @@ func TestProcessPkt(t *testing.T) {
 					// of HF1 will fail. Otherwise, this isn't visible because we changed segment.
 					egress = 1
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1221,7 +1231,7 @@ func TestProcessPkt(t *testing.T) {
 					dpath.InfoFields[1].UpdateSegID(dpath.HopFields[2].Mac)
 					egress = 2
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1300,7 +1310,7 @@ func TestProcessPkt(t *testing.T) {
 					// this test.
 					dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].Mac)
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1333,7 +1343,7 @@ func TestProcessPkt(t *testing.T) {
 					// The link is specific to the sibling. It has the address. So we don't expect:
 					// dstAddr = &net.UDPAddr{IP: net.ParseIP("10.0.200.200").To4(), Port: 30043}
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1391,7 +1401,7 @@ func TestProcessPkt(t *testing.T) {
 					dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].Mac)
 				}
 
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1433,7 +1443,7 @@ func TestProcessPkt(t *testing.T) {
 						Port: dstUDPPort,
 					}
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1498,7 +1508,7 @@ func TestProcessPkt(t *testing.T) {
 						Port: dstUDPPort,
 					}
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1538,7 +1548,7 @@ func TestProcessPkt(t *testing.T) {
 				}
 				ingress := uint16(2)
 				egress := uint16(21)
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: discarded,
 		},
@@ -1597,7 +1607,7 @@ func TestProcessPkt(t *testing.T) {
 					require.NoError(t, sp.IncPath())
 					egress = 1
 				}
-				return router.NewPacket(toBytes(t, spkt, sp), nil, nil, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, sp), nil, nil, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1640,7 +1650,7 @@ func TestProcessPkt(t *testing.T) {
 					dpath.Info.UpdateSegID(dpath.FirstHop.Mac)
 					egress = 2
 				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress)
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress, pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
@@ -1740,14 +1750,47 @@ func TestProcessPkt(t *testing.T) {
 	}
 }
 
-func assertPktEqual(t *testing.T, a, b *router.Packet) {
+func assertPktEqual(t *testing.T, expected, actual *router.Packet) {
 	// router.Packet.RemoteAddr is declared as unsafe.Pointer, so it can only be compared
 	// by address. That isn't what we want. We want the actual addresses compared. We know that
 	// those addresses are net.UDPAddress because we put them there. So, compare them separately.
-	assert.Equal(t, (*net.UDPAddr)(a.RemoteAddr), (*net.UDPAddr)(b.RemoteAddr))
-	a.RemoteAddr = nil
-	b.RemoteAddr = nil
-	assert.Equal(t, a, b)
+	assert.Equal(t, (*net.UDPAddr)(expected.RemoteAddr), (*net.UDPAddr)(actual.RemoteAddr))
+	expected.RemoteAddr = nil
+	actual.RemoteAddr = nil
+	if !assert.Equal(t, expected, actual) && !bytes.Equal(expected.RawPacket, actual.RawPacket) {
+		p := router.PathFromRawPacket(expected.RawPacket)
+		p = toDecoded(t, p)
+		b, err := json.MarshalIndent(p, "", "    ")
+		require.NoError(t, err)
+		expectedPktDescription := string(b)
+
+		p = router.PathFromRawPacket(actual.RawPacket)
+		p = toDecoded(t, p)
+		b, err = json.MarshalIndent(p, "", "    ")
+		require.NoError(t, err)
+		actualPktDescription := string(b)
+		require.JSONEq(t, expectedPktDescription, actualPktDescription,
+			"JSON description of the Packets.")
+	}
+}
+
+func toDecoded(t *testing.T, p path.Path) path.Path {
+	switch p.Type() {
+	case scion.PathType:
+		scionRaw, ok := p.(*scion.Raw)
+		require.True(t, ok)
+		dec, err := scionRaw.ToDecoded()
+		require.NoError(t, err)
+		return dec
+	case hummingbird.PathType:
+		hbirdRaw, ok := p.(*hummingbird.Raw)
+		require.True(t, ok)
+		dec, err := hbirdRaw.ToDecoded()
+		require.NoError(t, err)
+		return dec
+	default:
+		return p
+	}
 }
 
 func toBytes(t *testing.T, spkt *slayers.SCION, dpath path.Path) []byte {
@@ -1863,7 +1906,7 @@ func toIP(
 	} else {
 		egress = 0
 	}
-	return router.NewPacket(toBytes(t, spkt, path), nil, dstAddr, ingress, egress)
+	return router.NewPacket(toBytes(t, spkt, path), nil, dstAddr, ingress, egress, pr.WithBestEffort)
 }
 
 func computeMAC(t *testing.T, key []byte, info path.InfoField, hf path.HopField) [path.MacLen]byte {

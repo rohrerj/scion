@@ -44,6 +44,7 @@ var (
 	cmd           string
 	features      string
 	epic          bool
+	hummingbird   string
 	useSciond     bool
 	useEndhostAPI bool
 )
@@ -78,6 +79,7 @@ func realMain() int {
 		"-local", "[" + integration.SrcAddrPattern + "]:0",
 		"-remote", "[" + integration.DstAddrPattern + "]:" + integration.ServerPortReplace,
 		fmt.Sprintf("-epic=%t", epic),
+		fmt.Sprintf("-hummingbird=%s", hummingbird),
 	}
 	serverArgs := []string{
 		"-mode", "server",
@@ -128,6 +130,7 @@ func addFlags() {
 	flag.StringVar(&features, "features", "",
 		fmt.Sprintf("enable development features (%v)", feature.String(&feature.Default{}, "|")))
 	flag.BoolVar(&epic, "epic", false, "Enable EPIC.")
+	flag.StringVar(&hummingbird, "hummingbird", "", "Enable Hummingbird with BW,dur (e.g. '3,5s')")
 	flag.BoolVar(&useSciond, "sciond", false,
 		"Use remote SCION daemon instead of standalone daemon. "+
 			"By default, standalone daemon with topology file is used.")
@@ -310,6 +313,7 @@ func clientTemplate(progressSock string) integration.Cmd {
 			"-local", "[" + integration.SrcAddrPattern + "]:0",
 			"-remote", "[" + integration.DstAddrPattern + "]:" + integration.ServerPortReplace,
 			fmt.Sprintf("-epic=%t", epic),
+			fmt.Sprintf("-hummingbird=%s", hummingbird),
 		},
 	}
 	if len(features) != 0 {

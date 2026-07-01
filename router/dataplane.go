@@ -18,6 +18,7 @@ package router
 
 import (
 	"context"
+	"crypto/cipher"
 	"crypto/subtle"
 	"encoding/binary"
 	"errors"
@@ -45,6 +46,7 @@ import (
 	"github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/pkg/slayers/path/empty"
 	"github.com/scionproto/scion/pkg/slayers/path/epic"
+	hbird "github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	"github.com/scionproto/scion/pkg/slayers/path/onehop"
 	"github.com/scionproto/scion/pkg/slayers/path/scion"
 	"github.com/scionproto/scion/pkg/spao"
@@ -53,6 +55,7 @@ import (
 	underlayconn "github.com/scionproto/scion/private/underlay/conn"
 	"github.com/scionproto/scion/router/bfd"
 	"github.com/scionproto/scion/router/control"
+	pr "github.com/scionproto/scion/router/priority"
 )
 
 const (
@@ -120,6 +123,17 @@ const (
 // arch) until SlowpathRequest which is 4 bytes long. The rest is in decreasing order of size and
 // size-aligned. We want to fit neatly into cache lines, so we need to fit in 64 bytes. The padding
 // required to occupy exactly 64 bytes depends on the architecture.
+//
+// Note(juagargi): if the Packet struct grows larger than 64 bytes, it should have a size multiple
+// of 64 bytes. This prevents "false sharing", i.e. having the same bytes being accessed by
+// multiple threads simultaneously, thus failing cache coherence and hurting performance.
+// This "Packet struct alignment to 64 bytes" is achieved through the presence of the field
+// `_ [_pad]byte`. The value `_pad` is computed via a helper struct `alignHelperForPacket`,
+// who contains the same exact fields and in the same order as in Packet.
+// The presence of the _ [_pad]field needs to be not at the last position of the struct for there
+// is a specific case (with _pad==0) where the compiler would add extra padding to avoid pointer
+// aliasing with the next Packet object. The last field in the structure (QueueIndex PriorityLabel)
+// must not introduce additional padding due to its alignment.
 type Packet struct {
 	// The useful part of the raw packet at a point in time (i.e. a slice of the full buffer).  It
 	// can be any portion of the full buffer; not necessarily the start. This code maintains the
@@ -140,9 +154,39 @@ type Packet struct {
 	// The type of traffic. This is used for metrics at the forwarding stage, but is most
 	// economically determined at the processing stage. So store it here. It's 2 bytes long.
 	trafficType trafficType
-	// Pad to 64 bytes. For 64bit arch, add 1 byte. For 32bit arch, add 29 bytes.
-	_ [1 + is32bit*28]byte
+	// The struct padding field cannot be the last field of the struct. This is because if the
+	// helper constant _pad is zero and the field is at the end, the compiler will need to avoid
+	// aliasing this field with the next struct's pointer (e.g. in an array).
+	// Since the real last field of this struct is a byte long, this does't introduce alignment
+	// issues (and thus does not modify the final size of the struct regardless of the value
+	// of _pad). See notes for the Packet struct.
+	_ [_pad]byte
+	// Priority forwarding label: packets with more priority are forwarded first
+	PriorityLabel pr.PriorityLabel
 }
+
+// alignHelperForPacket is only used to compute the initial size of the Packet struct without
+// any extra padding. Since we can't define Packet recursively in terms of Packet without padding,
+// an extra struct is necessary.
+// The alignHelperForPacket fields must be kept in synchrony with Packet.
+type alignHelperForPacket struct {
+	RawPacket       []byte
+	buffer          *[bufSize]byte
+	RemoteAddr      unsafe.Pointer
+	Link            Link
+	slowPathRequest slowPathRequest
+	egress          uint16
+	trafficType     trafficType
+	QueueIndex      pr.PriorityLabel
+}
+
+// Make sure that the packet structure has the size we expect.
+const (
+	_pad = (64 - int(unsafe.Sizeof(alignHelperForPacket{})%64)) % 64
+)
+
+// Fail (negative array size) if the struct is not a multiple of 64.
+var _ [-(int(unsafe.Sizeof(Packet{}) % 64))]byte
 
 // Keep this 4 bytes long. See comment for packet.
 type slowPathRequest struct {
@@ -150,12 +194,6 @@ type slowPathRequest struct {
 	spType  slowPathType
 	code    slayers.SCMPCode
 }
-
-// Make sure that the packet structure has the size we expect.
-const (
-	_ uintptr = 64 - unsafe.Sizeof(Packet{}) // assert 64 >= sizeof(Packet)
-	_ uintptr = unsafe.Sizeof(Packet{}) - 64 // assert sizeof(Packet) >= 64
-)
 
 // initPacket configures the given blank packet (and returns it, for convenience).
 func (p *Packet) init(buffer *[bufSize]byte) *Packet {
@@ -168,8 +206,9 @@ func (p *Packet) init(buffer *[bufSize]byte) *Packet {
 // relative to the buffer, so there's enough headroom for any underlay headers.
 func (p *Packet) reset(headroom int) {
 	*p = Packet{
-		buffer:    p.buffer,            // keep the buffer
-		RawPacket: p.buffer[headroom:], // restore the full packet capacity (minus headroom).
+		buffer:        p.buffer,            // keep the buffer
+		RawPacket:     p.buffer[headroom:], // restore the full packet capacity (minus headroom).
+		PriorityLabel: pr.WithBestEffort,   // Default to best-effort.
 	}
 	// Everything else is reset to zero value.
 }
@@ -228,6 +267,7 @@ type dataPlane struct {
 	neighborIAs         [math.MaxUint16 + 1]addr.IA
 	localHost           addr.Host
 	macFactory          func() hash.Hash
+	prfFactory          func() cipher.Block
 	localIA             addr.IA
 	mtx                 sync.Mutex
 	running             atomic.Bool
@@ -255,6 +295,9 @@ type dataPlane struct {
 	// link layer header. Underlay providers may use the preceding part of the packet buffer to
 	// receive the link layer header.
 	underlayHeadroom int
+
+	// Contains the token buckets for hummingbird bandwidth check.
+	tokenBuckets sync.Map
 }
 
 var (
@@ -433,8 +476,15 @@ func (d *dataPlane) AddInternalInterface(localHost addr.Host, provider, localAdd
 	if internalUnderlay == nil {
 		return serrors.JoinNoStack(errNoSuchUnderlay, nil, "provider", provider)
 	}
+	labels := newMetricLabels(0, d.localIA, "", d.neighborIAs[0])
 	iMetrics := newInterfaceMetrics(d.Metrics, 0, d.localIA, "", d.neighborIAs[0])
-	lk, err := internalUnderlay.NewInternalLink(localAddr, d.RunConfig.BatchSize, iMetrics)
+	qMetrics := NewQueueDepthMetrics(d.Metrics, labels)
+	lk, err := internalUnderlay.NewInternalLink(
+		localAddr,
+		d.RunConfig.BatchSize,
+		iMetrics,
+		qMetrics,
+	)
 	if err != nil {
 		return err
 	}
@@ -483,14 +533,17 @@ func (d *dataPlane) AddExternalInterface(
 	}
 	d.linkTypes[ifID] = link.LinkTo
 
+	labels := newMetricLabels(ifID, d.localIA, "", d.neighborIAs[ifID])
 	iMetrics := newInterfaceMetrics(d.Metrics, ifID, d.localIA, "", d.neighborIAs[ifID])
+	qMetrics := NewQueueDepthMetrics(d.Metrics, labels)
 	lk, err := underlay.NewExternalLink(
 		d.RunConfig.BatchSize,
 		bfd,
 		link.Local.Addr,
 		link.Remote.Addr,
 		ifID,
-		iMetrics)
+		iMetrics,
+		qMetrics)
 	if err != nil {
 		return err
 	}
@@ -632,10 +685,18 @@ func (d *dataPlane) AddNextHop(
 	// Note that a link to the same sibling router might already exist. If so, it will be
 	// returned instead of creating a new one. As a result, the bfd session and metrics will be
 	// ignored and simply garbage collected.
+	labels := newMetricLabels(ifID, d.localIA, link.Remote.Addr, d.neighborIAs[ifID])
 	iMetrics := newInterfaceMetrics(
 		d.Metrics, ifID, d.localIA, link.Remote.Addr, d.neighborIAs[ifID])
+	qMetrics := NewQueueDepthMetrics(d.Metrics, labels)
 	lk, err := underlay.NewSiblingLink(
-		d.RunConfig.BatchSize, bfd, link.Local.Addr, link.Remote.Addr, iMetrics)
+		d.RunConfig.BatchSize,
+		bfd,
+		link.Local.Addr,
+		link.Remote.Addr,
+		iMetrics,
+		qMetrics,
+	)
 	if err != nil {
 		return err
 	}
@@ -850,6 +911,8 @@ func (d *dataPlane) runSlowPathProcessor(id int, q <-chan *Packet) {
 			continue
 		}
 		if !egressLink.Send(p) {
+			sc := ClassOfSize(len(p.RawPacket))
+			p.Link.Metrics()[sc].DroppedPacketsBusyForwarder.Inc()
 			d.packetPool.Put(p)
 		}
 	}
@@ -927,6 +990,8 @@ func (p *slowPathPacketProcessor) processPacket(pkt *Packet) error {
 		if p.path == nil {
 			return errMalformedPath
 		}
+	case hbird.PathType:
+		// Hummingbird slow-path handling is delegated to prepareHbirdSCMP.
 	default:
 		// unsupported path type
 		return serrors.New("Path type not supported for slow-path", "type", pathType)
@@ -968,7 +1033,9 @@ func newPacketProcessor(d *dataPlane) *scionPacketProcessor {
 	p := &scionPacketProcessor{
 		d:              d,
 		mac:            d.macFactory(),
+		prf:            d.prfFactory(),
 		macInputBuffer: make([]byte, max(path.MACBufferSize, libepic.MACBufferSize)),
+		hbirdXkbuffer:  make([]uint32, hbird.XkBufferSize),
 	}
 	p.scionLayer.RecyclePaths()
 	return p
@@ -989,6 +1056,10 @@ func (p *scionPacketProcessor) reset() error {
 	p.hbhLayer = slayers.HopByHopExtnSkipper{}
 	// Reset e2e layer
 	p.e2eLayer = slayers.EndToEndExtnSkipper{}
+	// Hummingbird:
+	p.hbirdPath = nil
+	p.flyoverField = hbird.FlyoverHopField{}
+	p.isFlyoverXover = false
 	return nil
 }
 
@@ -1036,6 +1107,8 @@ func (p *scionPacketProcessor) processPkt(pkt *Packet) disposition {
 		return p.processSCION()
 	case epic.PathType:
 		return p.processEPIC()
+	case hbird.PathType:
+		return p.processHummingbird()
 	default:
 		return errorDiscard("error", errUnsupportedPathType)
 	}
@@ -1131,6 +1204,12 @@ type scionPacketProcessor struct {
 	cachedMac       []byte                 // Full MAC. For a Xover, that of the down segment.
 	macInputBuffer  []byte                 // Reusable buffer for MAC computation.
 	bfdLayer        layers.BFD             // Reusable buffer for parsing BFD messages
+	// Hummingbird specific:
+	prf            cipher.Block          // Hummingbird authentication key derivation
+	hbirdPath      *hbird.Raw            // Raw Hummingbird path. Will be set during processing
+	flyoverField   hbird.FlyoverHopField // Hummingbird flyover field
+	isFlyoverXover bool                  // True if this is a Hummingbird xover flyover
+	hbirdXkbuffer  []uint32              // Reusable buffer for Hummingbird MAC
 }
 
 type slowPathType int8
@@ -1441,11 +1520,17 @@ func (p *scionPacketProcessor) updateNonConsDirIngressSegID() disposition {
 }
 
 func (p *scionPacketProcessor) currentInfoPointer() uint16 {
+	if p.scionLayer.PathType == hbird.PathType {
+		return p.currentHbirdInfoPointer()
+	}
 	return uint16(slayers.CmnHdrLen + p.scionLayer.AddrHdrLen() +
 		scion.MetaLen + path.InfoLen*int(p.path.PathMeta.CurrINF))
 }
 
 func (p *scionPacketProcessor) currentHopPointer() uint16 {
+	if p.scionLayer.PathType == hbird.PathType {
+		return p.currentHbirdHopPointer()
+	}
 	return uint16(slayers.CmnHdrLen + p.scionLayer.AddrHdrLen() +
 		scion.MetaLen + path.InfoLen*p.path.NumINF + path.HopLen*int(p.path.PathMeta.CurrHF))
 }
@@ -2173,7 +2258,12 @@ func (b *bfdSend) Send(bfd *layers.BFD) error {
 	// the forwarding queue is an serious internal error. Let that panic.
 	fwLink := b.dataPlane.interfaces[b.ifID]
 
+	// BFD packets are always marked as priority.
+	p.PriorityLabel = pr.WithPriority
+
 	if !fwLink.Send(p) {
+		sc := ClassOfSize(len(p.RawPacket))
+		fwLink.Metrics()[sc].DroppedPacketsBusyForwarder.Inc()
 		// We do not care if some BFD packets get bounced under high load. If it becomes a problem,
 		// the solution is do use BFD's demand-mode. To be considered in a future refactoring.
 		b.dataPlane.packetPool.Put(p)
@@ -2206,10 +2296,11 @@ func (p *slowPathPacketProcessor) prepareSCMP(
 				"path type", pathType)
 		}
 		path = epicPath.ScionPath
+	case hbird.PathType:
+		return p.prepareHbirdSCMP(typ, code, scmpP, isError)
 	default:
 		return serrors.JoinNoStack(errCannotRoute, nil, "details", "unsupported path type",
 			"path type", pathType)
-
 	}
 	decPath, err := path.ToDecoded()
 	if err != nil {

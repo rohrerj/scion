@@ -57,6 +57,7 @@ local system (if any) are not counted in this number.
 
 **Labels**: ``interface``, ``isd_as`` and ``neighbor_isd_as``.
 
+
 Dropped packets total
 ---------------------
 
@@ -68,6 +69,19 @@ Dropped packets total
 This metric reports the number of packets that were dropped because of errors.
 
 **Labels**: ``interface``, ``isd_as`` and ``neighbor_isd_as``.
+
+Priority forwarded packets total
+--------------------------------
+
+**Name**: ``router_priority_forwarded_pkts_total``
+
+**Type**: Counter
+
+**Description**: Total number of priority packets successfully forwarded by the
+router.
+
+**Labels**: ``interface``, ``isd_as``, ``neighbor_isd_as`` and ``sizeclass``.
+
 
 BFD state changes (inter-AS)
 ----------------------------
@@ -116,6 +130,66 @@ BFD packets sent/received (intra-AS)
 router in the local AS.
 
 **Labels**: ``sibling`` and ``isd_as``.
+
+Hummingbird packets processed total
+-----------------------------------
+
+**Name**: ``router_humm_processed_pkts_total``
+
+**Type**: Counter
+
+**Description**: Total number of Hummingbird packets received by the router
+processor.
+
+**Labels**: ``interface``, ``isd_as``, ``neighbor_isd_as`` and ``sizeclass``.
+
+Hummingbird flyover packets total
+---------------------------------
+
+**Name**: ``router_humm_flyover_pkts_total``
+
+**Type**: Counter
+
+**Description**: Total number of parsed Hummingbird packets with flyover hop
+fields.
+
+**Labels**: ``interface``, ``isd_as``, ``neighbor_isd_as`` and ``sizeclass``.
+
+Hummingbird freshness demotions total
+-------------------------------------
+
+**Name**: ``router_humm_demoted_freshness_total``
+
+**Type**: Counter
+
+**Description**: Total number of Hummingbird packets demoted to best-effort due
+to freshness checks.
+
+**Labels**: ``interface``, ``isd_as``, ``neighbor_isd_as`` and ``sizeclass``.
+
+Hummingbird expiration demotions total
+--------------------------------------
+
+**Name**: ``router_humm_demoted_expired_total``
+
+**Type**: Counter
+
+**Description**: Total number of Hummingbird packets demoted to best-effort due
+to expired reservations.
+
+**Labels**: ``interface``, ``isd_as``, ``neighbor_isd_as`` and ``sizeclass``.
+
+Hummingbird token bucket demotions total
+----------------------------------------
+
+**Name**: ``router_humm_demoted_tokenbucket_total``
+
+**Type**: Counter
+
+**Description**: Total number of Hummingbird packets demoted to best-effort due
+to token bucket checks.
+
+**Labels**: ``interface``, ``isd_as``, ``neighbor_isd_as`` and ``sizeclass``.
 
 Service instance count
 ----------------------

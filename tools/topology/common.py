@@ -34,6 +34,7 @@ SCION_SERVICE_NAMES = (
 
 BS_CONFIG_NAME = 'bs.toml'
 CS_CONFIG_NAME = 'cs.toml'
+HBIRD_CONFIG_NAME = 'hbird.toml'
 PS_CONFIG_NAME = 'ps.toml'
 SD_CONFIG_NAME = 'sd.toml'
 DISP_CONFIG_NAME = 'disp.toml'
@@ -114,6 +115,10 @@ def join_host_port(host: str, port: int) -> str:
     if ip.version == 4:
         return '{}:{}'.format(host, port)
     return '[{}]:{}'.format(host, port)
+
+
+def http_url(addr: str, path: str) -> str:
+    return "http://{}{}".format(addr, path)
 
 
 def sciond_ip(docker, topo_id, networks: Mapping[IPNetwork,

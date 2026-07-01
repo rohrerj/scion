@@ -26,6 +26,7 @@ import (
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/segment/iface"
+	"github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	"github.com/scionproto/scion/private/topology"
 )
 
@@ -39,6 +40,7 @@ type Dataplane interface {
 	AddSvc(ia addr.IA, svc addr.SVC, a addr.Host, port uint16) error
 	DelSvc(ia addr.IA, svc addr.SVC, a addr.Host, port uint16) error
 	SetKey(ia addr.IA, index int, key []byte) error
+	SetHbirdKey(ia addr.IA, index int, key []byte) error
 	SetPortRange(start, end uint16)
 }
 
@@ -135,6 +137,10 @@ func ConfigDataplane(dp Dataplane, cfg *Config) error {
 	if len(cfg.MasterKeys.Key0) > 0 {
 		key0 := DeriveHFMacKey(cfg.MasterKeys.Key0)
 		if err := dp.SetKey(cfg.IA, 0, key0); err != nil {
+			return err
+		}
+		keyHbird := hummingbird.DeriveSecretValue(cfg.MasterKeys.Key0)
+		if err := dp.SetHbirdKey(cfg.IA, 0, keyHbird); err != nil {
 			return err
 		}
 	}

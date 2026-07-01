@@ -25,6 +25,7 @@ import (
 	"github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/pkg/slayers/path/empty"
 	"github.com/scionproto/scion/pkg/slayers/path/epic"
+	"github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	"github.com/scionproto/scion/pkg/slayers/path/onehop"
 	"github.com/scionproto/scion/pkg/slayers/path/scion"
 )
@@ -46,6 +47,7 @@ func init() {
 	scion.RegisterPath()
 	onehop.RegisterPath()
 	epic.RegisterPath()
+	hummingbird.RegisterPath()
 }
 
 // AddrType indicates the type of a host address in the SCION header.
@@ -158,6 +160,13 @@ func (s *SCION) NetworkFlow() gopacket.Flow {
 	return gopacket.Flow{}
 }
 
+// PacketLen returns the full SCION packet length in bytes: common header,
+// address header, path header, and SCION payload. It does not include any
+// outer underlay headers.
+func (s *SCION) PacketLen() uint16 {
+	return uint16(CmnHdrLen+s.AddrHdrLen()+s.Path.Len()) + s.PayloadLen
+}
+
 func (s *SCION) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
 	scnLen := CmnHdrLen + s.AddrHdrLen() + s.Path.Len()
 	if scnLen > MaxHdrLen {
@@ -262,10 +271,11 @@ func (s *SCION) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error {
 func (s *SCION) RecyclePaths() {
 	if s.pathPool == nil {
 		s.pathPool = []path.Path{
-			empty.PathType:  empty.Path{},
-			onehop.PathType: &onehop.Path{},
-			scion.PathType:  &scion.Raw{},
-			epic.PathType:   &epic.Path{},
+			empty.PathType:       empty.Path{},
+			onehop.PathType:      &onehop.Path{},
+			scion.PathType:       &scion.Raw{},
+			epic.PathType:        &epic.Path{},
+			hummingbird.PathType: &hummingbird.Raw{},
 		}
 		s.pathPoolRaw = path.NewRawPath()
 	}

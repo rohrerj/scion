@@ -18,6 +18,7 @@ package router
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"unsafe"
@@ -26,11 +27,14 @@ import (
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/ptr"
+	"github.com/scionproto/scion/pkg/slayers"
+	"github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/private/topology"
 	"github.com/scionproto/scion/private/underlay/conn"
 	"github.com/scionproto/scion/router/bfd"
 	"github.com/scionproto/scion/router/control"
 	"github.com/scionproto/scion/router/mock_router"
+	pr "github.com/scionproto/scion/router/priority"
 )
 
 var (
@@ -45,15 +49,23 @@ func GetMetrics() *Metrics {
 type Disposition disposition
 
 const PDiscard = Disposition(pDiscard)
+const PSlowPath = Disposition(pSlowPath)
+
+type SlowPathRequestView struct {
+	SPType  int8
+	Code    slayers.SCMPCode
+	Pointer uint16
+}
 
 // Implements the link interface minimally
 type MockLink struct {
-	ifID uint16
+	ifID    uint16
+	metrics *InterfaceMetrics
 }
 
 func (l *MockLink) IsUp() bool                                           { return true }
 func (l *MockLink) IfID() uint16                                         { return l.ifID }
-func (l *MockLink) Metrics() *InterfaceMetrics                           { return nil }
+func (l *MockLink) Metrics() *InterfaceMetrics                           { return l.metrics }
 func (l *MockLink) Scope() LinkScope                                     { return Internal }
 func (l *MockLink) BFDSession() *bfd.Session                             { return nil }
 func (l *MockLink) Resolve(p *Packet, host addr.Host, port uint16) error { return nil }
@@ -62,11 +74,23 @@ func (l *MockLink) SendBlocking(p *Packet)                               {}
 
 var _ Link = new(MockLink)
 
-func newMockLink(ingress uint16) Link { return &MockLink{ifID: ingress} }
+func newMockLink(ingress uint16) Link {
+	local := addr.MustParseIA("1-ff00:0:1")
+	neighbor := addr.MustParseIA("1-ff00:0:2")
+	return &MockLink{
+		ifID:    ingress,
+		metrics: newInterfaceMetrics(metrics, ingress, local, "", neighbor),
+	}
+}
 
 // NewPacket makes a mock packet. It has shortcomings which makes it unsuited for some tests: it
 // refers to a mock link that has the scope Internal in all cases, and a blank remote address.
-func NewPacket(raw []byte, src, dst *net.UDPAddr, ingress, egress uint16) *Packet {
+func NewPacket(
+	raw []byte,
+	src, dst *net.UDPAddr,
+	ingress, egress uint16,
+	priority pr.PriorityLabel,
+) *Packet {
 	pktBuf := &([bufSize]byte{})
 	p := Packet{
 		buffer:    pktBuf,
@@ -82,7 +106,23 @@ func NewPacket(raw []byte, src, dst *net.UDPAddr, ingress, egress uint16) *Packe
 	}
 	p.RawPacket = p.RawPacket[:len(raw)]
 	copy(p.RawPacket, raw)
+
+	p.PriorityLabel = priority
+
 	return &p
+}
+
+func PathFromRawPacket(raw []byte) path.Path {
+	scionLayer := &slayers.SCION{}
+
+	lastLayer, err := decodeLayers(raw, scionLayer)
+	if err != nil {
+		panic(err) // deleteme
+	}
+	if lastLayer != scionLayer {
+		panic(fmt.Errorf("scion parsing failed")) // deleteme
+	}
+	return scionLayer.Path
 }
 
 // MockConnOpener implements the udpip ConnOpener interface with a method that returns a mock
@@ -126,7 +166,8 @@ func mustMakeDP(
 	internalNextHops map[uint16]netip.AddrPort,
 	local addr.IA,
 	neighbors map[uint16]addr.IA,
-	key []byte) (dp dataPlane) {
+	key []byte,
+	hbirdKey []byte) (dp dataPlane) {
 
 	dp = makeDataPlane(RunConfig{NumProcessors: 1, BatchSize: 64}, false)
 
@@ -202,6 +243,9 @@ func mustMakeDP(
 	if err := dp.SetKey(key); err != nil {
 		panic(err)
 	}
+	if err := dp.SetHbirdKey(hbirdKey); err != nil {
+		panic(err)
+	}
 
 	// The rest is normally done by Run(); it is up to the invoking test:
 	// add packet pool
@@ -224,7 +268,7 @@ func newDP(
 	neighbors map[uint16]addr.IA,
 	key []byte) *dataPlane {
 
-	dp := mustMakeDP(external, linkTypes, connOpener, internalNextHops, local, neighbors, key)
+	dp := mustMakeDP(external, linkTypes, connOpener, internalNextHops, local, neighbors, key, key)
 	return &dp
 }
 
@@ -246,7 +290,23 @@ func NewDP(
 	key []byte) *DataPlane {
 
 	return &DataPlane{
-		mustMakeDP(external, linkTypes, connOpener, internalNextHops, local, neighbors, key),
+		*newDP(external, linkTypes, connOpener, internalNextHops, local, neighbors, key),
+	}
+}
+
+func NewDPWithHummingbirdKey(
+	external []uint16,
+	linkTypes map[uint16]topology.LinkType,
+	connOpener any, // Some implementation of BatchConnOpener, or nil for the default.
+	internalNextHops map[uint16]netip.AddrPort,
+	local addr.IA,
+	neighbors map[uint16]addr.IA,
+	key []byte,
+	hbirdKey []byte) *DataPlane {
+
+	return &DataPlane{
+		mustMakeDP(external, linkTypes, connOpener, internalNextHops, local, neighbors,
+			key, hbirdKey),
 	}
 }
 
@@ -274,8 +334,25 @@ func (d *DataPlane) ProcessPkt(pkt *Packet) Disposition {
 	return Disposition(disp)
 }
 
+func (d *DataPlane) ProcessSlowPath(pkt *Packet) error {
+	p := newSlowPathProcessor(&d.dataPlane)
+	return p.processPacket(pkt)
+}
+
+func ExtractSlowPathRequest(pkt *Packet) SlowPathRequestView {
+	return SlowPathRequestView{
+		SPType:  int8(pkt.slowPathRequest.spType),
+		Code:    pkt.slowPathRequest.code,
+		Pointer: pkt.slowPathRequest.pointer,
+	}
+}
+
 func ExtractServices(s *Services[netip.AddrPort]) map[addr.SVC][]netip.AddrPort {
 	return s.m
+}
+
+func ExtractInterfaces(dp *DataPlane) [math.MaxUint16 + 1]Link {
+	return dp.dataPlane.interfaces
 }
 
 // We cannot know which tests are going to mock which underlay and what the opener's
