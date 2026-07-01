@@ -202,12 +202,13 @@ func testSCION(remoteAS, rpcType string) {
 		// 	LocalIA: topo.IA(),
 		// 	LocalIP: clientAddr.IP,
 		// }),*/
+		path.WithDaemonConnector(sd),
 	}
 	dstIA, err := addr.ParseIA(remoteAS)
 	if err != nil {
 		fmt.Printf("parsing the remote IA \"%s\": %s\n", remoteAS, err)
 	}
-	path, err := path.Choose(ctx, sd, dstIA, opts...)
+	path, err := path.Choose(ctx, dstIA, opts...)
 	if err != nil {
 		fmt.Printf("choosing paths: %s\n", err)
 		return
