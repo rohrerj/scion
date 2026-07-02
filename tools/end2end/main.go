@@ -46,8 +46,7 @@ import (
 	"github.com/scionproto/scion/pkg/daemon"
 	daemontypes "github.com/scionproto/scion/pkg/daemon/types"
 	"github.com/scionproto/scion/pkg/endhost"
-	hummpkg "github.com/scionproto/scion/pkg/hummingbird"
-	"github.com/scionproto/scion/pkg/hummingbird/redemption"
+	"github.com/scionproto/scion/pkg/hummingbird/marketplace"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/common"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -91,6 +90,8 @@ var (
 	hummingbird            string                // e.g. for BW=1, duration=5s do "1,5s"
 	hummKeysDir            string                // deleteme for testing purposes only
 	hummParams             hummingbirdParameters // derived from the string in hummingbird
+	marketplaceUrl         string
+	marketplaceToken       string
 )
 
 func main() {
@@ -130,6 +131,8 @@ func addFlags() {
 	flag.StringVar(&hummingbird, "hummingbird", "", "Enable Hummingbird with BW,dur (e.g. '3,5s')")
 	flag.StringVar(&hummKeysDir, "hummKeysDir", "",
 		"Root directory containing AS*/keys/master0.key files for Hummingbird")
+	flag.StringVar(&marketplaceUrl, "marketplace", "", "Url to the hummingbird marketplace")
+	flag.StringVar(&marketplaceToken, "marketplace_token", "", "JWT token to use the marketplace")
 }
 
 func validateFlags() {
@@ -175,7 +178,7 @@ func validateFlags() {
 		}
 	}
 	log.Info("Flags", "timeout", timeout, "epic", epic, "hummingbird", hummingbird,
-		"humm_keys_dir", hummKeysDir, "remote", remote)
+		"humm_keys_dir", hummKeysDir, "remote", remote, "marketplaceUrl", marketplaceUrl)
 }
 
 type server struct{}
@@ -302,10 +305,11 @@ type client struct {
 
 	errorPaths map[snet.PathFingerprint]struct{}
 	// Specific to Hummingbird:
-	useHummingbird bool
-	hummKeysDir    string
-	hummParams     hummingbirdParameters
-	hummSVByIA     map[addr.IA][]byte
+	useHummingbird      bool
+	hummKeysDir         string
+	hummParams          hummingbirdParameters
+	hummSVByIA          map[addr.IA][]byte
+	marketplaceMaxPrice uint64
 }
 
 func (c *client) run() int {
@@ -350,6 +354,7 @@ func (c *client) run() int {
 	c.hummKeysDir = hummKeysDir
 	c.hummParams = hummParams
 	c.hummSVByIA = make(map[addr.IA][]byte)
+	c.marketplaceMaxPrice = 1<<64 - 1 //TODO
 	log.Info("Send", "local",
 		fmt.Sprintf("%v,[%v] -> %v,[%v]",
 			integration.Local.IA, integration.Local.Host,
@@ -529,13 +534,15 @@ func (c *client) buildReservationWithRedemptions(
 	path snet.Path,
 	now time.Time,
 ) (*snetpath.Reservation, error) {
-	return redemption.OneShotReservation(ctx, c.sdConn, integration.Local.Host.IP, path,
+	return marketplace.OneShotReservation(ctx, c.sdConn, c.network.Topology, marketplaceUrl, marketplaceToken,
+		uint32(hummParams.Bw), now, now.Add(time.Duration(hummParams.Duration)*time.Second), 1024, path)
+	/*return redemption.OneShotReservation(ctx, c.sdConn, integration.Local.Host.IP, path,
 		hummpkg.RedemptionRequestNoHop{
 			StartTime: uint32(now.Unix()),
 			Bw:        hummParams.Bw,
 			Duration:  hummParams.Duration,
 		},
-	)
+	)*/
 }
 
 func (c *client) buildReservationWithSecretValues(

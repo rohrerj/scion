@@ -36,17 +36,19 @@ import (
 )
 
 var (
-	subset        string
-	attempts      int
-	timeout       = &util.DurWrap{Duration: 10 * time.Second}
-	parallelism   int
-	name          string
-	cmd           string
-	features      string
-	epic          bool
-	hummingbird   string
-	useSciond     bool
-	useEndhostAPI bool
+	subset           string
+	attempts         int
+	timeout          = &util.DurWrap{Duration: 10 * time.Second}
+	parallelism      int
+	name             string
+	cmd              string
+	features         string
+	epic             bool
+	hummingbird      string
+	marketplaceUrl   string
+	marketplaceToken string
+	useSciond        bool
+	useEndhostAPI    bool
 )
 
 func getCmd() (string, bool) {
@@ -80,6 +82,8 @@ func realMain() int {
 		"-remote", "[" + integration.DstAddrPattern + "]:" + integration.ServerPortReplace,
 		fmt.Sprintf("-epic=%t", epic),
 		fmt.Sprintf("-hummingbird=%s", hummingbird),
+		fmt.Sprintf("-marketplace=%s", marketplaceUrl),
+		fmt.Sprintf("-marketplace_token=%s", marketplaceToken),
 	}
 	serverArgs := []string{
 		"-mode", "server",
@@ -131,6 +135,8 @@ func addFlags() {
 		fmt.Sprintf("enable development features (%v)", feature.String(&feature.Default{}, "|")))
 	flag.BoolVar(&epic, "epic", false, "Enable EPIC.")
 	flag.StringVar(&hummingbird, "hummingbird", "", "Enable Hummingbird with BW,dur (e.g. '3,5s')")
+	flag.StringVar(&marketplaceUrl, "marketplace", "", "Url to the hummingbird marketplace")
+	flag.StringVar(&marketplaceToken, "marketplace_token", "", "JWT token to use the marketplace")
 	flag.BoolVar(&useSciond, "sciond", false,
 		"Use remote SCION daemon instead of standalone daemon. "+
 			"By default, standalone daemon with topology file is used.")
@@ -314,6 +320,8 @@ func clientTemplate(progressSock string) integration.Cmd {
 			"-remote", "[" + integration.DstAddrPattern + "]:" + integration.ServerPortReplace,
 			fmt.Sprintf("-epic=%t", epic),
 			fmt.Sprintf("-hummingbird=%s", hummingbird),
+			fmt.Sprintf("-marketplace=%s", marketplaceUrl),
+			fmt.Sprintf("-marketplace_token=%s", marketplaceToken),
 		},
 	}
 	if len(features) != 0 {

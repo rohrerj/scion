@@ -462,7 +462,7 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 		args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()))
 	}
 	if params.StartsAt != nil {
-		where = append(where, "(starts_at<?)")
+		where = append(where, "(starts_at<=?)")
 		args = append(args, *params.StartsAt)
 	}
 	if params.StopsAt != nil {
