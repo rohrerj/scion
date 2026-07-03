@@ -731,7 +731,7 @@ func (e *executor) InsertReservation(ctx context.Context, r *DBReservation) (int
 		return 0, serrors.New("No database open")
 	}
 	q := `INSERT INTO Reservations (id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key, owner_id)
-		VALUES(?,?,?,?,?,?,?,?,?,?)`
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)`
 	res, err := e.write.ExecContext(ctx, q, r.ID, r.IA.ISD(), r.IA.AS(), r.Ingress, r.Egress, r.Bandwidth, r.EncodedBandwidth,
 		r.StartsAt.UTC().Format(time.RFC3339), r.StopsAt.UTC().Format(time.RFC3339),
 		r.Key, r.OwnerId)
