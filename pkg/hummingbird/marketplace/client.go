@@ -265,7 +265,7 @@ func (c *MarketplaceClient) findExistingReservations(ctx context.Context, pairs 
 					Flyover: &snetpath.FlyoverData{
 						ResID:     r.ReservationId,
 						Ak:        [16]byte(r.AuthenticationKey),
-						Bw:        uint16(r.Bandwidth),
+						Bw:        uint16(r.DataplaneEncoding),
 						StartTime: uint32(r.StartsAt.Seconds),
 						Duration:  uint16(r.StopsAt.Seconds - r.StartsAt.Seconds),
 					},
