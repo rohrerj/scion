@@ -20,6 +20,7 @@ go_library(
         "//pkg/endhost:go_default_library",
         "//pkg/hummingbird/registration:go_default_library",
         "//pkg/log:go_default_library",
+        "//pkg/slayers/path/hummingbird:go_default_library",
         "//pkg/private/serrors:go_default_library",
         "//pkg/proto/hummingbird:go_default_library",
         "//pkg/scrypto/cppki:go_default_library",

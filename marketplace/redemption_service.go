@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
-	"encoding/binary"
 	"fmt"
 	"slices"
 	"sort"
@@ -29,6 +28,7 @@ import (
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
+	hbird "github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 )
 
 const (
@@ -172,7 +172,7 @@ func (s *RedemptionService) handleRequest(r *hummingbird.RedeemAssetFromASReques
 	encoded_bw := s.encodeBandwidth(r.Bandwidth)
 
 	var buff [16]byte
-	ak := s.deriveAuthKey(s.cipher, resId, encoded_bw, uint16(r.IngressId), uint16(r.EgressId), unixStart, uint16(durSeconds), buff[:])
+	ak := hbird.DeriveAuthKey(s.cipher, resId, encoded_bw, uint16(r.IngressId), uint16(r.EgressId), unixStart, uint16(durSeconds), buff[:])
 	s.client.mtx.Lock()
 	ch, ok := s.Pending[r.RequestId]
 	if ok {
@@ -196,34 +196,6 @@ func (s *RedemptionService) encodeBandwidth(bw uint32) uint16 {
 	return uint16(sort.Search(len(s.encodingPoints), func(i int) bool {
 		return s.encodingPoints[i] >= bw
 	}))
-}
-
-// DeriveAuthKey: copied and slightly modified from https://github.com/juagargi/scion/blob/hummingbird-endhost/pkg/slayers/path/hummingbird/mac.go
-func (s *RedemptionService) deriveAuthKey(
-	block cipher.Block,
-	resId uint32,
-	bw uint16,
-	in uint16,
-	eg uint16,
-	startTime uint32,
-	resDuration uint16,
-	buffer []byte,
-) []byte {
-
-	// Bounds check.
-	_ = buffer[AkBufferSize-1]
-
-	// Prepare input buffer.
-	binary.BigEndian.PutUint16(buffer[0:2], in)
-	binary.BigEndian.PutUint16(buffer[2:4], eg)
-	binary.BigEndian.PutUint32(buffer[4:8], resId<<10|uint32(bw))
-	binary.BigEndian.PutUint32(buffer[8:12], startTime)
-	binary.BigEndian.PutUint16(buffer[12:14], resDuration)
-	binary.BigEndian.PutUint16(buffer[14:16], 0) //padding
-
-	// Should XOR input with iv, but we use iv = 0 => identity
-	block.Encrypt(buffer[0:16], buffer[0:16])
-	return buffer[0:AkBufferSize]
 }
 
 // this is a very simple reservation ID store that never reuses the same ID and does not

@@ -535,7 +535,7 @@ func (c *client) buildReservationWithRedemptions(
 	now time.Time,
 ) (*snetpath.Reservation, error) {
 	return marketplace.OneShotReservation(ctx, c.sdConn, c.network.Topology, marketplaceUrl, marketplaceToken,
-		uint32(hummParams.Bw), now, now.Add(time.Duration(hummParams.Duration)*time.Second), 1024, path)
+		uint32(hummParams.Bw), now, now.Add(time.Duration(hummParams.Duration)*time.Second), c.marketplaceMaxPrice, path)
 	/*return redemption.OneShotReservation(ctx, c.sdConn, integration.Local.Host.IP, path,
 		hummpkg.RedemptionRequestNoHop{
 			StartTime: uint32(now.Unix()),
