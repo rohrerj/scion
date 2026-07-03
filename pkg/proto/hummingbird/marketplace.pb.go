@@ -1971,9 +1971,10 @@ type Reservation struct {
 	IngressId         uint32                 `protobuf:"varint,3,opt,name=ingress_id,json=ingressId,proto3" json:"ingress_id,omitempty"`
 	EgressId          uint32                 `protobuf:"varint,4,opt,name=egress_id,json=egressId,proto3" json:"egress_id,omitempty"`
 	Bandwidth         uint32                 `protobuf:"varint,5,opt,name=bandwidth,proto3" json:"bandwidth,omitempty"`
-	StartsAt          *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
-	StopsAt           *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
-	AuthenticationKey []byte                 `protobuf:"bytes,8,opt,name=authentication_key,json=authenticationKey,proto3" json:"authentication_key,omitempty"`
+	DataplaneEncoding uint32                 `protobuf:"varint,6,opt,name=dataplane_encoding,json=dataplaneEncoding,proto3" json:"dataplane_encoding,omitempty"`
+	StartsAt          *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=starts_at,json=startsAt,proto3" json:"starts_at,omitempty"`
+	StopsAt           *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=stops_at,json=stopsAt,proto3" json:"stops_at,omitempty"`
+	AuthenticationKey []byte                 `protobuf:"bytes,9,opt,name=authentication_key,json=authenticationKey,proto3" json:"authentication_key,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -2039,6 +2040,13 @@ func (x *Reservation) GetEgressId() uint32 {
 func (x *Reservation) GetBandwidth() uint32 {
 	if x != nil {
 		return x.Bandwidth
+	}
+	return 0
+}
+
+func (x *Reservation) GetDataplaneEncoding() uint32 {
+	if x != nil {
+		return x.DataplaneEncoding
 	}
 	return 0
 }
@@ -2230,17 +2238,18 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"_starts_atB\v\n" +
 	"\t_stops_at\"b\n" +
 	"\x19FetchReservationsResponse\x12E\n" +
-	"\freservations\x18\x01 \x03(\v2!.proto.hummingbird.v1.ReservationR\freservations\"\xbd\x02\n" +
+	"\freservations\x18\x01 \x03(\v2!.proto.hummingbird.v1.ReservationR\freservations\"\xec\x02\n" +
 	"\vReservation\x12%\n" +
 	"\x0ereservation_id\x18\x01 \x01(\rR\rreservationId\x12\x0e\n" +
 	"\x02ia\x18\x02 \x01(\x04R\x02ia\x12\x1d\n" +
 	"\n" +
 	"ingress_id\x18\x03 \x01(\rR\tingressId\x12\x1b\n" +
 	"\tegress_id\x18\x04 \x01(\rR\begressId\x12\x1c\n" +
-	"\tbandwidth\x18\x05 \x01(\rR\tbandwidth\x127\n" +
-	"\tstarts_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
-	"\bstops_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12-\n" +
-	"\x12authentication_key\x18\b \x01(\fR\x11authenticationKey*:\n" +
+	"\tbandwidth\x18\x05 \x01(\rR\tbandwidth\x12-\n" +
+	"\x12dataplane_encoding\x18\x06 \x01(\rR\x11dataplaneEncoding\x127\n" +
+	"\tstarts_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
+	"\bstops_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12-\n" +
+	"\x12authentication_key\x18\t \x01(\fR\x11authenticationKey*:\n" +
 	"\x0fPricingStrategy\x12\x12\n" +
 	"\x0estatic_pricing\x10\x00\x12\x13\n" +
 	"\x0fdynamic_pricing\x10\x012\xa4\b\n" +

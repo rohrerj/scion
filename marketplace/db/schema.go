@@ -47,6 +47,7 @@ const (
 		ingress INTEGER NOT NULL,
 		egress INTEGER NOT NULL,
 		bandwidth INTEGER NOT NULL,
+		bw_encoded INTEGER NOT NULL,
 		starts_at TEXT NOT NULL,
 		stops_at TEXT NOT NULL,
 		key BLOB NOT NULL,

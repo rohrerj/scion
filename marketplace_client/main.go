@@ -878,6 +878,7 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 		IngressId uint32
 		EgressId  uint32
 		Bw        uint32
+		EncodedBw uint16
 		StartsAt  time.Time
 		StopsAt   time.Time
 		Ak        []byte
@@ -890,6 +891,7 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 			IngressId: res.IngressId,
 			EgressId:  res.EgressId,
 			Bw:        res.Bandwidth,
+			EncodedBw: uint16(res.DataplaneEncoding),
 			StartsAt:  res.StartsAt.AsTime(),
 			StopsAt:   res.StopsAt.AsTime(),
 			Ak:        res.AuthenticationKey,

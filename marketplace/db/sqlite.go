@@ -129,7 +129,7 @@ func (e *executor) FetchReservations(ctx context.Context, params *ReservationQue
 		var stopsAtString string
 		var isd uint16
 		var as uint64
-		err = rows.Scan(&a.ID, &isd, &as, &a.Ingress, &a.Egress, &a.Bandwidth, &startsAtString, &stopsAtString, &a.Key)
+		err = rows.Scan(&a.ID, &isd, &as, &a.Ingress, &a.Egress, &a.Bandwidth, &a.EncodedBandwidth, &startsAtString, &stopsAtString, &a.Key)
 		if err != nil {
 			return nil, serrors.Wrap("Error reading DB response", err)
 		}
@@ -151,7 +151,7 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 	var args []any
 	where := []string{}
 	query := []string{
-		"SELECT id, isd_id, as_id, ingress, egress, bandwidth, starts_at, stops_at, key FROM Reservations",
+		"SELECT id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key FROM Reservations",
 	}
 	where = append(where, "(owner_id = ?)")
 	args = append(args, params.OwnerId)
@@ -730,9 +730,9 @@ func (e *executor) InsertReservation(ctx context.Context, r *DBReservation) (int
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	q := `INSERT INTO Reservations (id, isd_id, as_id, ingress, egress, bandwidth, starts_at, stops_at, key, owner_id)
+	q := `INSERT INTO Reservations (id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key, owner_id)
 		VALUES(?,?,?,?,?,?,?,?,?,?)`
-	res, err := e.write.ExecContext(ctx, q, r.ID, r.IA.ISD(), r.IA.AS(), r.Ingress, r.Egress, r.Bandwidth,
+	res, err := e.write.ExecContext(ctx, q, r.ID, r.IA.ISD(), r.IA.AS(), r.Ingress, r.Egress, r.Bandwidth, r.EncodedBandwidth,
 		r.StartsAt.UTC().Format(time.RFC3339), r.StopsAt.UTC().Format(time.RFC3339),
 		r.Key, r.OwnerId)
 	if err != nil {
