@@ -357,40 +357,27 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 	if err != nil {
 		return 0, 0, serrors.Join(err, tx.Rollback())
 	}
-	var requestedSplit []RequestedSplit
+	var requestedSplit RequestedSplit
 
 	if bwSplit != nil {
-		requestedSplit = []RequestedSplit{
-			{
-				ExactBandwidth: *bwSplit,
-				ExactFrom:      dbAsset.StartAt,
-				ExactTo:        dbAsset.StopsAt,
-			},
-			{
-				ExactBandwidth: dbAsset.Bandwidth - *bwSplit,
-				ExactFrom:      dbAsset.StartAt,
-				ExactTo:        dbAsset.StopsAt,
-			},
+		requestedSplit = RequestedSplit{
+			ExactBandwidth: *bwSplit,
+			ExactFrom:      dbAsset.StartAt,
+			ExactTo:        dbAsset.StopsAt,
 		}
+
 	} else {
-		requestedSplit = []RequestedSplit{
-			{
-				ExactBandwidth: dbAsset.Bandwidth,
-				ExactFrom:      dbAsset.StartAt,
-				ExactTo:        *timeSplit,
-			},
-			{
-				ExactBandwidth: dbAsset.Bandwidth,
-				ExactFrom:      *timeSplit,
-				ExactTo:        dbAsset.StopsAt,
-			},
+		requestedSplit = RequestedSplit{
+			ExactBandwidth: dbAsset.Bandwidth,
+			ExactFrom:      dbAsset.StartAt,
+			ExactTo:        *timeSplit,
 		}
 	}
 	splitResult, err := SplitAsset(dbAsset, requestedSplit)
 	if err != nil {
 		return 0, 0, serrors.Join(err, tx.Rollback())
 	}
-	if !(len(splitResult.Bought) == 2 && len(splitResult.Unused) == 0) {
+	if len(splitResult.Remainders) != 1 {
 		return 0, 0, serrors.Join(serrors.New("invalid split result"), tx.Rollback())
 	}
 	asset1 := &marketplacedb.DBAsset{
@@ -403,9 +390,9 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 		TimeMinDuration: dbAsset.TimeMinDuration,
 		IfIdIngress:     dbAsset.IfIdIngress,
 		IfIdEgress:      dbAsset.IfIdEgress,
-		Bandwidth:       splitResult.Bought[0].Bandwidth,
-		StartAt:         splitResult.Bought[0].StartAt,
-		StopsAt:         splitResult.Bought[0].StopAt,
+		Bandwidth:       splitResult.Split.Bandwidth,
+		StartAt:         splitResult.Split.StartsAt,
+		StopsAt:         splitResult.Split.StopsAt,
 	}
 	asset2 := &marketplacedb.DBAsset{
 		OwnerId:         dbAsset.OwnerId,
@@ -417,9 +404,9 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 		TimeMinDuration: dbAsset.TimeMinDuration,
 		IfIdIngress:     dbAsset.IfIdIngress,
 		IfIdEgress:      dbAsset.IfIdEgress,
-		Bandwidth:       splitResult.Bought[1].Bandwidth,
-		StartAt:         splitResult.Bought[1].StartAt,
-		StopsAt:         splitResult.Bought[1].StopAt,
+		Bandwidth:       splitResult.Remainders[0].Bandwidth,
+		StartAt:         splitResult.Remainders[0].StartsAt,
+		StopsAt:         splitResult.Remainders[0].StopsAt,
 	}
 	err = tx.RemoveAsset(ctx, assetId)
 	if err != nil {
@@ -474,57 +461,53 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, asset
 		if err != nil {
 			return nil, 0, serrors.Join(err, tx.Rollback())
 		}
-		split, err := SplitAsset(dbAsset, []RequestedSplit{
-			{
-				ExactFrom:      asset.StartsAtExactly.AsTime(),
-				ExactTo:        asset.StopsAtExactly.AsTime(),
-				ExactBandwidth: asset.BandwidthExact,
-			},
+		split, err := SplitAsset(dbAsset, RequestedSplit{
+			ExactFrom:      asset.StartsAtExactly.AsTime(),
+			ExactTo:        asset.StopsAtExactly.AsTime(),
+			ExactBandwidth: asset.BandwidthExact,
 		})
 		if err != nil {
 			return nil, 0, serrors.Join(err, tx.Rollback())
 		}
-		for _, segment := range split.Bought {
-			newAsset := &marketplacedb.DBAsset{
-				OwnerId: sql.NullInt64{
-					Int64: user_id,
-					Valid: true,
-				},
-				IA:              dbAsset.IA,
-				BandwidthMin:    dbAsset.BandwidthMin,
-				BandwidthMax:    dbAsset.BandwidthMax,
-				TimeGranularity: dbAsset.TimeGranularity,
-				TimeMinDuration: dbAsset.TimeMinDuration,
-				IfIdIngress:     dbAsset.IfIdIngress,
-				IfIdEgress:      dbAsset.IfIdEgress,
-				Bandwidth:       segment.Bandwidth,
-				StartAt:         segment.StartAt,
-				StopsAt:         segment.StopAt,
-				Price:           dbAsset.Price,
-			}
-			id, err := tx.InsertAsset(ctx, newAsset)
-			if err != nil {
-				return nil, 0, serrors.Join(err, tx.Rollback())
-			}
-			totalAssetPrice, fee, safe := s.totalPrice(dbAsset.Price, segment.Bandwidth, segment.StartAt, segment.StopAt)
-			if !safe {
-				return nil, 0, serrors.Join(serrors.New("total asset price would lead to integer overflow"), tx.Rollback())
-			}
-			pricePlusFee, safe := addInt64(totalAssetPrice, fee)
-			if !safe {
-				return nil, 0, serrors.Join(serrors.New("total asset price would lead to integer overflow"), tx.Rollback())
-			}
-			_, err = tx.UpdateASMoney(ctx, dbAsset.IA, totalAssetPrice)
-			if err != nil {
-				return nil, 0, serrors.Join(err, tx.Rollback())
-			}
-			costAcc, safe = addInt64(costAcc, pricePlusFee) // currently fee is deducted but the marketplace cannot really see their actual income
-			if !safe {
-				return nil, 0, serrors.Join(serrors.New("total asset price would lead to integer overflow"), tx.Rollback())
-			}
-			boughtAssets = append(boughtAssets, id)
+		newAsset := &marketplacedb.DBAsset{
+			OwnerId: sql.NullInt64{
+				Int64: user_id,
+				Valid: true,
+			},
+			IA:              dbAsset.IA,
+			BandwidthMin:    dbAsset.BandwidthMin,
+			BandwidthMax:    dbAsset.BandwidthMax,
+			TimeGranularity: dbAsset.TimeGranularity,
+			TimeMinDuration: dbAsset.TimeMinDuration,
+			IfIdIngress:     dbAsset.IfIdIngress,
+			IfIdEgress:      dbAsset.IfIdEgress,
+			Bandwidth:       split.Split.Bandwidth,
+			StartAt:         split.Split.StartsAt,
+			StopsAt:         split.Split.StopsAt,
+			Price:           dbAsset.Price,
 		}
-		for _, segment := range split.Unused {
+		id, err := tx.InsertAsset(ctx, newAsset)
+		if err != nil {
+			return nil, 0, serrors.Join(err, tx.Rollback())
+		}
+		totalAssetPrice, fee, safe := s.totalPrice(dbAsset.Price, split.Split.Bandwidth, split.Split.StartsAt, split.Split.StopsAt)
+		if !safe {
+			return nil, 0, serrors.Join(serrors.New("total asset price would lead to integer overflow"), tx.Rollback())
+		}
+		pricePlusFee, safe := addInt64(totalAssetPrice, fee)
+		if !safe {
+			return nil, 0, serrors.Join(serrors.New("total asset price would lead to integer overflow"), tx.Rollback())
+		}
+		_, err = tx.UpdateASMoney(ctx, dbAsset.IA, totalAssetPrice)
+		if err != nil {
+			return nil, 0, serrors.Join(err, tx.Rollback())
+		}
+		costAcc, safe = addInt64(costAcc, pricePlusFee) // currently fee is deducted but the marketplace cannot really see their actual income
+		if !safe {
+			return nil, 0, serrors.Join(serrors.New("total asset price would lead to integer overflow"), tx.Rollback())
+		}
+		boughtAssets = append(boughtAssets, id)
+		for _, segment := range split.Remainders {
 			newAsset := &marketplacedb.DBAsset{
 				IA:              dbAsset.IA,
 				BandwidthMin:    dbAsset.BandwidthMin,
@@ -534,8 +517,8 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, asset
 				IfIdIngress:     dbAsset.IfIdIngress,
 				IfIdEgress:      dbAsset.IfIdEgress,
 				Bandwidth:       segment.Bandwidth,
-				StartAt:         segment.StartAt,
-				StopsAt:         segment.StopAt,
+				StartAt:         segment.StartsAt,
+				StopsAt:         segment.StopsAt,
 				Price:           dbAsset.Price,
 			}
 			_, err := tx.InsertAsset(ctx, newAsset)

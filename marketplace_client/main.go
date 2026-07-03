@@ -850,8 +850,8 @@ func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdc
 	ingress = readOptionalUint32(reader, "Ingress: ")
 	egress = readOptionalUint32(reader, "Egress: ")
 	bw = readOptionalUint32(reader, "BW: ")
-	startsAt = readOptionalTime(reader, "Starts At (2006-01-02T15:04:05): ")
-	stopsAt = readOptionalTime(reader, "Stops At (2006-01-02T15:04:05): ")
+	startsAt = readOptionalTime(reader, "Starts At (2006-01-02T15:04:05Z): ")
+	stopsAt = readOptionalTime(reader, "Stops At (2006-01-02T15:04:05Z): ")
 
 	req := &hummingbird.FetchReservationsRequest{
 		Ia:        ia,
@@ -1033,8 +1033,8 @@ func handleSearch(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 	egress = readOptionalUint32(reader, "Egress: ")
 	minReqBw = readOptionalUint32(reader, "Min Required BW: ")
 	price = readOptionalUint32(reader, "Price: ")
-	startsAtLatest = readOptionalTime(reader, "Starts At Latest (2006-01-02T15:04:05): ")
-	stopsAtEarliest = readOptionalTime(reader, "Stops At Earliest (2006-01-02T15:04:05): ")
+	startsAtLatest = readOptionalTime(reader, "Starts At Latest (2006-01-02T15:04:05Z): ")
+	stopsAtEarliest = readOptionalTime(reader, "Stops At Earliest (2006-01-02T15:04:05Z): ")
 	if owned == nil {
 		tmp := false
 		owned = &tmp
@@ -1242,7 +1242,7 @@ func readOptionalTime(reader *bufio.Reader, prompt string) *time.Time {
 	}
 
 	// Example format: 2026-05-20T15:04:05
-	t, err := time.Parse("2006-01-02T15:04:05", text)
+	t, err := time.Parse(time.RFC3339, text)
 	if err != nil {
 		fmt.Println("Invalid time format")
 		return nil

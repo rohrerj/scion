@@ -189,12 +189,13 @@ func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hu
 		ia = &tmp
 	}
 	reservations, err := s.store.FetchReservations(ctx, &db.ReservationQuery{
-		IA:       ia,
-		Ingress:  req.Msg.IngressId,
-		Egress:   req.Msg.EgressId,
-		StartsAt: startsAt,
-		StopsAt:  stopsAt,
-		OwnerId:  user,
+		IA:        ia,
+		Ingress:   req.Msg.IngressId,
+		Egress:    req.Msg.EgressId,
+		StartsAt:  startsAt,
+		StopsAt:   stopsAt,
+		Bandwidth: req.Msg.Bandwidth,
+		OwnerId:   user,
 	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)

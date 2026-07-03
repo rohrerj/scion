@@ -55,12 +55,13 @@ type RedemptionDelegation struct {
 }
 
 type ReservationQuery struct {
-	OwnerId  int64
-	IA       *addr.IA
-	Ingress  *uint32
-	Egress   *uint32
-	StartsAt *string
-	StopsAt  *string
+	OwnerId   int64
+	IA        *addr.IA
+	Ingress   *uint32
+	Egress    *uint32
+	StartsAt  *string
+	StopsAt   *string
+	Bandwidth *uint32
 }
 type StatisticsQuery struct {
 	IA          addr.IA
