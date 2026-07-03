@@ -160,7 +160,7 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 		args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()))
 	}
 	if params.StartsAt != nil {
-		where = append(where, "(starts_at<?)")
+		where = append(where, "(starts_at<=?)")
 		args = append(args, *params.StartsAt)
 	}
 	if params.StopsAt != nil {
@@ -174,6 +174,10 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 	if params.Egress != nil {
 		where = append(where, "(egress=?)")
 		args = append(args, *params.Egress)
+	}
+	if params.Bandwidth != nil {
+		where = append(where, "(bandwidth>=?)")
+		args = append(args, *params.Bandwidth)
 	}
 	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
 	return strings.Join(query, "\n"), args

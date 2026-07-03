@@ -16,8 +16,6 @@ package storage
 
 import (
 	"fmt"
-	"slices"
-	"sort"
 	"time"
 
 	"github.com/scionproto/scion/marketplace/db"
@@ -30,21 +28,14 @@ type RequestedSplit struct {
 }
 
 type AssetSegment struct {
-	StartAt   time.Time
-	StopAt    time.Time
+	StartsAt  time.Time
+	StopsAt   time.Time
 	Bandwidth uint32
-	Used      bool
-
-	requestIndex *int
 }
 
 type SplitResult struct {
-	Bought []AssetSegment
-	Unused []AssetSegment
-}
-
-func overlaps(segFrom time.Time, segTo time.Time, req RequestedSplit) bool {
-	return segFrom.Before(req.ExactTo) && segTo.After(req.ExactFrom)
+	Split      AssetSegment
+	Remainders []AssetSegment
 }
 
 func validateSplit(asset *db.DBAsset, p RequestedSplit) error {
@@ -64,137 +55,82 @@ func validateSplit(asset *db.DBAsset, p RequestedSplit) error {
 	return nil
 }
 
-func sameRequest(a *int, b *int) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return *a == *b
-}
-
-func mergeAdjacent(
-	segments []AssetSegment,
-) []AssetSegment {
-
-	if len(segments) == 0 {
-		return nil
-	}
-	sort.Slice(segments, func(i, j int) bool {
-		ai := -1
-		aj := -1
-		if segments[i].requestIndex != nil {
-			ai = *segments[i].requestIndex
-		}
-		if segments[j].requestIndex != nil {
-			aj = *segments[j].requestIndex
-		}
-		if ai != aj {
-			return ai < aj
-		}
-		if segments[i].Used != segments[j].Used {
-			return segments[i].Used
-		}
-		if segments[i].Bandwidth != segments[j].Bandwidth {
-			return segments[i].Bandwidth < segments[j].Bandwidth
-		}
-		return segments[i].StartAt.Before(segments[j].StartAt)
-	})
-
-	out := []AssetSegment{
-		segments[0],
-	}
-
-	for i := 1; i < len(segments); i++ {
-		cur := segments[i]
-		last := &out[len(out)-1]
-		canMerge := last.StopAt.Equal(cur.StartAt) &&
-			last.Bandwidth == cur.Bandwidth &&
-			last.Used == cur.Used &&
-			sameRequest(last.requestIndex, cur.requestIndex)
-
-		if canMerge {
-			last.StopAt = cur.StopAt
-		} else {
-			out = append(out, cur)
-		}
-	}
-
-	return out
-}
-
-func SplitAsset(
-	asset *db.DBAsset,
-	purchases []RequestedSplit,
-) (*SplitResult, error) {
-
+func SplitAsset(asset *db.DBAsset, split RequestedSplit) (*SplitResult, error) {
 	if !asset.StartAt.Before(asset.StopsAt) {
 		return nil, fmt.Errorf("invalid asset range")
 	}
-
-	pointsMap := map[int64]struct{}{
-		asset.StartAt.Unix(): {},
-		asset.StopsAt.Unix(): {},
+	if err := validateSplit(asset, split); err != nil {
+		return nil, err
 	}
-	for _, p := range purchases {
-		if err := validateSplit(asset, p); err != nil {
-			return nil, err
+	remainingAsset := AssetSegment{
+		Bandwidth: asset.Bandwidth,
+		StartsAt:  asset.StartAt,
+		StopsAt:   asset.StopsAt,
+	}
+	splitResult := &SplitResult{}
+	if split.ExactBandwidth != asset.Bandwidth {
+		splitResult.Remainders = append(splitResult.Remainders, AssetSegment{
+			StartsAt:  remainingAsset.StartsAt,
+			StopsAt:   remainingAsset.StopsAt,
+			Bandwidth: remainingAsset.Bandwidth - split.ExactBandwidth,
+		})
+		remainingAsset.Bandwidth = split.ExactBandwidth
+	}
+	if split.ExactFrom == remainingAsset.StartsAt {
+		// no left remainder asset exists
+		if split.ExactTo == remainingAsset.StopsAt {
+			// no right remainder asset exists -> split = asset
+			splitResult.Split = AssetSegment{
+				Bandwidth: remainingAsset.Bandwidth,
+				StartsAt:  remainingAsset.StartsAt,
+				StopsAt:   remainingAsset.StopsAt,
+			}
+		} else {
+			// only a right remainder asset exists
+			splitResult.Split = AssetSegment{
+				Bandwidth: remainingAsset.Bandwidth,
+				StartsAt:  remainingAsset.StartsAt,
+				StopsAt:   split.ExactTo,
+			}
+			splitResult.Remainders = append(splitResult.Remainders, AssetSegment{
+				Bandwidth: remainingAsset.Bandwidth,
+				StartsAt:  split.ExactTo,
+				StopsAt:   remainingAsset.StopsAt,
+			})
 		}
-		pointsMap[p.ExactFrom.Unix()] = struct{}{}
-		pointsMap[p.ExactTo.Unix()] = struct{}{}
-	}
-
-	var points []int64
-	for p := range pointsMap {
-		points = append(points, p)
-	}
-
-	slices.Sort(points)
-	result := &SplitResult{}
-
-	for i := 0; i < len(points)-1; i++ {
-		segFrom := time.Unix(points[i], 0).UTC()
-		segTo := time.Unix(points[i+1], 0).UTC()
-		cursor := uint32(0)
-
-		for reqIdx, p := range purchases {
-			if !overlaps(segFrom, segTo, p) {
-				continue
+	} else {
+		// a left remainder asset exists
+		if split.ExactTo == remainingAsset.StopsAt {
+			// no right remainder asset exists -> only a left remainder exists
+			splitResult.Split = AssetSegment{
+				Bandwidth: remainingAsset.Bandwidth,
+				StartsAt:  split.ExactFrom,
+				StopsAt:   remainingAsset.StopsAt,
 			}
-			endBw := cursor + p.ExactBandwidth
-
-			if endBw > asset.Bandwidth {
-				return nil, fmt.Errorf("overbooked interval %v -> %v", segFrom, segTo)
+			splitResult.Remainders = append(splitResult.Remainders, AssetSegment{
+				Bandwidth: remainingAsset.Bandwidth,
+				StartsAt:  remainingAsset.StartsAt,
+				StopsAt:   split.ExactTo,
+			})
+		} else {
+			// a left remainder and a right remainder exists
+			splitResult.Split = AssetSegment{
+				Bandwidth: remainingAsset.Bandwidth,
+				StartsAt:  split.ExactFrom,
+				StopsAt:   split.ExactTo,
 			}
-			cursor = endBw
-			reqCopy := reqIdx
-
-			s := AssetSegment{
-				StartAt:      segFrom,
-				StopAt:       segTo,
-				Bandwidth:    p.ExactBandwidth,
-				Used:         true,
-				requestIndex: &reqCopy,
-			}
-
-			result.Bought = append(result.Bought, s)
-		}
-
-		// leftover capacity
-		remaining := asset.Bandwidth - cursor
-
-		if remaining > 0 {
-			s := AssetSegment{
-				StartAt:   segFrom,
-				StopAt:    segTo,
-				Bandwidth: remaining,
-				Used:      false,
-			}
-			result.Unused = append(result.Unused, s)
+			splitResult.Remainders = append(splitResult.Remainders,
+				AssetSegment{
+					Bandwidth: remainingAsset.Bandwidth,
+					StartsAt:  remainingAsset.StartsAt,
+					StopsAt:   split.ExactFrom,
+				}, AssetSegment{
+					Bandwidth: remainingAsset.Bandwidth,
+					StartsAt:  split.ExactTo,
+					StopsAt:   remainingAsset.StopsAt,
+				})
 		}
 	}
-	result.Bought = mergeAdjacent(result.Bought)
-	result.Unused = mergeAdjacent(result.Unused)
-	return result, nil
+	return splitResult, nil
+
 }
