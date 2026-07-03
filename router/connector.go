@@ -15,6 +15,7 @@
 package router
 
 import (
+	"encoding/hex"
 	"sync"
 
 	"github.com/scionproto/scion/pkg/addr"
@@ -187,7 +188,11 @@ func (c *Connector) SetKey(ia addr.IA, index int, key []byte) error {
 func (c *Connector) SetHbirdKey(ia addr.IA, index int, sv []byte) error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
-	log.Debug("Setting Humingbird secret key", "isd_as", ia, "index", index)
+	log.Debug("Setting Humingbird secret key",
+		"isd_as", ia,
+		"index", index,
+		"secret value", hex.EncodeToString(sv),
+	)
 	if !c.ia.Equal(ia) {
 		return serrors.JoinNoStack(errMultiIA, nil, "current", c.ia, "new", ia)
 	}

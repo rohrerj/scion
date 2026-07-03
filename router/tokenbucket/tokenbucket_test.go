@@ -255,3 +255,11 @@ func TestRealBwToEncodedErrors(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestPrintAllCodePoints(t *testing.T) {
+	lastCodepoint := 1<<10 - 1
+	for i := 0; i <= lastCodepoint; i++ {
+		bw := tokenbucket.ConvertBW(uint16(i))
+		t.Logf("%d\t\t%d", i, bw)
+	}
+}
