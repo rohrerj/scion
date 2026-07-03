@@ -208,6 +208,7 @@ func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hu
 			IngressId:         reservation.Ingress,
 			EgressId:          reservation.Egress,
 			Bandwidth:         reservation.Bandwidth,
+			DataplaneEncoding: uint32(reservation.EncodedBandwidth),
 			StartsAt:          timestamppb.New(reservation.StartsAt),
 			StopsAt:           timestamppb.New(reservation.StopsAt),
 			AuthenticationKey: reservation.Key,
@@ -449,15 +450,16 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 			return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
 		}
 		n, err := s.store.InsertReservation(ctx, &db.DBReservation{
-			ID:        resp.ResInfo.ReservationId,
-			IA:        ia,
-			Ingress:   ingressID,
-			Egress:    egressID,
-			Bandwidth: resp.ResInfo.BandwithRounded,
-			StartsAt:  startsAt,
-			StopsAt:   stopsAt,
-			OwnerId:   user,
-			Key:       resp.AuthenticationKey,
+			ID:               resp.ResInfo.ReservationId,
+			IA:               ia,
+			Ingress:          ingressID,
+			Egress:           egressID,
+			Bandwidth:        resp.ResInfo.BandwithRounded,
+			EncodedBandwidth: uint16(resp.ResInfo.BwDataplaneEncoding),
+			StartsAt:         startsAt,
+			StopsAt:          stopsAt,
+			OwnerId:          user,
+			Key:              resp.AuthenticationKey,
 		})
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)

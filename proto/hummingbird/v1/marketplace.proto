@@ -227,7 +227,8 @@ message Reservation {
     uint32 ingress_id = 3;
     uint32 egress_id = 4;
     uint32 bandwidth = 5;
-    google.protobuf.Timestamp starts_at = 6;
-    google.protobuf.Timestamp stops_at = 7;
-    bytes authentication_key = 8;
+    uint32 dataplane_encoding = 6;
+    google.protobuf.Timestamp starts_at = 7;
+    google.protobuf.Timestamp stops_at = 8;
+    bytes authentication_key = 9;
 }

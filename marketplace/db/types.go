@@ -79,15 +79,16 @@ type DBStat struct {
 }
 
 type DBReservation struct {
-	ID        uint32
-	IA        addr.IA
-	Ingress   uint32
-	Egress    uint32
-	Bandwidth uint32
-	StartsAt  time.Time
-	StopsAt   time.Time
-	OwnerId   int64
-	Key       []byte
+	ID               uint32
+	IA               addr.IA
+	Ingress          uint32
+	Egress           uint32
+	Bandwidth        uint32
+	EncodedBandwidth uint16
+	StartsAt         time.Time
+	StopsAt          time.Time
+	OwnerId          int64
+	Key              []byte
 }
 
 type DBAsset struct {
