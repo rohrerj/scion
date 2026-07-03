@@ -243,19 +243,16 @@ func (c *MarketplaceClient) findExistingReservations(ctx context.Context, pairs 
 		StartsAt:  timestamppb.New(startsAt),
 		StopsAt:   timestamppb.New(stopsAt),
 	}
-	fmt.Println("ppp", req.Bandwidth, req.StartsAt.AsTime(), req.StopsAt.AsTime())
 	res, err := c.client.FetchReservations(ctx, &connect.Request[hummingbird.FetchReservationsRequest]{
 		Msg: req,
 	})
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("YYY", res.Msg.Reservations)
 	ret := make([]*snetpath.Hop, len(pairs))
 	for i, pair := range pairs {
 		for _, r := range res.Msg.Reservations {
 			if r.Ia == pair.IA && r.IngressId == pair.Ingress && r.EgressId == pair.Egress {
-				fmt.Println("AAA", addr.IA(r.Ia), r.AuthenticationKey)
 				ret[i] = &snetpath.Hop{
 					BaseHop: snetpath.BaseHop{
 						IA:      addr.IA(r.Ia),
@@ -423,7 +420,6 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 		}
 	}
 	var orders = []*hummingbird.BuyAsset{}
-	fmt.Println("XXX", hops)
 	iaAssets := map[uint64][]assetInfo{}
 	var boughtAssets *connect.Response[hummingbird.BuyAssetsResponse]
 	success := false
@@ -588,7 +584,6 @@ func (c *MarketplaceClient) redeemHopsConcurrently(ctx context.Context, pairs []
 					Duration:  uint16(requests[i].stopsAt.Sub(requests[i].startsAt) / time.Second),
 				},
 			}
-			fmt.Println("BBB", addr.IA(pairs[i].IA), responses[i].AuthenticationKey)
 		} else if errors[i] != nil {
 			log.FromCtx(ctx).Debug("error redeeming asset", "err", errors[i])
 			ret[i] = &snetpath.Hop{
