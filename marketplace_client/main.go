@@ -149,8 +149,12 @@ func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *
 		QUIC: appnet.QUIC{
 			TLSVerifier: trust.NewTLSCryptoVerifier(trustDB),
 		},
-		MTU:    1400,
-		Public: localPublic,
+		MTU: 1400,
+		Public: &net.UDPAddr{
+			IP:   localPublic.IP,
+			Port: 0,
+			Zone: localPublic.Zone,
+		},
 	}
 	quicStack, err := nc.QUICStack(ctx)
 	if err != nil {
