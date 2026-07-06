@@ -133,17 +133,15 @@ func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *
 	remote.Path = dp
 	remote.NextHop = nextHop
 
-	if remote.NextHop.IP.To4() != nil {
-		localPublic = &net.UDPAddr{
-			IP:   net.IPv4(127, 0, 0, 1),
-			Port: 0,
-		}
-	} else {
-		localPublic = &net.UDPAddr{
-			IP:   net.IPv6loopback,
-			Port: 0,
-		}
+	conn, err := net.Dial("udp", nextHop.String())
+	if err != nil {
+		return nil, nil, nil, err
 	}
+	localPublic, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		return nil, nil, nil, serrors.New("localAddr not UPD addr")
+	}
+	conn.Close()
 
 	nc := appnet.NetworkConfig{
 		Topology: connector.Topology,
