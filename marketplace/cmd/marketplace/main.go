@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -50,6 +51,7 @@ import (
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
+	"github.com/scionproto/scion/pkg/segment/iface"
 	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/pkg/snet/squic"
 	"github.com/scionproto/scion/private/app/appnet"
@@ -112,6 +114,7 @@ func realMain(ctx context.Context) error {
 		}
 		opts := []endhost.ConnectOption{
 			endhost.WithCertsDir(path.Join(globalCfg.General.ConfigDir, "certs")),
+			endhost.WithLocalIA(topo.IA()),
 		}
 		if endhostApiUrl.Scheme == "http" {
 			opts = append(opts, endhost.WithInsecureConnection())
@@ -130,6 +133,19 @@ func realMain(ctx context.Context) error {
 		snetTopo = connector.Topology
 	} else {
 		// local topology does not have a SCION endhost API endpoint :(
+		startPort, endPort := topo.PortRange()
+		snetTopo.PortRange = snet.TopologyPortRange{
+			Start: startPort,
+			End:   endPort,
+		}
+		snetTopo.LocalIA = topo.IA()
+		snetTopo.Interface = func(u uint16) (netip.AddrPort, bool) {
+			i, found := topo.InterfaceInfoMap()[iface.ID(u)]
+			if !found {
+				return netip.AddrPort{}, false
+			}
+			return i.InternalAddr, true
+		}
 	}
 
 	store, err := marketplacestorage.NewStorage(globalCfg.MarketplaceDB, globalCfg.Marketplace.TransactionFeeRelative,
@@ -159,7 +175,7 @@ func realMain(ctx context.Context) error {
 		return err
 	}
 	var regService *registration.Service
-	if connector != nil {
+	if !globalCfg.Marketplace.DisableASRegistration {
 		trustDB = marketplace.FromTrustDB(trustDB, connector.TrustService)
 		regService = registration.NewService(connector, trustDB)
 	}
@@ -199,7 +215,7 @@ func realMain(ctx context.Context) error {
 
 	accountPath, accountHandler := hummingbirdconnect.NewAccountServiceHandler(service, connect.WithInterceptors(marketplace.AccountManagerInterceptor(tokenVerifier)))
 
-	webapp.Init(jwtSigner, store, mux)
+	webapp.Init(jwtSigner, store, mux, globalCfg.Marketplace.DisableUserRegistration)
 	mux.Handle(accountPath, accountHandler)
 
 	g := &errgroup.Group{}

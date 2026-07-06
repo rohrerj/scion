@@ -34,12 +34,13 @@ import (
 
 var templates = template.Must(template.ParseGlob("marketplace/templates/*.html"))
 
-func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *http.ServeMux) {
+func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *http.ServeMux, disableUserRegistration bool) {
 	h := &Handler{
-		sessions:   make(map[string]User),
-		asSessions: make(map[string]addr.IA),
-		signer:     signer,
-		store:      store,
+		sessions:                make(map[string]User),
+		asSessions:              make(map[string]addr.IA),
+		signer:                  signer,
+		store:                   store,
+		disableUserRegistration: disableUserRegistration,
 	}
 	mux.HandleFunc("/", h.tokenHandler)
 	mux.HandleFunc("/token", h.tokenHandler)
@@ -55,11 +56,12 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 }
 
 type Handler struct {
-	store      *storage.MarketplaceStorage
-	sessions   map[string]User
-	asSessions map[string]addr.IA
-	mu         sync.Mutex
-	signer     *registration.Signer
+	store                   *storage.MarketplaceStorage
+	sessions                map[string]User
+	asSessions              map[string]addr.IA
+	mu                      sync.Mutex
+	signer                  *registration.Signer
+	disableUserRegistration bool
 }
 type User struct {
 	id   int64
@@ -254,6 +256,12 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
+	if h.disableUserRegistration {
+		templates.ExecuteTemplate(w, "register.html", map[string]any{
+			"Error": "User registration disabled",
+		})
+		return
+	}
 	if r.Method == http.MethodGet {
 		templates.ExecuteTemplate(w, "register.html", map[string]any{})
 		return
