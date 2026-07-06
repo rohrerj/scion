@@ -59,6 +59,8 @@ type MarketplaceConfig struct {
 	TransactionFeeAbsolute       uint64  `toml:"transaction_fee_absolute,omitempty"`
 	SplitCombineFeeAbsolute      uint64  `toml:"split_combine_fee_absolute,omitempty"`
 	DelegationHourlyFee          uint64  `toml:"delegation_hourly_fee,omitempty"`
+	DisableUserRegistration      bool    `toml:"disable_user_registration,omitempty"`
+	DisableASRegistration        bool    `toml:"disable_as_registration,omitempty"`
 }
 
 func (cfg *MarketplaceConfig) InitDefaults() {
