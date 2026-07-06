@@ -79,17 +79,15 @@ func (c *MarketplaceClient) withSCION(ctx context.Context, querier snet.PathQuer
 	remote.Path = dp
 	remote.NextHop = nextHop
 
-	if remote.NextHop.IP.To4() != nil {
-		localPublic = &net.UDPAddr{
-			IP:   net.IPv4(127, 0, 0, 1),
-			Port: 0,
-		}
-	} else {
-		localPublic = &net.UDPAddr{
-			IP:   net.IPv6loopback,
-			Port: 0,
-		}
+	conn, err := net.Dial("udp", nextHop.String())
+	if err != nil {
+		return nil, err
 	}
+	localPublic, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		return nil, serrors.New("localAddr not UDP addr")
+	}
+	conn.Close()
 
 	nc := appnet.NetworkConfig{
 		Topology: c.topo,
@@ -97,8 +95,12 @@ func (c *MarketplaceClient) withSCION(ctx context.Context, querier snet.PathQuer
 		QUIC: appnet.QUIC{
 			TLSVerifier: trust.NewTLSCryptoVerifier(trustDB),
 		},
-		MTU:    1400,
-		Public: localPublic,
+		MTU: 1400,
+		Public: &net.UDPAddr{
+			IP:   localPublic.IP,
+			Port: 0,
+			Zone: localPublic.Zone,
+		},
 	}
 	quicStack, err := nc.QUICStack(ctx)
 	if err != nil {
