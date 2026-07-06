@@ -64,6 +64,9 @@ func AccountManagerInterceptor(verifier *TokenVerifier) connect.UnaryInterceptor
 }
 
 func (s *Service) CreateChallenge(ctx context.Context, req *connect.Request[hummingbird.CreateChallengeRequest]) (*connect.Response[hummingbird.CreateChallengeResponse], error) {
+	if s.registrationService == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, serrors.New("Registration not configured"))
+	}
 	challenge, err := s.registrationService.CreateChallenge(ctx, addr.IA(req.Msg.Ia))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -74,6 +77,9 @@ func (s *Service) CreateChallenge(ctx context.Context, req *connect.Request[humm
 }
 
 func (s *Service) RegisterAS(ctx context.Context, req *connect.Request[hummingbird.RegisterASRequest]) (*connect.Response[hummingbird.RegisterASResponse], error) {
+	if s.registrationService == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, serrors.New("Registration not configured"))
+	}
 	authority, ok := ctx.Value("authority").(string)
 	if !ok || authority == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("Request must provide HTTP Host or HTTP2 :authority header"))

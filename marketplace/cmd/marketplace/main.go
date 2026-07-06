@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"time"
@@ -75,6 +76,10 @@ func main() {
 }
 
 func realMain(ctx context.Context) error {
+	var snetTopo snet.Topology
+	var endhostAPI string
+	var err error
+	var connector *endhost.Connector
 	topo, err := topology.NewLoader(topology.LoaderCfg{
 		File:      globalCfg.General.Topology(),
 		Validator: &topology.DefaultValidator{},
@@ -82,35 +87,51 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return serrors.Wrap("creating topology loader", err)
 	}
-	var endhostAPI string
 	for _, k := range topo.EndhostAPI() {
 		endhostAPI = k.Url
 		break
 	}
-	shouldRetry := func(e error) bool {
-		if err == nil {
+	if endhostAPI != "" {
+		shouldRetry := func(e error) bool {
+			if err == nil {
+				return false
+			}
+			fmt.Println("error connecting to endhost API:", err)
+			var connectErr *connect.Error
+			if errors.As(e, &connectErr) {
+				switch connectErr.Code() {
+				case connect.CodeUnavailable:
+					return true
+				}
+			}
 			return false
 		}
-		fmt.Println("error connecting to endhost API:", err)
-		var connectErr *connect.Error
-		if errors.As(e, &connectErr) {
-			switch connectErr.Code() {
-			case connect.CodeUnavailable:
-				return true
-			}
-		}
-		return false
-	}
-	connector, err := endhost.NewConnector(ctx, endhostAPI, endhost.WithCertsDir(path.Join(globalCfg.General.ConfigDir, "certs")))
-	if err != nil {
-		for i := 0; i < 120 && shouldRetry(err); i++ {
-			time.Sleep(time.Second)
-			connector, err = endhost.NewConnector(ctx, endhostAPI, endhost.WithCertsDir(path.Join(globalCfg.General.ConfigDir, "certs")))
-		}
+		endhostApiUrl, err := url.Parse(endhostAPI)
 		if err != nil {
 			return err
 		}
+		opts := []endhost.ConnectOption{
+			endhost.WithCertsDir(path.Join(globalCfg.General.ConfigDir, "certs")),
+		}
+		if endhostApiUrl.Scheme == "http" {
+			opts = append(opts, endhost.WithInsecureConnection())
+		}
+
+		connector, err = endhost.NewConnector(ctx, endhostAPI, opts...)
+		if err != nil {
+			for i := 0; i < 120 && shouldRetry(err); i++ {
+				time.Sleep(time.Second)
+				connector, err = endhost.NewConnector(ctx, endhostAPI, opts...)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		snetTopo = connector.Topology
+	} else {
+		// local topology does not have a SCION endhost API endpoint :(
 	}
+
 	store, err := marketplacestorage.NewStorage(globalCfg.MarketplaceDB, globalCfg.Marketplace.TransactionFeeRelative,
 		globalCfg.Marketplace.TransactionFeeAbsolute, globalCfg.Marketplace.SplitCombineFeeAbsolute, globalCfg.Marketplace.DelegationHourlyFee)
 	if err != nil {
@@ -137,11 +158,13 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	trustDB = marketplace.FromTrustDB(trustDB, connector.TrustService)
+	var regService *registration.Service
+	if connector != nil {
+		trustDB = marketplace.FromTrustDB(trustDB, connector.TrustService)
+		regService = registration.NewService(connector, trustDB)
+	}
 
 	trustVerifer := trust.NewTLSCryptoVerifier(trustDB)
-	regService := registration.NewService(connector, trustDB)
 	service, err := marketplace.NewService(ctx, &marketplace.MarketplaceInfo{
 		ApiMajorVersion:              APIMajorVersion,
 		ApiMinorVersion:              APIMinorVersion,
@@ -185,7 +208,7 @@ func realMain(ctx context.Context) error {
 	})
 	log.Info(fmt.Sprintf("HTTPS server running on %s\n", globalCfg.Marketplace.APIAddr))
 	if globalCfg.Marketplace.SCIONAPIAddr != "" {
-		err = StartSCIONServer(ctx, connector.Topology, topo.MTU(), globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux)
+		err = StartSCIONServer(ctx, snetTopo, 1400, globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux)
 		if err != nil {
 			return err
 		}
