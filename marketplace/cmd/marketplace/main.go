@@ -23,7 +23,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -94,20 +93,6 @@ func realMain(ctx context.Context) error {
 		break
 	}
 	if endhostAPI != "" {
-		shouldRetry := func(e error) bool {
-			if err == nil {
-				return false
-			}
-			fmt.Println("error connecting to endhost API:", err)
-			var connectErr *connect.Error
-			if errors.As(e, &connectErr) {
-				switch connectErr.Code() {
-				case connect.CodeUnavailable:
-					return true
-				}
-			}
-			return false
-		}
 		endhostApiUrl, err := url.Parse(endhostAPI)
 		if err != nil {
 			return err
@@ -122,9 +107,12 @@ func realMain(ctx context.Context) error {
 
 		connector, err = endhost.NewConnector(ctx, endhostAPI, opts...)
 		if err != nil {
-			for i := 0; i < 120 && shouldRetry(err); i++ {
+			for i := 0; i < 10; i++ {
 				time.Sleep(time.Second)
 				connector, err = endhost.NewConnector(ctx, endhostAPI, opts...)
+				if err == nil {
+					break
+				}
 			}
 			if err != nil {
 				return err
