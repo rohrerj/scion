@@ -139,7 +139,7 @@ func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *
 	}
 	localPublic, ok := conn.LocalAddr().(*net.UDPAddr)
 	if !ok {
-		return nil, nil, nil, serrors.New("localAddr not UPD addr")
+		return nil, nil, nil, serrors.New("localAddr not UDP addr")
 	}
 	conn.Close()
 
