@@ -246,7 +246,7 @@ func (c *Connector) setupSCIONPKI(ctx context.Context, clientCerts []tls.Certifi
 						VerifyConnection:      tlsVerifier.VerifyConnection,
 						VerifyPeerCertificate: tlsVerifier.VerifyServerCertificate,
 						Certificates:          clientCerts,
-						ServerName: fmt.Sprintf("%s,%s", c.Topology.LocalIA,
+						ServerName: fmt.Sprintf("%s,%s", localIA,
 							endhostApiAddr.IP.String()),
 					},
 					DialContext: dialContext,
