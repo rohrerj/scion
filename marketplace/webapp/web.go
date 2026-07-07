@@ -141,9 +141,11 @@ func (h *Handler) asLoginHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := h.generateSessionID()
 	h.SetASSessionUser(sessionID, dbUser.IA)
 	http.SetCookie(w, &http.Cookie{
-		Name:  "as_session_id",
-		Value: sessionID,
-		Path:  "/",
+		Name:     "as_session_id",
+		Value:    sessionID,
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
 	})
 	http.Redirect(w, r, "/asbalance", http.StatusSeeOther)
 }
@@ -331,10 +333,12 @@ func (h *Handler) logoutHandler(w http.ResponseWriter, r *http.Request) {
 	defer h.mu.Unlock()
 	delete(h.sessions, cookie.Value)
 	http.SetCookie(w, &http.Cookie{
-		Name:   "session_id",
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
+		Name:     "session_id",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Secure:   true,
+		HttpOnly: true,
 	})
 	ascookie, err := r.Cookie("as_session_id")
 	if err != nil {
@@ -343,10 +347,12 @@ func (h *Handler) logoutHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	delete(h.asSessions, ascookie.Value)
 	http.SetCookie(w, &http.Cookie{
-		Name:   "as_session_id",
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
+		Name:     "as_session_id",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Secure:   true,
+		HttpOnly: true,
 	})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
@@ -391,9 +397,11 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	http.SetCookie(w, &http.Cookie{
-		Name:  "session_id",
-		Value: sessionID,
-		Path:  "/",
+		Name:     "session_id",
+		Value:    sessionID,
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
 	})
 
 	http.Redirect(w, r, "/token", http.StatusSeeOther)

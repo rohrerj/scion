@@ -23,7 +23,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -54,6 +53,7 @@ import (
 	"github.com/scionproto/scion/pkg/segment/iface"
 	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/pkg/snet/squic"
+	"github.com/scionproto/scion/private/app"
 	"github.com/scionproto/scion/private/app/appnet"
 	"github.com/scionproto/scion/private/app/launcher"
 	"github.com/scionproto/scion/private/storage"
@@ -94,20 +94,6 @@ func realMain(ctx context.Context) error {
 		break
 	}
 	if endhostAPI != "" {
-		shouldRetry := func(e error) bool {
-			if err == nil {
-				return false
-			}
-			fmt.Println("error connecting to endhost API:", err)
-			var connectErr *connect.Error
-			if errors.As(e, &connectErr) {
-				switch connectErr.Code() {
-				case connect.CodeUnavailable:
-					return true
-				}
-			}
-			return false
-		}
 		endhostApiUrl, err := url.Parse(endhostAPI)
 		if err != nil {
 			return err
@@ -122,9 +108,12 @@ func realMain(ctx context.Context) error {
 
 		connector, err = endhost.NewConnector(ctx, endhostAPI, opts...)
 		if err != nil {
-			for i := 0; i < 120 && shouldRetry(err); i++ {
+			for i := 0; i < 10; i++ {
 				time.Sleep(time.Second)
 				connector, err = endhost.NewConnector(ctx, endhostAPI, opts...)
+				if err == nil {
+					break
+				}
 			}
 			if err != nil {
 				return err
@@ -217,24 +206,37 @@ func realMain(ctx context.Context) error {
 
 	webapp.Init(jwtSigner, store, mux, globalCfg.Marketplace.DisableUserRegistration)
 	mux.Handle(accountPath, accountHandler)
-
-	g := &errgroup.Group{}
+	var cleanup app.Cleanup
+	g, errCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		return server.ListenAndServeTLS("", "")
 	})
 	log.Info(fmt.Sprintf("HTTPS server running on %s\n", globalCfg.Marketplace.APIAddr))
 	if globalCfg.Marketplace.SCIONAPIAddr != "" {
-		err = StartSCIONServer(ctx, snetTopo, 1400, globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux)
+		err = StartSCIONServer(errCtx, snetTopo, 1400, globalCfg.Marketplace.SCIONAPIAddr, g, trustVerifer, &cert, mux, &cleanup)
 		if err != nil {
 			return err
 		}
 	}
+	cleanup.Add(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil && ctx.Err() == nil {
+			return err
+		}
+		return nil
+	})
+	g.Go(func() error {
+		defer log.HandlePanic()
+		<-errCtx.Done()
+		return cleanup.Do()
+	})
 
 	g.Wait()
 	return nil
 }
 
-func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrString string, g *errgroup.Group, trustVerifier *trust.TLSCryptoVerifier, cert *tls.Certificate, mux *http.ServeMux) error {
+func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrString string, g *errgroup.Group, trustVerifier *trust.TLSCryptoVerifier, cert *tls.Certificate, mux *http.ServeMux, cleanup *app.Cleanup) error {
 	addr, err := net.ResolveUDPAddr("udp", addrString)
 	if err != nil {
 		return err
@@ -260,12 +262,25 @@ func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrS
 		libgrpc.UnaryServerInterceptor(),
 		libgrpc.DefaultMaxConcurrentStreams(),
 	)
+	cleanup.Add(func() error { quicServer.GracefulStop(); return nil })
+	cleanup.Add(func() error { return quicStack.Listener.Close() })
 	grpcConns := make(chan *quic.Conn)
 	g.Go(func() error {
 		defer log.HandlePanic()
 		listener := quicStack.Listener
+		connectServer := http3.Server{
+			Handler: libconnect.AttachPeer(mux),
+		}
+		cleanup.Add(func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			if err := connectServer.Shutdown(ctx); err != nil && ctx.Err() == nil {
+				return err
+			}
+			return nil
+		})
 		for {
-			conn, err := listener.Accept(context.Background())
+			conn, err := listener.Accept(ctx)
 			if err == quic.ErrServerClosed {
 				return http.ErrServerClosed
 			}
@@ -277,9 +292,6 @@ func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrS
 				if conn.ConnectionState().TLS.NegotiatedProtocol != "h3" {
 					grpcConns <- conn
 					return
-				}
-				connectServer := http3.Server{
-					Handler: libconnect.AttachPeer(mux),
 				}
 				if err := connectServer.ServeQUICConn(conn); err != nil {
 					log.Debug("Error handling connectrpc connection", "err", err)
