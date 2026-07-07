@@ -1,4 +1,5 @@
 load("@rules_go//go:def.bzl", "go_library")
+load("//tools:go.bzl", "go_test")
 
 go_library(
     name = "go_default_library",
@@ -25,5 +26,16 @@ go_library(
         "@com_github_quic_go_quic_go//http3:go_default_library",
         "@org_golang_google_protobuf//types/known/timestamppb:go_default_library",
         "@com_github_scionproto_scion//pkg/proto/hummingbird/v1/hummingbirdconnect:go_default_library",
+    ],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = ["client_test.go"],
+    embed = [":go_default_library"],
+    deps = [
+        "//pkg/proto/hummingbird:go_default_library",
+        "@com_github_stretchr_testify//assert:go_default_library",
+        "@org_golang_google_protobuf//types/known/timestamppb:go_default_library",
     ],
 )
