@@ -1,4 +1,5 @@
 // Copyright 2020 Anapaya Systems
+// Copyright 2026 ETH Zurich
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -419,6 +420,14 @@ func (p *Packet) Decode() error {
 			DstPort: udpLayer.DstPort,
 			Payload: udpLayer.Payload,
 		}
+		if e2eLayer.ActualLen != 0 {
+			var e2e slayers.EndToEndExtn
+			parser = gopacket.NewDecodingLayerParser(slayers.LayerTypeEndToEndExtn, &e2e)
+			if err := parser.DecodeLayers(e2eLayer.Contents, &decoded); err != nil {
+				return serrors.Wrap("cannot decode endToend extension", err)
+			}
+			p.E2eExtnContents = e2e.Options
+		}
 	case slayers.LayerTypeSCMP:
 		gpkt := gopacket.NewPacket(scmpLayer.Payload, scmpLayer.NextLayerType(),
 			gopacket.DecodeOptions{})
@@ -572,9 +581,35 @@ func (p *Packet) Serialize() error {
 		return serrors.Wrap("setting source address", err)
 	}
 
-	// XXX(roosd): Currently, this does not take the extension headers
-	// into consideration.
+	packetLayers = append(packetLayers, &scionLayer)
+	payloadLayers := p.Payload.toLayers(&scionLayer)
+
+	var e2eExtn *slayers.EndToEndExtn
+	if extender, ok := p.Path.(DataplanePacketExtender); ok {
+		var err error
+		e2eExtn, err = extender.EndToEndExtn()
+		if err != nil {
+			return serrors.Wrap("building end-to-end extension", err)
+		}
+	}
+
 	scionLayer.PayloadLen = uint16(p.Payload.length())
+	if e2eExtn != nil {
+		if len(e2eExtn.Options) == 0 {
+			return serrors.New("end-to-end extension must contain at least one option")
+		}
+		// Insert the extension in between the scion layer and its next header (possibly
+		// a UDP or SCMP one).
+		e2eExtn.NextHdr = scionLayer.NextHdr
+		scionLayer.NextHdr = slayers.End2EndClass
+
+		// We need the size of the extension, serialize it just for that.
+		e2eLen, err := serializedEndToEndExtnLen(e2eExtn)
+		if err != nil {
+			return serrors.Wrap("serializing end-to-end extension", err)
+		}
+		scionLayer.PayloadLen += uint16(e2eLen)
+	}
 
 	// At this point all the fields in the SCION header apart from the path
 	// and path type must be set already.
@@ -582,8 +617,10 @@ func (p *Packet) Serialize() error {
 		return serrors.Wrap("setting path", err)
 	}
 
-	packetLayers = append(packetLayers, &scionLayer)
-	packetLayers = append(packetLayers, p.Payload.toLayers(&scionLayer)...)
+	if e2eExtn != nil {
+		packetLayers = append(packetLayers, e2eExtn)
+	}
+	packetLayers = append(packetLayers, payloadLayers...)
 
 	buffer := gopacket.NewSerializeBuffer()
 	options := gopacket.SerializeOptions{
@@ -602,6 +639,16 @@ func (p *Packet) Serialize() error {
 	return nil
 }
 
+func serializedEndToEndExtnLen(e2e *slayers.EndToEndExtn) (int, error) {
+	buffer := gopacket.NewSerializeBuffer()
+	if err := gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{
+		FixLengths: true,
+	}, e2e); err != nil {
+		return 0, err
+	}
+	return len(buffer.Bytes()), nil
+}
+
 // PacketInfo contains the data needed to construct a SCION packet.
 //
 // This is a high-level structure, and can only be used to create valid
@@ -617,4 +664,6 @@ type PacketInfo struct {
 	Path DataplanePath
 	// Payload is the Payload of the message.
 	Payload Payload
+	// E2eExtnContents makes an E2E extension data available to the callers.
+	E2eExtnContents []*slayers.EndToEndOption
 }

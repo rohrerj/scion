@@ -27,6 +27,7 @@ import (
 	dppath "github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	dphum "github.com/scionproto/scion/pkg/slayers/path/hummingbird"
+	dphumm "github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	"github.com/scionproto/scion/pkg/slayers/path/scion"
 	"github.com/scionproto/scion/pkg/snet"
 )
@@ -36,18 +37,20 @@ import (
 // was computed using the correct payload size.
 // This path represents a possibly partially reserved path, with zero or more flyovers.
 type Reservation struct {
-	Now      func() time.Time   // The current time.
-	DstIA    addr.IA            // Destination IA of the path.
-	Dec      *dphum.Decoded     // The Hummingbird path.
-	metadata *snet.PathMetadata // Set at construction time.
-	Hops     []*Hop             // Same length as `Dec`. Hops[i]==nil iff no hop at i (eg. xover hop).
+	Now   func() time.Time // The current time.
+	DstIA addr.IA          // Destination IA of the path.
+	Dec   *dphum.Decoded   // The Hummingbird path.
+	Hops  []*Hop           // Same length as `Dec`. Hops[i]==nil iff no hop at i (eg. xover hop).
 
-	blocksPerAk []cipher.Block        // Same length as Hops.
-	scionMacs   [][dppath.MacLen]byte // Original MAC fields from the SCION path.
-	counter     uint32                // duplicate detection counter.
+	reverseReservation     *slayers.EndToEndExtn
+	sentToPacketReverseRsv *slayers.EndToEndExtn
+	blocksPerAk            []cipher.Block        // Same length as Hops.
+	scionMacs              [][dppath.MacLen]byte // Original MAC fields from the SCION path.
+	counter                uint32                // duplicate detection counter.
 }
 
 var _ snet.DataplanePath = (*Reservation)(nil)
+var _ snet.DataplanePacketExtender = (*Reservation)(nil)
 
 // NewReservation builds a new Hummingbird Reservation based on the destination IA and the
 // options passed.
@@ -72,10 +75,6 @@ func NewReservation(opts ...ReservationModFcn) (*Reservation, error) {
 		return nil, serrors.New("unset destination IA")
 	}
 
-	if r.metadata == nil {
-		return nil, serrors.New("missing path metadata")
-	}
-
 	return r, nil
 }
 
@@ -86,11 +85,35 @@ func (r *Reservation) SetPath(s *slayers.SCION) error {
 	// since r.Dec and the derived dataplane path have the same length in bytes,
 	// use the decoded Hummingbird path initially before deriving the correct dataplane path.
 	s.Path, s.PathType = r.Dec, r.Dec.Type()
-	r.deriveDataPlanePath(s.PacketLen(), r.Now())
+	pktLen := s.PacketLen()
+	fmt.Printf("deleteme packet length = %d\n", pktLen)
+	r.deriveDataPlanePath(pktLen, r.Now())
 
 	// The correct dataplane path in the SCION layer is still r.Dec (pointer to path),
 	// nothing else to do.
 	return nil
+}
+
+// SetReverseReservationExtn installs the reverse-reservation E2E extension to
+// advertise on the next packet serialized over this reservation.
+func (r *Reservation) SetReverseReservationExtn(extn *slayers.EndToEndExtn) {
+	r.reverseReservation = extn
+	r.sentToPacketReverseRsv = nil
+}
+
+// EndToEndExtn returns the reverse-reservation extension to be serialized with
+// the next packet, if any.
+func (r *Reservation) EndToEndExtn() (*slayers.EndToEndExtn, error) {
+	if r.reverseReservation == nil {
+		return nil, nil
+	}
+	if r.reverseReservation == r.sentToPacketReverseRsv {
+		r.reverseReservation = nil
+		r.sentToPacketReverseRsv = nil
+		return nil, nil
+	}
+	r.sentToPacketReverseRsv = r.reverseReservation
+	return r.reverseReservation, nil
 }
 
 // deriveDataPlanePath sets pathmeta timestamps and increments the duplicate detection counter and
@@ -158,41 +181,98 @@ func WithDstIA(dstIA addr.IA) ReservationModFcn {
 	}
 }
 
-// WithScionPath allows to build a Reservation based on the SCION path and flyovers passed as
-// arguments. If no flyover is found for a hop, that hop will not have priority.
-// The flyover map is modified by removing those flyovers that were used during the reservation.
-func WithScionPath(p snet.Path, flyoverMap FlyoverMap) ReservationModFcn {
+// WithRawPath can be used to build a Reservation given the RawPath, e.g. in case
+// of replying to a received packet.
+// Only scion and hummingbird path types are supported.
+func WithRawPath(rawPath snet.RawPath, dstIA addr.IA, seq FlyoverSequence) ReservationModFcn {
 	return func(r *Reservation) error {
-		switch p := p.Dataplane().(type) {
-		case SCION:
-			if err := r.setScionPath(p); err != nil {
+		switch rawPath.PathType {
+		case scion.PathType:
+			return r.setupReservationWithScion(rawPath.Raw, dstIA, seq)
+		case dphum.PathType:
+			dec := &dphum.Decoded{}
+			if err := dec.DecodeFromBytes(rawPath.Raw); err != nil {
 				return err
 			}
+			return r.setupReservationWithHummDecoded(dec, dstIA, seq)
 		default:
-			return serrors.New("Unsupported path type")
+			return serrors.New("creating reservation: unsupported path type",
+				"type", rawPath.PathType.String(),
+			)
 		}
-		// Extend the number of hops to that of the path.
-		r.Hops = make([]*Hop, len(r.Dec.HopFields))
+	}
+}
+
+// WithDataplanePath builds a Reservation from an snet DataplanePath.
+// It does not need to deserialize the path from bytes if the path passed is already of
+// type Reservation.
+func WithDataplanePath(p snet.DataplanePath, dstIA addr.IA, seq FlyoverSequence) ReservationModFcn {
+	return func(r *Reservation) error {
+		switch p := p.(type) {
+		case SCION:
+			return r.setupReservationWithScion(p.Raw, dstIA, seq)
+		case *Reservation:
+			return r.setupReservationWithHummDecoded(p.Dec, dstIA, seq)
+		default:
+			return serrors.New("creating reservation: unsupported path type",
+				"type", fmt.Sprintf("%T", p),
+			)
+		}
+	}
+}
+
+// WithReverseFromBidirectional constructs a Reservation given the necessary data from a
+// reverse reservation. This is used to create a bidirectional reservation,
+// and this option is usually applied at the server side, who receives the reverse reservation
+// that was created by the client.
+// - serializedReservation is the end to end extension bytes serialized, which represent the hops
+// and SCION MACs of the reverse reservation.
+// - carrierPath is the path used to send the end to end extension, aka client to server.
+// - otherIA is the IA source of carrierPath, aka the client.
+func WithReverseFromBidirectional(
+	serializedReservation []byte,
+	carrierPath snet.RawPath,
+	otherIA addr.IA,
+) ReservationModFcn {
+	return func(r *Reservation) error {
+		// 1. Deserialize the return path
+		originalPath := carrierPath
+		if originalPath.PathType != dphumm.PathType {
+			return serrors.New("bidirectional reservations supported only on hummingbird paths",
+				"type", originalPath.PathType.String())
+		}
+		var dec dphumm.Decoded
+		if err := dec.DecodeFromBytes(originalPath.Raw); err != nil {
+			return serrors.Wrap("bidirectional reservation, decoding humm. path", err)
+		}
+		// Reverse in place.
+		if _, err := dec.Reverse(); err != nil {
+			return serrors.Wrap("cannot reverse hummingbird path", err)
+		}
+
+		// 2. Deserialize the reservation.
+		if err := r.Deserialize(serializedReservation); err != nil {
+			return serrors.Wrap("cannot deserialize reverse reservation state", err)
+		}
+		if len(r.Hops) != len(dec.HopFields) {
+			return serrors.New("reverse reservation state does not match reversed dataplane path",
+				"reservation_hops", len(r.Hops),
+				"hop_fields", len(dec.HopFields),
+			)
+		}
+
+		// 3. Rebind the reversed dataplane path onto the serialized reverse reservation state.
+		r.Dec = &dec
+		r.DstIA = otherIA
+		r.Now = time.Now
 		r.blocksPerAk = make([]cipher.Block, len(r.Hops))
-
-		// We use the path metadata to get the IAs and interface ID sequence from it.
-		r.metadata = p.Metadata()
-		interfaces := p.Metadata().Interfaces
-		baseHops := InterfacesToBaseHops(interfaces)
-
-		// Set the destination IA from the path metadata:
-		r.DstIA = baseHops[len(baseHops)-1].IA
-
-		hfIndices := reservationHopFieldIndicesForFlyovers(r.Dec)
-		if len(hfIndices) != len(baseHops) {
-			return serrors.New("inconsistent path metadata to hop-field mapping",
-				"base_hops", len(baseHops), "hop_fields", len(hfIndices))
-		}
-		for i, baseHop := range baseHops {
-			err := r.SetHopAndFlyover(hfIndices[i], consumeFlyover(flyoverMap, baseHop))
-			if err != nil {
-				return serrors.Wrap("cannot set the flyover for hop", err,
-					"index", i, "base hop", baseHop)
+		for i, hop := range r.Hops {
+			if hop == nil {
+				continue
+			}
+			if err := r.SetHopAndFlyover(uint8(i), hop); err != nil {
+				return serrors.Wrap("cannot bind reverse reservation hop to dataplane path", err,
+					"index", i)
 			}
 		}
 
@@ -200,20 +280,201 @@ func WithScionPath(p snet.Path, flyoverMap FlyoverMap) ReservationModFcn {
 	}
 }
 
-func (r *Reservation) setScionPath(p SCION) error {
-	scion := &scion.Decoded{}
-	if err := scion.DecodeFromBytes(p.Raw); err != nil {
-		return serrors.Join(err, serrors.New("failed to Prepare Hummingbird Path"))
-	}
+func (r *Reservation) setScionPath(dec *scion.Decoded) error {
 	r.Dec = &hummingbird.Decoded{}
-	r.Dec.ConvertFromScionDecoded(scion)
+	r.Dec.ConvertFromScionDecoded(dec)
 
 	// Clone the MAC fields.
-	r.scionMacs = make([][6]byte, len(scion.HopFields))
-	for i, hf := range scion.HopFields {
+	r.scionMacs = make([][6]byte, len(dec.HopFields))
+	for i, hf := range dec.HopFields {
 		r.scionMacs[i] = hf.Mac
 	}
 
+	return nil
+}
+
+// cloneAggregatedMACsFromHummDecoded clones the aggregated MAC fields into the independent storage,
+// so that they are used as SCION MACs.
+// Note that if the aggregated MAC fields contained already the flyover MACs in them, they will
+// be not be de-aggregated.
+func (r *Reservation) cloneAggregatedMACsFromHummDecoded() {
+	r.scionMacs = make([][dppath.MacLen]byte, len(r.Dec.HopFields))
+	for i, hf := range r.Dec.HopFields {
+		r.scionMacs[i] = hf.HopField.Mac
+	}
+}
+
+func (r *Reservation) SerializedLen() int {
+	return lenOfSerializedHops(r.Hops) + dppath.MacLen*len(r.scionMacs)
+}
+
+func (r *Reservation) Serialize(buff []byte) error {
+	if len(r.scionMacs) != len(r.Hops) {
+		return serrors.New("logic error, inconsistent hop and scion mac count",
+			"hop count", len(r.Hops),
+			"mac count", len(r.scionMacs),
+		)
+	}
+	serializedLen := r.SerializedLen()
+	if len(buff) < serializedLen {
+		return serrors.New("buffer too small to serialize reservation",
+			"expected", serializedLen,
+			"actual", len(buff),
+		)
+	}
+	n, err := serializeHops(buff, r.Hops)
+	if err != nil {
+		return err
+	}
+	// Copy the original SCION MACs to the serialized buffer.
+	buff = buff[n:serializedLen]
+	for _, mac := range r.scionMacs {
+		copy(buff, mac[:])
+		buff = buff[dppath.MacLen:]
+	}
+	return nil
+}
+
+func (r *Reservation) Deserialize(buff []byte) error {
+	hops, err := deserializeHops(buff)
+	if err != nil {
+		return err
+	}
+	hopsLen := lenOfSerializedHops(hops)
+	expectedLen := hopsLen + dppath.MacLen*len(hops)
+	if len(buff) != expectedLen {
+		return serrors.New("invalid serialized reservation length",
+			"expected", expectedLen,
+			"actual", len(buff),
+		)
+	}
+	buff = buff[hopsLen:]
+
+	// Copy as many original SCION MACs as hops:
+	r.scionMacs = make([][dppath.MacLen]byte, len(hops))
+	for i := range len(hops) {
+		copy(r.scionMacs[i][:], buff)
+		buff = buff[dppath.MacLen:]
+	}
+	r.Hops = hops
+	return nil
+}
+
+// deleteme TODO remove this function.
+func (r *Reservation) DeAggregateMACs(
+	originalSrcIA addr.IA,
+	pktLen uint16,
+) {
+	// The MAC fields are aggregated from the SCION MACs and Hummingbird flyover MACs.
+	// Compute the Hummingbird flyover MACs for each hop, and XOR them to the MAC field to
+	// obtain the original SCION MAC. I.e., SCION_MAC = MAC_field ^ MAC_Flyover .
+	var byteBuffer [hummingbird.FlyoverMacBufferSize]byte
+	for i, h := range r.Hops {
+		// Check if hop is xover (no hop) or non flyover (just best effort)
+		if h == nil || h.Flyover == nil {
+			continue
+		}
+		hf := &r.Dec.HopFields[i]
+
+		flyoverMac := hummingbird.FlyoverMacWithAkAesBlock(
+			r.blocksPerAk[i],
+			byteBuffer[:],
+			originalSrcIA,
+			pktLen,
+			hf.ResStartTime,
+			r.Dec.Base.PathMeta.HighResTS,
+		)
+		// XOR the first 4 bytes with the MAC field.
+		binary.BigEndian.PutUint32(r.scionMacs[i][:4],
+			binary.BigEndian.Uint32(flyoverMac[:4])^binary.BigEndian.Uint32(hf.HopField.Mac[:4]),
+		)
+		// And the remaining 2 bytes.
+		binary.BigEndian.PutUint16(r.scionMacs[i][4:],
+			binary.BigEndian.Uint16(flyoverMac[4:])^binary.BigEndian.Uint16(hf.HopField.Mac[4:]),
+		)
+	}
+}
+
+func (r *Reservation) setupReservationWithScion(
+	serializedPath []byte,
+	dstIA addr.IA,
+	seq FlyoverSequence,
+) error {
+	var dec scion.Decoded
+	if err := dec.DecodeFromBytes(serializedPath); err != nil {
+		return err
+	}
+	if err := r.setScionPath(&dec); err != nil {
+		return err
+	}
+	// hopsFromDP will skip crossovers.
+	hopsFromDP, err := scionDataplaneToBaseHops(&dec)
+	if err != nil {
+		return err
+	}
+
+	r.DstIA = dstIA
+	// Extend the number of hops to that of the path.
+	r.Hops = make([]*Hop, len(r.Dec.HopFields))
+	r.blocksPerAk = make([]cipher.Block, len(r.Hops))
+
+	return r.assignFlyovers(seq, hopsFromDP)
+}
+
+func (r *Reservation) setupReservationWithHummDecoded(
+	hummDec *dphum.Decoded,
+	dstIA addr.IA,
+	seq FlyoverSequence,
+) error {
+	r.Dec = &dphum.Decoded{}
+	r.Dec = hummDec
+	r.cloneAggregatedMACsFromHummDecoded()
+
+	// hopsFromDP will skip crossovers.
+	hopsFromDP, err := hummDataplaneToBaseHops(r.Dec)
+	if err != nil {
+		return err
+	}
+
+	r.DstIA = dstIA
+	// Extend the number of hops to that of the path.
+	r.Hops = make([]*Hop, len(r.Dec.HopFields))
+	r.blocksPerAk = make([]cipher.Block, len(r.Hops))
+
+	return r.assignFlyovers(seq, hopsFromDP)
+}
+
+func (r *Reservation) assignFlyovers(
+	seq FlyoverSequence,
+	hopsFromDP []BaseHop,
+) error {
+	hfIndices := reservationHopFieldIndicesForFlyovers(r.Dec)
+	if len(hopsFromDP) != len(seq) || len(hopsFromDP) != len(hfIndices) {
+		return serrors.New("inconsistent hummingbird dataplane to flyover mapping",
+			"base_hops", len(hopsFromDP),
+			"flyover_sequence", len(seq),
+			"hop_fields", len(hfIndices))
+	}
+	for i, hopFromDP := range hopsFromDP {
+		hop := seq[i]
+		if hop == nil {
+			continue
+		}
+
+		if hop.BaseHop.Ingress != hopFromDP.Ingress ||
+			hop.BaseHop.Egress != hopFromDP.Egress {
+			return serrors.New("mismatch hop parameter and data-plane",
+				"index", i,
+				"hop", hop,
+				"dataplane_hop", hopFromDP)
+		}
+		if err := r.SetHopAndFlyover(hfIndices[i], hop); err != nil {
+			return serrors.Wrap("cannot set the flyover for dataplane hop", err,
+				"index", i,
+				"hop", hop,
+				"dataplane hop", hopFromDP)
+		}
+	}
 	return nil
 }
 
@@ -229,10 +490,40 @@ func (r *Reservation) SetHopAndFlyover(
 	// Find the hop field from its index.
 	hf := &r.Dec.HopFields[hfIdx]
 
+	// Validate ingress and egress.
+	segIdx := r.Dec.InfIndexForHFIndex(hfIdx)
+	in := hf.HopField.ConsIngress
+	eg := hf.HopField.ConsEgress
+	if !r.Dec.InfoFields[segIdx].ConsDir {
+		in, eg = eg, in
+	}
+
+	xover := r.Dec.IsCrossOver(hfIdx)
+	switch xover {
+	case -1:
+		if !r.Dec.InfoFields[segIdx+1].ConsDir {
+			eg = r.Dec.HopFields[hfIdx+1].HopField.ConsIngress
+		} else {
+			eg = r.Dec.HopFields[hfIdx+1].HopField.ConsEgress
+		}
+	case +1:
+		if !r.Dec.InfoFields[segIdx-1].ConsDir {
+			in = r.Dec.HopFields[hfIdx+1].HopField.ConsEgress
+		} else {
+			in = r.Dec.HopFields[hfIdx+1].HopField.ConsIngress
+		}
+	default:
+	}
+	if in != hop.Ingress || eg != hop.Egress {
+		return serrors.New("inconsistent flyover ingress/egress for dataplane",
+			"flyover", fmt.Sprintf("in:%d, eg:%d", hop.Ingress, hop.Egress),
+			"dataplane", fmt.Sprintf("in:%d, eg:%d", in, eg))
+	}
+
 	if !hf.Flyover {
 		// Because we are setting a plain hop field as a flyover, it will use two more lines.
 		r.Dec.NumLines += 2
-		r.Dec.PathMeta.SegLen[r.Dec.InfIndexForHFIndex(hfIdx)] += 2
+		r.Dec.PathMeta.SegLen[segIdx] += 2
 		hf.Flyover = true
 	}
 
@@ -249,17 +540,6 @@ func (r *Reservation) SetHopAndFlyover(
 	r.blocksPerAk[hfIdx] = block
 
 	return nil
-}
-
-func consumeFlyover(flyoverMap FlyoverMap, baseHop BaseHop) *Hop {
-	flyover, ok := flyoverMap[baseHop]
-	if ok {
-		delete(flyoverMap, baseHop)
-	}
-	return &Hop{
-		BaseHop: baseHop,
-		Flyover: flyover,
-	}
 }
 
 // reservationHopFieldIndicesForFlyovers returns the hop field indices in the Hummingbird path
@@ -293,6 +573,76 @@ func reservationHopFieldIndicesForFlyovers(dec *hummingbird.Decoded) []uint8 {
 	return indices
 }
 
+// scionDataplaneToBaseHops maps a decoded SCION dataplane path to its logical ingress/egress
+// hop sequence. Segment crossover pairs are collapsed into one logical hop.
+func scionDataplaneToBaseHops(dec *scion.Decoded) ([]BaseHop, error) {
+	if len(dec.HopFields) == 0 {
+		return nil, nil
+	}
+
+	baseHops := make([]BaseHop, 0, len(dec.HopFields)-dec.NumINF+1)
+	for segIdx, hopIdx := 0, 0; segIdx < dec.NumINF; segIdx++ {
+		for hopInSegment := 0; hopInSegment < int(dec.PathMeta.SegLen[segIdx]); hopInSegment++ {
+			h := dec.HopFields[hopIdx]
+			in := h.ConsIngress
+			eg := h.ConsEgress
+			if !dec.InfoFields[segIdx].ConsDir {
+				// In reverse construction direction, swap ingress with egress.
+				in, eg = eg, in
+			}
+			hop := BaseHop{
+				Ingress: in,
+				Egress:  eg,
+			}
+			// Check for crossovers.
+			if segIdx > 0 && hopInSegment == 0 {
+				// Crossover. Replace the previous zero egress with the one in this hop field.
+				baseHops[len(baseHops)-1].Egress = eg
+			} else {
+				// Not a crossover. Add the new hop field.
+				baseHops = append(baseHops, hop)
+			}
+			hopIdx++
+		}
+	}
+	return baseHops, nil
+}
+
+// hummDataplaneToBaseHops maps a decoded Hummingbird dataplane path to its logical ingress/egress
+// hop sequence. Segment crossover pairs are collapsed into one logical hop.
+func hummDataplaneToBaseHops(dec *hummingbird.Decoded) ([]BaseHop, error) {
+	if len(dec.HopFields) == 0 {
+		return nil, nil
+	}
+
+	baseHops := make([]BaseHop, 0, len(dec.HopFields)-dec.NumINF+1)
+	for segIdx, hopIdx := 0, 0; segIdx < dec.NumINF; segIdx++ {
+		for hopInSegment := 0; hopInSegment < dec.NumberOfHFsInSegment(segIdx); hopInSegment++ {
+			h := dec.HopFields[hopIdx]
+			in := h.HopField.ConsIngress
+			eg := h.HopField.ConsEgress
+			if !dec.InfoFields[segIdx].ConsDir {
+				// In reverse construction direction, swap ingress with egress.
+				in, eg = eg, in
+			}
+			hop := BaseHop{
+				Ingress: in,
+				Egress:  eg,
+			}
+			// Check for crossovers.
+			if segIdx > 0 && hopInSegment == 0 {
+				// Crossover. Replace the previous zero egress with the one in this hop field.
+				baseHops[len(baseHops)-1].Egress = eg
+			} else {
+				// Not a crossover. Add the new hop field.
+				baseHops = append(baseHops, hop)
+			}
+			hopIdx++
+		}
+	}
+	return baseHops, nil
+}
+
 // BaseHop describes a pair of Ingress and Egress interfaces in a specific AS
 type BaseHop struct {
 	IA      addr.IA
@@ -313,17 +663,203 @@ type FlyoverData struct {
 	Duration  uint16 // Duration of the reservation in seconds.
 }
 
-// FlyoverMap is a map between a flyover <IA,ingress,egress> and its corresponding data.
-type FlyoverMap map[BaseHop]*FlyoverData
+const HopNoFlyoverLen = 12 // bytes
+// ResID = 22 bits
+// Bw = 10 bits
+// Ak = 16 bytes
+// StartTime = 4 bytes
+// Duration = 4 bytes
+const FlyoverLen = 4 + 16 + 4 + 4
+const HopWithFlyoverLen = HopNoFlyoverLen + FlyoverLen
 
-func FlyoversToMap(hops []*Hop) FlyoverMap {
-	ret := make(FlyoverMap)
-	for _, hop := range hops {
-		k := hop.BaseHop
-		ret[k] = hop.Flyover
+// Len returns the length of the hop in bytes.
+func (h Hop) Len() int {
+
+	l := HopNoFlyoverLen
+	if h.Flyover != nil {
+		l += FlyoverLen
 	}
-	return ret
+	return l
 }
+
+func (h Hop) Serialize(buff []byte) (int, error) {
+	l := h.Len()
+	if len(buff) < l {
+		return 0, fmt.Errorf("buffer is too small (%d bytes); expected at least %d bytes",
+			len(buff), l)
+	}
+	buff = buff[:0]
+	buff = binary.BigEndian.AppendUint64(buff, uint64(h.IA))
+	buff = binary.BigEndian.AppendUint16(buff, h.Ingress)
+	buff = binary.BigEndian.AppendUint16(buff, h.Egress)
+
+	if h.Flyover != nil {
+		buff = binary.BigEndian.AppendUint32(buff, h.Flyover.ResID<<10|uint32(h.Flyover.Bw))
+		buff = append(buff, h.Flyover.Ak[:]...)
+		buff = binary.BigEndian.AppendUint32(buff, h.Flyover.StartTime)
+		buff = binary.BigEndian.AppendUint16(buff, h.Flyover.Duration)
+	}
+	return l, nil
+}
+
+func (h *Hop) Deserialize(buff []byte, hasFlyover bool) error {
+	expected := HopNoFlyoverLen
+	if hasFlyover {
+		expected += FlyoverLen
+	}
+	if len(buff) < expected {
+		return fmt.Errorf("buffer is too small (%d bytes); expected at least %d bytes",
+			len(buff), HopNoFlyoverLen+FlyoverLen)
+	}
+	h.IA = addr.IA(binary.BigEndian.Uint64(buff))
+	buff = buff[8:]
+	h.Ingress = binary.BigEndian.Uint16(buff)
+	buff = buff[2:]
+	h.Egress = binary.BigEndian.Uint16(buff)
+	buff = buff[2:]
+
+	if hasFlyover {
+		h.Flyover = &FlyoverData{}
+		resIdBw := binary.BigEndian.Uint32(buff)
+		buff = buff[4:]
+		h.Flyover.ResID = resIdBw >> 10
+		h.Flyover.Bw = uint16(resIdBw) & 0x000003FF // lowest 10 bits
+		copy(h.Flyover.Ak[:], buff)
+		buff = buff[16:]
+		h.Flyover.StartTime = binary.BigEndian.Uint32(buff)
+		buff = buff[4:]
+		h.Flyover.Duration = binary.BigEndian.Uint16(buff)
+		buff = buff[2:]
+	}
+	return nil
+}
+
+func lenOfSerializedHops(hops []*Hop) int {
+	l := 1
+	bitsetBytes := backingBytesForHopBitset(len(hops))
+	l += bitsetBytes // bytes to hold the hop existence flags.
+	l += bitsetBytes // bytes to hold the flyover flags.
+	for _, h := range hops {
+		if h == nil {
+			continue
+		}
+		l += h.Len()
+	}
+	return l
+}
+
+// serializeHops serializes up to 255 hops.
+// The structure of the buffer ends up as:
+// - Hop count, 1 byte.
+// - Hop existence flag bitset, for all hops; (hop count+7) / 8
+// - Flyover flag bitset, for all hops; (hop count+7) / 8
+// - Sequence of non-nil Hops.
+func serializeHops(buff []byte, hops []*Hop) (int, error) {
+	if len(hops) > 255 {
+		return 0, fmt.Errorf("cannot serialize more than 255 hops, requested %d", len(hops))
+	}
+	// Check size.
+	expectedSize := lenOfSerializedHops(hops)
+	if len(buff) < expectedSize {
+		return 0, fmt.Errorf("buffer with length %d is too small; required %d bytes",
+			len(buff), expectedSize)
+	}
+
+	// Serialize.
+	buff[0] = byte(len(hops))
+	buff = buff[1:]
+	bitsetBytes := backingBytesForHopBitset(len(hops))
+
+	existsFlags := newHopBitset(buff[:bitsetBytes], len(hops))
+	existsFlags.Clear()
+	buff = buff[bitsetBytes:]
+
+	flyoverFlags := newHopBitset(buff[:bitsetBytes], len(hops))
+	flyoverFlags.Clear()
+	buff = buff[bitsetBytes:]
+
+	var err error
+	var n int
+	for i, h := range hops {
+		if h == nil {
+			continue
+		}
+		existsFlags.Set(i, true)
+		if h.Flyover != nil {
+			flyoverFlags.Set(i, true)
+		}
+		n, err = h.Serialize(buff)
+		if err != nil {
+			return n, serrors.Wrap("serializing hop field", err, "i", i)
+		}
+		buff = buff[n:]
+	}
+	return expectedSize, nil
+}
+
+func deserializeHops(buff []byte) ([]*Hop, error) {
+	if len(buff) == 0 {
+		return nil, nil
+	}
+	N := int(buff[0])
+
+	bitsetBytes := backingBytesForHopBitset(N)
+	headerLen := 1 + 2*bitsetBytes
+	if len(buff) < headerLen {
+		return nil, fmt.Errorf("deserialize hops: buffer too small, expected >= %d, got %d bytes",
+			headerLen, len(buff))
+	}
+	existsFlags := newHopBitset(buff[1:1+bitsetBytes], N)
+	flyoverFlags := newHopBitset(buff[1+bitsetBytes:headerLen], N)
+	hopData := buff[headerLen:]
+	expectedPayloadLen := 0
+	for i := range N {
+		exists := existsFlags.Get(i)
+		hasFlyover := flyoverFlags.Get(i)
+		if !exists {
+			if hasFlyover {
+				return nil, fmt.Errorf(
+					"deserialize hops: invalid flags at index %d: non-existent hop has flyover",
+					i,
+				)
+			}
+			continue
+		}
+		if hasFlyover {
+			expectedPayloadLen += HopWithFlyoverLen
+		} else {
+			expectedPayloadLen += HopNoFlyoverLen
+		}
+	}
+	expectedLen := headerLen + expectedPayloadLen
+
+	if len(buff) < expectedLen {
+		return nil, fmt.Errorf("deserialize hops: buffer too small, expected >= %d, got %d bytes",
+			expectedLen, len(buff))
+	}
+
+	hops := make([]*Hop, N)
+	for i := range N {
+		if !existsFlags.Get(i) {
+			continue
+		}
+		hops[i] = &Hop{}
+		hasFlyover := flyoverFlags.Get(i)
+		err := hops[i].Deserialize(hopData, hasFlyover)
+		if err != nil {
+			return nil, serrors.Wrap("deserialize hops", err)
+		}
+		if hasFlyover {
+			hopData = hopData[HopWithFlyoverLen:]
+		} else {
+			hopData = hopData[HopNoFlyoverLen:]
+		}
+	}
+	return hops, nil
+}
+
+// FlyoverSequence represents a sequence of hops. These hops may contain flyovers.
+type FlyoverSequence []*Hop
 
 // InterfacesToBaseHops maps path metadata interfaces to per-AS ingress/egress hop tuples.
 func InterfacesToBaseHops(ifaces []snet.PathInterface) []BaseHop {
@@ -349,4 +885,62 @@ func InterfacesToBaseHops(ifaces []snet.PathInterface) []BaseHop {
 		})
 	}
 	return baseHops
+}
+
+type hopBitset struct {
+	nBits int
+	buf   []byte
+}
+
+func backingBytesForHopBitset(nBits int) int {
+	return (nBits + 7) / 8
+}
+
+func newHopBitset(backing []byte, nBits int) hopBitset {
+	nBytes := backingBytesForHopBitset(nBits)
+	b := backing[:nBytes]
+	return hopBitset{
+		nBits: nBits,
+		buf:   b,
+	}
+}
+
+func (b hopBitset) Clear() {
+	clear(b.buf) // all bits to zero
+}
+
+func (b hopBitset) Set(i int, value bool) {
+	byteIdx := i / 8
+	bitIdx := uint(i % 8)
+
+	mask := byte(1 << bitIdx) // LSB-first within each byte
+	if value {
+		b.buf[byteIdx] |= mask
+	} else {
+		b.buf[byteIdx] &^= mask
+	}
+}
+
+func (b hopBitset) Get(i int) bool {
+	byteIdx := i / 8
+	bitIdx := uint(i % 8)
+	return b.buf[byteIdx]&(1<<bitIdx) != 0
+}
+
+func (b hopBitset) TotalBits() int {
+	return b.nBits
+}
+
+func (b hopBitset) CountOnes() int {
+	count := 0
+	for i := range b.nBits {
+		if b.Get(i) {
+			count++
+		}
+	}
+	return count
+}
+
+func (b hopBitset) CountZeroes() int {
+	return b.TotalBits() - b.CountOnes()
 }

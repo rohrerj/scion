@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package hummingbirdtest contains shared helpers for the Hummingbird QUIC
-// live test and the matching acceptance test.
+// Package hummingbirdtest contains shared helpers for Hummingbird live tests
+// and the matching acceptance test.
 
 package hummingbirdtest
 
@@ -27,8 +27,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -40,7 +38,9 @@ import (
 	"github.com/scionproto/scion/pkg/daemon"
 	"github.com/scionproto/scion/pkg/daemon/types"
 	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/slayers"
 	hummlib "github.com/scionproto/scion/pkg/slayers/path/hummingbird"
+	dpscion "github.com/scionproto/scion/pkg/slayers/path/scion"
 	"github.com/scionproto/scion/pkg/snet"
 	snetpath "github.com/scionproto/scion/pkg/snet/path"
 	"github.com/scionproto/scion/private/keyconf"
@@ -97,16 +97,6 @@ var tlsKey []byte
 // Logger matches testing-style logging functions such as t.Logf and log.Printf.
 type Logger func(string, ...any)
 
-// FixedReplyPather always returns a preselected dataplane reply path.
-type FixedReplyPather struct {
-	Path snet.DataplanePath
-}
-
-// ReplyPath implements snet.ReplyPather.
-func (p FixedReplyPather) ReplyPath(snet.RawPath) (snet.DataplanePath, error) {
-	return p.Path, nil
-}
-
 type ignoreSCMP struct{}
 
 func (ignoreSCMP) Handle(*snet.Packet) error {
@@ -125,33 +115,6 @@ func NewTLSConfig() (*tls.Config, error) {
 		InsecureSkipVerify: true,
 		NextProtos:         []string{"SCION"},
 	}, nil
-}
-
-// FindTinyTopologyAssets verifies that root contains the generated tiny-topology
-// files needed to derive Hummingbird reservation keys.
-func FindTinyTopologyAssets(root string) (string, error) {
-	if HasTinyTopologyAssets(root) {
-		return root, nil
-	}
-	return "", serrors.New("tiny topology assets not found", "root", root)
-}
-
-// HasTinyTopologyAssets reports whether root contains the minimum generated
-// tiny-topology files required by the Hummingbird tests.
-func HasTinyTopologyAssets(root string) bool {
-	required := []string{
-		filepath.Join(root, "ASff00_0_110", "keys", "master0.key"),
-		filepath.Join(root, "ASff00_0_111", "keys", "master0.key"),
-		filepath.Join(root, "ASff00_0_112", "keys", "master0.key"),
-		filepath.Join(root, "ASff00_0_111", "topology.json"),
-		filepath.Join(root, "ASff00_0_112", "topology.json"),
-	}
-	for _, path := range required {
-		if _, err := os.Stat(path); err != nil {
-			return false
-		}
-	}
-	return true
 }
 
 // ConnectDaemon establishes a daemon connector and verifies that it is usable.
@@ -203,51 +166,24 @@ func BasePath(
 func NewSCIONConn(
 	ctx context.Context,
 	topology snet.Topology,
-	local *net.UDPAddr,
+	local *snet.UDPAddr,
 	replyPather snet.ReplyPather,
-	ignoreServerSCMP bool,
 ) (*snet.Conn, error) {
 	var handler snet.SCMPHandler = snet.SCMPPropagationStopper{
 		Handler: ignoreSCMP{},
 		Log: func(string, ...any) {
 		},
 	}
-	if ignoreServerSCMP {
-		// The one-shot test server should not fail just because the network emits
-		// an SCMP packet while the client is still establishing the flow.
-		handler = ignoreSCMP{}
-	}
 	network := &snet.SCIONNetwork{
 		Topology:    topology,
 		ReplyPather: replyPather,
 		SCMPHandler: handler,
 	}
-	conn, err := network.Listen(ctx, "udp", local)
+	conn, err := network.Listen(ctx, "udp", local.Host)
 	if err != nil {
 		return nil, serrors.Wrap("listening on scion network", err, "local", local)
 	}
 	return conn, nil
-}
-
-// BuildHummingbirdRemote turns a plain remote address into one that carries a
-// Hummingbird reservation path and the matching next hop.
-func BuildHummingbirdRemote(
-	ctx context.Context,
-	conn daemon.Connector,
-	clientLocal *snet.UDPAddr,
-	serverRemote *snet.UDPAddr,
-	keysRoot string,
-	log Logger,
-) (*snet.UDPAddr, error) {
-	return BuildHummingbirdRemoteWithParams(
-		ctx,
-		conn,
-		clientLocal,
-		serverRemote,
-		keysRoot,
-		DefaultReservationParams(),
-		log,
-	)
 }
 
 // BuildHummingbirdRemoteWithParams turns a plain remote address into one that
@@ -266,7 +202,20 @@ func BuildHummingbirdRemoteWithParams(
 	if err != nil {
 		return nil, err
 	}
-	reservation, err := NewHummingbirdReservationWithParams(basePath, keysRoot, time.Now(), params, log)
+	return BuildHummingbirdRemoteWithPath(basePath, serverRemote, keysRoot, params, log)
+}
+
+// BuildHummingbirdRemoteWithPath turns a plain remote address into one that
+// carries a Hummingbird reservation over the provided base path.
+func BuildHummingbirdRemoteWithPath(
+	basePath snet.Path,
+	serverRemote *snet.UDPAddr,
+	keysRoot string,
+	params ReservationParams,
+	log Logger,
+) (*snet.UDPAddr, error) {
+	now := time.Now()
+	reservation, err := NewHummingbirdReservationWithParams(basePath, keysRoot, now, params, log)
 	if err != nil {
 		return nil, err
 	}
@@ -274,9 +223,14 @@ func BuildHummingbirdRemoteWithParams(
 	if !ok {
 		return nil, serrors.New("unexpected reservation path type", "type", reflect.TypeOf(reservation))
 	}
-	if err := ValidateReservationWindow(res, time.Now()); err != nil {
+	if err := ValidateReservationWindow(res, now); err != nil {
 		return nil, err
 	}
+	reverseReservation, err := reverseReservationExtn(basePath, keysRoot, now, params, log)
+	if err != nil {
+		return nil, err
+	}
+	res.SetReverseReservationExtn(reverseReservation)
 
 	remote := serverRemote.Copy()
 	remote.Path = reservation
@@ -286,17 +240,6 @@ func BuildHummingbirdRemoteWithParams(
 		log("hummingbird next hop: %v", remote.NextHop)
 	}
 	return remote, nil
-}
-
-// NewHummingbirdReservation derives one flyover reservation per hop on the
-// selected base path and wraps them into a reservation dataplane path.
-func NewHummingbirdReservation(
-	basePath snet.Path,
-	keysRoot string,
-	now time.Time,
-	log Logger,
-) (snet.DataplanePath, error) {
-	return NewHummingbirdReservationWithParams(basePath, keysRoot, now, DefaultReservationParams(), log)
 }
 
 // NewHummingbirdReservationWithParams derives one flyover reservation per hop
@@ -310,6 +253,36 @@ func NewHummingbirdReservationWithParams(
 	log Logger,
 ) (snet.DataplanePath, error) {
 	baseHops := snetpath.InterfacesToBaseHops(basePath.Metadata().Interfaces)
+	if len(baseHops) == 0 {
+		return nil, serrors.New("base path does not contain any hops")
+	}
+
+	// Convert the path to a scion raw path.
+	scionPath, ok := basePath.Dataplane().(snetpath.SCION)
+	if !ok {
+		return nil, serrors.New("provided path must be of type scion")
+	}
+
+	return newHummingbirdReservationFromBaseHops(
+		scionPath,
+		basePath.Destination(),
+		baseHops,
+		keysRoot,
+		now,
+		params,
+		log,
+	)
+}
+
+func newHummingbirdReservationFromBaseHops(
+	scionPath snetpath.SCION,
+	dstIA addr.IA,
+	baseHops []snetpath.BaseHop,
+	keysRoot string,
+	now time.Time,
+	params ReservationParams,
+	log Logger,
+) (*snetpath.Reservation, error) {
 	if len(baseHops) == 0 {
 		return nil, serrors.New("base path does not contain any hops")
 	}
@@ -364,12 +337,83 @@ func NewHummingbirdReservationWithParams(
 
 	reservation, err := snetpath.NewReservation(
 		snetpath.WithNow(func() time.Time { return now }),
-		snetpath.WithScionPath(basePath, snetpath.FlyoversToMap(flyovers)),
+		snetpath.WithDataplanePath(scionPath, dstIA, flyovers),
 	)
 	if err != nil {
 		return nil, serrors.Wrap("building reservation path", err)
 	}
 	return reservation, nil
+}
+
+func reverseReservationExtn(
+	basePath snet.Path,
+	keysRoot string,
+	now time.Time,
+	params ReservationParams,
+	log Logger,
+) (*slayers.EndToEndExtn, error) {
+	scionPath, ok := basePath.Dataplane().(snetpath.SCION)
+	if !ok {
+		return nil, serrors.New("provided path must be of type scion")
+	}
+	reverseScionPath, err := reverseSCIONPath(scionPath)
+	if err != nil {
+		return nil, err
+	}
+	reverseHops := reverseBaseHops(snetpath.InterfacesToBaseHops(basePath.Metadata().Interfaces))
+	reservation, err := newHummingbirdReservationFromBaseHops(
+		reverseScionPath,
+		basePath.Source(),
+		reverseHops,
+		keysRoot,
+		now,
+		params,
+		log,
+	)
+	if err != nil {
+		return nil, err
+	}
+	state := make([]byte, reservation.SerializedLen())
+	if err := reservation.Serialize(state); err != nil {
+		return nil, err
+	}
+	return &slayers.EndToEndExtn{
+		Options: []*slayers.EndToEndOption{
+			{
+				OptType: slayers.OptTypeReversePath,
+				OptData: state,
+			},
+		},
+	}, nil
+}
+
+func reverseSCIONPath(scionPath snetpath.SCION) (snetpath.SCION, error) {
+	var dec dpscion.Decoded
+	raw := append([]byte(nil), scionPath.Raw...)
+	if err := dec.DecodeFromBytes(raw); err != nil {
+		return snetpath.SCION{}, serrors.Wrap("decoding scion path", err)
+	}
+	reversed, err := dec.Reverse()
+	if err != nil {
+		return snetpath.SCION{}, serrors.Wrap("reversing scion path", err)
+	}
+	reversedDecoded, ok := reversed.(*dpscion.Decoded)
+	if !ok {
+		return snetpath.SCION{}, serrors.New("unexpected reversed path type", "type", reflect.TypeOf(reversed))
+	}
+	return snetpath.NewSCIONFromDecoded(*reversedDecoded)
+}
+
+func reverseBaseHops(hops []snetpath.BaseHop) []snetpath.BaseHop {
+	reversed := make([]snetpath.BaseHop, len(hops))
+	for i, hop := range hops {
+		reversed[len(hops)-1-i] = snetpath.BaseHop{
+			IA:      hop.IA,
+			Ingress: hop.Egress,
+			Egress:  hop.Ingress,
+		}
+	}
+	return reversed
 }
 
 // SecretValue loads the AS master key from keysRoot and derives the
@@ -483,14 +527,12 @@ func RunQUICClientRoundTrip(
 	return nil
 }
 
-// RunServer runs the one-shot QUIC server side of the Hummingbird test against
+// RunQuicServer runs the one-shot QUIC server side of the Hummingbird test against
 // the provided daemon and local address.
-func RunServer(
+func RunQuicServer(
 	ctx context.Context,
 	daemonAddr string,
 	localAddr *snet.UDPAddr,
-	peerIA addr.IA,
-	log Logger,
 ) error {
 	serverDaemon, err := ConnectDaemon(ctx, daemonAddr)
 	if err != nil {
@@ -502,12 +544,7 @@ func RunServer(
 	if err != nil {
 		return serrors.Wrap("loading server topology", err)
 	}
-	serverBasePath, err := BasePath(ctx, serverDaemon, localAddr.IA, peerIA, log)
-	if err != nil {
-		return err
-	}
-	replyPather := FixedReplyPather{Path: serverBasePath.Dataplane()}
-	serverConn, err := NewSCIONConn(ctx, serverTopo, localAddr.Host, replyPather, true)
+	serverConn, err := NewSCIONConn(ctx, serverTopo, localAddr, nil)
 	if err != nil {
 		return err
 	}
@@ -568,7 +605,7 @@ func RunClientWithParams(
 	if err != nil {
 		return serrors.Wrap("loading client topology", err)
 	}
-	clientConn, err := NewSCIONConn(ctx, clientTopo, localAddr.Host, nil, false)
+	clientConn, err := NewSCIONConn(ctx, clientTopo, localAddr, nil)
 	if err != nil {
 		return err
 	}

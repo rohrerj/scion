@@ -15,6 +15,7 @@
 package snet
 
 import (
+	"fmt"
 	"net"
 	"net/netip"
 	"sync"
@@ -77,20 +78,11 @@ func (c *scionConnReader) read(b []byte) (int, *UDPAddr, error) {
 		return 0, nil, err
 	}
 
-	rpath, ok := pkt.Path.(RawPath)
-	if !ok {
-		return 0, nil, serrors.New("unexpected path", "type", common.TypeOf(pkt.Path))
-	}
-	replyPath, err := c.replyPather.ReplyPath(rpath)
-	if err != nil {
-		return 0, nil, serrors.Wrap("creating reply path", err)
-	}
-
+	// Check that the packet is destined to us.
 	udp, ok := pkt.Payload.(UDPPayload)
 	if !ok {
 		return 0, nil, serrors.New("unexpected payload", "type", common.TypeOf(pkt.Payload))
 	}
-
 	pktAddrPort := netip.AddrPortFrom(pkt.Destination.Host.IP(), udp.DstPort)
 	if c.local.IA != pkt.Destination.IA {
 		return 0, nil, serrors.New("packet is destined to a different IA",
@@ -120,6 +112,29 @@ func (c *scionConnReader) read(b []byte) (int, *UDPAddr, error) {
 				"pkt_destination_host", pktAddrPort,
 			)
 		}
+	}
+
+	// Obtain the packet path.
+	rpath, ok := pkt.Path.(RawPath)
+	if !ok {
+		return 0, nil, serrors.New("unexpected path", "type", common.TypeOf(pkt.Path))
+	}
+
+	// Using the reply pather, build the reverse path.
+	fmt.Printf("deleteme checking if reply pather is stateful... ")
+
+	var replyPath DataplanePath
+	if statefulRP, ok := c.replyPather.(StatefulReplyPather); ok {
+		fmt.Print("yes\n")
+		if err := statefulRP.SetState(pkt); err != nil {
+			return 0, nil, serrors.Wrap("cannot set the state of the reply pather", err)
+		}
+	} else {
+		fmt.Print("no\n")
+	}
+	replyPath, err = c.replyPather.ReplyPath(rpath)
+	if err != nil {
+		return 0, nil, serrors.Wrap("creating reply path", err)
 	}
 
 	// Extract remote address.

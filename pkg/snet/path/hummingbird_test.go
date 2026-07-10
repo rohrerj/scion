@@ -15,18 +15,17 @@
 package path_test
 
 import (
-	"context"
 	"crypto/cipher"
-	"sync"
+	"encoding/hex"
 	"testing"
 	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
-	"github.com/scionproto/scion/pkg/daemon"
-	"github.com/scionproto/scion/pkg/daemon/types"
 	"github.com/scionproto/scion/pkg/private/util"
 	"github.com/scionproto/scion/pkg/segment/iface"
+	"github.com/scionproto/scion/pkg/slayers"
 	dppath "github.com/scionproto/scion/pkg/slayers/path"
+	"github.com/scionproto/scion/pkg/slayers/path/epic"
 	dphumm "github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	"github.com/scionproto/scion/pkg/slayers/path/scion"
 	"github.com/scionproto/scion/pkg/snet"
@@ -41,7 +40,6 @@ func TestNewWithNow(t *testing.T) {
 			return util.SecsToTime(referenceEpochTime)
 		}),
 		path.WithDstIA(addr.MustParseIA("1-ff00:0:112")),
-		path.WithMetadata(&snet.PathMetadata{}), // Skip metadata errors in this test.
 	)
 	require.NoError(t, err)
 	require.Equal(t, referenceEpochTime, util.TimeToSecs(r.Now()))
@@ -110,18 +108,25 @@ func TestSetFlyover(t *testing.T) {
 	require.Equal(t, 6, int(r.Dec.PathMeta.SegLen[1]))
 }
 
-func TestWithScionPath(t *testing.T) {
+func TestWithScionDataplane(t *testing.T) {
 	const referenceEpochTime uint32 = 123456
 	referenceTime := util.SecsToTime(referenceEpochTime)
 
-	p := createSnetScionPath(t, referenceTime)
-	flyoverMap := createFlyovers(t, referenceEpochTime)
-	require.Len(t, flyoverMap, 3) // Original flyovers are three.
-	r, err := path.NewReservation(path.WithScionPath(p, flyoverMap))
+	scionDec := createScionPath(referenceTime)
+	snetScion := path.SCION{
+		Raw: make([]byte, scionDec.Len()),
+	}
+	err := scionDec.SerializeTo(snetScion.Raw)
+	require.NoError(t, err)
+
+	seq := createFlyoverSequence(t, referenceEpochTime)
+
+	r, err := path.NewReservation(
+		path.WithDataplanePath(snetScion, addr.MustParseIA("1-ff00:0:112"), seq),
+	)
 	require.NoError(t, err)
 	require.NotNil(t, r)
 	require.Equal(t, addr.MustParseIA("1-ff00:0:112"), r.DstIA)
-	require.Len(t, flyoverMap, 0) // All flyovers were used.
 
 	// The path contains two segments, i.e. one xover hop.
 	// There should only be three flyovers, check it.
@@ -131,10 +136,168 @@ func TestWithScionPath(t *testing.T) {
 	// - [2] 110[0] -> 110[2]
 	// - [3] 112[1] -> 112[0]		*
 	require.Len(t, r.Hops, 4)
-	checkHop(t, r.Hops[0], "1-ff00:0:111", 0, 41, true)
-	checkHop(t, r.Hops[1], "1-ff00:0:110", 1, 2, true)
-	checkHop(t, r.Hops[2], "1-ff00:0:110", 999, 999, false) // ingress and egress don't matter here
-	checkHop(t, r.Hops[3], "1-ff00:0:112", 1, 0, true)
+	checkHop(t, r.Hops[0], "", 0, 41, true)
+	checkHop(t, r.Hops[1], "", 1, 2, true)
+	checkHop(t, r.Hops[2], "", 999, 999, false) // ingress and egress don't matter here
+	checkHop(t, r.Hops[3], "", 1, 0, true)
+}
+
+func TestWithHummDataplane(t *testing.T) {
+	const referenceEpochTime uint32 = 123456
+	referenceTime := util.SecsToTime(referenceEpochTime)
+
+	hummDec := createHummingbirdPath(referenceTime)
+	snetHumm := &path.Reservation{
+		Dec: hummDec,
+	}
+	seq := createFlyoverSequence(t, referenceEpochTime)
+
+	r, err := path.NewReservation(
+		path.WithDataplanePath(snetHumm, addr.MustParseIA("1-ff00:0:112"), seq),
+	)
+	require.NoError(t, err)
+	require.Same(t, hummDec, r.Dec)
+	require.Len(t, r.Hops, 4)
+
+	checkHop(t, r.Hops[0], "", 0, 41, true)
+	checkHop(t, r.Hops[1], "", 1, 2, true)
+	checkHop(t, r.Hops[2], "", 999, 999, false)
+	checkHop(t, r.Hops[3], "", 1, 0, true)
+}
+
+func TestReservationEndToEndExtn(t *testing.T) {
+	const referenceEpochTime uint32 = 123456
+	referenceTime := util.SecsToTime(referenceEpochTime)
+	seq := createFlyoverSequence(t, referenceEpochTime)
+
+	scionDec := createScionPath(referenceTime)
+	snetScion := path.SCION{
+		Raw: make([]byte, scionDec.Len()),
+	}
+	require.NoError(t, scionDec.SerializeTo(snetScion.Raw))
+
+	reservation, err := path.NewReservation(
+		path.WithDataplanePath(snetScion, addr.MustParseIA("1-ff00:0:112"), seq),
+	)
+	require.NoError(t, err)
+
+	extn, err := reservation.EndToEndExtn()
+	require.NoError(t, err)
+	require.Nil(t, extn)
+
+	first := &slayers.EndToEndExtn{
+		Options: []*slayers.EndToEndOption{
+			{
+				OptType: slayers.OptTypeReversePath,
+				OptData: []byte{1, 2, 3, 4},
+			},
+		},
+	}
+	reservation.SetReverseReservationExtn(first)
+
+	extn, err = reservation.EndToEndExtn()
+	require.NoError(t, err)
+	require.Same(t, first, extn)
+	require.Len(t, extn.Options, 1)
+	require.Equal(t, slayers.OptTypeReversePath, extn.Options[0].OptType)
+	require.Equal(t, []byte{1, 2, 3, 4}, extn.Options[0].OptData)
+
+	extn, err = reservation.EndToEndExtn()
+	require.NoError(t, err)
+	require.Nil(t, extn)
+
+	second := &slayers.EndToEndExtn{
+		Options: []*slayers.EndToEndOption{
+			{
+				OptType: slayers.OptTypeReversePath,
+				OptData: []byte{5, 6, 7, 8},
+			},
+		},
+	}
+	reservation.SetReverseReservationExtn(second)
+
+	extn, err = reservation.EndToEndExtn()
+	require.NoError(t, err)
+	require.Same(t, second, extn)
+	require.Len(t, extn.Options, 1)
+	require.Equal(t, slayers.OptTypeReversePath, extn.Options[0].OptType)
+	require.Equal(t, []byte{5, 6, 7, 8}, extn.Options[0].OptData)
+}
+
+func TestWithRawPath(t *testing.T) {
+	const referenceEpochTime uint32 = 123456
+	referenceTime := util.SecsToTime(referenceEpochTime)
+
+	seq := createFlyoverSequence(t, referenceEpochTime)
+	t.Run("scion", func(t *testing.T) {
+		p := createScionPath(referenceTime)
+		buff := make([]byte, p.Len())
+		err := p.SerializeTo(buff)
+		require.NoError(t, err)
+		rawPath := snet.RawPath{
+			PathType: scion.PathType,
+			Raw:      buff,
+		}
+
+		r, err := path.NewReservation(
+			path.WithRawPath(rawPath, addr.MustParseIA("1-ff00:0:112"), seq),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, r)
+		require.Len(t, r.Hops, 4)
+		checkHop(t, r.Hops[0], "", 0, 41, true)
+		checkHop(t, r.Hops[1], "", 1, 2, true)
+		checkHop(t, r.Hops[2], "", 999, 999, false)
+		checkHop(t, r.Hops[3], "", 1, 0, true)
+	})
+	t.Run("hummingbird", func(t *testing.T) {
+		p := createHummingbirdPath(referenceTime)
+		buff := make([]byte, p.Len())
+		err := p.SerializeTo(buff)
+		require.NoError(t, err)
+		rawPath := snet.RawPath{
+			PathType: dphumm.PathType,
+			Raw:      buff,
+		}
+
+		r, err := path.NewReservation(
+			path.WithRawPath(rawPath, addr.MustParseIA("1-ff00:0:112"), seq),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, r)
+		require.Len(t, r.Hops, 4)
+		checkHop(t, r.Hops[0], "", 0, 41, true)
+		checkHop(t, r.Hops[1], "", 1, 2, true)
+		checkHop(t, r.Hops[2], "", 999, 999, false)
+		checkHop(t, r.Hops[3], "", 1, 0, true)
+	})
+	t.Run("epic", func(t *testing.T) {
+		scionRaw, err := createScionPath(referenceTime).ToRaw()
+		require.NoError(t, err)
+		epicPath := epic.Path{
+			PktID: epic.PktID{
+				Timestamp: 1,
+				Counter:   0x02000003,
+			},
+			PHVF:      []byte{1, 2, 3, 4},
+			LHVF:      []byte{5, 6, 7, 8},
+			ScionPath: scionRaw,
+		}
+		buff := make([]byte, epicPath.Len())
+		err = epicPath.SerializeTo(buff)
+		require.NoError(t, err)
+
+		rawPath := snet.RawPath{
+			PathType: epic.PathType,
+			Raw:      buff,
+		}
+		r, err := path.NewReservation(
+			path.WithRawPath(rawPath, addr.MustParseIA("1-ff00:0:112"), seq),
+		)
+		require.Error(t, err)
+		require.Nil(t, r)
+		require.Contains(t, err.Error(), "unsupported path type")
+	})
 }
 
 // TestSetScionPathClonesMacFields checks that Reservation.setScionPath clones the values of
@@ -144,16 +307,11 @@ func TestSetScionPathClonesMacFields(t *testing.T) {
 	referenceTime := util.SecsToTime(referenceEpochTime)
 
 	// Create a path and remember one of the MAC fields.
-	p := createSnetScionPath(t, referenceTime)
-	scionPath := p.DataplanePath.(path.SCION)
-	require.NotNil(t, scionPath)
-	scionDec := &scion.Decoded{}
-	err := scionDec.DecodeFromBytes(scionPath.Raw)
-	require.NoError(t, err)
+	scionDec := createScionPath(referenceTime)
 	originalMac := scionDec.HopFields[0].Mac // Copy the array (clone).
 
 	r := &path.Reservation{}
-	err = r.SetScionPath(p.DataplanePath.(path.SCION))
+	err := r.SetScionPath(scionDec)
 	require.NoError(t, err)
 
 	// Modify one of the MAC fields.
@@ -168,19 +326,147 @@ func TestSetScionPathClonesMacFields(t *testing.T) {
 	require.Equal(t, originalMac, r.GetScionMACs()[0])
 }
 
-func TestFlyoversForPath(t *testing.T) {
-	const referenceEpochTime uint32 = 123456
-	referenceTime := util.SecsToTime(referenceEpochTime)
+func TestHopsBitset(t *testing.T) {
+	// buff [0] and [3] will be unused, [1] and [2] for the bitset.
+	buff := make([]byte, 4)
 
-	p := createSnetScionPath(t, referenceTime)
-	require.NotNil(t, p)
+	nBits := 9
+	flags := path.NewHopBitSet(buff[1:], nBits)
+	flags.Set(0, true)
+	require.True(t, flags.Get(0))
+	require.Equal(t, byte(0x01), buff[1])
+	flags.Set(8, true)
+	require.True(t, flags.Get(8))
+	require.Equal(t, byte(0x01), buff[2])
+}
 
-	flyovers, err := getFlyoversForPath(p, referenceEpochTime)
+func TestSerializeHop(t *testing.T) {
+	h := createHopWithFlyover(t)
+	h.Flyover = nil
+	buff := make([]byte, 1)
+	n, err := h.Serialize(buff)
+	require.Error(t, err)
+	buff = make([]byte, path.HopNoFlyoverLen)
+	n, err = h.Serialize(buff)
 	require.NoError(t, err)
-	require.Len(t, flyovers, 3)
+	require.Equal(t, path.HopNoFlyoverLen, n)
+	t.Logf("hop: %s", hex.EncodeToString(buff))
 
-	expectedFlyovers := createFlyovers(t, referenceEpochTime)
-	require.EqualValues(t, expectedFlyovers, flyovers)
+	// With a flyover.
+	h = createHopWithFlyover(t)
+	buff2 := make([]byte, path.HopNoFlyoverLen)
+	n, err = h.Serialize(buff2)
+	require.Error(t, err)
+	buff2 = make([]byte, path.HopWithFlyoverLen)
+	n, err = h.Serialize(buff2)
+	require.NoError(t, err)
+	require.Equal(t, path.HopWithFlyoverLen, n)
+	t.Logf("hop with flyover: %s", hex.EncodeToString(buff2))
+
+	// The initial part must be the same for both buffers.
+	require.Equal(t, buff, buff2[:len(buff)])
+}
+
+// TestSerializeDeserializeHop checks that a Hop can be serialized and deserialized.
+func TestSerializeDeserializeHop(t *testing.T) {
+	h := createHopWithFlyover(t)
+	h.Flyover = nil
+	// Serialize:
+	buff := make([]byte, h.Len())
+	_, err := h.Serialize(buff)
+	require.NoError(t, err)
+	t.Logf("hop: %s", hex.EncodeToString(buff))
+	// Deserialize:
+	h2 := &path.Hop{}
+	err = h2.Deserialize(buff, false)
+	require.NoError(t, err)
+	require.Equal(t, h, h2)
+
+	// Same, with flyover.
+	h = createHopWithFlyover(t)
+	// Serialize:
+	buff = make([]byte, h.Len())
+	_, err = h.Serialize(buff)
+	require.NoError(t, err)
+	t.Logf("hop with flyover: %s", hex.EncodeToString(buff))
+	// Deserialize:
+	h2 = &path.Hop{}
+	err = h2.Deserialize(buff, true)
+	require.NoError(t, err)
+	require.Equal(t, h, h2)
+}
+
+// TestSerializeDeserializeMultipleHops checks that a sequence of Hop can be serialized to
+// bytes, and deserialized from them.
+func TestSerializeDeserializeMultipleHops(t *testing.T) {
+	hops := make([]*path.Hop, 1)
+	hops[0] = createHopWithFlyover(t)
+	// Serialize errors.
+	buff := make([]byte, 1)
+	n, err := path.SerializeHops(buff, hops)
+	require.Error(t, err)
+	// Serialize.
+	buff = make([]byte, path.LenOfSerializedHops(hops))
+	n, err = path.SerializeHops(buff, hops)
+	require.NoError(t, err)
+	require.Equal(t, len(buff), n)
+	// Deserialize errors.
+	gotHops, err := path.DeserializeHops([]byte{1})
+	require.Error(t, err)
+	// Deserialize.
+	gotHops, err = path.DeserializeHops(nil)
+	require.NoError(t, err)
+	require.Len(t, gotHops, 0)
+	gotHops, err = path.DeserializeHops([]byte{0})
+	require.NoError(t, err)
+	require.Len(t, gotHops, 0)
+	// Deserialize real hops.
+	gotHops, err = path.DeserializeHops(buff)
+	require.NoError(t, err)
+	require.Equal(t, hops, gotHops)
+
+	// Create some hops. With flyover denoted by F, without by -.
+	// -FF--F-
+	hops = make([]*path.Hop, 7)
+	for i := range hops {
+		hops[i] = createHopWithFlyover(t)
+		hops[i].Ingress = uint16(i + 42)
+	}
+	hops[0].Flyover = nil
+	hops[3].Flyover = nil
+	hops[4].Flyover = nil
+	hops[6].Flyover = nil
+	// Serialize / deserialize.
+	buff = make([]byte, path.LenOfSerializedHops(hops))
+	n, err = path.SerializeHops(buff, hops)
+	require.NoError(t, err)
+	require.Equal(t, len(buff), n)
+	t.Logf("serialize 7 hops: %s", hex.EncodeToString(buff))
+	// Deserialize the 7 hops.
+	gotHops, err = path.DeserializeHops(buff)
+	require.NoError(t, err)
+	require.Equal(t, hops, gotHops)
+
+	// Create some hops, including nil entries. With flyover denoted by F, without by -, and
+	// nil entries by x.
+	// xF-x-Fx
+	hops = make([]*path.Hop, 7)
+	for _, i := range []int{1, 2, 4, 5} {
+		hops[i] = createHopWithFlyover(t)
+		hops[i].Ingress = uint16(i + 52)
+	}
+	hops[2].Flyover = nil
+	hops[5].Flyover = nil
+	// Serialize / deserialize.
+	buff = make([]byte, path.LenOfSerializedHops(hops))
+	n, err = path.SerializeHops(buff, hops)
+	require.NoError(t, err)
+	require.Equal(t, len(buff), n)
+	t.Logf("serialize 7 hops with nil entries: %s", hex.EncodeToString(buff))
+	// Deserialize the 7 hops with nil entries.
+	gotHops, err = path.DeserializeHops(buff)
+	require.NoError(t, err)
+	require.Equal(t, hops, gotHops)
 }
 
 // createHummingbirdPath creates a valid Hummingbird path between 111 and 112 from the tiny topo.
@@ -301,71 +587,36 @@ func createScionPath(iniTime time.Time) *scion.Decoded {
 	return dec
 }
 
-func createSnetScionPath(t *testing.T, iniTime time.Time) path.Path {
-	scion, err := path.NewSCIONFromDecoded(*createScionPath(iniTime))
-	require.NoError(t, err)
-	as111 := addr.MustParseIA("1-ff00:0:111")
-	as110 := addr.MustParseIA("1-ff00:0:110")
-	as112 := addr.MustParseIA("1-ff00:0:112")
-	return path.Path{
-		Src:           addr.MustParseIA("1-ff00:0:111"),
-		Dst:           addr.MustParseIA("1-ff00:0:112"),
-		DataplanePath: scion,
-		Meta: snet.PathMetadata{
-			MTU:    1500,
-			Expiry: iniTime.Add(time.Hour),
-			Interfaces: []snet.PathInterface{
-				// First segment:
-				{
-					IA: as111,
-					ID: 41,
-				},
-				{
-					IA: as110,
-					ID: 1,
-				},
-				// Second segment:
-				{
-					IA: as110,
-					ID: 2,
-				},
-				{
-					IA: as112,
-					ID: 1,
-				},
+func createFlyoverSequence(t *testing.T, startTime uint32) path.FlyoverSequence {
+	return path.FlyoverSequence{
+		// 111: 0 -> 41
+		&path.Hop{
+			BaseHop: path.BaseHop{
+				IA:      addr.MustParseIA("1-ff00:0:111"),
+				Ingress: 0,
+				Egress:  41,
 			},
+			Flyover: createFlyover(t, startTime),
+		},
+		// 110: 1 ->  2
+		&path.Hop{
+			BaseHop: path.BaseHop{
+				IA:      addr.MustParseIA("1-ff00:0:110"),
+				Ingress: 1,
+				Egress:  2,
+			},
+			Flyover: createFlyover(t, startTime),
+		},
+		// 112: 1 ->  0
+		&path.Hop{
+			BaseHop: path.BaseHop{
+				IA:      addr.MustParseIA("1-ff00:0:112"),
+				Ingress: 1,
+				Egress:  0,
+			},
+			Flyover: createFlyover(t, startTime),
 		},
 	}
-}
-
-// createFlyovers creates all the flyovers for the path 111->112 of the tiny topology.
-func createFlyovers(t *testing.T, startTime uint32) path.FlyoverMap {
-	m := make(path.FlyoverMap)
-	{ // 111: 0 -> 41
-		hop := path.BaseHop{
-			IA:      addr.MustParseIA("1-ff00:0:111"),
-			Ingress: 0,
-			Egress:  41,
-		}
-		m[hop] = createFlyover(t, startTime)
-	}
-	{ // 110: 1 ->  2
-		hop := path.BaseHop{
-			IA:      addr.MustParseIA("1-ff00:0:110"),
-			Ingress: 1,
-			Egress:  2,
-		}
-		m[hop] = createFlyover(t, startTime)
-	}
-	{ // 112: 1 ->  0
-		hop := path.BaseHop{
-			IA:      addr.MustParseIA("1-ff00:0:112"),
-			Ingress: 1,
-			Egress:  0,
-		}
-		m[hop] = createFlyover(t, startTime)
-	}
-	return m
 }
 
 // createFlyover mocks the redemption of a flyover for a given AS, ingress, and egress interfaces.
@@ -390,103 +641,34 @@ func checkHop(t *testing.T, hop *path.Hop, ia string, in uint16, eg uint16, expe
 		require.Nil(t, hop)
 		return
 	}
-	require.Equal(t, addr.MustParseIA(ia), hop.IA)
+	if ia != "" {
+		require.Equal(t, addr.MustParseIA(ia), hop.IA)
+	}
 	require.Equal(t, in, hop.Ingress)
 	require.Equal(t, eg, hop.Egress)
 }
 
-func getPaths(srcIA addr.IA, dstIA addr.IA) ([]snet.Path, error) {
-	ctx, cancelF := context.WithTimeout(context.Background(), time.Second)
-	defer cancelF()
-	daemonLocation := ""
-	configDir := ""
-	sd, err := daemon.NewAutoConnector(ctx,
-		daemon.WithDaemon(daemonLocation),
-		daemon.WithConfigDir(configDir),
-	)
-	if err != nil {
-		return nil, err
-	}
-	paths, err := sd.Paths(ctx, dstIA, srcIA, types.PathReqFlags{})
-	if err != nil {
-		return nil, err
-	}
-	return paths, nil
-}
-
-// getPathsToTransitASes returns one path to each on-path AS of the passes snet.Path.
-func getPathsToTransitASes(t *testing.T, p snet.Path) []snet.Path {
-	t.Helper()
-	intfs := p.Metadata().Interfaces
-	require.NotEmpty(t, intfs)
-	// Find all on-path ASes.
-	ases := make([]addr.IA, 0, len(intfs)/2+1)
-	ases = append(ases, intfs[0].IA)
-	for i := 1; i < len(intfs); i += 2 {
-		ases = append(ases, intfs[i].IA)
-	}
-
-	// For each AS, find a path to it and store it.
-	paths := make([]snet.Path, len(ases))
-	errs := make([]error, len(ases))
-	resolved := make([][]snet.Path, len(ases))
-	srcIA := p.Source()
-	var wg sync.WaitGroup
-	wg.Add(len(ases))
-	for i, as := range ases {
-		go func(i int, as addr.IA) {
-			defer wg.Done()
-			asPaths, err := getPaths(srcIA, as)
-			errs[i] = err
-			resolved[i] = asPaths
-		}(i, as)
-	}
-	wg.Wait()
-
-	for i := range ases {
-		require.NoError(t, errs[i])
-		require.NotEmpty(t, resolved[i])
-		paths[i] = resolved[i][0]
-	}
-
-	return paths
-}
-
-// getFlyoversForPath returns a FlyoverMap with all returned flyovers for the given path.
-// Compatibility wrapper: keeps the old mocked behavior.
-// deleteme! TODO remove this temporary function and modify tests.
-func getFlyoversForPath(p snet.Path, startTime uint32) (path.FlyoverMap, error) {
-	interfaces := p.Metadata().Interfaces
-	if len(interfaces) == 0 {
-		return path.FlyoverMap{}, nil
-	}
-	baseHops := path.InterfacesToBaseHops(interfaces)
-	return getFlyoversForHops(baseHops, startTime)
-}
-
-func getFlyoversForHops(baseHops []path.BaseHop, startTime uint32) (path.FlyoverMap, error) {
-	// For each found triplet <AS,ingress,egress> call redeemFlyover and store the result.
-	redeemed := make([]*path.Hop, len(baseHops))
-
-	for i := range baseHops {
-		redeemed[i] = redeemFlyover(baseHops[i], startTime)
-	}
-
-	return path.FlyoversToMap(redeemed), nil
-}
-
-// redeemFlyover mocks the redemption of a flyover for a given AS, ingress, and egress interfaces.
-// The real function will require a daemon.Connector to find a path to the given AS, or the path
-// to the given AS.
-func redeemFlyover(baseHop path.BaseHop, startTime uint32) *path.Hop {
+func createHopWithFlyover(t *testing.T) *path.Hop {
 	return &path.Hop{
-		BaseHop: baseHop,
+		BaseHop: path.BaseHop{
+			IA:      addr.MustParseIA("1025-ff00:dead:abcd"),
+			Ingress: 0xdead,
+			Egress:  0xbeef,
+		},
 		Flyover: &path.FlyoverData{
-			ResID:     1,
-			StartTime: startTime,
-			Duration:  10,
-			Bw:        64,
-			Ak:        [16]byte{1, 2, 3, 4},
+			ResID:     123456,
+			Ak:        mustDecode16bytes(t, "0123456789abcdef0123456789abcdef"),
+			Bw:        1023,
+			StartTime: 4_123_456,
+			Duration:  0xfe,
 		},
 	}
+}
+
+func mustDecode16bytes(t *testing.T, s string) [16]byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	require.NoError(t, err)
+	require.Len(t, b, 16)
+	return [16]byte(b)
 }
