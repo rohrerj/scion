@@ -48,8 +48,10 @@ import (
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/proto/control_plane/v1/control_planeconnect"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
+	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	"github.com/scionproto/scion/pkg/segment/iface"
 	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/pkg/snet/squic"
@@ -59,6 +61,7 @@ import (
 	"github.com/scionproto/scion/private/storage"
 	"github.com/scionproto/scion/private/topology"
 	"github.com/scionproto/scion/private/trust"
+	trustgrpc "github.com/scionproto/scion/private/trust/grpc"
 )
 
 const APIMajorVersion = uint32(0)
@@ -77,11 +80,105 @@ func main() {
 	application.Run()
 }
 
+type controlServiceFetcher struct {
+	client control_planeconnect.TrustMaterialServiceClient
+}
+
+func (f *controlServiceFetcher) Chains(ctx context.Context, query trust.ChainQuery,
+	_ net.Addr) ([][]*x509.Certificate, error) {
+
+	rep, err := f.client.Chains(ctx, connect.NewRequest(trustgrpc.ChainQueryToReq(query)))
+	if err != nil {
+		return nil, serrors.Wrap("fetching chains over connect", err)
+	}
+	chains, _, err := trustgrpc.RepToChains(rep.Msg.Chains)
+	if err != nil {
+		return nil, serrors.Wrap("parsing chains", err)
+	}
+	if err := trustgrpc.CheckChainsMatchQuery(query, chains); err != nil {
+		return nil, serrors.Wrap("chains do not match query", err)
+	}
+	return chains, nil
+}
+
+func (f *controlServiceFetcher) TRC(ctx context.Context, id cppki.TRCID,
+	_ net.Addr) (cppki.SignedTRC, error) {
+
+	rep, err := f.client.TRC(ctx, connect.NewRequest(trustgrpc.IDToReq(id)))
+	if err != nil {
+		return cppki.SignedTRC{}, serrors.Wrap("fetching chains over connect", err)
+	}
+	//nolint:forbidigo // generated field.
+	trc, err := cppki.DecodeSignedTRC(rep.Msg.Trc)
+	if err != nil {
+		return cppki.SignedTRC{}, serrors.Wrap("parse TRC reply", err)
+	}
+	if trc.TRC.ID != id {
+		return cppki.SignedTRC{}, serrors.New("received wrong TRC", "expected", id,
+			"actual", trc.TRC.ID)
+	}
+	return trc, nil
+}
+
+type endhostApifetcher struct {
+	trustService *endhost.TrustService
+}
+
+func chainToCerts(c *endhost.Chain) ([]*x509.Certificate, error) {
+	var chain []*x509.Certificate
+	asCert, err := x509.ParseCertificate(c.AsCert)
+	if err != nil {
+		return nil, serrors.Wrap("parsing AS certificate", err)
+	}
+	caCert, err := x509.ParseCertificate(c.CaCert)
+	if err != nil {
+		return nil, serrors.Wrap("parsing CA certificate", err)
+	}
+	chain = append(chain, asCert, caCert)
+	return chain, nil
+}
+
+func (f *endhostApifetcher) Chains(ctx context.Context, req trust.ChainQuery, _ net.Addr) ([][]*x509.Certificate, error) {
+	chains, err := f.trustService.GetChains(ctx, []endhost.Subject{
+		{
+			IA:           req.IA,
+			SubjectKeyId: req.SubjectKeyID,
+		},
+	}, req.Validity)
+	if err != nil {
+		return nil, err
+	}
+	certs := [][]*x509.Certificate{}
+	for _, chain := range chains {
+		c, err := chainToCerts(&chain)
+		if err != nil {
+			return nil, err
+		}
+		certs = append(certs, c)
+	}
+	return certs, nil
+}
+
+func (f *endhostApifetcher) TRC(ctx context.Context, id cppki.TRCID, server net.Addr) (cppki.SignedTRC, error) {
+	raw, err := f.trustService.GetTRC(ctx, uint32(id.ISD), uint64(id.Base), uint64(id.Serial))
+	trc, err := cppki.DecodeSignedTRC(raw)
+	if err != nil {
+		return cppki.SignedTRC{}, serrors.WrapNoStack("parsing TRC", err)
+	}
+	return trc, nil
+}
+
+type recurser struct {
+}
+
+func (r *recurser) AllowRecursion(peer net.Addr) error {
+	return nil
+}
+
 func realMain(ctx context.Context) error {
 	var snetTopo snet.Topology
 	var endhostAPI string
 	var err error
-	var connector *endhost.Connector
 	topo, err := topology.NewLoader(topology.LoaderCfg{
 		File:      globalCfg.General.Topology(),
 		Validator: &topology.DefaultValidator{},
@@ -93,6 +190,15 @@ func realMain(ctx context.Context) error {
 		endhostAPI = k.Url
 		break
 	}
+	trustDB, err := storage.NewInMemoryTrustStorage()
+	if err != nil {
+		return err
+	}
+	_, err = trust.LoadTRCs(context.Background(), path.Join(globalCfg.General.ConfigDir, "certs"), trustDB)
+	if err != nil {
+		return err
+	}
+	var regService *registration.Service
 	if endhostAPI != "" {
 		endhostApiUrl, err := url.Parse(endhostAPI)
 		if err != nil {
@@ -106,7 +212,7 @@ func realMain(ctx context.Context) error {
 			opts = append(opts, endhost.WithInsecureConnection())
 		}
 
-		connector, err = endhost.NewConnector(ctx, endhostAPI, opts...)
+		connector, err := endhost.NewConnector(ctx, endhostAPI, opts...)
 		if err != nil {
 			for i := 0; i < 10; i++ {
 				time.Sleep(time.Second)
@@ -120,6 +226,19 @@ func realMain(ctx context.Context) error {
 			}
 		}
 		snetTopo = connector.Topology
+		if !globalCfg.Marketplace.DisableASRegistration {
+			trustProvider := trust.FetchingProvider{
+				DB: trustDB,
+				Fetcher: &endhostApifetcher{
+					trustService: connector.TrustService,
+				},
+				Router: trust.LocalRouter{
+					IA: connector.Topology.LocalIA,
+				},
+				Recurser: &recurser{},
+			}
+			regService = registration.NewService(trustProvider)
+		}
 	} else {
 		// local topology does not have a SCION endhost API endpoint :(
 		startPort, endPort := topo.PortRange()
@@ -134,6 +253,19 @@ func realMain(ctx context.Context) error {
 				return netip.AddrPort{}, false
 			}
 			return i.InternalAddr, true
+		}
+		if !globalCfg.Marketplace.DisableASRegistration {
+			trustProvider := trust.FetchingProvider{
+				DB: trustDB,
+				Fetcher: &controlServiceFetcher{
+					client: control_planeconnect.NewTrustMaterialServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", topo.ControlServiceAddresses()[0])),
+				},
+				Router: trust.LocalRouter{
+					IA: topo.IA(),
+				},
+				Recurser: &recurser{},
+			}
+			regService = registration.NewService(trustProvider)
 		}
 	}
 
@@ -154,19 +286,6 @@ func realMain(ctx context.Context) error {
 	tokenVerifier := &marketplace.TokenVerifier{
 		Store:       store,
 		JWTVerifier: registration.NewVerifier(signingPubKey),
-	}
-	trustDB, err := storage.NewInMemoryTrustStorage()
-	if err != nil {
-		return err
-	}
-	_, err = trust.LoadTRCs(context.Background(), path.Join(globalCfg.General.ConfigDir, "certs"), trustDB)
-	if err != nil {
-		return err
-	}
-	var regService *registration.Service
-	if !globalCfg.Marketplace.DisableASRegistration {
-		trustDB = marketplace.FromTrustDB(trustDB, connector.TrustService)
-		regService = registration.NewService(connector, trustDB)
 	}
 
 	trustVerifer := trust.NewTLSCryptoVerifier(trustDB)

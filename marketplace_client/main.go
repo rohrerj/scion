@@ -38,6 +38,8 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/pkg/addr"
 	libconnect "github.com/scionproto/scion/pkg/connect"
+	"github.com/scionproto/scion/pkg/daemon"
+	"github.com/scionproto/scion/pkg/daemon/types"
 	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -91,49 +93,68 @@ func printOptions(t jwtType) {
 	fmt.Println("-> exit")
 }
 
-func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *snet.UDPAddr, serverName string, token string) (
+func withSCION(ctx context.Context, localIA addr.IA, remote *snet.UDPAddr, serverName string, token string) (
 	hummingbirdconnect.MarketplaceServiceClient, hummingbirdconnect.RedemptionServiceClient, hummingbirdconnect.AccountServiceClient, error) {
-	var connector *endhost.Connector
+	var topo snet.Topology
 	var err error
-	if !localIA.IsZero() {
-		connector, err = endhost.NewConnector(ctx, endhostAPI, endhost.WithLocalIA(localIA))
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	} else {
-		connector, err = endhost.NewConnector(ctx, endhostAPI)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	}
-
-	trustDB, err := storage.NewInMemoryTrustStorage()
-	if err != nil {
-		return nil, nil, nil, err
-	}
 	var localPublic *net.UDPAddr
-	var dp snet.DataplanePath
-	var nextHop *net.UDPAddr
+	var querier snet.PathQuerier
 
-	if remote.IA == connector.Topology.LocalIA {
-		// marketplace is inside local AS
-		dp = path.Empty{}
-		nextHop = remote.Host
+	if endhost_api != "" {
+		connector, err := endhost.NewConnector(ctx, endhost_api, endhost.WithLocalIA(localIA))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		topo = connector.Topology
+		querier = connector.PathService
 	} else {
-		paths, err := connector.PathService.Paths(ctx, remote.IA)
+		connector, err := daemon.NewAutoConnector(ctx, daemon.WithDaemon(sciond))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		localIA, err := connector.LocalIA(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		querier = daemon.Querier{Connector: connector, IA: localIA}
+		portStart, portEnd, err := connector.PortRange(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		interfaces, err := connector.Interfaces(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		topo = snet.Topology{
+			LocalIA:   localIA,
+			PortRange: snet.TopologyPortRange{Start: portStart, End: portEnd},
+			Interface: func(u uint16) (netip.AddrPort, bool) {
+				a, found := interfaces[u]
+				return a, found
+			},
+		}
+	}
+	if remote.IA == localIA {
+		remote.Path = path.Empty{}
+		remote.NextHop = remote.Host
+	} else {
+		paths, err := querier.Query(ctx, remote.IA)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		if len(paths) == 0 {
 			return nil, nil, nil, serrors.New("no paths found to marketplace")
 		}
-		dp = paths[0].Dataplane()
-		nextHop = paths[0].UnderlayNextHop()
+		remote.Path = paths[0].Dataplane()
+		remote.NextHop = paths[0].UnderlayNextHop()
 	}
-	remote.Path = dp
-	remote.NextHop = nextHop
 
-	conn, err := net.Dial("udp", nextHop.String())
+	trustDB, err := storage.NewInMemoryTrustStorage()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	conn, err := net.Dial("udp", remote.NextHop.String())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -144,8 +165,8 @@ func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *
 	conn.Close()
 
 	nc := appnet.NetworkConfig{
-		Topology: connector.Topology,
-		IA:       connector.Topology.LocalIA,
+		Topology: topo,
+		IA:       topo.LocalIA,
 		QUIC: appnet.QUIC{
 			TLSVerifier: trust.NewTLSCryptoVerifier(trustDB),
 		},
@@ -170,7 +191,7 @@ func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *
 			},
 			Rewriter: &appnet.AddressRewriter{
 				Router: &snet.BaseRouter{
-					Querier: connector.PathService,
+					Querier: querier,
 				},
 			},
 		}).NewDialer
@@ -183,7 +204,7 @@ func withSCION(ctx context.Context, endhostAPI string, localIA addr.IA, remote *
 			},
 			Rewriter: &appnet.AddressRewriter{
 				Router: &snet.BaseRouter{
-					Querier: connector.PathService,
+					Querier: querier,
 				},
 			},
 		}).NewDialer
@@ -222,21 +243,40 @@ type HummingbirdNoteEntry struct {
 	Website  string `json:"website"`
 }
 
-func discoverMarketplaces(ctx context.Context, reader *bufio.Reader, endhostApi string) (*HummingbirdNoteEntry, error) {
+func discoverMarketplaces(ctx context.Context, reader *bufio.Reader) (*HummingbirdNoteEntry, error) {
 	fmt.Println("Discovery will return a list of marketplaces that offer hummingbird reservations for a given AS.")
 	targetIA := readString(reader, "Reservation ISD-AS: ")
 	ia, err := addr.ParseIA(targetIA)
 	if err != nil {
 		return nil, err
 	}
-	connector, err := endhost.NewConnector(ctx, endhostApi)
-	if err != nil {
-		return nil, err
+
+	var paths []snet.Path
+
+	if endhost_api != "" {
+		connector, err := endhost.NewConnector(ctx, endhost_api)
+		if err != nil {
+			return nil, err
+		}
+		paths, err = connector.PathService.Paths(ctx, ia, endhost.WithSkipSegmentVerificationIfUnsupportedByAS())
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		connector, err := daemon.NewAutoConnector(ctx, daemon.WithDaemon(sciond))
+		if err != nil {
+			return nil, err
+		}
+		localIA, err := connector.LocalIA(ctx)
+		if err != nil {
+			return nil, err
+		}
+		paths, err = connector.Paths(ctx, ia, localIA, types.PathReqFlags{})
+		if err != nil {
+			return nil, err
+		}
 	}
-	paths, err := connector.PathService.Paths(ctx, ia)
-	if err != nil {
-		return nil, err
-	}
+
 	marketplacesSet := map[HummingbirdNoteEntry]int{}
 	for _, path := range paths {
 		for _, note := range path.Metadata().Notes {
@@ -346,14 +386,13 @@ func userInteraction() {
 	reader := bufio.NewReader(os.Stdin)
 	url := readString(reader, "marketplace_api (leave empty to start discovery): ")
 	var err error
-	var endhostApi string
 	if url == "" {
-		endhostApi = readString(reader, "endhostAPI: ")
-		if endhostApi == "" {
-			fmt.Println("invalid endhost API")
+		if endhost_api == "" && sciond == "" {
+			fmt.Println("marketplace discovery is only enabled when providing a SCION endhost API url or SCION daemon address")
 			return
 		}
-		marketplace, err := discoverMarketplaces(ctx, reader, endhostApi)
+
+		marketplace, err := discoverMarketplaces(ctx, reader)
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -400,14 +439,11 @@ func userInteraction() {
 			return
 		}
 		httpHost = baseUrlSplit[1]
-		if endhostApi == "" {
-			endhostApi = readString(reader, "endhostAPI: ")
-			if endhostApi == "" {
-				fmt.Println("invalid endhost API")
-				return
-			}
+		if endhost_api == "" && sciond == "" {
+			fmt.Println("connecting over SCION requires endhost_api url or sciond address")
+			return
 		}
-		marketplaceClient, redemptionClient, accountClient, err = withSCION(ctx, endhostApi, localIA, remote, serverName, token)
+		marketplaceClient, redemptionClient, accountClient, err = withSCION(ctx, localIA, remote, serverName, token)
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -1257,10 +1293,14 @@ func readOptionalTime(reader *bufio.Reader, prompt string) *time.Time {
 
 var insecure bool
 var as_registration bool
+var sciond string
+var endhost_api string
 
 func main() {
 	flag.BoolVar(&insecure, "insecure", false, "indicates whether TLS insecure skip verify should be applied")
 	flag.BoolVar(&as_registration, "register", false, "start AS registration")
+	flag.StringVar(&sciond, "sciond", "", "address of the SCION daemon")
+	flag.StringVar(&endhost_api, "endhost_api", "", "address of the SCION endhost API")
 	flag.Parse()
 	userInteraction()
 }
