@@ -17,16 +17,13 @@ package registration
 import (
 	"context"
 	"crypto/rand"
-	"crypto/x509"
 	"encoding/hex"
-	"net"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt"
 	"github.com/scionproto/scion/pkg/addr"
-	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	cryptopb "github.com/scionproto/scion/pkg/proto/crypto"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
@@ -47,62 +44,8 @@ type bucket struct {
 	challenges map[string]Challenge
 	mtx        sync.RWMutex
 }
-type fetcher struct {
-	trustService *endhost.TrustService
-}
 
-func chainToCerts(c *endhost.Chain) ([]*x509.Certificate, error) {
-	var chain []*x509.Certificate
-	asCert, err := x509.ParseCertificate(c.AsCert)
-	if err != nil {
-		return nil, serrors.Wrap("parsing AS certificate", err)
-	}
-	caCert, err := x509.ParseCertificate(c.CaCert)
-	if err != nil {
-		return nil, serrors.Wrap("parsing CA certificate", err)
-	}
-	chain = append(chain, asCert, caCert)
-	return chain, nil
-}
-
-func (f *fetcher) Chains(ctx context.Context, req trust.ChainQuery, _ net.Addr) ([][]*x509.Certificate, error) {
-	chains, err := f.trustService.GetChains(ctx, []endhost.Subject{
-		{
-			IA:           req.IA,
-			SubjectKeyId: req.SubjectKeyID,
-		},
-	}, req.Validity)
-	if err != nil {
-		return nil, err
-	}
-	certs := make([][]*x509.Certificate, 0, 1)
-	for _, chain := range chains {
-		c, err := chainToCerts(&chain)
-		if err != nil {
-			return nil, err
-		}
-		certs = append(certs, c)
-	}
-	return certs, nil
-}
-
-func (f *fetcher) TRC(ctx context.Context, id cppki.TRCID, server net.Addr) (cppki.SignedTRC, error) {
-	raw, err := f.trustService.GetTRC(ctx, uint32(id.ISD), uint64(id.Base), uint64(id.Serial))
-	trc, err := cppki.DecodeSignedTRC(raw)
-	if err != nil {
-		return cppki.SignedTRC{}, serrors.WrapNoStack("parsing TRC", err)
-	}
-	return trc, nil
-}
-
-type recurser struct {
-}
-
-func (r *recurser) AllowRecursion(peer net.Addr) error {
-	return nil
-}
-
-func NewService(connector *endhost.Connector, trustDB trust.DB) *Service {
+func NewService(provider trust.Provider) *Service {
 	buckets := [3]*bucket{}
 	for i := range 3 {
 		buckets[i] = &bucket{
@@ -112,16 +55,7 @@ func NewService(connector *endhost.Connector, trustDB trust.DB) *Service {
 	s := &Service{
 		buckets:           buckets,
 		challengeLifetime: max(10, ChallengeLifetime),
-		trustProvider: trust.FetchingProvider{
-			DB: trustDB,
-			Fetcher: &fetcher{
-				trustService: connector.TrustService,
-			},
-			Router: trust.LocalRouter{
-				IA: connector.Topology.LocalIA,
-			},
-			Recurser: &recurser{},
-		},
+		trustProvider:     provider,
 	}
 	s.startCleanupRoutine()
 	return s
