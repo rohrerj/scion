@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -256,8 +255,6 @@ func ComputeAuthenticationKey(r ResInfo, masterKey [16]byte) (*[16]byte, error) 
 		durSeconds,
 		buff[:],
 	)
-	deleteme := fmt.Sprintf("deleteme recomputed ak = %s", hex.EncodeToString(ak))
-	log.Debug(deleteme)
 
 	buffAlias := [16]byte(ak)
 	return &buffAlias, nil

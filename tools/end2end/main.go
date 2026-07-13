@@ -87,7 +87,7 @@ var (
 	scmpErrorsCounter      = scionPacketConnMetrics.SCMPErrors
 	epic                   bool
 	hummingbird            string                // e.g. "1,5s" or "1,5s,2"
-	hummKeysDir            string                // deleteme for testing purposes only
+	hummKeysDir            string                // for testing purposes only
 	hummParams             hummingbirdParameters // derived from the string in hummingbird
 )
 

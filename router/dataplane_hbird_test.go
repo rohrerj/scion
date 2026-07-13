@@ -68,7 +68,6 @@ func TestProcessHbirdPacket(t *testing.T) {
 	otherKey := []byte("testkey_yyyyyyyy")
 	hbirdKey := []byte("test_secretvalue")
 	now := time.Now()
-	// now := time.Date(2025, 1, 1, 1, 1, 1, 1, time.UTC) // deleteme
 
 	// ProcessPacket assumes some pre-conditions:
 	// * The ingress interface has to exist. This mock map is good for most test cases.
@@ -4017,7 +4016,7 @@ func computeAggregateMacExplicitInEg(
 	require.NoError(t, err)
 	ingress, egress := hin, heg
 	if !info.ConsDir {
-		// deleteme since reservations are not bidirectional,
+		// Since reservations are not bidirectional,
 		// specify here the exact ingress and egress that was used to make the reservation.
 		ingress, egress = egress, ingress
 	}

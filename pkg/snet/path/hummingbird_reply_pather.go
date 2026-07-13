@@ -15,8 +15,6 @@
 package path
 
 import (
-	"fmt"
-
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/snet"
@@ -46,19 +44,15 @@ func NewHummReplyPather() *HummReplyPather {
 // by A from B, i.e. B->A. This packet contains some end2end extension options with the necessary
 // serialized reservation state to reconstruct a valid reverse Reservation.
 func (p *HummReplyPather) SetState(pkt snet.Packet) error {
-	fmt.Println("deleteme humm reply pather SetState")
 	// Record the sender.
 	p.origSrcIA = pkt.Source.IA
-	fmt.Printf("deleteme humm reply pather SetState orig src IA = %s\n", p.origSrcIA)
 
 	// Check if there is any bidirectional reservation information in this packet.
 	serializedReservation := containedReversePathState(pkt.E2eExtnContents)
 	if serializedReservation == nil {
-		fmt.Println("deleteme humm reply pather SetState no bidirectional reservation")
 		// No bidirectional reservation information. Bail.
 		return nil
 	}
-	fmt.Println("deleteme humm reply pather SetState we have a bidirectional reservation")
 
 	// Build the reverse reservation.
 	originalPath := pkt.Path.(snet.RawPath) // Can't fail, it was checked by the caller.
@@ -72,16 +66,13 @@ func (p *HummReplyPather) SetState(pkt snet.Packet) error {
 }
 
 func (r *HummReplyPather) ReplyPath(rpath snet.RawPath) (snet.DataplanePath, error) {
-	fmt.Println("deleteme humm reply pather ReplyPath 1")
 	// If we have a valid reversed reservation, return it already without reversing the current
 	// passed path. This reversed reservation might have been constructed many packets ago.
 	if r.reservation != nil {
-		fmt.Println("deleteme humm reply pather ReplyPath using existing reservation")
 		return r.reservation, nil
 	}
 
 	// Otherwise, just reverse the hummingbird path.
-	fmt.Println("deleteme humm reply pather ReplyPath 2")
 	return r.BackupRepyPather.ReplyPath(rpath)
 }
 

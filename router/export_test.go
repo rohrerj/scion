@@ -21,9 +21,11 @@ import (
 	"math"
 	"net"
 	"net/netip"
+	"testing"
 	"unsafe"
 
 	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/ptr"
@@ -112,16 +114,12 @@ func NewPacket(
 	return &p
 }
 
-func PathFromRawPacket(raw []byte) path.Path {
+func PathFromRawPacket(t *testing.T, raw []byte) path.Path {
 	scionLayer := &slayers.SCION{}
-
 	lastLayer, err := decodeLayers(raw, scionLayer)
-	if err != nil {
-		panic(err) // deleteme
-	}
-	if lastLayer != scionLayer {
-		panic(fmt.Errorf("scion parsing failed")) // deleteme
-	}
+	require.NoError(t, err)
+	require.Equal(t, lastLayer, scionLayer)
+
 	return scionLayer.Path
 }
 

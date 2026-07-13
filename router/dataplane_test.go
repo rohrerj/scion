@@ -108,8 +108,6 @@ func TestDataPlaneSetKey(t *testing.T) {
 	})
 }
 
-// deleteme test SetHbirdKey
-
 func TestDataPlaneAddExternalInterface(t *testing.T) {
 	l := control.LinkEnd{
 		IA:   addr.MustParseIA("1-ff00:0:1"),
@@ -1758,13 +1756,13 @@ func assertPktEqual(t *testing.T, expected, actual *router.Packet) {
 	expected.RemoteAddr = nil
 	actual.RemoteAddr = nil
 	if !assert.Equal(t, expected, actual) && !bytes.Equal(expected.RawPacket, actual.RawPacket) {
-		p := router.PathFromRawPacket(expected.RawPacket)
+		p := router.PathFromRawPacket(t, expected.RawPacket)
 		p = toDecoded(t, p)
 		b, err := json.MarshalIndent(p, "", "    ")
 		require.NoError(t, err)
 		expectedPktDescription := string(b)
 
-		p = router.PathFromRawPacket(actual.RawPacket)
+		p = router.PathFromRawPacket(t, actual.RawPacket)
 		p = toDecoded(t, p)
 		b, err = json.MarshalIndent(p, "", "    ")
 		require.NoError(t, err)
