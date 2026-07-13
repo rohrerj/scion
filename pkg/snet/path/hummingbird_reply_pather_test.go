@@ -15,7 +15,10 @@
 package path_test
 
 import (
+	"fmt"
+	"net/netip"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +32,7 @@ import (
 	dpscion "github.com/scionproto/scion/pkg/slayers/path/scion"
 	"github.com/scionproto/scion/pkg/snet"
 	"github.com/scionproto/scion/pkg/snet/path"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,9 +42,14 @@ import (
 // snet.DefaultReplyPather for reply-path construction.
 func TestHummReplyPather(t *testing.T) {
 	timestamp := util.SecsToTime(123456)
-	srcIA := addr.MustParseIA("1-ff00:0:111")
+	srcId := snet.SourceIdentifier{
+		IA:   addr.MustParseIA("1-ff00:0:111"),
+		IP:   mustParseIp(t, "10.0.0.2"),
+		Port: 12345,
+	}
 	carrierPath := mustRawHummingbirdPathForReplyPather(t, timestamp)
 	validReverseState := mustSerializedReverseReservationState(t, timestamp)
+	validReverseStateNoFlyovers := mustSerializedReverseReservationStateNoFlyovers(t, timestamp)
 
 	// Exercise the fallback reply-pather behavior with the main path families
 	// supported by DefaultReplyPather.
@@ -55,36 +64,52 @@ func TestHummReplyPather(t *testing.T) {
 	// expected to install a cached reverse reservation.
 	cases := map[string]struct {
 		packet                *snet.Packet
+		srcId                 snet.SourceIdentifier
 		wantSetStateErr       bool
 		wantCachedReservation bool
 	}{
 		"never_set_state": {},
 		"set_state_invalid_packet/no_reverse_option": {
-			packet:                packetWithoutReverseState(srcIA, carrierPath),
+			packet:                packetWithoutReverseState(srcId, carrierPath),
+			srcId:                 srcId,
 			wantCachedReservation: false,
 		},
 		"set_state_invalid_packet/non_hummingbird_carrier": {
-			packet:                packetWithReverseState(srcIA, mustRawSCIONPathForReplyPather(t, timestamp), validReverseState),
+			packet: packetWithReverseState(
+				srcId,
+				mustRawSCIONPathForReplyPather(t, timestamp),
+				validReverseState),
+			srcId:                 srcId,
 			wantSetStateErr:       true,
 			wantCachedReservation: false,
 		},
 		"set_state_invalid_packet/bad_serialized_state": {
-			packet:                packetWithReverseState(srcIA, carrierPath, []byte{0xde, 0xad, 0xbe, 0xef}),
+			packet: packetWithReverseState(srcId,
+				carrierPath, []byte{0xde, 0xad, 0xbe, 0xef}),
+			srcId:                 srcId,
 			wantSetStateErr:       true,
 			wantCachedReservation: false,
 		},
 		"set_state_valid_packet": {
-			packet:                packetWithReverseState(srcIA, carrierPath, validReverseState),
+			packet:                packetWithReverseState(srcId, carrierPath, validReverseState),
+			srcId:                 srcId,
 			wantCachedReservation: true,
+		},
+		"set_state_valid_packet/no_flyovers": {
+			// A reverse reservation with no flyovers offers nothing beyond reversing the
+			// transport path directly, so it must not be cached.
+			packet:                packetWithReverseState(srcId, carrierPath, validReverseStateNoFlyovers),
+			srcId:                 srcId,
+			wantCachedReservation: false,
 		},
 	}
 
 	for name, tc := range cases {
 		name, tc := name, tc
 		t.Run(name, func(t *testing.T) {
-			rp := path.NewHummReplyPather()
+			rp := path.NewHummReplyPather(path.WithClock(func() time.Time { return timestamp }))
 			if tc.packet != nil {
-				err := rp.SetState(*tc.packet)
+				err := rp.SetState(tc.srcId, *tc.packet)
 				if tc.wantSetStateErr {
 					require.Error(t, err)
 				} else {
@@ -95,7 +120,7 @@ func TestHummReplyPather(t *testing.T) {
 			for replyName, input := range replyInputs {
 				replyName, input := replyName, input
 				t.Run(replyName, func(t *testing.T) {
-					got, err := rp.ReplyPath(cloneRawPath(input))
+					got, err := rp.ReplyPathTo(tc.srcId, cloneRawPath(input))
 					if tc.wantCachedReservation {
 						// Once a valid reverse reservation is cached, reply-path
 						// selection should no longer depend on the incoming path type.
@@ -103,7 +128,11 @@ func TestHummReplyPather(t *testing.T) {
 						gotReservation, ok := got.(*path.Reservation)
 						require.True(t, ok, "expected cached reservation, got %T", got)
 
-						wantReservation := mustReservationFromReverseState(t, carrierPath, validReverseState, srcIA)
+						wantReservation := mustReservationFromReverseState(
+							t,
+							carrierPath,
+							validReverseState,
+							tc.srcId.IA)
 						require.Equal(t, wantReservation.DstIA, gotReservation.DstIA)
 						require.Len(t, gotReservation.Hops, len(wantReservation.Hops))
 						require.Equal(t, wantReservation.Dec.Type(), gotReservation.Dec.Type())
@@ -136,30 +165,310 @@ func TestHummReplyPather(t *testing.T) {
 			}
 		})
 	}
+}
 
-	// Nil receivers are currently unsupported; document the panic contract
-	// explicitly so future changes are intentional.
-	t.Run("nil_receiver", func(t *testing.T) {
-		var rp *path.HummReplyPather
-		pkt := *packetWithoutReverseState(srcIA, carrierPath)
-		rpath := mustRawSCIONPathForReplyPather(t, timestamp)
+// TestHummReplyPatherMultipleClients checks that HummReplyPather keeps one
+// cached reservation per distinct source (identified by the IA, IP, port
+// triplet), and that clients are never cross-contaminated even when they
+// partially share IA or port with another client.
+func TestHummReplyPatherMultipleClients(t *testing.T) {
+	timestampA := util.SecsToTime(123456)
+	timestampB := util.SecsToTime(654321)
 
-		require.Panics(t, func() {
-			_ = rp.SetState(pkt)
+	clientA := snet.SourceIdentifier{
+		IA:   addr.MustParseIA("1-ff00:0:111"),
+		IP:   mustParseIp(t, "10.0.0.2"),
+		Port: 12345,
+	}
+	// clientB differs from clientA in every element of the triplet.
+	clientB := snet.SourceIdentifier{
+		IA:   addr.MustParseIA("1-ff00:0:112"),
+		IP:   mustParseIp(t, "10.0.0.3"),
+		Port: 54321,
+	}
+	// clientC shares clientA's IA and port but not its IP: the triplet as a whole must still
+	// be treated as a distinct source.
+	clientC := snet.SourceIdentifier{
+		IA:   clientA.IA,
+		IP:   mustParseIp(t, "10.0.0.9"),
+		Port: clientA.Port,
+	}
+
+	carrierPathA := mustRawHummingbirdPathForReplyPather(t, timestampA)
+	carrierPathB := mustRawHummingbirdPathForReplyPather(t, timestampB)
+	stateA := mustSerializedReverseReservationState(t, timestampA)
+	stateB := mustSerializedReverseReservationState(t, timestampB)
+
+	rp := path.NewHummReplyPather(path.WithClock(func() time.Time { return timestampA }))
+
+	// Only A and B ever call SetState; C never does.
+	require.NoError(t, rp.SetState(clientA, *packetWithReverseState(clientA, carrierPathA, stateA)))
+	require.NoError(t, rp.SetState(clientB, *packetWithReverseState(clientB, carrierPathB, stateB)))
+
+	gotA, err := rp.ReplyPathTo(clientA, cloneRawPath(carrierPathA))
+	require.NoError(t, err)
+	rsvA, ok := gotA.(*path.Reservation)
+	require.True(t, ok, "expected cached reservation for clientA, got %T", gotA)
+
+	gotB, err := rp.ReplyPathTo(clientB, cloneRawPath(carrierPathB))
+	require.NoError(t, err)
+	rsvB, ok := gotB.(*path.Reservation)
+	require.True(t, ok, "expected cached reservation for clientB, got %T", gotB)
+
+	// Each client's cached reservation must reflect its own reverse state.
+	wantA := mustReservationFromReverseState(t, carrierPathA, stateA, clientA.IA)
+	wantB := mustReservationFromReverseState(t, carrierPathB, stateB, clientB.IA)
+	require.Equal(t, mustSerializeReservation(t, wantA), mustSerializeReservation(t, rsvA))
+	require.Equal(t, mustSerializeReservation(t, wantB), mustSerializeReservation(t, rsvB))
+	require.NotEqual(t,
+		mustSerializeReservation(t, rsvA),
+		mustSerializeReservation(t, rsvB),
+		"distinct clients must not share a cached reservation",
+	)
+
+	// clientC never called SetState, so it must fall back to the default reply pather rather
+	// than picking up clientA's cached reservation, even though it shares A's IA and port.
+	gotC, err := rp.ReplyPathTo(clientC, cloneRawPath(carrierPathA))
+	require.NoError(t, err)
+	_, isReservation := gotC.(*path.Reservation)
+	require.False(t, isReservation, "clientC must not receive clientA's cached reservation")
+}
+
+// TestHummReplyPatherConcurrent exercises SetState and ReplyPathTo from many goroutines at once,
+// each acting as a distinct client. Run with -race to confirm there is no data race on the
+// shared reservation cache.
+func TestHummReplyPatherConcurrent(t *testing.T) {
+	const numClients = 50
+	const itersPerClient = 20
+
+	timestamp := util.SecsToTime(123456)
+	rp := path.NewHummReplyPather(path.WithClock(func() time.Time { return timestamp }))
+
+	type client struct {
+		srcId       snet.SourceIdentifier
+		carrierPath snet.RawPath
+		state       []byte
+	}
+	clients := make([]client, numClients)
+	for i := range clients {
+		clients[i] = client{
+			srcId: snet.SourceIdentifier{
+				IA:   addr.MustParseIA("1-ff00:0:111"),
+				IP:   mustParseIp(t, "10.0.0.2"),
+				Port: uint16(20000 + i),
+			},
+			carrierPath: mustRawHummingbirdPathForReplyPather(t, timestamp),
+			state:       mustSerializedReverseReservationState(t, timestamp),
+		}
+	}
+
+	var wg sync.WaitGroup
+	for _, c := range clients {
+		c := c
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < itersPerClient; i++ {
+				pkt := packetWithReverseState(c.srcId, c.carrierPath, c.state)
+				if !assert.NoError(t, rp.SetState(c.srcId, *pkt)) {
+					return
+				}
+				got, err := rp.ReplyPathTo(c.srcId, cloneRawPath(c.carrierPath))
+				if !assert.NoError(t, err) {
+					return
+				}
+				assert.IsType(t, (*path.Reservation)(nil), got)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// After every goroutine settles, each client must still have its own valid cached
+	// reservation, independent of how many other clients were being served concurrently.
+	for _, c := range clients {
+		got, err := rp.ReplyPathTo(c.srcId, cloneRawPath(c.carrierPath))
+		require.NoError(t, err)
+		require.IsType(t, (*path.Reservation)(nil), got)
+	}
+}
+
+// TestHummReplyPatherCleanup checks that cleanup is tied to SetState's insertion of a new
+// entry rather than to ReplyPathTo lookups: a reservation past its own expiry+slack keeps being
+// served by ReplyPathTo until some later SetState call (for any source) sweeps it away.
+func TestHummReplyPatherCleanup(t *testing.T) {
+	start := util.SecsToTime(1_000_000)
+	now := start
+	clock := func() time.Time { return now }
+
+	const slack = 5 * time.Second
+	rp := path.NewHummReplyPather(path.WithClock(clock), path.WithCleanupSlack(slack))
+
+	srcId := snet.SourceIdentifier{
+		IA:   addr.MustParseIA("1-ff00:0:111"),
+		IP:   mustParseIp(t, "10.0.0.2"),
+		Port: 12345,
+	}
+	carrierPath := mustRawHummingbirdPathForReplyPather(t, start)
+	state := mustSerializedReverseReservationState(t, start)
+	require.NoError(t, rp.SetState(srcId, *packetWithReverseState(srcId, carrierPath, state)))
+
+	// The fixture's flyovers have a 10s duration (see createFlyoverForReplyPather), so the
+	// reservation's own expiry is start+10s; with slack it becomes eligible for cleanup at
+	// start+10s+slack.
+	got, err := rp.ReplyPathTo(srcId, cloneRawPath(carrierPath))
+	require.NoError(t, err)
+	require.IsType(t, (*path.Reservation)(nil), got, "reservation should still be cached")
+
+	// Advance time past expiry + slack. ReplyPathTo performs no cleanup on its own, so the
+	// now-stale entry must still be returned: eviction only happens on the next SetState call.
+	now = start.Add(10*time.Second + slack).Add(time.Millisecond)
+	got, err = rp.ReplyPathTo(srcId, cloneRawPath(carrierPath))
+	require.NoError(t, err)
+	require.IsType(t, (*path.Reservation)(nil), got,
+		"ReplyPathTo alone must not evict a stale entry; cleanup is tied to SetState")
+
+	// A SetState call for an unrelated source triggers the global cleanup sweep, which
+	// evicts srcId's now-stale entry as a side effect.
+	otherSrcId := snet.SourceIdentifier{
+		IA:   addr.MustParseIA("1-ff00:0:112"),
+		IP:   mustParseIp(t, "10.0.0.3"),
+		Port: 54321,
+	}
+	otherCarrierPath := mustRawHummingbirdPathForReplyPather(t, now)
+	otherState := mustSerializedReverseReservationState(t, now)
+	require.NoError(t, rp.SetState(
+		otherSrcId, *packetWithReverseState(otherSrcId, otherCarrierPath, otherState)))
+
+	got, err = rp.ReplyPathTo(srcId, cloneRawPath(carrierPath))
+	require.NoError(t, err)
+	_, isReservation := got.(*path.Reservation)
+	require.False(t, isReservation,
+		"srcId's reservation should have been evicted by the SetState-triggered sweep")
+
+	want, wantErr := snet.DefaultReplyPather{}.ReplyPath(cloneRawPath(carrierPath))
+	require.NoError(t, wantErr)
+	require.Equal(t, want, got)
+}
+
+// TestHummReplyPatherSetStateNoFlyoversEvictsCachedReservation checks that a SetState call
+// carrying a valid but flyover-less reverse reservation for a source that already has a cached
+// reservation immediately evicts that cached entry, rather than leaving it to be served (or to
+// be reaped incidentally by some later, unrelated SetState call).
+func TestHummReplyPatherSetStateNoFlyoversEvictsCachedReservation(t *testing.T) {
+	timestamp := util.SecsToTime(123456)
+	rp := path.NewHummReplyPather(path.WithClock(func() time.Time { return timestamp }))
+
+	srcId := snet.SourceIdentifier{
+		IA:   addr.MustParseIA("1-ff00:0:111"),
+		IP:   mustParseIp(t, "10.0.0.2"),
+		Port: 12345,
+	}
+	carrierPath := mustRawHummingbirdPathForReplyPather(t, timestamp)
+
+	// First, install a cached reservation via a valid reverse state with flyovers.
+	state := mustSerializedReverseReservationState(t, timestamp)
+	require.NoError(t, rp.SetState(srcId, *packetWithReverseState(srcId, carrierPath, state)))
+
+	got, err := rp.ReplyPathTo(srcId, cloneRawPath(carrierPath))
+	require.NoError(t, err)
+	require.IsType(t, (*path.Reservation)(nil), got, "reservation should be cached")
+
+	// The same source now sends a valid reverse state, but with no flyovers. SetState must
+	// not cache it (as checked elsewhere), and must also evict the stale entry it supersedes.
+	stateNoFlyovers := mustSerializedReverseReservationStateNoFlyovers(t, timestamp)
+	require.NoError(t, rp.SetState(
+		srcId, *packetWithReverseState(srcId, carrierPath, stateNoFlyovers)))
+
+	got, err = rp.ReplyPathTo(srcId, cloneRawPath(carrierPath))
+	require.NoError(t, err)
+	_, isReservation := got.(*path.Reservation)
+	require.False(t, isReservation,
+		"the previously cached reservation should have been evicted")
+
+	want, wantErr := snet.DefaultReplyPather{}.ReplyPath(cloneRawPath(carrierPath))
+	require.NoError(t, wantErr)
+	require.Equal(t, want, got)
+}
+
+// BenchmarkHummReplyPatherCleanup measures the cost of evicting n already-expired reservations
+// from the cache in a single SetState call, for growing values of n. Cleanup is tied to
+// insertion: every SetState call that adds a new entry also sweeps every expired entry at
+// once (not just the calling source's), so this is the operation whose cost scales with how
+// many distinct clients had entries pending eviction.
+//
+// The n entries must be recreated before every measured call, since cleanup empties the cache;
+// that setup is deliberately left inside the benchmark's own timer (rather than excluded via
+// b.StopTimer/b.StartTimer) so Go's duration-based auto-scaling picks a b.N inversely
+// proportional to the true per-iteration cost, keeping the total run time bounded regardless of
+// n. The cost of the triggering SetState call alone is measured separately and reported as the
+// custom "ns/entry" metric.
+func BenchmarkHummReplyPatherCleanup(b *testing.B) {
+	for _, n := range []int{1, 10, 100, 1_000} {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			start := util.SecsToTime(1_000_000)
+			carrierPath := mustRawHummingbirdPathForReplyPather(b, start)
+			state := mustSerializedReverseReservationState(b, start)
+			ia := addr.MustParseIA("1-ff00:0:111")
+			ip := mustParseIp(b, "10.0.0.2")
+
+			srcIds := make([]snet.SourceIdentifier, n)
+			for i := range srcIds {
+				// Varying only the port is enough to make each entry a distinct map key.
+				srcIds[i] = snet.SourceIdentifier{IA: ia, IP: ip, Port: uint16(i)}
+			}
+			// A source distinct from all of srcIds, used only to trigger the measured
+			// SetState call that performs the cleanup sweep.
+			triggerSrcId := snet.SourceIdentifier{IA: ia, IP: ip, Port: uint16(n)}
+
+			var cleanupNanos int64
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				now := start
+				rp := path.NewHummReplyPather(path.WithClock(func() time.Time { return now }))
+				for _, srcId := range srcIds {
+					pkt := packetWithReverseState(srcId, carrierPath, state)
+					if err := rp.SetState(srcId, *pkt); err != nil {
+						b.Fatal(err)
+					}
+				}
+				// Advance time well past every entry's expiry+slack so the next SetState
+				// call must evict all n of them in a single sweep.
+				now = start.Add(time.Hour)
+				triggerPkt := packetWithReverseState(triggerSrcId, carrierPath, state)
+
+				cleanupStart := time.Now()
+				if err := rp.SetState(triggerSrcId, *triggerPkt); err != nil {
+					b.Fatal(err)
+				}
+				cleanupNanos += time.Since(cleanupStart).Nanoseconds()
+			}
+			entries := n
+			if entries == 0 {
+				entries = 1
+			}
+			b.ReportMetric(float64(cleanupNanos)/float64(b.N*entries), "ns/entry")
 		})
-		require.Panics(t, func() {
-			_, _ = rp.ReplyPath(rpath)
-		})
-	})
+	}
 }
 
 // packetWithoutReverseState builds a packet whose SetState call should behave
 // like a no-op for reverse-reservation caching.
-func packetWithoutReverseState(srcIA addr.IA, carrierPath snet.RawPath) *snet.Packet {
+func packetWithoutReverseState(
+	srcId snet.SourceIdentifier,
+	carrierPath snet.RawPath,
+) *snet.Packet {
 	return &snet.Packet{
 		PacketInfo: snet.PacketInfo{
-			Source: snet.SCIONAddress{IA: srcIA},
-			Path:   carrierPath,
+			Source: snet.SCIONAddress{
+				IA:   srcId.IA,
+				Host: addr.HostIP(srcId.IP),
+			},
+			Path: carrierPath,
+			Payload: snet.UDPPayload{
+				SrcPort: srcId.Port,
+				DstPort: 42,
+				Payload: ([]byte)("mock payload"),
+			},
 		},
 	}
 }
@@ -174,24 +483,24 @@ func cloneRawPath(rpath snet.RawPath) snet.RawPath {
 
 // packetWithReverseState builds a packet that carries reverse reservation state
 // in an end-to-end option.
-func packetWithReverseState(srcIA addr.IA, carrierPath snet.RawPath, state []byte) *snet.Packet {
-	return &snet.Packet{
-		PacketInfo: snet.PacketInfo{
-			Source: snet.SCIONAddress{IA: srcIA},
-			Path:   carrierPath,
-			E2eExtnContents: []*slayers.EndToEndOption{
-				{
-					OptType: slayers.OptTypeReversePath,
-					OptData: append([]byte(nil), state...),
-				},
-			},
+func packetWithReverseState(
+	srcId snet.SourceIdentifier,
+	carrierPath snet.RawPath,
+	state []byte,
+) *snet.Packet {
+	pkt := packetWithoutReverseState(srcId, carrierPath)
+	pkt.E2eExtnContents = []*slayers.EndToEndOption{
+		{
+			OptType: slayers.OptTypeReversePath,
+			OptData: append([]byte(nil), state...),
 		},
 	}
+	return pkt
 }
 
 // mustRawSCIONPathForReplyPather serializes the synthetic SCION path fixture
 // used by the reply-pather tests into an snet.RawPath.
-func mustRawSCIONPathForReplyPather(t *testing.T, when time.Time) snet.RawPath {
+func mustRawSCIONPathForReplyPather(t testing.TB, when time.Time) snet.RawPath {
 	t.Helper()
 
 	dec := createScionPathForReplyPather(when)
@@ -205,7 +514,7 @@ func mustRawSCIONPathForReplyPather(t *testing.T, when time.Time) snet.RawPath {
 
 // mustRawHummingbirdPathForReplyPather serializes the synthetic Hummingbird path
 // fixture used by the reply-pather tests into an snet.RawPath.
-func mustRawHummingbirdPathForReplyPather(t *testing.T, when time.Time) snet.RawPath {
+func mustRawHummingbirdPathForReplyPather(t testing.TB, when time.Time) snet.RawPath {
 	t.Helper()
 
 	dec := createHummingbirdPathForReplyPather(when)
@@ -219,7 +528,7 @@ func mustRawHummingbirdPathForReplyPather(t *testing.T, when time.Time) snet.Raw
 
 // mustRawEPICPath wraps the synthetic SCION fixture in an EPIC path so the
 // fallback reply-path logic can be exercised on EPIC inputs.
-func mustRawEPICPath(t *testing.T, when time.Time) snet.RawPath {
+func mustRawEPICPath(t testing.TB, when time.Time) snet.RawPath {
 	t.Helper()
 
 	scionDecoded := createScionPathForReplyPather(when)
@@ -244,7 +553,7 @@ func mustRawEPICPath(t *testing.T, when time.Time) snet.RawPath {
 
 // mustRawOneHopPath builds a supported non-SCION, non-Hummingbird fallback
 // input for reply-path tests.
-func mustRawOneHopPath(t *testing.T, when time.Time) snet.RawPath {
+func mustRawOneHopPath(t testing.TB, when time.Time) snet.RawPath {
 	t.Helper()
 
 	p := onehop.Path{
@@ -273,7 +582,7 @@ func mustRawOneHopPath(t *testing.T, when time.Time) snet.RawPath {
 
 // mustSerializedReverseReservationState creates the serialized reverse
 // reservation state consumed by HummReplyPather.SetState.
-func mustSerializedReverseReservationState(t *testing.T, when time.Time) []byte {
+func mustSerializedReverseReservationState(t testing.TB, when time.Time) []byte {
 	t.Helper()
 
 	srcIA := addr.MustParseIA("1-ff00:0:111")
@@ -313,10 +622,52 @@ func mustSerializedReverseReservationState(t *testing.T, when time.Time) []byte 
 	return mustSerializeReservation(t, reservation)
 }
 
+// mustSerializedReverseReservationStateNoFlyovers is identical to
+// mustSerializedReverseReservationState except none of its hops carry a flyover, so the
+// resulting Reservation's Expiry is the zero Time. It is used to check that HummReplyPather
+// rejects caching such a reservation, since it offers nothing beyond reversing the transport
+// path directly.
+func mustSerializedReverseReservationStateNoFlyovers(t testing.TB, when time.Time) []byte {
+	t.Helper()
+
+	srcIA := addr.MustParseIA("1-ff00:0:111")
+	reverseSCION := mustReversedSCIONPathForReplyPather(t, when)
+	reverseHops := path.FlyoverSequence{
+		{
+			BaseHop: path.BaseHop{
+				IA:      addr.MustParseIA("1-ff00:0:112"),
+				Ingress: 0,
+				Egress:  1,
+			},
+		},
+		{
+			BaseHop: path.BaseHop{
+				IA:      addr.MustParseIA("1-ff00:0:110"),
+				Ingress: 2,
+				Egress:  1,
+			},
+		},
+		{
+			BaseHop: path.BaseHop{
+				IA:      addr.MustParseIA("1-ff00:0:111"),
+				Ingress: 41,
+				Egress:  0,
+			},
+		},
+	}
+
+	reservation, err := path.NewReservation(
+		path.WithDataplanePath(reverseSCION, srcIA, reverseHops),
+		path.WithNow(func() time.Time { return when }),
+	)
+	require.NoError(t, err)
+	return mustSerializeReservation(t, reservation)
+}
+
 // mustReservationFromReverseState reconstructs the reservation that SetState is
 // expected to cache for successful bidirectional-reply setup.
 func mustReservationFromReverseState(
-	t *testing.T,
+	t testing.TB,
 	carrierPath snet.RawPath,
 	state []byte,
 	dstIA addr.IA,
@@ -332,7 +683,7 @@ func mustReservationFromReverseState(
 
 // mustReversedSCIONPathForReplyPather creates the reversed SCION dataplane path
 // used to synthesize reverse reservation state.
-func mustReversedSCIONPathForReplyPather(t *testing.T, when time.Time) path.SCION {
+func mustReversedSCIONPathForReplyPather(t testing.TB, when time.Time) path.SCION {
 	t.Helper()
 
 	dec := createScionPathForReplyPather(when)
@@ -347,7 +698,7 @@ func mustReversedSCIONPathForReplyPather(t *testing.T, when time.Time) path.SCIO
 
 // mustSerializeReservation encodes a reservation into its wire-format state for
 // stable equality assertions.
-func mustSerializeReservation(t *testing.T, reservation *path.Reservation) []byte {
+func mustSerializeReservation(t testing.TB, reservation *path.Reservation) []byte {
 	t.Helper()
 
 	raw := make([]byte, reservation.SerializedLen())
@@ -357,7 +708,7 @@ func mustSerializeReservation(t *testing.T, reservation *path.Reservation) []byt
 
 // mustSerializeSlayersPath encodes a decoded slayers path into bytes so tests
 // can compare reply-path results independently of concrete Go values.
-func mustSerializeSlayersPath(t *testing.T, p dppath.Path) []byte {
+func mustSerializeSlayersPath(t testing.TB, p dppath.Path) []byte {
 	t.Helper()
 
 	if p == nil {
@@ -483,4 +834,10 @@ func createFlyoverForReplyPather(startTime uint32) *path.FlyoverData {
 		Bw:        64,
 		Ak:        [16]byte{1, 2, 3, 4},
 	}
+}
+
+func mustParseIp(t testing.TB, ip string) netip.Addr {
+	a, err := netip.ParseAddr(ip)
+	require.NoError(t, err)
+	return a
 }
