@@ -48,6 +48,7 @@ import (
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/proto/control_plane"
 	"github.com/scionproto/scion/pkg/proto/control_plane/v1/control_planeconnect"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
@@ -62,6 +63,7 @@ import (
 	"github.com/scionproto/scion/private/topology"
 	"github.com/scionproto/scion/private/trust"
 	trustgrpc "github.com/scionproto/scion/private/trust/grpc"
+	"github.com/scionproto/scion/private/trust/happy"
 )
 
 const APIMajorVersion = uint32(0)
@@ -80,11 +82,51 @@ func main() {
 	application.Run()
 }
 
-type controlServiceFetcher struct {
+type controlServiceFetcherGrpc struct {
+	client control_plane.TrustMaterialServiceClient
+}
+
+func (f *controlServiceFetcherGrpc) Chains(ctx context.Context, query trust.ChainQuery,
+	_ net.Addr) ([][]*x509.Certificate, error) {
+
+	rep, err := f.client.Chains(ctx, trustgrpc.ChainQueryToReq(query))
+	if err != nil {
+		return nil, serrors.Wrap("fetching chains over connect", err)
+	}
+	chains, _, err := trustgrpc.RepToChains(rep.Chains)
+	if err != nil {
+		return nil, serrors.Wrap("parsing chains", err)
+	}
+	if err := trustgrpc.CheckChainsMatchQuery(query, chains); err != nil {
+		return nil, serrors.Wrap("chains do not match query", err)
+	}
+	return chains, nil
+}
+
+func (f *controlServiceFetcherGrpc) TRC(ctx context.Context, id cppki.TRCID,
+	_ net.Addr) (cppki.SignedTRC, error) {
+
+	rep, err := f.client.TRC(ctx, trustgrpc.IDToReq(id))
+	if err != nil {
+		return cppki.SignedTRC{}, serrors.Wrap("fetching chains over connect", err)
+	}
+	//nolint:forbidigo // generated field.
+	trc, err := cppki.DecodeSignedTRC(rep.Trc)
+	if err != nil {
+		return cppki.SignedTRC{}, serrors.Wrap("parse TRC reply", err)
+	}
+	if trc.TRC.ID != id && !(id.Base == 0 && id.Serial == 0) {
+		return cppki.SignedTRC{}, serrors.New("received wrong TRC", "expected", id,
+			"actual", trc.TRC.ID)
+	}
+	return trc, nil
+}
+
+type controlServiceFetcherConnect struct {
 	client control_planeconnect.TrustMaterialServiceClient
 }
 
-func (f *controlServiceFetcher) Chains(ctx context.Context, query trust.ChainQuery,
+func (f *controlServiceFetcherConnect) Chains(ctx context.Context, query trust.ChainQuery,
 	_ net.Addr) ([][]*x509.Certificate, error) {
 
 	rep, err := f.client.Chains(ctx, connect.NewRequest(trustgrpc.ChainQueryToReq(query)))
@@ -101,7 +143,7 @@ func (f *controlServiceFetcher) Chains(ctx context.Context, query trust.ChainQue
 	return chains, nil
 }
 
-func (f *controlServiceFetcher) TRC(ctx context.Context, id cppki.TRCID,
+func (f *controlServiceFetcherConnect) TRC(ctx context.Context, id cppki.TRCID,
 	_ net.Addr) (cppki.SignedTRC, error) {
 
 	rep, err := f.client.TRC(ctx, connect.NewRequest(trustgrpc.IDToReq(id)))
@@ -113,7 +155,7 @@ func (f *controlServiceFetcher) TRC(ctx context.Context, id cppki.TRCID,
 	if err != nil {
 		return cppki.SignedTRC{}, serrors.Wrap("parse TRC reply", err)
 	}
-	if trc.TRC.ID != id {
+	if trc.TRC.ID != id && !(id.Base == 0 && id.Serial == 0) {
 		return cppki.SignedTRC{}, serrors.New("received wrong TRC", "expected", id,
 			"actual", trc.TRC.ID)
 	}
@@ -225,18 +267,21 @@ func realMain(ctx context.Context) error {
 				return err
 			}
 		}
+		fetcher := &endhostApifetcher{
+			trustService: connector.TrustService,
+		}
+		trustDB = marketplace.FromTrustDB(trustDB, fetcher, nil)
 		snetTopo = connector.Topology
 		if !globalCfg.Marketplace.DisableASRegistration {
 			trustProvider := trust.FetchingProvider{
-				DB: trustDB,
-				Fetcher: &endhostApifetcher{
-					trustService: connector.TrustService,
-				},
+				DB:      trustDB,
+				Fetcher: fetcher,
 				Router: trust.LocalRouter{
 					IA: connector.Topology.LocalIA,
 				},
 				Recurser: &recurser{},
 			}
+
 			regService = registration.NewService(trustProvider)
 		}
 	} else {
@@ -255,11 +300,40 @@ func realMain(ctx context.Context) error {
 			return i.InternalAddr, true
 		}
 		if !globalCfg.Marketplace.DisableASRegistration {
-			trustProvider := trust.FetchingProvider{
-				DB: trustDB,
-				Fetcher: &controlServiceFetcher{
-					client: control_planeconnect.NewTrustMaterialServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", topo.ControlServiceAddresses()[0])),
+			connectConn := control_planeconnect.NewTrustMaterialServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", topo.ControlServiceAddresses()[0].String()))
+			cpConn, err := grpc.DialContext(ctx, topo.ControlServiceAddresses()[0].String(), grpc.WithInsecure())
+			if err != nil {
+				return err
+			}
+			cpTrustMaterialClient := control_plane.NewTrustMaterialServiceClient(cpConn)
+			fetcher := happy.Fetcher{
+				Connect: &controlServiceFetcherConnect{
+					client: connectConn,
 				},
+				Grpc: &controlServiceFetcherGrpc{
+					client: cpTrustMaterialClient,
+				},
+			}
+			trustDB = marketplace.FromTrustDB(trustDB, fetcher, topo.ControlServiceAddresses()[0])
+
+			/*currentTRCID := cppki.TRCID{ISD: snetTopo.LocalIA.ISD(), Base: 0, Serial: 0}
+			foundTRC, err := trustDB.SignedTRC(ctx, currentTRCID)
+			if err != nil {
+				return err
+			}
+			if foundTRC.IsZero() {
+				currentTRC, err := fetcher.TRC(ctx, currentTRCID, nil)
+				if err != nil {
+					return err
+				}
+				_, err = trustDB.InsertTRC(ctx, currentTRC)
+				if err != nil {
+					return err
+				}
+			}*/
+			trustProvider := trust.FetchingProvider{
+				DB:      trustDB,
+				Fetcher: fetcher,
 				Router: trust.LocalRouter{
 					IA: topo.IA(),
 				},

@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/scionproto/scion/pkg/daemon"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/snet"
 	snetpath "github.com/scionproto/scion/pkg/snet/path"
@@ -27,7 +26,7 @@ import (
 
 func OneShotReservation(
 	ctx context.Context,
-	sdConn daemon.Connector,
+	pathQuerier snet.PathQuerier,
 	topo snet.Topology,
 	marketplaceUrl string,
 	token string,
@@ -37,7 +36,7 @@ func OneShotReservation(
 	maxPrice uint64,
 	p snet.Path,
 ) (*snetpath.Reservation, error) {
-	marketplaceClient, err := NewMarketplaceClient(ctx, marketplaceUrl, token, daemon.Querier{Connector: sdConn}, topo, true)
+	marketplaceClient, err := NewMarketplaceClient(ctx, marketplaceUrl, token, pathQuerier, topo, true)
 	if err != nil {
 		return nil, serrors.Wrap("new marketplace client", err)
 	}

@@ -9,6 +9,7 @@ go_library(
         "redeem.go",
         "redemption_service.go",
         "service.go",
+        "trust_db_wrapper.go",
     ],
     importpath = "github.com/scionproto/scion/marketplace",
     visibility = ["//visibility:public"],
