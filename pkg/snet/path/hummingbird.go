@@ -67,8 +67,9 @@ func NewReservation(opts ...ReservationModFcn) (*Reservation, error) {
 	}
 
 	if len(r.Hops) != len(r.Dec.HopFields) {
-		return nil, fmt.Errorf("wrong number of flyover hops %d, expected %d from path",
-			len(r.Hops), len(r.Dec.HopFields))
+		return nil, serrors.New("wrong number of flyover",
+			"expected", len(r.Dec.HopFields),
+			"got", len(r.Hops))
 	}
 
 	if r.DstIA == 0 {
@@ -86,7 +87,6 @@ func (r *Reservation) SetPath(s *slayers.SCION) error {
 	// use the decoded Hummingbird path initially before deriving the correct dataplane path.
 	s.Path, s.PathType = r.Dec, r.Dec.Type()
 	pktLen := s.PacketLen()
-	fmt.Printf("deleteme packet length = %d\n", pktLen)
 	r.deriveDataPlanePath(pktLen, r.Now())
 
 	// The correct dataplane path in the SCION layer is still r.Dec (pointer to path),
@@ -375,41 +375,6 @@ func (r *Reservation) Deserialize(buff []byte) error {
 	}
 	r.Hops = hops
 	return nil
-}
-
-// deleteme TODO remove this function.
-func (r *Reservation) DeAggregateMACs(
-	originalSrcIA addr.IA,
-	pktLen uint16,
-) {
-	// The MAC fields are aggregated from the SCION MACs and Hummingbird flyover MACs.
-	// Compute the Hummingbird flyover MACs for each hop, and XOR them to the MAC field to
-	// obtain the original SCION MAC. I.e., SCION_MAC = MAC_field ^ MAC_Flyover .
-	var byteBuffer [hummingbird.FlyoverMacBufferSize]byte
-	for i, h := range r.Hops {
-		// Check if hop is xover (no hop) or non flyover (just best effort)
-		if h == nil || h.Flyover == nil {
-			continue
-		}
-		hf := &r.Dec.HopFields[i]
-
-		flyoverMac := hummingbird.FlyoverMacWithAkAesBlock(
-			r.blocksPerAk[i],
-			byteBuffer[:],
-			originalSrcIA,
-			pktLen,
-			hf.ResStartTime,
-			r.Dec.Base.PathMeta.HighResTS,
-		)
-		// XOR the first 4 bytes with the MAC field.
-		binary.BigEndian.PutUint32(r.scionMacs[i][:4],
-			binary.BigEndian.Uint32(flyoverMac[:4])^binary.BigEndian.Uint32(hf.HopField.Mac[:4]),
-		)
-		// And the remaining 2 bytes.
-		binary.BigEndian.PutUint16(r.scionMacs[i][4:],
-			binary.BigEndian.Uint16(flyoverMac[4:])^binary.BigEndian.Uint16(hf.HopField.Mac[4:]),
-		)
-	}
 }
 
 func (r *Reservation) setupReservationWithScion(
@@ -702,8 +667,9 @@ func (h Hop) Len() int {
 func (h Hop) Serialize(buff []byte) (int, error) {
 	l := h.Len()
 	if len(buff) < l {
-		return 0, fmt.Errorf("buffer is too small (%d bytes); expected at least %d bytes",
-			len(buff), l)
+		return 0, serrors.New("buffer is too small",
+			"expected", l,
+			"got", len(buff))
 	}
 	buff = buff[:0]
 	buff = binary.BigEndian.AppendUint64(buff, uint64(h.IA))
@@ -725,8 +691,10 @@ func (h *Hop) Deserialize(buff []byte, hasFlyover bool) error {
 		expected += FlyoverLen
 	}
 	if len(buff) < expected {
-		return fmt.Errorf("buffer is too small (%d bytes); expected at least %d bytes",
-			len(buff), HopNoFlyoverLen+FlyoverLen)
+		return serrors.New("buffer is too small",
+			"expected", HopNoFlyoverLen+FlyoverLen,
+			"got", len(buff))
+
 	}
 	h.IA = addr.IA(binary.BigEndian.Uint64(buff))
 	buff = buff[8:]
@@ -773,13 +741,14 @@ func lenOfSerializedHops(hops []*Hop) int {
 // - Sequence of non-nil Hops.
 func serializeHops(buff []byte, hops []*Hop) (int, error) {
 	if len(hops) > 255 {
-		return 0, fmt.Errorf("cannot serialize more than 255 hops, requested %d", len(hops))
+		return 0, serrors.New("cannot serialize more than 255 hops", "requested", len(hops))
 	}
 	// Check size.
 	expectedSize := lenOfSerializedHops(hops)
 	if len(buff) < expectedSize {
-		return 0, fmt.Errorf("buffer with length %d is too small; required %d bytes",
-			len(buff), expectedSize)
+		return 0, serrors.New("buffer is too small",
+			"expected", expectedSize,
+			"got", len(buff))
 	}
 
 	// Serialize.
@@ -823,8 +792,9 @@ func deserializeHops(buff []byte) ([]*Hop, error) {
 	bitsetBytes := backingBytesForHopBitset(N)
 	headerLen := 1 + 2*bitsetBytes
 	if len(buff) < headerLen {
-		return nil, fmt.Errorf("deserialize hops: buffer too small, expected >= %d, got %d bytes",
-			headerLen, len(buff))
+		return nil, serrors.New("buffer is too small",
+			"expected", headerLen,
+			"got", len(buff))
 	}
 	existsFlags := newHopBitset(buff[1:1+bitsetBytes], N)
 	flyoverFlags := newHopBitset(buff[1+bitsetBytes:headerLen], N)
@@ -835,10 +805,8 @@ func deserializeHops(buff []byte) ([]*Hop, error) {
 		hasFlyover := flyoverFlags.Get(i)
 		if !exists {
 			if hasFlyover {
-				return nil, fmt.Errorf(
-					"deserialize hops: invalid flags at index %d: non-existent hop has flyover",
-					i,
-				)
+				return nil, serrors.New("deserialize hops: non-existent hop has flyover",
+					"at_index", i)
 			}
 			continue
 		}
@@ -851,8 +819,9 @@ func deserializeHops(buff []byte) ([]*Hop, error) {
 	expectedLen := headerLen + expectedPayloadLen
 
 	if len(buff) < expectedLen {
-		return nil, fmt.Errorf("deserialize hops: buffer too small, expected >= %d, got %d bytes",
-			expectedLen, len(buff))
+		return nil, serrors.New("buffer is too small",
+			"expected", expectedLen,
+			"got", len(buff))
 	}
 
 	hops := make([]*Hop, N)
