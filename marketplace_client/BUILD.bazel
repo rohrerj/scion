@@ -1,4 +1,5 @@
 load("@rules_go//go:def.bzl", "go_binary", "go_library")
+load("//tools:go.bzl", "go_test")
 
 go_library(
     name = "go_default_library",
@@ -33,4 +34,13 @@ go_binary(
     name = "marketplace_client",
     embed = [":go_default_library"],
     visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = ["client_test.go"],
+    deps = [
+        "//pkg/slayers/path/hummingbird:go_default_library",
+        "//private/keyconf:go_default_library",
+    ],
 )

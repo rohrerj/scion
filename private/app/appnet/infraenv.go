@@ -105,7 +105,7 @@ func (nc *NetworkConfig) QUICStack(ctx context.Context) (*QUICStack, error) {
 		InsecureSkipVerify: true,
 		GetCertificate:     nc.QUIC.GetCertificate,
 		ClientAuth:         tls.RequestClientCert,
-		NextProtos:         []string{"h3", "SCION"},
+		NextProtos:         []string{"h3", "SCION", "qs"},
 	}
 
 	listener, err := quic.Listen(server, serverTLSConfig, nil)

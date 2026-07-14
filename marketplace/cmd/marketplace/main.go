@@ -40,6 +40,7 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/marketplace"
+	"github.com/scionproto/scion/marketplace/quicutil"
 	marketplacestorage "github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/marketplace/webapp"
 	libconnect "github.com/scionproto/scion/pkg/connect"
@@ -429,6 +430,24 @@ func realMain(ctx context.Context) error {
 	return nil
 }
 
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Printf("%s: %s %s%s\n",
+			r.Proto,
+			r.Method,
+			r.URL.Path,
+			func() string {
+				if r.URL.RawQuery != "" {
+					return "?" + r.URL.RawQuery
+				}
+				return ""
+			}(),
+		)
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrString string, g *errgroup.Group, trustVerifier *trust.TLSCryptoVerifier, cert *tls.Certificate, mux *http.ServeMux, cleanup *app.Cleanup) error {
 	addr, err := net.ResolveUDPAddr("udp", addrString)
 	if err != nil {
@@ -458,6 +477,14 @@ func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrS
 	cleanup.Add(func() error { quicServer.GracefulStop(); return nil })
 	cleanup.Add(func() error { return quicStack.Listener.Close() })
 	grpcConns := make(chan *quic.Conn)
+	singleStreamConns := make(chan net.Conn)
+	httpSrv := &http.Server{
+		Handler: loggingMiddleware(mux),
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{*cert},
+			NextProtos:   []string{"http/1.1"},
+		},
+	}
 	g.Go(func() error {
 		defer log.HandlePanic()
 		listener := quicStack.Listener
@@ -472,8 +499,10 @@ func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrS
 			}
 			return nil
 		})
+
 		for {
 			conn, err := listener.Accept(ctx)
+			fmt.Println("incomming connection")
 			if err == quic.ErrServerClosed {
 				return http.ErrServerClosed
 			}
@@ -481,7 +510,23 @@ func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrS
 				return err
 			}
 			go func() {
+
 				defer log.HandlePanic()
+				if conn.ConnectionState().TLS.NegotiatedProtocol == "qs" {
+					fmt.Println("qs stream")
+					stream, err := quicutil.NewSingleStream(conn)
+					if err != nil {
+						log.Debug("new stream", "err", err)
+						return
+					}
+					/*err = httpSrv.ServeTLS(&singleListener{conn: stream}, "", "")
+					if err != nil {
+						log.Debug("serve", "err", err)
+					}
+					return*/
+					singleStreamConns <- stream
+					return
+				}
 				if conn.ConnectionState().TLS.NegotiatedProtocol != "h3" {
 					grpcConns <- conn
 					return
@@ -494,6 +539,13 @@ func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrS
 	})
 	g.Go(func() error {
 		defer log.HandlePanic()
+		if err := httpSrv.ServeTLS(&quicListener{streams: singleStreamConns}, "", ""); err != nil {
+			return serrors.Wrap("serving qs", err)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		defer log.HandlePanic()
 		grpcListener := squic.NewConnListener(grpcConns, quicStack.Listener.Addr())
 		if err := quicServer.Serve(grpcListener); err != nil {
 			return serrors.Wrap("serving gRPC/SCION API", err)
@@ -501,6 +553,25 @@ func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrS
 		return nil
 	})
 	return nil
+}
+
+type quicListener struct {
+	streams chan net.Conn
+	addr    net.Addr
+}
+
+func (l *quicListener) Accept() (net.Conn, error) {
+	c := <-l.streams
+	fmt.Println("accept")
+	return c, nil
+}
+
+func (l *quicListener) Close() error {
+	return nil
+}
+
+func (l *quicListener) Addr() net.Addr {
+	return l.addr
 }
 
 func saveSignatureKeys(pubKey ed25519.PublicKey, privKey ed25519.PrivateKey) error {
