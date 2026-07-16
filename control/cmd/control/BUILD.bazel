@@ -23,7 +23,6 @@ go_library(
         "//control/drkey/grpc:go_default_library",
         "//control/drkey/happy:go_default_library",
         "//control/ifstate:go_default_library",
-        "//control/marketplace:go_default_library",
         "//control/mgmtapi:go_default_library",
         "//control/onehop:go_default_library",
         "//control/segreg:go_default_library",

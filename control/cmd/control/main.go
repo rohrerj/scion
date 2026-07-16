@@ -55,7 +55,6 @@ import (
 	drkeygrpc "github.com/scionproto/scion/control/drkey/grpc"
 	drkeyhappy "github.com/scionproto/scion/control/drkey/happy"
 	"github.com/scionproto/scion/control/ifstate"
-	"github.com/scionproto/scion/control/marketplace"
 	api "github.com/scionproto/scion/control/mgmtapi"
 	"github.com/scionproto/scion/control/onehop"
 	"github.com/scionproto/scion/control/segreg"
@@ -1198,33 +1197,6 @@ func realMain(ctx context.Context) error {
 		<-errCtx.Done()
 		return cleanup.Do()
 	})
-	if globalCfg.Marketplace.MarketplaceApi != "" {
-		publisherToken := &marketplace.JwtToken{}
-		redemptionToken := &marketplace.JwtToken{}
-
-		g.Go(func() error {
-			defer log.HandlePanic()
-			tlsCertLoader := cs.NewTLSCertificateLoader(
-				topo.IA(), x509.ExtKeyUsageClientAuth, trustDB, globalCfg.General.ConfigDir,
-			)
-			tokenRenewer := marketplace.NewTokenRenwer(globalCfg.Marketplace.MarketplaceApi, topo.IA(), tlsCertLoader, publisherToken, redemptionToken)
-			return tokenRenewer.InitTokenRenewer()
-		})
-
-		g.Go(func() error {
-			defer log.HandlePanic()
-			redemptionClient := marketplace.RedemptionClient{
-				MarketplaceUrl: globalCfg.Marketplace.MarketplaceApi,
-				IA:             topo.IA(),
-				Token:          redemptionToken,
-			}
-			if err := redemptionClient.Init(); err != nil {
-				log.Error("redemption service", "err", err)
-				return err
-			}
-			return nil
-		})
-	}
 	return g.Wait()
 }
 
