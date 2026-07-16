@@ -15,6 +15,7 @@
 package marketplace
 
 import (
+	"container/heap"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -67,7 +68,7 @@ type RedemptionDelegationUpdateResult struct {
 
 type ReservationIdStore interface {
 	Init(limit uint32, r []*db.UsedReservation) error
-	Next(start uint64, end uint64) (uint32, error)
+	Next(now int64, start int64, end int64) (uint32, error)
 	Migrate(newLimit uint32, r []*db.UsedReservation) error
 	Close() error
 }
@@ -120,14 +121,15 @@ func (s *RedemptionService) readRoutine() {
 			}
 			s.UpdateResultChannel <- s.handleUpdate(u)
 		case r := <-s.SendChannel:
-			if s.expiration.Before(time.Now()) {
+			now := time.Now()
+			if s.expiration.Before(now) {
 				select {
 				case s.SendChannel <- r:
 				default:
 				}
 				return
 			}
-			if err = s.handleRequest(r); err != nil {
+			if err = s.handleRequest(now, r); err != nil {
 				fmt.Println(err)
 				return
 			}
@@ -160,8 +162,8 @@ func (s *RedemptionService) handleUpdate(u *RedemptionDelegationUpdate) error {
 	return err
 }
 
-func (s *RedemptionService) handleRequest(r *hummingbird.RedeemAssetFromASRequest) error {
-	resId, err := s.resIdStore.Next(uint64(r.StartsAt.Seconds), uint64(r.StopsAt.Seconds))
+func (s *RedemptionService) handleRequest(now time.Time, r *hummingbird.RedeemAssetFromASRequest) error {
+	resId, err := s.resIdStore.Next(now.Unix(), r.StartsAt.Seconds, r.StopsAt.Seconds)
 	if err != nil {
 		return err
 	}
@@ -226,12 +228,44 @@ func (s *RedemptionService) deriveAuthKey(
 	return buffer[0:AkBufferSize]
 }
 
-// this is a very simple reservation ID store that never reuses the same ID and does not
-// care about start or end
+type entry struct {
+	id         uint32
+	expiration int64
+}
+
+type ExpiryHeap []*entry
+
+func (h ExpiryHeap) Len() int {
+	return len(h)
+}
+
+func (h ExpiryHeap) Less(i, j int) bool {
+	return h[i].expiration < h[j].expiration
+}
+
+func (h ExpiryHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *ExpiryHeap) Push(x any) {
+	*h = append(*h, x.(*entry))
+}
+
+func (h *ExpiryHeap) Pop() any {
+	old := *h
+	n := len(old)
+
+	e := old[n-1]
+	*h = old[:n-1]
+
+	return e
+}
+
 type UsedIDStore struct {
-	usedIds map[uint32]struct{}
-	next    uint32
-	limit   uint32
+	usedIds     map[uint32]struct{}
+	expirations ExpiryHeap
+	next        uint32
+	limit       uint32
 }
 
 func (s *UsedIDStore) Init(limit uint32, r []*db.UsedReservation) error {
@@ -240,15 +274,32 @@ func (s *UsedIDStore) Init(limit uint32, r []*db.UsedReservation) error {
 	s.next = 0
 	for _, res := range r {
 		s.usedIds[res.Id] = struct{}{}
+		s.expirations = append(s.expirations, &entry{
+			id:         res.Id,
+			expiration: res.StopsAt.Unix(),
+		})
 	}
+	heap.Init(&s.expirations)
 	return nil
 }
 
-func (s *UsedIDStore) Next(start uint64, end uint64) (uint32, error) {
+func (s *UsedIDStore) Next(now int64, start int64, end int64) (uint32, error) {
+	if len(s.expirations) != 0 && s.expirations[0].expiration <= now {
+		e := heap.Pop(&s.expirations).(*entry)
+		heap.Push(&s.expirations, &entry{
+			id:         e.id,
+			expiration: end,
+		})
+		return e.id, nil
+	}
 	for ; s.next < s.limit; s.next++ {
 		_, found := s.usedIds[s.next]
 		if !found {
 			s.usedIds[s.next] = struct{}{}
+			heap.Push(&s.expirations, &entry{
+				id:         s.next,
+				expiration: end,
+			})
 			tmp := s.next
 			s.next++
 			return tmp, nil
@@ -263,11 +314,18 @@ func (s *UsedIDStore) Migrate(newLimit uint32, r []*db.UsedReservation) error {
 	}
 	if r != nil {
 		clear(s.usedIds)
+		clear(s.expirations)
 		s.next = 0
 		for _, res := range r {
 			s.usedIds[res.Id] = struct{}{}
+			s.expirations = append(s.expirations, &entry{
+				id:         res.Id,
+				expiration: res.StopsAt.Unix(),
+			})
 		}
+		heap.Init(&s.expirations)
 	}
+
 	s.limit = newLimit
 	return nil
 }
