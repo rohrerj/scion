@@ -898,37 +898,37 @@ func realMain(ctx context.Context) error {
 		TLSConfig: endhostTLSConfig,
 	}
 	endhost_api, found := topo.EndhostAPI()[globalCfg.General.ID]
-	if !found {
-		return serrors.New("endhost api endpoint not found in topology")
+	if found {
+		g.Go(func() error {
+			defer log.HandlePanic()
+			u, err := url.Parse(endhost_api.Url)
+			if err != nil {
+				return err
+			}
+			addr, err := net.ResolveTCPAddr("tcp", u.Host)
+			if err != nil {
+				return err
+			}
+			tcpListener, err := net.ListenTCP("tcp", addr)
+			if err != nil {
+				return err
+			}
+			switch u.Scheme {
+			case "https":
+				if err = endhostServer.ServeTLS(tcpListener, "", ""); err != nil {
+					return err
+				}
+			case "http":
+				if err = endhostServer.Serve(tcpListener); err != nil {
+					return err
+				}
+			default:
+				return serrors.New("unknown scheme", "scheme", u.Scheme)
+			}
+			return nil
+		})
 	}
-	g.Go(func() error {
-		defer log.HandlePanic()
-		u, err := url.Parse(endhost_api.Url)
-		if err != nil {
-			return err
-		}
-		addr, err := net.ResolveTCPAddr("tcp", u.Host)
-		if err != nil {
-			return err
-		}
-		tcpListener, err := net.ListenTCP("tcp", addr)
-		if err != nil {
-			return err
-		}
-		switch u.Scheme {
-		case "https":
-			if err = endhostServer.ServeTLS(tcpListener, "", ""); err != nil {
-				return err
-			}
-		case "http":
-			if err = endhostServer.Serve(tcpListener); err != nil {
-				return err
-			}
-		default:
-			return serrors.New("unknown scheme", "scheme", u.Scheme)
-		}
-		return nil
-	})
+
 	intraServer := http.Server{
 		Handler: h2c.NewHandler(libconnect.AttachPeer(connectIntra), &http2.Server{}),
 	}
