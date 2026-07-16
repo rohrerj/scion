@@ -352,12 +352,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Loads assets, users, reservations and delegations into marketplace db")
     parser.add_argument(
         "--db",
-        required=True,
+        default="gen-cache/marketplace.db",
         help="Path to the SQLite database."
     )
     parser.add_argument(
         "--schema",
-        required=True,
+        default="marketplace/db/schema.sql",
         help="Path to the schema.sql file."
     )
     parser.add_argument(
