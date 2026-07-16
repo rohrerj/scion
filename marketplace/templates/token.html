@@ -36,10 +36,6 @@
         {{if .Token}}
         <h4>Your token</h4>
         <p class="success">{{.Token}}</p>
-        {{else}}
-        <form method="POST" action="/token">
-            <button type="submit">Create New Token</button>
-        </form>
         {{end}}
     </div>
 </body>

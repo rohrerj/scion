@@ -357,7 +357,6 @@ func (h *Handler) logoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// POST /login
 func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		templates.ExecuteTemplate(w, "login.html", map[string]any{})
@@ -413,12 +412,6 @@ func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	if r.Method == http.MethodGet {
-		templates.ExecuteTemplate(w, "token.html", map[string]any{
-			"Username": user.name,
-		})
-		return
-	}
 	dbUser, err := h.store.GetUser(r.Context(), user.id)
 	if err != nil {
 		templates.ExecuteTemplate(w, "token.html", map[string]any{
@@ -432,11 +425,16 @@ func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
+	if r.Method == http.MethodGet {
+		templates.ExecuteTemplate(w, "token.html", map[string]any{
+			"Username": user.name,
+			"Token":    token,
+		})
+	} else {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte(token))
+	}
 
-	templates.ExecuteTemplate(w, "token.html", map[string]any{
-		"Username": user.name,
-		"Token":    token,
-	})
 }
 
 func (h *Handler) createToken(user string, tokenVersion int64) (string, error) {
