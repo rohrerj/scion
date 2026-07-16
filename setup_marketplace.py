@@ -38,7 +38,7 @@ level = "debug"
 
 [marketplace]
 api_addr = "localhost:8888"
-scion_api_addr = "localhost:9888"
+scion_api_addr = "localhost:8888"
 currency = "CHF"
 currency_exponent = 2
 supports_redemption_delegation = true

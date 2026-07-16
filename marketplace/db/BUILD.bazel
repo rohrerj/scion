@@ -7,6 +7,9 @@ go_library(
         "sqlite.go",
         "types.go",
     ],
+    embedsrcs = [
+        "schema.sql",
+    ],
     importpath = "github.com/scionproto/scion/marketplace/db",
     visibility = ["//visibility:public"],
     deps = [

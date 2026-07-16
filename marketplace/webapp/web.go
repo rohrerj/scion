@@ -16,28 +16,39 @@ package webapp
 
 import (
 	"crypto/rand"
-	"encoding/hex"
+	"encoding/gob"
 	"fmt"
 	"html/template"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt"
+	"github.com/gorilla/sessions"
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/scionproto/scion/marketplace/db"
 	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
-	"golang.org/x/crypto/bcrypt"
+	"github.com/scionproto/scion/pkg/log"
 )
 
 var templates = template.Must(template.ParseGlob("marketplace/templates/*.html"))
 
 func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *http.ServeMux, disableUserRegistration bool) {
+	sessionKey := make([]byte, 32)
+	rand.Read(sessionKey)
+	sessionStore := sessions.NewCookieStore(sessionKey)
+	sessionStore.Options = &sessions.Options{
+		Secure:   true,
+		HttpOnly: true,
+		MaxAge:   0,
+	}
+	gob.Register(User{})
+	gob.Register(addr.IA(0))
 	h := &Handler{
-		sessions:                make(map[string]User),
-		asSessions:              make(map[string]addr.IA),
+		sessions:                sessionStore,
 		signer:                  signer,
 		store:                   store,
 		disableUserRegistration: disableUserRegistration,
@@ -56,54 +67,36 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 }
 
 type Handler struct {
+	sessions                sessions.Store
 	store                   *storage.MarketplaceStorage
-	sessions                map[string]User
-	asSessions              map[string]addr.IA
-	mu                      sync.Mutex
 	signer                  *registration.Signer
 	disableUserRegistration bool
 }
 type User struct {
-	id   int64
-	name string
+	ID   int64
+	Name string
 }
 
-func (h *Handler) getSessionUser(r *http.Request) (User, bool) {
-	cookie, err := r.Cookie("session_id")
+func (h *Handler) SetSessionUser(w http.ResponseWriter, r *http.Request, user any) error {
+	session, _ := h.sessions.Get(r, "session_id")
+	session.Values["user"] = user
+	session.Values["iat"] = time.Now().Unix()
+	return session.Save(r, w)
+}
+
+func (h *Handler) GetSession(r *http.Request) (*sessions.Session, error) {
+	session, err := h.sessions.Get(r, "session_id")
 	if err != nil {
-		return User{}, false
+		return nil, err
 	}
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	userId, ok := h.sessions[cookie.Value]
-	return userId, ok
-}
-
-func (h *Handler) getSessionAS(r *http.Request) (addr.IA, bool) {
-	cookie, err := r.Cookie("as_session_id")
-	if err != nil {
-		return 0, false
+	iat, ok := session.Values["iat"].(int64)
+	if !ok {
+		return nil, fmt.Errorf("session invalid")
 	}
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	userId, ok := h.asSessions[cookie.Value]
-	return userId, ok
-}
-
-func (h *Handler) SetSessionUser(sessionId string, user User) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.sessions[sessionId] = user
-}
-
-func (h *Handler) SetASSessionUser(sessionId string, user addr.IA) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.asSessions[sessionId] = user
+	if time.Now().Unix() > iat+3600 {
+		return nil, fmt.Errorf("session invalid")
+	}
+	return session, nil
 }
 
 func (h *Handler) asLoginHandler(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +111,7 @@ func (h *Handler) asLoginHandler(w http.ResponseWriter, r *http.Request) {
 	ia, err := addr.ParseIA(username)
 	dbUser, err := h.store.GetASUser(r.Context(), ia)
 	if err != nil {
+		log.Debug("AS login handler", "err", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
@@ -138,20 +132,23 @@ func (h *Handler) asLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := h.generateSessionID()
-	h.SetASSessionUser(sessionID, dbUser.IA)
-	http.SetCookie(w, &http.Cookie{
-		Name:     "as_session_id",
-		Value:    sessionID,
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: true,
-	})
+	err = h.SetSessionUser(w, r, dbUser.IA)
+	if err != nil {
+		log.Debug("AS login handler", "err", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
 	http.Redirect(w, r, "/asbalance", http.StatusSeeOther)
 }
 
 func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
-	ia, ok := h.getSessionAS(r)
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
+		return
+	}
+	ia, ok := session.Values["user"].(addr.IA)
 	if !ok {
 		http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
 		return
@@ -159,6 +156,7 @@ func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		dbUser, err := h.store.GetASUser(r.Context(), ia)
 		if err != nil {
+			log.Debug("AS balance handler", "err", err)
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
@@ -178,6 +176,7 @@ func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil || depositInt < 0 {
 		dbUser, err := h.store.GetASUser(r.Context(), ia)
 		if err != nil {
+			log.Debug("AS balance handler", "err", err)
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
@@ -195,6 +194,7 @@ func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.store.DepositMoneyAndGetAS(r.Context(), ia, int64(depositInt))
 	if err != nil {
+		log.Debug("AS balance handler", "err", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
@@ -205,14 +205,20 @@ func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := h.getSessionUser(r)
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	user, ok := session.Values["user"].(User)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	if r.Method == http.MethodGet {
-		dbUser, err := h.store.GetUser(r.Context(), user.id)
+		dbUser, err := h.store.GetUser(r.Context(), user.ID)
 		if err != nil {
+			log.Debug("User balance handler", "err", err)
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
@@ -221,7 +227,7 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		templates.ExecuteTemplate(w, "balance.html", map[string]any{
-			"Username": user.name,
+			"Username": user.Name,
 			"Balance":  strconv.Itoa(int(dbUser.Balance)),
 		})
 		return
@@ -230,8 +236,9 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 	deposit := r.FormValue("deposit")
 	depositInt, err := strconv.Atoi(deposit)
 	if err != nil || depositInt < 0 {
-		dbUser, err := h.store.GetUser(r.Context(), user.id)
+		dbUser, err := h.store.GetUser(r.Context(), user.ID)
 		if err != nil {
+			log.Debug("User balance handler", "err", err)
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
@@ -240,19 +247,20 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		templates.ExecuteTemplate(w, "balance.html", map[string]any{
-			"Username": user.name,
+			"Username": user.Name,
 			"Error":    "Invalid deposit amount",
 			"Balance":  strconv.Itoa(int(dbUser.Balance)),
 		})
 		return
 	}
-	dbUser, err := h.store.DepositMoneyAndGet(r.Context(), user.id, int64(depositInt))
+	dbUser, err := h.store.DepositMoneyAndGet(r.Context(), user.ID, int64(depositInt))
 	if err != nil {
+		log.Debug("User balance handler", "err", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 	templates.ExecuteTemplate(w, "balance.html", map[string]any{
-		"Username": user.name,
+		"Username": user.Name,
 		"Balance":  strconv.Itoa(int(dbUser.Balance)),
 	})
 }
@@ -275,6 +283,7 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.store.GetUserByName(r.Context(), username)
 	if err != nil {
+		log.Debug("User register handler", "err", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
@@ -289,6 +298,7 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 		12,
 	)
 	if err != nil {
+		log.Debug("User register handler", "err", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
@@ -298,66 +308,40 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 		PasswordHash: string(hash),
 	})
 	if err != nil {
-		fmt.Println("Error creating user", "err", err)
+		log.Debug("User register handler", "err", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 
-	sessionID := h.generateSessionID()
-	h.SetSessionUser(sessionID, User{
-		id:   userId,
-		name: username,
+	err = h.SetSessionUser(w, r, User{
+		ID:   userId,
+		Name: username,
 	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:  "session_id",
-		Value: sessionID,
-		Path:  "/",
-	})
+	if err != nil {
+		log.Debug("User register handler", "err", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
 	http.Redirect(w, r, "/token", http.StatusSeeOther)
 }
 
-func (h *Handler) generateSessionID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
 func (h *Handler) logoutHandler(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("session_id")
+	session, err := h.GetSession(r)
 	if err != nil {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	delete(h.sessions, cookie.Value)
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_id",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		Secure:   true,
-		HttpOnly: true,
-	})
-	ascookie, err := r.Cookie("as_session_id")
+	clear(session.Values)
+	session.Options.MaxAge = -1
+	err = session.Save(r, w)
 	if err != nil {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		log.Debug("Logout handler", "err", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	delete(h.asSessions, ascookie.Value)
-	http.SetCookie(w, &http.Cookie{
-		Name:     "as_session_id",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		Secure:   true,
-		HttpOnly: true,
-	})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// POST /login
 func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		templates.ExecuteTemplate(w, "login.html", map[string]any{})
@@ -370,6 +354,7 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	dbUser, err := h.store.GetUserByName(r.Context(), username)
 	if err != nil {
+		log.Debug("User login handler", "err", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
@@ -390,53 +375,55 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := h.generateSessionID()
-	h.SetSessionUser(sessionID, User{
-		id:   dbUser.ID,
-		name: username,
+	err = h.SetSessionUser(w, r, User{
+		ID:   dbUser.ID,
+		Name: username,
 	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_id",
-		Value:    sessionID,
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: true,
-	})
+	if err != nil {
+		templates.ExecuteTemplate(w, "login.html", map[string]any{
+			"Error": err.Error(),
+		})
+		return
+	}
 
 	http.Redirect(w, r, "/token", http.StatusSeeOther)
 }
 
 func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := h.getSessionUser(r)
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	user, ok := session.Values["user"].(User)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	if r.Method == http.MethodGet {
-		templates.ExecuteTemplate(w, "token.html", map[string]any{
-			"Username": user.name,
-		})
-		return
-	}
-	dbUser, err := h.store.GetUser(r.Context(), user.id)
+	dbUser, err := h.store.GetUser(r.Context(), user.ID)
 	if err != nil {
 		templates.ExecuteTemplate(w, "token.html", map[string]any{
-			"Username": user.name,
+			"Username": user.Name,
 			"Error":    err,
 		})
 		return
 	}
-	token, err := h.createToken(strconv.FormatInt(user.id, 10), dbUser.TokenVersion)
+	token, err := h.createToken(strconv.FormatInt(user.ID, 10), dbUser.TokenVersion)
 	if err != nil {
+		log.Debug("User token handler", "err", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
+	if r.Method == http.MethodGet {
+		templates.ExecuteTemplate(w, "token.html", map[string]any{
+			"Username": user.Name,
+			"Token":    token,
+		})
+	} else {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte(token))
+	}
 
-	templates.ExecuteTemplate(w, "token.html", map[string]any{
-		"Username": user.name,
-		"Token":    token,
-	})
 }
 
 func (h *Handler) createToken(user string, tokenVersion int64) (string, error) {

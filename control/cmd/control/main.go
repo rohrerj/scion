@@ -55,7 +55,6 @@ import (
 	drkeygrpc "github.com/scionproto/scion/control/drkey/grpc"
 	drkeyhappy "github.com/scionproto/scion/control/drkey/happy"
 	"github.com/scionproto/scion/control/ifstate"
-	"github.com/scionproto/scion/control/marketplace"
 	api "github.com/scionproto/scion/control/mgmtapi"
 	"github.com/scionproto/scion/control/onehop"
 	"github.com/scionproto/scion/control/segreg"
@@ -899,37 +898,37 @@ func realMain(ctx context.Context) error {
 		TLSConfig: endhostTLSConfig,
 	}
 	endhost_api, found := topo.EndhostAPI()[globalCfg.General.ID]
-	if !found {
-		return serrors.New("endhost api endpoint not found in topology")
+	if found {
+		g.Go(func() error {
+			defer log.HandlePanic()
+			u, err := url.Parse(endhost_api.Url)
+			if err != nil {
+				return err
+			}
+			addr, err := net.ResolveTCPAddr("tcp", u.Host)
+			if err != nil {
+				return err
+			}
+			tcpListener, err := net.ListenTCP("tcp", addr)
+			if err != nil {
+				return err
+			}
+			switch u.Scheme {
+			case "https":
+				if err = endhostServer.ServeTLS(tcpListener, "", ""); err != nil {
+					return err
+				}
+			case "http":
+				if err = endhostServer.Serve(tcpListener); err != nil {
+					return err
+				}
+			default:
+				return serrors.New("unknown scheme", "scheme", u.Scheme)
+			}
+			return nil
+		})
 	}
-	g.Go(func() error {
-		defer log.HandlePanic()
-		u, err := url.Parse(endhost_api.Url)
-		if err != nil {
-			return err
-		}
-		addr, err := net.ResolveTCPAddr("tcp", u.Host)
-		if err != nil {
-			return err
-		}
-		tcpListener, err := net.ListenTCP("tcp", addr)
-		if err != nil {
-			return err
-		}
-		switch u.Scheme {
-		case "https":
-			if err = endhostServer.ServeTLS(tcpListener, "", ""); err != nil {
-				return err
-			}
-		case "http":
-			if err = endhostServer.Serve(tcpListener); err != nil {
-				return err
-			}
-		default:
-			return serrors.New("unknown scheme", "scheme", u.Scheme)
-		}
-		return nil
-	})
+
 	intraServer := http.Server{
 		Handler: h2c.NewHandler(libconnect.AttachPeer(connectIntra), &http2.Server{}),
 	}
@@ -1198,33 +1197,6 @@ func realMain(ctx context.Context) error {
 		<-errCtx.Done()
 		return cleanup.Do()
 	})
-	if globalCfg.Marketplace.MarketplaceApi != "" {
-		publisherToken := &marketplace.JwtToken{}
-		redemptionToken := &marketplace.JwtToken{}
-
-		g.Go(func() error {
-			defer log.HandlePanic()
-			tlsCertLoader := cs.NewTLSCertificateLoader(
-				topo.IA(), x509.ExtKeyUsageClientAuth, trustDB, globalCfg.General.ConfigDir,
-			)
-			tokenRenewer := marketplace.NewTokenRenwer(globalCfg.Marketplace.MarketplaceApi, topo.IA(), tlsCertLoader, publisherToken, redemptionToken)
-			return tokenRenewer.InitTokenRenewer()
-		})
-
-		g.Go(func() error {
-			defer log.HandlePanic()
-			redemptionClient := marketplace.RedemptionClient{
-				MarketplaceUrl: globalCfg.Marketplace.MarketplaceApi,
-				IA:             topo.IA(),
-				Token:          redemptionToken,
-			}
-			if err := redemptionClient.Init(); err != nil {
-				log.Error("redemption service", "err", err)
-				return err
-			}
-			return nil
-		})
-	}
 	return g.Wait()
 }
 
