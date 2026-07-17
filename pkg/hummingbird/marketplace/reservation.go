@@ -41,7 +41,7 @@ func OneShotReservation(
 		return nil, serrors.Wrap("new marketplace client", err)
 	}
 	// Obtain the flyovers.
-	flyovers, err := marketplaceClient.ObtainReservationsFullPath(ctx, p, bwInKbps, startsAt, stopsAt, maxPrice, ContinueOnError, true, true, 5)
+	flyovers, err := marketplaceClient.ObtainReservationsFullPath(ctx, p, bwInKbps, startsAt, stopsAt, maxPrice, ContinueOnError, false, false, 5)
 	if err != nil {
 		return nil, serrors.Wrap("redeeming flyovers", err)
 	}
