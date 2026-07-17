@@ -449,36 +449,41 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 		if resp == nil {
 			return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
 		}
-		n, err := s.store.InsertReservation(ctx, &db.DBReservation{
-			ID:               resp.ResInfo.ReservationId,
-			IA:               ia,
-			Ingress:          ingressID,
-			Egress:           egressID,
-			Bandwidth:        resp.ResInfo.BandwithRounded,
-			EncodedBandwidth: uint16(resp.ResInfo.BwDataplaneEncoding),
-			StartsAt:         startsAt,
-			StopsAt:          stopsAt,
-			OwnerId:          user,
-			Key:              resp.AuthenticationKey,
-		})
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		switch r := resp.Result.(type) {
+		case *hummingbird.RedeemAssetFromASResponse_Error:
+			return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New(r.Error), undoRedemption()))
+		case *hummingbird.RedeemAssetFromASResponse_ResInfo:
+			n, err := s.store.InsertReservation(ctx, &db.DBReservation{
+				ID:               r.ResInfo.ReservationId,
+				IA:               ia,
+				Ingress:          ingressID,
+				Egress:           egressID,
+				Bandwidth:        r.ResInfo.BandwithRounded,
+				EncodedBandwidth: uint16(r.ResInfo.BwDataplaneEncoding),
+				StartsAt:         startsAt,
+				StopsAt:          stopsAt,
+				OwnerId:          user,
+				Key:              r.ResInfo.AuthenticationKey,
+			})
+			if err != nil {
+				return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(err, undoRedemption()))
+			}
+			if n != 1 {
+				return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("reservation could not be stored"), undoRedemption()))
+			}
+			return &connect.Response[hummingbird.RedeemAssetResponse]{
+				Msg: &hummingbird.RedeemAssetResponse{
+					AuthenticationKey:   r.ResInfo.AuthenticationKey,
+					ReservationId:       r.ResInfo.ReservationId,
+					BandwidthRounded:    r.ResInfo.BandwithRounded,
+					BwDataplaneEncoding: r.ResInfo.BwDataplaneEncoding,
+				},
+			}, nil
 		}
-		if n != 1 {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-
-		}
-		return &connect.Response[hummingbird.RedeemAssetResponse]{
-			Msg: &hummingbird.RedeemAssetResponse{
-				AuthenticationKey:   resp.AuthenticationKey,
-				ReservationId:       resp.ResInfo.ReservationId,
-				BandwidthRounded:    resp.ResInfo.BandwithRounded,
-				BwDataplaneEncoding: resp.ResInfo.BwDataplaneEncoding,
-			},
-		}, nil
 	case <-time.After(30 * time.Second):
 		return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
 	}
+	return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
 }
 
 func ceilDuration(base time.Duration, multiple time.Duration) time.Duration {

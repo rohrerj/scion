@@ -50,14 +50,17 @@ message RedeemAssetFromASRequest {
 }
 
 message RedeemAssetFromASResponse {
-    ReservationInfo res_info = 1;
-    bytes authentication_key = 2;
     // to match request with response
-    uint64 request_id = 3;
+    uint64 request_id = 1;
+    oneof result {
+        ReservationInfo res_info = 2;
+        string error = 3;
+    }
 }
 
 message ReservationInfo {
     uint32 reservation_id = 1;
     uint32 bandwith_rounded = 2;
     uint32 bw_dataplane_encoding = 3;
+    bytes authentication_key = 4;
 }

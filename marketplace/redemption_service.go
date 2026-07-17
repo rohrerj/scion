@@ -175,13 +175,15 @@ func (s *RedemptionService) handleRequest(now time.Time, r *hummingbird.RedeemAs
 	ch, ok := s.Pending[r.RequestId]
 	if ok {
 		ch <- &hummingbird.RedeemAssetFromASResponse{
-			ResInfo: &hummingbird.ReservationInfo{
-				ReservationId:       resId,
-				BandwithRounded:     s.encodingPoints[encoded_bw],
-				BwDataplaneEncoding: uint32(encoded_bw),
+			Result: &hummingbird.RedeemAssetFromASResponse_ResInfo{
+				ResInfo: &hummingbird.ReservationInfo{
+					ReservationId:       resId,
+					BandwithRounded:     s.encodingPoints[encoded_bw],
+					BwDataplaneEncoding: uint32(encoded_bw),
+					AuthenticationKey:   ak,
+				},
 			},
-			AuthenticationKey: ak,
-			RequestId:         r.RequestId,
+			RequestId: r.RequestId,
 		}
 		close(ch)
 		delete(s.client.pending, r.RequestId)

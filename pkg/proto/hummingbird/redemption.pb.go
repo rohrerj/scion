@@ -223,12 +223,15 @@ func (x *RedeemAssetFromASRequest) GetRequestId() uint64 {
 }
 
 type RedeemAssetFromASResponse struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	ResInfo           *ReservationInfo       `protobuf:"bytes,1,opt,name=res_info,json=resInfo,proto3" json:"res_info,omitempty"`
-	AuthenticationKey []byte                 `protobuf:"bytes,2,opt,name=authentication_key,json=authenticationKey,proto3" json:"authentication_key,omitempty"`
-	RequestId         uint64                 `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Types that are valid to be assigned to Result:
+	//
+	//	*RedeemAssetFromASResponse_ResInfo
+	//	*RedeemAssetFromASResponse_Error
+	Result        isRedeemAssetFromASResponse_Result `protobuf_oneof:"result"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RedeemAssetFromASResponse) Reset() {
@@ -261,20 +264,6 @@ func (*RedeemAssetFromASResponse) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_redemption_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *RedeemAssetFromASResponse) GetResInfo() *ReservationInfo {
-	if x != nil {
-		return x.ResInfo
-	}
-	return nil
-}
-
-func (x *RedeemAssetFromASResponse) GetAuthenticationKey() []byte {
-	if x != nil {
-		return x.AuthenticationKey
-	}
-	return nil
-}
-
 func (x *RedeemAssetFromASResponse) GetRequestId() uint64 {
 	if x != nil {
 		return x.RequestId
@@ -282,11 +271,53 @@ func (x *RedeemAssetFromASResponse) GetRequestId() uint64 {
 	return 0
 }
 
+func (x *RedeemAssetFromASResponse) GetResult() isRedeemAssetFromASResponse_Result {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *RedeemAssetFromASResponse) GetResInfo() *ReservationInfo {
+	if x != nil {
+		if x, ok := x.Result.(*RedeemAssetFromASResponse_ResInfo); ok {
+			return x.ResInfo
+		}
+	}
+	return nil
+}
+
+func (x *RedeemAssetFromASResponse) GetError() string {
+	if x != nil {
+		if x, ok := x.Result.(*RedeemAssetFromASResponse_Error); ok {
+			return x.Error
+		}
+	}
+	return ""
+}
+
+type isRedeemAssetFromASResponse_Result interface {
+	isRedeemAssetFromASResponse_Result()
+}
+
+type RedeemAssetFromASResponse_ResInfo struct {
+	ResInfo *ReservationInfo `protobuf:"bytes,2,opt,name=res_info,json=resInfo,proto3,oneof"`
+}
+
+type RedeemAssetFromASResponse_Error struct {
+	Error string `protobuf:"bytes,3,opt,name=error,proto3,oneof"`
+}
+
+func (*RedeemAssetFromASResponse_ResInfo) isRedeemAssetFromASResponse_Result() {}
+
+func (*RedeemAssetFromASResponse_Error) isRedeemAssetFromASResponse_Result() {}
+
 type ReservationInfo struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	ReservationId       uint32                 `protobuf:"varint,1,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
 	BandwithRounded     uint32                 `protobuf:"varint,2,opt,name=bandwith_rounded,json=bandwithRounded,proto3" json:"bandwith_rounded,omitempty"`
 	BwDataplaneEncoding uint32                 `protobuf:"varint,3,opt,name=bw_dataplane_encoding,json=bwDataplaneEncoding,proto3" json:"bw_dataplane_encoding,omitempty"`
+	AuthenticationKey   []byte                 `protobuf:"bytes,4,opt,name=authentication_key,json=authenticationKey,proto3" json:"authentication_key,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -342,6 +373,13 @@ func (x *ReservationInfo) GetBwDataplaneEncoding() uint32 {
 	return 0
 }
 
+func (x *ReservationInfo) GetAuthenticationKey() []byte {
+	if x != nil {
+		return x.AuthenticationKey
+	}
+	return nil
+}
+
 var File_proto_hummingbird_v1_redemption_proto protoreflect.FileDescriptor
 
 const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
@@ -362,16 +400,18 @@ const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
 	"\tstarts_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x125\n" +
 	"\bstops_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\astopsAt\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x06 \x01(\x04R\trequestId\"\xab\x01\n" +
-	"\x19RedeemAssetFromASResponse\x12@\n" +
-	"\bres_info\x18\x01 \x01(\v2%.proto.hummingbird.v1.ReservationInfoR\aresInfo\x12-\n" +
-	"\x12authentication_key\x18\x02 \x01(\fR\x11authenticationKey\x12\x1d\n" +
+	"request_id\x18\x06 \x01(\x04R\trequestId\"\xa0\x01\n" +
+	"\x19RedeemAssetFromASResponse\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x03 \x01(\x04R\trequestId\"\x97\x01\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12B\n" +
+	"\bres_info\x18\x02 \x01(\v2%.proto.hummingbird.v1.ReservationInfoH\x00R\aresInfo\x12\x16\n" +
+	"\x05error\x18\x03 \x01(\tH\x00R\x05errorB\b\n" +
+	"\x06result\"\xc6\x01\n" +
 	"\x0fReservationInfo\x12%\n" +
 	"\x0ereservation_id\x18\x01 \x01(\rR\rreservationId\x12)\n" +
 	"\x10bandwith_rounded\x18\x02 \x01(\rR\x0fbandwithRounded\x122\n" +
-	"\x15bw_dataplane_encoding\x18\x03 \x01(\rR\x13bwDataplaneEncoding2\x86\x02\n" +
+	"\x15bw_dataplane_encoding\x18\x03 \x01(\rR\x13bwDataplaneEncoding\x12-\n" +
+	"\x12authentication_key\x18\x04 \x01(\fR\x11authenticationKey2\x86\x02\n" +
 	"\x11RedemptionService\x12v\n" +
 	"\rRedeemASAsset\x12/.proto.hummingbird.v1.RedeemAssetFromASResponse\x1a..proto.hummingbird.v1.RedeemAssetFromASRequest\"\x00(\x010\x01\x12y\n" +
 	"\x12DelegateRedemption\x12/.proto.hummingbird.v1.DelegateRedemptionRequest\x1a0.proto.hummingbird.v1.DelegateRedemptionResponse\"\x00B3Z1github.com/scionproto/scion/pkg/proto/hummingbirdb\x06proto3"
@@ -418,6 +458,10 @@ func init() { file_proto_hummingbird_v1_redemption_proto_init() }
 func file_proto_hummingbird_v1_redemption_proto_init() {
 	if File_proto_hummingbird_v1_redemption_proto != nil {
 		return
+	}
+	file_proto_hummingbird_v1_redemption_proto_msgTypes[3].OneofWrappers = []any{
+		(*RedeemAssetFromASResponse_ResInfo)(nil),
+		(*RedeemAssetFromASResponse_Error)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
