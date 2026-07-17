@@ -93,11 +93,9 @@ func NewRedemptionService(ctx context.Context, client *RedemptionServerPeer, sto
 		expiration:          initState.ExpirationTime,
 		resIdStore:          &UsedIDStore{},
 	}
-	now := time.Now()
 	res, err := s.store.FindUsedReservations(ctx, &db.UsedReservationsQuery{
-		IA:       ia,
-		StartsAt: now.UTC().Format(time.RFC3339),
-		StopsAt:  initState.ExpirationTime.Format(time.RFC3339),
+		IA:    ia,
+		Limit: initState.ReservationIdLimit,
 	})
 	if err != nil {
 		return nil, err
@@ -141,11 +139,9 @@ func (s *RedemptionService) handleUpdate(u *RedemptionDelegationUpdate) error {
 	var res []*db.UsedReservation
 	var err error
 	if u.ExpirationTime != s.expiration {
-		now := time.Now()
 		res, err = s.store.FindUsedReservations(context.TODO(), &db.UsedReservationsQuery{
-			IA:       s.client.ia,
-			StartsAt: now.UTC().Format(time.RFC3339),
-			StopsAt:  u.ExpirationTime.Format(time.RFC3339),
+			IA:    s.client.ia,
+			Limit: u.ReservationIdLimit,
 		})
 		if err != nil {
 			return err

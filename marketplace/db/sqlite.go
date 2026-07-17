@@ -188,7 +188,7 @@ func (e *executor) FindRedemptionDelegations(ctx context.Context) ([]*Redemption
 		return nil, serrors.New("No database open")
 	}
 	stmt := `SELECT isd_id, as_id, res_id_limit, expiration, paid_until, key, encodings FROM Redemption_Delegations WHERE expiration >= ?`
-	args := []any{time.Now().Format(time.RFC3339)}
+	args := []any{time.Now().UTC().Format(time.RFC3339)}
 	rows, err := e.read.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
@@ -309,8 +309,8 @@ func (e *executor) CreateOrUpdateRedemptionDelegations(ctx context.Context, r *R
 		key = excluded.key,
 		encodings = excluded.encodings,
 		res_id_limit = excluded.res_id_limit;`
-	res, err := e.write.ExecContext(ctx, q, r.IA.ISD(), r.IA.AS(), r.ReservationIdLimit, r.Expiration.Format(time.RFC3339),
-		r.PaidUntil.Format(time.RFC3339), r.Key, r.Encodings)
+	res, err := e.write.ExecContext(ctx, q, r.IA.ISD(), r.IA.AS(), r.ReservationIdLimit, r.Expiration.UTC().Format(time.RFC3339),
+		r.PaidUntil.UTC().Format(time.RFC3339), r.Key, r.Encodings)
 	if err != nil {
 		return 0, err
 	}
@@ -353,11 +353,9 @@ func (e *executor) buildUsedReservationsQuery(params *UsedReservationsQuery) (st
 	var args []any
 	query := []string{
 		"SELECT id, starts_at, stops_at FROM Reservations",
-		"WHERE (isd_id = ?) AND (as_id = ?) AND (starts_at >= ?) AND (stops_at < ?)",
+		"WHERE (isd_id = ?) AND (as_id = ?) AND (id < ?) AND (stops_at > ?)",
 	}
-	// we want to find all reservations of the IA, that are at least partially valid withing our interval,
-	// i.e. end of reservation must come after interval start and start of reservation must come before end of interval
-	args = append(args, params.IA.ISD(), params.IA.AS(), params.StopsAt, params.StartsAt)
+	args = append(args, params.IA.ISD(), params.IA.AS(), params.Limit, time.Now().UTC().Format(time.RFC3339))
 	return strings.Join(query, "\n"), args
 }
 

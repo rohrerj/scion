@@ -34,9 +34,8 @@ type AssetQuery struct {
 }
 
 type UsedReservationsQuery struct {
-	IA       addr.IA
-	StartsAt string
-	StopsAt  string
+	IA    addr.IA
+	Limit uint32
 }
 
 type UsedReservation struct {
