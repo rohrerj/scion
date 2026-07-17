@@ -1,0 +1,174 @@
+// Copyright 2026 ETH Zurich
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package registration
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/golang-jwt/jwt"
+	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/private/serrors"
+	cryptopb "github.com/scionproto/scion/pkg/proto/crypto"
+	"github.com/scionproto/scion/pkg/proto/hummingbird"
+	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
+	"github.com/scionproto/scion/pkg/scrypto/cppki"
+	"github.com/scionproto/scion/private/trust"
+)
+
+var ChallengeLifetime = int64(10) //time in seconds
+
+type Service struct {
+	buckets           [3]*bucket
+	challengeLifetime int64
+	trustProvider     trust.Provider
+	mtx               sync.RWMutex
+}
+type bucket struct {
+	challenges map[string]Challenge
+	mtx        sync.RWMutex
+}
+
+func NewService(provider trust.Provider) *Service {
+	buckets := [3]*bucket{}
+	for i := range 3 {
+		buckets[i] = &bucket{
+			challenges: make(map[string]Challenge),
+		}
+	}
+	s := &Service{
+		buckets:           buckets,
+		challengeLifetime: max(10, ChallengeLifetime),
+		trustProvider:     provider,
+	}
+	s.startCleanupRoutine()
+	return s
+}
+
+type Challenge struct {
+	ID    string
+	IA    addr.IA
+	Nonce []byte
+}
+
+func (s *Service) startCleanupRoutine() {
+	go func() {
+		now := time.Now()
+		next := now.Truncate(time.Duration(s.challengeLifetime) * time.Second).Add(time.Duration(s.challengeLifetime+s.challengeLifetime/2) * time.Second)
+		sleepDuration := next.Sub(now)
+		time.Sleep(sleepDuration)
+		tick := time.NewTicker(time.Duration(s.challengeLifetime) * time.Second)
+		for {
+			t := <-tick.C
+			s.clear(t)
+		}
+	}()
+}
+
+func (s *Service) CreateChallenge(ctx context.Context, ia addr.IA) (*hummingbird.CreateChallengeResponse, error) {
+	nonce := make([]byte, 32)
+	challengeID := make([]byte, 32)
+	rand.Read(nonce)
+	rand.Read(challengeID)
+	challengeIDString := hex.EncodeToString(challengeID)
+
+	c := Challenge{
+		ID:    challengeIDString,
+		IA:    ia,
+		Nonce: nonce,
+	}
+	s.insert(time.Now(), c)
+	return &hummingbird.CreateChallengeResponse{
+		Id:    challengeIDString,
+		Value: nonce,
+	}, nil
+}
+
+// get searches for the challenge in both current and previous bucket (validity might overlap)
+func (s *Service) get(now time.Time, id string) (Challenge, bool) {
+	bucketIndex := (now.Unix() % (3 * s.challengeLifetime)) / s.challengeLifetime
+	bucket := s.buckets[bucketIndex]
+	bucket.mtx.RLock()
+	defer bucket.mtx.RUnlock()
+	c, found := bucket.challenges[id]
+	if !found {
+		bucketIndex = (bucketIndex + 2) % 3
+		bucket = s.buckets[bucketIndex]
+		bucket.mtx.RLock()
+		defer bucket.mtx.RUnlock()
+		c, found = bucket.challenges[id]
+		return c, found
+	}
+	return c, true
+}
+
+// insert inserts challenge in current bucket
+func (s *Service) insert(now time.Time, c Challenge) {
+	bucketIndex := (now.Unix() % (3 * s.challengeLifetime)) / s.challengeLifetime
+	bucket := s.buckets[bucketIndex]
+	bucket.mtx.Lock()
+	defer bucket.mtx.Unlock()
+	bucket.challenges[c.ID] = c
+}
+
+// delete tries to delete challenge in both current and previous bucket (validity might overlap bucket)
+func (s *Service) delete(now time.Time, id string) {
+	bucketIndex := (now.Unix() % (3 * s.challengeLifetime)) / s.challengeLifetime
+	bucket := s.buckets[bucketIndex]
+	bucket.mtx.Lock()
+	delete(bucket.challenges, id)
+	bucket.mtx.Unlock()
+	bucketIndex = (bucketIndex + 2) % 3
+	bucket = s.buckets[bucketIndex]
+	bucket.mtx.Lock()
+	delete(bucket.challenges, id)
+	bucket.mtx.Unlock()
+}
+func (s *Service) clear(now time.Time) {
+	bucketIndex := (((now.Unix() % (3 * s.challengeLifetime)) / s.challengeLifetime) + 1) % 3
+	bucket := s.buckets[bucketIndex]
+	bucket.mtx.Lock()
+	defer bucket.mtx.Unlock()
+	clear(bucket.challenges)
+}
+
+func (s *Service) RegisterAS(ctx context.Context, challengeID string, signedMsg *cryptopb.SignedMessage, name string, claims ...jwt.MapClaims) (addr.IA, error) {
+	now := time.Now()
+	c, found := s.get(now, challengeID)
+	if !found {
+		return 0, serrors.New("challenge not found")
+	}
+	verifier := &trust.Verifier{
+		BoundIA: c.IA,
+		Engine:  s.trustProvider,
+		BoundValidity: cppki.Validity{
+			NotBefore: now,
+			NotAfter:  now,
+		},
+	}
+	msg, err := verifier.Verify(ctx, signedMsg, []byte(name), []byte(hummingbirdconnect.AccountServiceRegisterASProcedure))
+	if err != nil {
+		return 0, err
+	}
+	if slices.Compare(msg.Body, c.Nonce) != 0 {
+		return 0, serrors.New("wrong challenge")
+	}
+	s.delete(now, c.ID)
+	return c.IA, nil
+}

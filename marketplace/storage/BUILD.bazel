@@ -1,0 +1,19 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "split.go",
+        "storage.go",
+    ],
+    importpath = "github.com/scionproto/scion/marketplace/storage",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//marketplace/db:go_default_library",
+        "//pkg/addr:go_default_library",
+        "//pkg/private/serrors:go_default_library",
+        "//pkg/proto/hummingbird:go_default_library",
+        "//private/config:go_default_library",
+        "//private/storage/db:go_default_library",
+    ],
+)

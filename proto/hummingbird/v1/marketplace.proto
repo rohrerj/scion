@@ -1,0 +1,234 @@
+// Copyright 2026 ETH Zurich
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+option go_package = "github.com/scionproto/scion/pkg/proto/hummingbird";
+
+package proto.hummingbird.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service MarketplaceService {
+    rpc Info(MarketplaceInfoRequest) returns (MarketplaceInfoResponse) {}
+    rpc PublishAsset(PublishAssetRequest) returns (PublishAssetResponse) {}
+    rpc SearchAssets(SearchAssetsRequest) returns (SearchAssetsResponse) {}
+    rpc BuyAssets(BuyAssetsRequest) returns (BuyAssetsResponse) {}
+    rpc RedeemAsset(RedeemAssetRequest) returns (RedeemAssetResponse) {}
+    rpc FetchReservations(FetchReservationsRequest) returns (FetchReservationsResponse) {}
+    rpc SplitAsset(SplitAssetRequest) returns (SplitAssetResponse) {}
+    rpc CombineAssets(CombineAssetRequest) returns (CombineAssetResponse) {}
+    rpc Statistics(StatisticsRequest) returns (StatisticsResponse) {}
+    rpc UpdateAssets(UpdateAssetsRequest) returns (UpdateAssetsResponse) {}
+}
+
+message UpdateAssetsRequest {
+    repeated AssetUpdate assets = 1;
+}
+message AssetUpdate {
+    string asset_id = 1;
+    oneof operation {
+        PublisherAsset update = 2;
+        Remove remove = 3;
+    }
+}
+message Remove {}
+message UpdateAssetsResponse {
+    repeated UpdateAssetResult result = 1;
+}
+message UpdateAssetResult {
+    oneof result_type {
+        string new_id = 1;
+        string error = 2;
+    }
+}
+
+message StatisticsRequest {
+    optional uint32 if_id_ingress = 1;
+    optional uint32 if_id_egress = 2;
+    google.protobuf.Timestamp start = 3;
+    google.protobuf.Timestamp end = 4;
+    uint32 step = 5;
+}
+
+message StatisticsResponse {
+    repeated StatisticsResponseEntry statistics = 1;
+}
+
+message StatisticsResponseEntry {
+    uint64 revenue = 1;
+    double bandwidth_utilization = 2;
+}
+
+// Split assets splits an asset either by defining the bandwidth to split, or the time it should split.
+message SplitAssetRequest {
+    string asset_id = 1;
+    oneof split_option {
+        uint32 bw_split = 2;
+        google.protobuf.Timestamp time_split = 3;
+    }
+}
+// Returns the two asset IDs created from the split.
+message SplitAssetResponse {
+    string asset_id_1 = 1;
+    string asset_id_2 = 2;
+}
+// When combining assets, both assets must have the same IA, asset_type, ingress and egress.enum
+// Additionally, both assets must either:
+// a) have adjacent validity with same bandwidth, or
+// b) same validity with different bandwidth
+message CombineAssetRequest {
+    string asset_id_1 = 1;
+    string asset_id_2 = 2;
+}
+// Returns the the asset ID created from combining the two assets.
+message CombineAssetResponse {
+    string asset_id = 1;
+}
+
+message MarketplaceInfoRequest {
+    
+}
+
+message MarketplaceInfoResponse {
+    uint32 api_major_version = 1;
+    uint32 api_minor_version = 2;
+    string currency = 3;
+    uint32 currency_exponent = 4;
+    uint32 max_statistics_granularity = 5;
+    PricingStrategy pricing_strategy = 6;
+    float transaction_fee_relative = 7;
+    uint64 transaction_fee_absolute = 8;
+    uint64 split_combine_fee_absolute = 9;
+    bool supports_redemption_delegation = 10;
+    uint64 delegation_hourly_fee = 11;
+}
+
+enum PricingStrategy {
+  static_pricing = 0;
+  dynamic_pricing = 1;
+}
+
+message PublishAssetRequest {
+    PublisherAsset asset = 1;
+}
+
+message PublishAssetResponse {
+    string asset_id = 1;
+}
+message PublisherAsset {
+    optional uint32 if_id_ingress = 1;
+    optional uint32 if_id_egress = 2;
+    uint32 bandwidth = 3;
+    uint32 bandwidth_min = 4;
+    uint32 bandwidth_max = 5;
+    google.protobuf.Timestamp starts_at = 6;
+    google.protobuf.Timestamp stops_at = 7;
+    uint32 time_granularity = 8;
+    uint32 time_min_duration = 9;
+    uint32 price = 10;
+}
+
+message SearchAssetsRequest {
+    bool owned = 1;
+    optional uint64 ia = 2;
+    optional uint32 if_id_ingress = 3;
+    optional uint32 if_id_egress = 4;
+    optional uint32 min_required_bw = 5;
+    optional google.protobuf.Timestamp starts_at_latest = 6;
+    optional google.protobuf.Timestamp stops_at_earliest = 7;
+    optional uint32 price = 8;
+}
+
+message SearchAssetsResponse {
+    repeated SearchAsset assets = 1;
+}
+message SearchAsset {
+    string asset_id = 1;
+    uint64 ia = 2;
+    optional uint32 if_id_ingress = 3;
+    optional uint32 if_id_egress = 4;
+    uint32 bandwidth = 5;
+    uint32 bandwidth_min = 6;
+    uint32 bandwidth_max = 7;
+    google.protobuf.Timestamp starts_at = 8;
+    google.protobuf.Timestamp stops_at = 9;
+    uint32 time_granularity = 10;
+    uint32 time_min_duration = 11;
+    uint32 price = 12;
+}
+
+message BuyAssetsRequest {
+    repeated BuyAsset assets = 1;
+    uint64 max_price = 2;
+}
+
+message BuyAsset {
+    string asset_id = 1;
+    google.protobuf.Timestamp starts_at_exactly = 2;
+    google.protobuf.Timestamp stops_at_exactly = 3;
+    uint32 bandwidth_exact = 4;
+}
+
+message BuyAssetsResponse {
+    repeated BoughtAsset assets = 1;
+    uint64 cost = 2;
+}
+
+message BoughtAsset {
+    string asset_id = 1;
+}
+
+message RedeemAssetRequest {
+    oneof interfaces {
+        IngressEgressPair pair = 1;
+        string if_pair_asset_id = 3;
+    }
+}
+message IngressEgressPair {
+    string ingress_asset_id = 1;
+    string egress_asset_id = 2;
+}
+
+message RedeemAssetResponse {
+    bytes authentication_key = 1;
+    uint32 reservation_id = 2;
+    uint32 bandwidth_rounded = 3;
+    uint32 bw_dataplane_encoding = 4;
+}
+
+message FetchReservationsRequest {
+    optional uint64 ia = 1;
+    optional uint32 ingress_id = 2;
+    optional uint32 egress_id = 3;
+    optional uint32 bandwidth = 4;
+    optional google.protobuf.Timestamp starts_at = 5;
+    optional google.protobuf.Timestamp stops_at = 6;
+}
+
+message FetchReservationsResponse {
+    repeated Reservation reservations = 1;
+}
+
+message Reservation {
+    uint32 reservation_id = 1;
+    uint64 ia = 2;
+    uint32 ingress_id = 3;
+    uint32 egress_id = 4;
+    uint32 bandwidth = 5;
+    uint32 dataplane_encoding = 6;
+    google.protobuf.Timestamp starts_at = 7;
+    google.protobuf.Timestamp stops_at = 8;
+    bytes authentication_key = 9;
+}

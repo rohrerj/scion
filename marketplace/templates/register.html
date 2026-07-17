@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Register</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <nav>
+        <div class="nav-left">
+            {{if .Username}}
+            <a href="/token">Token</a>
+            <a href="/balance">Balance</a>
+            {{else}}
+            <a href="/aslogin">AS Login</a>
+            <a href="/login">Login</a>
+            <a href="/register">Register</a>
+            {{end}}
+        </div>
+        {{if .Username}}
+        <div class="nav-right">
+            👤 {{.Username}}
+            <a class="logout-link" href="/logout">Logout</a>
+        </div>
+        {{end}}
+    </nav>
+    <div class="container">
+        <h2>Register</h2>
+        {{if .Error}}
+        <p style="color:red;">{{.Error}}</p>
+        {{end}}
+        <form method="POST" action="/register">
+            User ID: <input name="username">
+            Password: <input name="password" type="password">
+            <button type="submit">Login</button>
+        </form>
+    </div>
+</body>
+
+</html>

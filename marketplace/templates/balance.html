@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Deposit Money</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <nav>
+        <div class="nav-left">
+            {{if .Username}}
+            <a href="/token">Token</a>
+            <a href="/balance">Balance</a>
+            {{else}}
+            <a href="/aslogin">AS Login</a>
+            <a href="/login">Login</a>
+            <a href="/register">Register</a>
+            {{end}}
+        </div>
+        {{if .Username}}
+        <div class="nav-right">
+            👤 {{.Username}}
+            <a class="logout-link" href="/logout">Logout</a>
+        </div>
+        {{end}}
+    </nav>
+    <div class="container">
+        <h2>Account Balance</h2>
+
+        {{if .Error}}
+        <p class="error">{{.Error}}</p>
+        {{end}}
+
+        <h4>Current balance</h4>
+
+        {{if .Balance}}
+        <p class="success">{{.Balance}}</p>
+        {{end}}
+
+        <form method="POST" action="/balance">
+            <label>Deposit amount</label>
+            <input name="deposit" type="text">
+            <button type="submit">Deposit</button>
+        </form>
+    </div>
+</body>
+
+</html>

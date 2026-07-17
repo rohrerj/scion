@@ -170,6 +170,8 @@ pkg_tar(
         "//dispatcher/cmd/dispatcher",
         "//gateway/cmd/gateway",
         "//hbird/cmd/hummingbird",
+        "//marketplace/cmd/marketplace",
+        "//marketplace_client",
         "//router/cmd/router",
         "//scion-pki/cmd/scion-pki",
         "//scion/cmd/scion",
