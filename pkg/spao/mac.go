@@ -27,12 +27,13 @@ import (
 	"github.com/scionproto/scion/pkg/slayers/path"
 	"github.com/scionproto/scion/pkg/slayers/path/empty"
 	"github.com/scionproto/scion/pkg/slayers/path/epic"
+	"github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	"github.com/scionproto/scion/pkg/slayers/path/onehop"
 	"github.com/scionproto/scion/pkg/slayers/path/scion"
 )
 
 const (
-	// FixAuthDataInputLen is the unvariable fields length for the
+	// FixAuthDataInputLen is the invariable fields length for the
 	// authenticated data. It consists of the Authenticator Option Metadata
 	// length and the SCION Common Header without the second row.
 	fixAuthDataInputLen = slayers.PacketAuthOptionMetadataLen +
@@ -176,6 +177,9 @@ func zeroOutMutablePath(orig path.Path, buf []byte) error {
 	case *epic.Path:
 		zeroOutWithBase(p.ScionPath.Base, buf[epic.MetadataLen:])
 		return nil
+	case *hummingbird.Decoded:
+		zeroOutHbird(p, buf)
+		return nil
 	case *onehop.Path:
 		// Zero out IF.SegID
 		binary.BigEndian.PutUint16(buf[2:], 0)
@@ -204,6 +208,37 @@ func zeroOutWithBase(base scion.Base, buf []byte) {
 			// Zero out HF.Flags&&Alerts
 			buf[offset] = 0
 			offset += 12
+		}
+	}
+}
+
+// zeroOutHbird zeroes the mutable fields of a Hummingbird path. The fields a
+// transit router mutates are the current info/hop pointers (CurrINF, CurrHF),
+// the per-segment SegID and the hop-field flags/router-alerts.
+//
+// Only *hummingbird.Decoded reaches this function: it is exclusively used by the
+// router when building an authenticated SCMP reply over a reversed Hummingbird
+// path (see router prepareHbirdSCMP), which always produces a Decoded path.
+func zeroOutHbird(p *hummingbird.Decoded, buf []byte) {
+	// The first 4 bytes of the meta header pack CurrINF (top 2 bits), CurrHF
+	// (next 8 bits) and the three SegLen fields (remaining 21 bits). Zero out
+	// CurrINF and CurrHF while preserving SegLen.
+	buf[0] = 0
+	buf[1] &= 0x3F
+	offset := hummingbird.MetaLen
+	// Zero out InfoField.SegID for each info field.
+	for i := 0; i < p.NumINF; i++ {
+		binary.BigEndian.PutUint16(buf[offset+2:], 0)
+		offset += path.InfoLen
+	}
+	// Zero out the flags/router-alerts byte of each hop field. Hop fields are
+	// variable length: a flyover hop is longer than a regular hop.
+	for _, hop := range p.HopFields {
+		buf[offset] = 0
+		if hop.Flyover {
+			offset += hummingbird.FlyoverLines * hummingbird.LineLen
+		} else {
+			offset += hummingbird.HopLines * hummingbird.LineLen
 		}
 	}
 }

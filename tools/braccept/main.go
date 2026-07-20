@@ -29,6 +29,7 @@ import (
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/slayers"
+	"github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	"github.com/scionproto/scion/private/keyconf"
 	"github.com/scionproto/scion/tools/braccept/cases"
 	"github.com/scionproto/scion/tools/braccept/runner"
@@ -54,20 +55,29 @@ func realMain() int {
 	}
 	defer log.HandlePanic()
 
-	artifactsDir, err := os.MkdirTemp("", "braccept_")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
-	}
+	var artifactsDir string
 	if *dir != "" {
 		artifactsDir = *dir
 	}
 	if v := os.Getenv("TEST_ARTIFACTS_DIR"); v != "" {
 		artifactsDir = v
 	}
+	if artifactsDir == "" {
+		var err error
+		artifactsDir, err = os.MkdirTemp("", "braccept_")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			return 1
+		}
+	}
 	hfMAC, err := loadKey(artifactsDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Loading keys failed: %v\n", err)
+		return 1
+	}
+	hbirdSV, err := loadHbirdSV(artifactsDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Loading Hummingbird secret value failed: %v\n", err)
 		return 1
 	}
 
@@ -135,6 +145,51 @@ func realMain() int {
 		cases.JumboPacket(artifactsDir, hfMAC),
 		cases.ChildToPeer(artifactsDir, hfMAC),
 		cases.PeerToChild(artifactsDir, hfMAC),
+		// Hummingbird regular forwarding cases.
+		cases.HummingbirdBestEffortChildToParent(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBestEffortParentToChild(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverParentToChild(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverInbound(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverOutbound(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBestEffortChildToChildXover(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBestEffortInbound(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBestEffortOutbound(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBestEffortChildToInternalParent(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverChildToInternalParent(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBestEffortInternalParentToChild(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverInternalParentToChild(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverChildToParentNonConsDir(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverChildToChildXover(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverXoverASTransitIngress(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverXoverASTransitEgress(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBestEffortXoverASTransitIngress(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBestEffortXoverASTransitEgress(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverChildToPeer(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdFlyoverPeerToChild(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBestEffortChildToPeer(artifactsDir, hfMAC),
+		cases.HummingbirdBestEffortPeerToChild(artifactsDir, hfMAC),
+		cases.HummingbirdBestEffortPeeringDownstream(artifactsDir, hfMAC),
+		cases.HummingbirdFlyoverPeeringDownstream(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBestEffortPeeringUpstream(artifactsDir, hfMAC),
+		cases.HummingbirdFlyoverPeeringUpstream(artifactsDir, hfMAC, hbirdSV),
+		// Hummingbird malformed and validation-failure cases.
+		cases.HummingbirdMalformedCurrentHopAlignment(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdMalformedCurrentHopAlignmentFlyover(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBadFlyoverMAC(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdBadBestEffortMAC(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdInvalidSourceIA(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdInvalidDestinationIA(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdInvalidSourceIAFlyover(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdInvalidDestinationIAFlyover(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdInvalidSourceIAOutbound(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdInvalidDestinationIAOutbound(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdInvalidSourceIAOutboundFlyover(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdInvalidDestinationIAOutboundFlyover(artifactsDir, hfMAC, hbirdSV),
+		// Hummingbird router-alert cases.
+		cases.HummingbirdIngressRouterAlert(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdEgressRouterAlert(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdIngressRouterAlertFlyover(artifactsDir, hfMAC, hbirdSV),
+		cases.HummingbirdEgressRouterAlertFlyover(artifactsDir, hfMAC, hbirdSV),
 	}
 
 	if *bfd {
@@ -167,6 +222,19 @@ func loadKey(artifactsDir string) (hash.Hash, error) {
 		return nil, err
 	}
 	return macGen(), nil
+}
+
+// loadHbirdSV derives the Hummingbird AS secret value from the same master key
+// the router uses (see router/control/conf.go: DeriveSecretValue(MasterKeys.Key0)).
+// The router derives this value unconditionally whenever a master key is present,
+// so the Hummingbird cases work against the standard router_multi configuration.
+func loadHbirdSV(artifactsDir string) ([]byte, error) {
+	keysDir := filepath.Join(artifactsDir, "conf", "keys")
+	mk, err := keyconf.LoadMaster(keysDir)
+	if err != nil {
+		return nil, err
+	}
+	return hummingbird.DeriveSecretValue(mk.Key0), nil
 }
 
 // registerScionPorts registers the following UDP ports in gopacket such as SCION is the

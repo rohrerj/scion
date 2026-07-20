@@ -19,10 +19,10 @@ import (
 	"crypto/aes"
 	"net"
 	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/golang/mock/gomock"
 	"github.com/gopacket/gopacket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,6 +38,51 @@ import (
 	pr "github.com/scionproto/scion/router/priority"
 )
 
+// Hummingbird dataplane coverage. A check mark means that the behavior has a
+// dedicated test for that packet mode; reservation checks apply only to
+// flyovers by definition.
+//
+//	Behavior                              Best-effort  Flyover
+//	Inbound delivery                      x            x
+//	Inbound, converted reversed path      x            x
+//	Outbound forwarding                   x            x
+//	BR transit, construction direction    x            x
+//	BR transit, reverse direction         x            x
+//	Direct AS transit, ingress BR         x            x
+//	Direct AS transit, egress BR          x            x
+//	AS-transit cross-over, ingress BR     x            x
+//	AS-transit cross-over, egress BR      x            x
+//	Same-BR cross-over                    x            x
+//	Peering boundary, construction dir.   x            x
+//	Peering boundary, reverse dir.        x            x
+//	After peering, downstream             x            x
+//	Before peering, upstream              x            x
+//	Malformed current-hop alignment       x            x
+//	Invalid hop MAC / SCMP                x            x
+//	Invalid source IA / SCMP              x            x
+//	Invalid destination IA / SCMP         x            x
+//	Invalid outbound source IA / SCMP     x            x
+//	Invalid outbound destination IA/SCMP  x            x
+//	Ingress router alert                  x            x
+//	Egress router alert                   x            x
+//	Expired reservation                   N/A          x
+//	Stale/future packet freshness         N/A          x
+//	Reservation exceeds bandwidth         N/A          x
+
+// Notation for the test cases, re. packets that are not sourced or destined to the AS (transits):
+// brtransit_*					No segment crossover	One BR owns ingress and egress
+// brtransit_xover_*			Segment crossover		One BR owns ingress and egress
+// astransit_direct_ingress_*	No crossover	First BR receives externally and forwards via AS
+// astransit_direct_egress_*	No crossover	Second BR receives from AS, forwards externally
+// astransit_xover_ingress_*	Segment crossover	First BR receives externally, forwards via AS
+// astransit_xover_egress_*		Segment crossover	Second BR receives from AS, forwards externally
+//
+// Crossover detection is segment-type agnostic: it checks whether advancing
+// changes CurrINF. The up->down fixtures therefore exercise the same dataplane
+// branch as an up->core transition without duplicating the topology matrix.
+
+// TestDataPlaneSetHbirdKey checks the lifecycle rules of DataPlane.SetHbirdKey: it must be set
+// before the dataplane starts serving, rejects a nil key, and rejects being set twice.
 func TestDataPlaneSetHbirdKey(t *testing.T) {
 	t.Run("fails after serve", func(t *testing.T) {
 		d := router.NewDPRaw(router.RunConfig{}, false)
@@ -60,9 +105,11 @@ func TestDataPlaneSetHbirdKey(t *testing.T) {
 	})
 }
 
+// TestProcessHbirdPacket drives DataPlane.ProcessPkt with one crafted Hummingbird packet per
+// forwarding scenario (see the coverage table above) and checks the packet is transformed
+// exactly as an independently constructed "after processing" packet, or discarded, as declared
+// by each case's assertFunc.
 func TestProcessHbirdPacket(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
 
 	key := []byte("testkey_xxxxxxxx")
 	otherKey := []byte("testkey_yyyyyyyy")
@@ -77,20 +124,20 @@ func TestProcessHbirdPacket(t *testing.T) {
 	mockInternalNextHops := map[uint16]netip.AddrPort{}
 
 	testCases := map[string]struct {
-		prepareDP  func(*gomock.Controller) *router.DataPlane
-		mockMsg    func(bool, *router.DataPlane) *router.Packet
+		prepareDP  func() *router.DataPlane
+		mockMsg    func(*testing.T, bool, *router.DataPlane) *router.Packet
 		assertFunc func(*testing.T, router.Disposition)
 	}{
-		"inbound": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
+		"inbound_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
 					mockExternalInterfaces,
 					nil,
 					nil,
 					mockInternalNextHops,
-					addr.MustParseIA("1-ff00:0:110"), nil, key)
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, dpath := prepHbirdMsg(now)
 				spkt.DstIA = addr.MustParseIA("1-ff00:0:110")
 				dst := addr.MustParseHost("10.0.100.100")
@@ -114,19 +161,20 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"outbound": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
+		"outbound_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
 					[]uint16{1},
 					map[uint16]topology.LinkType{
 						1: topology.Child,
 					},
 					nil, // No special connOpener.
 					mockInternalNextHops,
-					addr.MustParseIA("1-ff00:0:110"), nil, key)
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
-				spkt, dpath := prepHbirdMsg(now)
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
+				spkt, _ := prepHbirdMsg(now)
+				dpath := prepMalformedHbirdPath(now, true)
 				spkt.SrcIA = addr.MustParseIA("1-ff00:0:110")
 				dpath.HopFields = []hummingbird.FlyoverHopField{
 					{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1}},
@@ -148,9 +196,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"brtransit": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
+		"brtransit_consdir_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
 						1: topology.Parent,
@@ -158,9 +206,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 					},
 					nil, // No special connOpener.
 					mockInternalNextHops,
-					addr.MustParseIA("1-ff00:0:110"), nil, key)
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, dpath := prepHbirdMsg(now)
 				dpath.HopFields = []hummingbird.FlyoverHopField{
 					{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
@@ -182,9 +230,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"brtransit non consdir": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
+		"brtransit_non_consdir_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
 						2: topology.Parent,
@@ -192,9 +240,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 					},
 					nil, // No special connOpener.
 					mockInternalNextHops,
-					addr.MustParseIA("1-ff00:0:110"), nil, key)
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, dpath := prepHbirdMsg(now)
 				dpath.HopFields = []hummingbird.FlyoverHopField{
 					{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
@@ -218,29 +266,21 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"discard malformed current hop alignment": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
+		"malformed_current_hop_alignment_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
 					mockExternalInterfaces,
 					nil,
 					nil,
 					mockInternalNextHops,
-					addr.MustParseIA("1-ff00:0:110"), nil, key)
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
-				spkt, dpath := prepHbirdMsg(now)
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
+				spkt, _ := prepHbirdMsg(now)
+				dpath := prepMalformedHbirdPath(now, true)
 				spkt.DstIA = addr.MustParseIA("1-ff00:0:110")
 				dst := addr.MustParseHost("10.0.100.100")
 				assert.NoError(t, spkt.SetDstAddr(dst))
-				dpath.HopFields = []hummingbird.FlyoverHopField{
-					{HopField: path.HopField{ConsIngress: 41, ConsEgress: 40}},
-					{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
-					{HopField: path.HopField{ConsIngress: 1, ConsEgress: 0},
-						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 16},
-				}
-				dpath.Base.PathMeta.SegLen[0] = 11
-				dpath.Base.NumLines = 11
-				dpath.Base.PathMeta.CurrHF = 4
 				ingress := uint16(1)
 				egress := uint16(0)
 				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress,
@@ -248,9 +288,26 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: discarded,
 		},
-		"brtransit peering consdir": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
+		"malformed_current_hop_alignment_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					mockExternalInterfaces, nil, nil, mockInternalNextHops,
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockMsg: func(t *testing.T, _ bool, _ *router.DataPlane) *router.Packet {
+				spkt, _ := prepHbirdMsg(now)
+				dpath := prepMalformedHbirdPath(now, false)
+				spkt.DstIA = addr.MustParseIA("1-ff00:0:110")
+				dst := addr.MustParseHost("10.0.100.100")
+				require.NoError(t, spkt.SetDstAddr(dst))
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, 1, 0,
+					pr.WithBestEffort)
+			},
+			assertFunc: discarded,
+		},
+		"brtransit_peering_consdir_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
 						1: topology.Peer,
@@ -258,9 +315,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 					},
 					nil, // No special connOpener.
 					mockInternalNextHops,
-					addr.MustParseIA("1-ff00:0:110"), nil, key)
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				// Story: the packet just left segment 0 which ends at
 				// (peering) hop 0 and is landing on segment 1 which
 				// begins at (peering) hop 1. We do not care what hop 0
@@ -316,9 +373,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"brtransit peering non consdir": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
+		"brtransit_peering_non_consdir_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
 						1: topology.Peer,
@@ -326,9 +383,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 					},
 					nil, // No special connOpener.
 					mockInternalNextHops,
-					addr.MustParseIA("1-ff00:0:110"), nil, key)
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				// Story: the packet lands on the last (peering) hop of
 				// segment 0. After processing, the packet is ready to
 				// be processed by the first (peering) hop of segment 1.
@@ -389,11 +446,11 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"peering consdir downstream": {
+		"peering_consdir_downstream_best-effort": {
 			// Similar to previous test case but looking at what
 			// happens on the next hop.
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
 						1: topology.Peer,
@@ -401,9 +458,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 					},
 					nil, // No special connOpener.
 					mockInternalNextHops,
-					addr.MustParseIA("1-ff00:0:110"), nil, key)
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				// Story: the packet just left hop 1 (the first hop
 				// of peering down segment 1) and is processed at hop 2
 				// which is not a peering hop.
@@ -463,9 +520,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"peering non consdir upstream": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
+		"peering_non_consdir_upstream_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
 						1: topology.Peer,
@@ -473,9 +530,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 					},
 					nil, // No special connOpener.
 					mockInternalNextHops,
-					addr.MustParseIA("1-ff00:0:110"), nil, key)
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				// Story: the packet lands on the second (non-peering) hop of
 				// segment 0 (a peering segment). After processing, the packet
 				// is ready to be processed by the third (peering) hop of segment 0.
@@ -543,9 +600,9 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"astransit direct": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
+		"astransit_direct_ingress_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
 					[]uint16{1}, // Interface 3 is in the external interfaces of a sibling router
 					map[uint16]topology.LinkType{
 						1: topology.Core,
@@ -554,44 +611,42 @@ func TestProcessHbirdPacket(t *testing.T) {
 					nil, // No special connOpener.
 					map[uint16]netip.AddrPort{
 						uint16(3): netip.MustParseAddrPort("10.0.200.200:30043"),
-					}, addr.MustParseIA("1-ff00:0:110"), nil, key)
+					}, addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
-				spkt, dpath := prepHbirdMsg(now)
-				dpath.HopFields = []hummingbird.FlyoverHopField{
-					{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
-					{HopField: path.HopField{ConsIngress: 1, ConsEgress: 3}},
-					{HopField: path.HopField{ConsIngress: 50, ConsEgress: 51}},
-				}
-				dpath.HopFields[1].HopField.Mac =
-					computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[1].HopField)
-				var dstAddr *net.UDPAddr
-				ingress := uint16(1)
-				egress := uint16(0) // To make sure it gets updated.
-				if afterProcessing {
-					egress = uint16(3) // The sibling router is locally mapped to the egress ifID.
-					// The link is specific to the sibling. It has the address. So we don't expect:
-					// dstAddr = &net.UDPAddr{IP: net.ParseIP("10.0.200.200").To4(), Port: 30043}
-				}
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress,
-					pr.WithBestEffort)
+			mockMsg: func(t *testing.T, afterProcessing bool, dp *router.DataPlane) *router.Packet {
+				return directASTransitPkt(t, dp, now, key, hbirdKey, false, false, afterProcessing)
 			},
 			assertFunc: notDiscarded,
 		},
-		"astransit xover": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
-				return router.NewDP(
-					[]uint16{51},
+		"astransit_direct_egress_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{3},
+					map[uint16]topology.LinkType{1: topology.Core, 3: topology.Core},
+					nil,
+					map[uint16]netip.AddrPort{
+						1: netip.MustParseAddrPort("10.0.200.200:30041"),
+					}, addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockMsg: func(t *testing.T, afterProcessing bool, dp *router.DataPlane) *router.Packet {
+				return directASTransitPkt(t, dp, now, key, hbirdKey, false, true, afterProcessing)
+			},
+			assertFunc: notDiscarded,
+		},
+		"astransit_xover_ingress_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1},
 					map[uint16]topology.LinkType{
-						51: topology.Child,
-						3:  topology.Core,
+						1: topology.Child,
+						2: topology.Child,
 					},
 					nil, // No special connOpener.
 					map[uint16]netip.AddrPort{
-						uint16(3): netip.MustParseAddrPort("10.0.200.200:30043"),
-					}, addr.MustParseIA("1-ff00:0:110"), nil, key)
+						uint16(2): netip.MustParseAddrPort("10.0.200.200:30042"),
+					}, addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, _ := prepHbirdMsg(now)
 				dpath := &hummingbird.Decoded{
 					Base: hummingbird.Base{
@@ -606,14 +661,14 @@ func TestProcessHbirdPacket(t *testing.T) {
 					InfoFields: []path.InfoField{
 						// up seg
 						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-						// core seg
-						{SegID: 0x222, ConsDir: false, Timestamp: util.TimeToSecs(now)},
+						// down seg
+						{SegID: 0x222, ConsDir: true, Timestamp: util.TimeToSecs(now)},
 					},
 					HopFields: []hummingbird.FlyoverHopField{
-						{HopField: path.HopField{ConsIngress: 31, ConsEgress: 0}}, // Src,
-						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 51}}, // IA 110
-						{HopField: path.HopField{ConsIngress: 3, ConsEgress: 0}},  // IA 110
-						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1}},  // Dst
+						{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}}, // AS 111
+						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1}},  // AS 110 ingress BR
+						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 2}},  // AS 110 egress BR
+						{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}}, // AS 112
 					},
 				}
 				dpath.HopFields[1].HopField.Mac =
@@ -621,25 +676,85 @@ func TestProcessHbirdPacket(t *testing.T) {
 				dpath.HopFields[2].HopField.Mac =
 					computeMAC(t, key, dpath.InfoFields[1], dpath.HopFields[2].HopField)
 
-				var dstAddr *net.UDPAddr
-				ingress := uint16(51) // == consEgress, bc non-consdir
-				egress := uint16(0)   // To check that it is updated
+				ingress := uint16(1) // == consEgress, bc non-consdir
+				egress := uint16(0)  // To check that it is updated
 				if afterProcessing {
 					require.NoError(t, dpath.IncPath(hummingbird.HopLines))
-					egress = uint16(3) // Internal hop => egress points at sibling router.
-					// The link is specific to the sibling. It has the address. So we don't expect:
-					// dstAddr = &net.UDPAddr{IP: net.ParseIP("10.0.200.200").To4(), Port: 30043}
+					egress = uint16(2) // Internal hop => egress points at sibling router.
 				} else {
 					dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
 				}
 
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress,
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress,
 					pr.WithBestEffort)
 			},
 			assertFunc: notDiscarded,
 		},
-		"inbound flyover": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"brtransit_xover_best-effort": {
+			// Cross-over (up->down shortcut) handled entirely on this BR: the
+			// packet enters and leaves on external child links of the same BR.
+			// Wire-level analogue: HummingbirdBestEffortChildToChildXover.
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2},
+					map[uint16]topology.LinkType{
+						1: topology.Child,
+						2: topology.Child,
+					},
+					nil, // No special connOpener.
+					mockInternalNextHops,
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
+				spkt, _ := prepHbirdMsg(now)
+				dpath := &hummingbird.Decoded{
+					Base: hummingbird.Base{
+						PathMeta: hummingbird.MetaHdr{
+							CurrINF: 0,
+							CurrHF:  3,
+							SegLen:  [3]uint8{6, 6, 0},
+							BaseTS:  util.TimeToSecs(now),
+						},
+						NumINF:   2,
+						NumLines: 12,
+					},
+					InfoFields: []path.InfoField{
+						// up seg
+						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
+						// down seg
+						{SegID: 0x222, ConsDir: true, Timestamp: util.TimeToSecs(now)},
+					},
+					HopFields: []hummingbird.FlyoverHopField{
+						{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}},
+						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1}},
+						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 2}},
+						{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}},
+					},
+				}
+				dpath.HopFields[1].HopField.Mac =
+					computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[1].HopField)
+				dpath.HopFields[2].HopField.Mac =
+					computeMAC(t, key, dpath.InfoFields[1], dpath.HopFields[2].HopField)
+				ingress := uint16(1)
+				egress := uint16(0)
+				if afterProcessing {
+					// This BR owns both hop fields at the segment boundary. The first
+					// increment crosses from its up-segment hop to its down-segment hop;
+					// normal egress processing advances once more to the next AS.
+					require.NoError(t, dpath.IncPath(hummingbird.HopLines))
+					require.NoError(t, dpath.IncPath(hummingbird.HopLines))
+					dpath.InfoFields[1].UpdateSegID(dpath.HopFields[2].HopField.Mac)
+					egress = 2
+				} else {
+					dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
+				}
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress,
+					pr.WithBestEffort)
+			},
+			assertFunc: notDiscarded,
+		},
+		"inbound_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					mockExternalInterfaces,
 					nil,
@@ -647,7 +762,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, dpath := prepHbirdMsg(now)
 				spkt.DstIA = addr.MustParseIA("1-ff00:0:110")
 				dst := addr.MustParseHost("10.0.100.100")
@@ -676,8 +791,8 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"inbound flyover from reversed scion path": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"inbound_reversed_scion_path_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					mockExternalInterfaces,
 					nil,
@@ -685,13 +800,13 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, _ := prepHbirdMsg(now)
 				spkt.DstIA = addr.MustParseIA("1-ff00:0:110")
 				dst := addr.MustParseHost("10.0.100.100")
 				assert.NoError(t, spkt.SetDstAddr(dst))
 
-				scionPath := prepReversedScionPathForInboundFlyover(t, now)
+				scionPath := prepReversedScionPathForInbound(t, now)
 				dpath := &hummingbird.Decoded{}
 				dpath.ConvertFromScionDecoded(scionPath)
 				dpath.Base.PathMeta.BaseTS = util.TimeToSecs(now)
@@ -721,8 +836,37 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"outbound flyover": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"inbound_reversed_scion_path_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					mockExternalInterfaces, nil, nil, mockInternalNextHops,
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
+				spkt, _ := prepHbirdMsg(now)
+				spkt.DstIA = addr.MustParseIA("1-ff00:0:110")
+				dst := addr.MustParseHost("10.0.100.100")
+				require.NoError(t, spkt.SetDstAddr(dst))
+
+				scionPath := prepReversedScionPathForInbound(t, now)
+				dpath := &hummingbird.Decoded{}
+				dpath.ConvertFromScionDecoded(scionPath)
+				dpath.PathMeta.BaseTS = util.TimeToSecs(now)
+				dpath.PathMeta.HighResTS = 500 << 22
+				dpath.PathMeta.CurrHF = 6
+				dpath.HopFields[2].HopField.Mac =
+					computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[2].HopField)
+				var dstAddr *net.UDPAddr
+				if afterProcessing {
+					dstAddr = &net.UDPAddr{IP: dst.IP().AsSlice(), Port: dstUDPPort}
+				}
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, 1, 0,
+					pr.WithBestEffort)
+			},
+			assertFunc: notDiscarded,
+		},
+		"outbound_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1},
 					map[uint16]topology.LinkType{
@@ -732,7 +876,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, dpath := prepHbirdMsg(now)
 				spkt.SrcIA = addr.MustParseIA("1-ff00:0:110")
 				dpath.HopFields = []hummingbird.FlyoverHopField{
@@ -762,8 +906,8 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"reservation expired": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"reservation_expired_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1},
 					map[uint16]topology.LinkType{
@@ -773,7 +917,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, dpath := prepHbirdMsg(now)
 				spkt.SrcIA = addr.MustParseIA("1-ff00:0:110")
 				dpath.HopFields = []hummingbird.FlyoverHopField{
@@ -805,8 +949,36 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"reservation exceeds bandwidth": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"freshness_stale_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1}, map[uint16]topology.LinkType{1: topology.Child},
+					nil, mockInternalNextHops,
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
+				return freshnessFlyoverPkt(
+					t, now.Add(-router.MaxFreshnessTolerance-time.Second), key, hbirdKey,
+					afterProcessing)
+			},
+			assertFunc: notDiscarded,
+		},
+		"freshness_future_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1}, map[uint16]topology.LinkType{1: topology.Child},
+					nil, mockInternalNextHops,
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
+				return freshnessFlyoverPkt(
+					t, now.Add(router.MaxFreshnessTolerance+time.Second), key, hbirdKey,
+					afterProcessing)
+			},
+			assertFunc: notDiscarded,
+		},
+		"reservation_exceeds_bandwidth_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1},
 					map[uint16]topology.LinkType{
@@ -816,7 +988,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, dpath := prepHbirdMsg(now)
 				spkt.SrcIA = addr.MustParseIA("1-ff00:0:110")
 				largePayload := bytes.Repeat([]byte{0xab}, 512)
@@ -865,8 +1037,8 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"brtransit flyover": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"brtransit_consdir_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
@@ -877,7 +1049,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, dpath := prepHbirdMsg(now)
 				dpath.HopFields = []hummingbird.FlyoverHopField{
 					{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
@@ -905,8 +1077,8 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"brtransit non consdir flyover": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"brtransit_non_consdir_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
@@ -917,7 +1089,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, dpath := prepHbirdMsg(now)
 				dpath.HopFields = []hummingbird.FlyoverHopField{
 					{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
@@ -947,8 +1119,8 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"astransit direct flyover": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"astransit_direct_ingress_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1}, // Interface 3 is in the external interfaces of a sibling router
 					map[uint16]topology.LinkType{
@@ -960,41 +1132,40 @@ func TestProcessHbirdPacket(t *testing.T) {
 						uint16(3): netip.MustParseAddrPort("10.0.200.200:30043"),
 					}, addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
-				spkt, dpath := prepHbirdMsg(now)
-				dpath.HopFields = []hummingbird.FlyoverHopField{
-					{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
-					{HopField: path.HopField{ConsIngress: 1, ConsEgress: 3},
-						Flyover: true, ResID: 42, ResStartTime: 5, Duration: 301, Bw: 129},
-					{HopField: path.HopField{ConsIngress: 50, ConsEgress: 51}},
-				}
-				dpath.Base.NumLines = 11
-				dpath.Base.PathMeta.SegLen[0] = 11
-				dpath.PathMeta.CurrHF = 3
-				dpath.HopFields[1].HopField.Mac = computeAggregateMac(t, key, hbirdKey, spkt, dpath,
-					dpath.InfoFields[0], dpath.HopFields[1], dpath.Base.PathMeta)
-				var dstAddr *net.UDPAddr
-				ingress := uint16(1)
-				egress := uint16(3)
-				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress,
-					pr.WithPriority)
+			mockMsg: func(t *testing.T, afterProcessing bool, dp *router.DataPlane) *router.Packet {
+				return directASTransitPkt(t, dp, now, key, hbirdKey, true, false, afterProcessing)
 			},
 			assertFunc: notDiscarded,
 		},
-		"astransit xover flyover ingress": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"astransit_direct_egress_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
-					[]uint16{51},
+					[]uint16{3},
+					map[uint16]topology.LinkType{1: topology.Core, 3: topology.Core},
+					nil,
+					map[uint16]netip.AddrPort{
+						1: netip.MustParseAddrPort("10.0.200.200:30041"),
+					}, addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockMsg: func(t *testing.T, afterProcessing bool, dp *router.DataPlane) *router.Packet {
+				return directASTransitPkt(t, dp, now, key, hbirdKey, true, true, afterProcessing)
+			},
+			assertFunc: notDiscarded,
+		},
+		"astransit_xover_ingress_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1},
 					map[uint16]topology.LinkType{
-						51: topology.Child,
-						3:  topology.Core,
+						1: topology.Child,
+						2: topology.Child,
 					},
 					nil, // No special connOpener.
 					map[uint16]netip.AddrPort{
-						uint16(3): netip.MustParseAddrPort("10.0.200.200:30043"),
+						uint16(2): netip.MustParseAddrPort("10.0.200.200:30042"),
 					}, addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, _ := prepHbirdMsg(now)
 				dpath := &hummingbird.Decoded{
 					Base: hummingbird.Base{
@@ -1010,26 +1181,26 @@ func TestProcessHbirdPacket(t *testing.T) {
 					InfoFields: []path.InfoField{
 						// up seg
 						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-						// core seg
-						{SegID: 0x222, ConsDir: false, Timestamp: util.TimeToSecs(now)},
+						// down seg
+						{SegID: 0x222, ConsDir: true, Timestamp: util.TimeToSecs(now)},
 					},
 					HopFields: []hummingbird.FlyoverHopField{
-						{HopField: path.HopField{ConsIngress: 31, ConsEgress: 0}}, // Src,
-						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 51},
+						{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}}, // AS 111
+						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1},
 							Flyover: true, Bw: 129, ResStartTime: 5, Duration: 310}, // IA 110
 						// xover here.
-						{HopField: path.HopField{ConsIngress: 3, ConsEgress: 0}}, // IA 110
-						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1}}, // Dst
+						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 2}},  // IA 110
+						{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}}, // AS 112
 					},
 				}
-				dpath.HopFields[1].HopField.Mac = computeAggregateMacExplicitInEg(
-					t, key, hbirdKey, spkt, dpath, 3, 51,
+				dpath.HopFields[1].HopField.Mac = computeAggregateMacForInterfaces(
+					t, key, hbirdKey, spkt, dpath, 1, 2,
 					dpath.InfoFields[0], dpath.HopFields[1], dpath.PathMeta)
 				dpath.HopFields[2].HopField.Mac =
 					computeMAC(t, key, dpath.InfoFields[1], dpath.HopFields[2].HopField)
 				var dstAddr *net.UDPAddr
-				ingress := uint16(51) // == consEgress, bc non-consdir
-				egress := uint16(0)   // To check that it is updated
+				ingress := uint16(1) // == consEgress, bc non-consdir
+				egress := uint16(0)  // To check that it is updated
 				if afterProcessing {
 					dpath.HopFields[1].Flyover = false
 					dpath.HopFields[2].Flyover = true
@@ -1038,77 +1209,74 @@ func TestProcessHbirdPacket(t *testing.T) {
 					dpath.HopFields[2].Duration = 310
 					dpath.HopFields[1].HopField.Mac =
 						computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[1].HopField)
-					dpath.HopFields[2].HopField.Mac = computeAggregateMacExplicitInEg(t, key, hbirdKey,
-						spkt, dpath, 3, 51,
+					dpath.HopFields[2].HopField.Mac = computeAggregateMacForInterfaces(t, key, hbirdKey,
+						spkt, dpath, 1, 2,
 						dpath.InfoFields[1], dpath.HopFields[2], dpath.PathMeta)
 					dpath.PathMeta.SegLen[0] -= 2
 					dpath.PathMeta.SegLen[1] += 2
 					require.NoError(t, dpath.IncPath(hummingbird.HopLines))
-					egress = uint16(3) // Internal hop => egress points at sibling router.
+					egress = uint16(2) // Internal hop => egress points at sibling router.
 					// The link is specific to the sibling. It has the address. So we don't expect:
 					// dstAddr = &net.UDPAddr{IP: net.ParseIP("10.0.200.200").To4(), Port: 30043}
 				} else {
 					// The BR is going to update the segment ID based on the regular SCION MAC,
 					// not the flyover one. Since both are XOR-aggregated into the mac field,
 					// we need to de-aggregate the flyover first.
-					dpath.InfoFields[0].UpdateSegID(deaggregateFlyoverFromMac(
-						t,
-						key,
-						dpath.InfoFields[0],
-						dpath.HopFields[1],
-					))
+					dpath.InfoFields[0].UpdateSegID(computeMAC(
+						t, key, dpath.InfoFields[0], dpath.HopFields[1].HopField))
 				}
 				return router.NewPacket(toBytes(t, spkt, dpath), nil, dstAddr, ingress, egress,
 					pr.WithPriority)
 			},
 			assertFunc: notDiscarded,
 		},
-		"astransit xover flyover egress": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"astransit_xover_egress_best-effort": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
-					[]uint16{3},
+					[]uint16{2},
+					map[uint16]topology.LinkType{1: topology.Child, 2: topology.Child},
+					nil,
+					map[uint16]netip.AddrPort{
+						1: netip.MustParseAddrPort("10.0.200.200:30041"),
+					}, addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockMsg: func(t *testing.T, afterProcessing bool, dp *router.DataPlane) *router.Packet {
+				spkt, _ := prepHbirdMsg(now)
+				dpath := prepASTransitXoverEgressPath(now, false)
+				dpath.HopFields[2].HopField.Mac =
+					computeMAC(t, key, dpath.InfoFields[1], dpath.HopFields[2].HopField)
+				if afterProcessing {
+					dpath.InfoFields[1].UpdateSegID(dpath.HopFields[2].HopField.Mac)
+					require.NoError(t, dpath.IncPath(hummingbird.HopLines))
+				}
+				pkt := router.NewPacket(toBytes(t, spkt, dpath), nil, nil, 0, 2,
+					pr.WithBestEffort)
+				pkt.Link = router.ExtractInterfaces(dp)[1]
+				return pkt
+			},
+			assertFunc: notDiscarded,
+		},
+		"astransit_xover_egress_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{2},
 					map[uint16]topology.LinkType{
-						51: topology.Child,
-						3:  topology.Core,
+						1: topology.Child,
+						2: topology.Child,
 					},
 					nil, // No special connOpener.
 					map[uint16]netip.AddrPort{
-						uint16(51): netip.MustParseAddrPort("10.0.200.200:30043"),
+						uint16(1): netip.MustParseAddrPort("10.0.200.200:30041"),
 					}, addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, dp *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, dp *router.DataPlane) *router.Packet {
 				spkt, _ := prepHbirdMsg(now)
-				dpath := &hummingbird.Decoded{
-					Base: hummingbird.Base{
-						NumINF:   2,
-						NumLines: 9 + 5, // 1 flyover
-						PathMeta: hummingbird.MetaHdr{
-							CurrINF: 1,
-							CurrHF:  6,
-							SegLen:  [3]uint8{6, 8, 0}, // Flyover on second segment
-							BaseTS:  util.TimeToSecs(now),
-						},
-					},
-					InfoFields: []path.InfoField{
-						// up seg
-						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-						// core seg
-						{SegID: 0x222, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-					},
-					HopFields: []hummingbird.FlyoverHopField{
-						{HopField: path.HopField{ConsIngress: 31, ConsEgress: 0}}, // Src,
-						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 51}}, // IA 110
-						// xover here.
-						{HopField: path.HopField{ConsIngress: 3, ConsEgress: 0}, // IA 110
-							Flyover: true, Bw: 129, ResStartTime: 5, Duration: 310},
-						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1}}, // Dst
-					},
-				}
-				dpath.HopFields[2].HopField.Mac = computeAggregateMacExplicitInEg(
-					t, key, hbirdKey, spkt, dpath, 3, 51,
+				dpath := prepASTransitXoverEgressPath(now, true)
+				dpath.HopFields[2].HopField.Mac = computeAggregateMacForInterfaces(
+					t, key, hbirdKey, spkt, dpath, 1, 2,
 					dpath.InfoFields[1], dpath.HopFields[2], dpath.PathMeta)
 				ingress := uint16(0) // from sibling router
-				egress := uint16(3)
+				egress := uint16(2)
 				if afterProcessing {
 					// Restore flyover to xover ingress hop from the egress one.
 					dpath.HopFields[2].Flyover = false
@@ -1120,6 +1288,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 						computeMAC(t, key, dpath.InfoFields[1], dpath.HopFields[2].HopField)
 					dpath.PathMeta.SegLen[0] += 2
 					dpath.PathMeta.SegLen[1] -= 2
+					dpath.InfoFields[1].UpdateSegID(dpath.HopFields[2].HopField.Mac)
 					require.NoError(t, dpath.IncPath(hummingbird.FlyoverLines))
 				}
 				pkt := router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress,
@@ -1128,13 +1297,80 @@ func TestProcessHbirdPacket(t *testing.T) {
 				ifaces := router.ExtractInterfaces(dp)
 				// At the xover egress border router, the packet enters the BR via 0, but the
 				// sibling border router link is stored at the ingress on the AS (previous hop).
-				pkt.Link = ifaces[51]
+				pkt.Link = ifaces[1]
 				return pkt
 			},
 			assertFunc: notDiscarded,
 		},
-		"brtransit peering consdir flyovers": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"brtransit_xover_flyover": {
+			// Cross-over (up->down shortcut) handled entirely on this BR, with a
+			// flyover on the up-segment cross-over hop. Exercises doHbirdXoverFlyover
+			// in the external-egress branch. Wire-level analogue:
+			// HummingbirdFlyoverChildToChildXover.
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2},
+					map[uint16]topology.LinkType{
+						1: topology.Child,
+						2: topology.Child,
+					},
+					nil, // No special connOpener.
+					mockInternalNextHops,
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
+				spkt, _ := prepHbirdMsg(now)
+				dpath := &hummingbird.Decoded{
+					Base: hummingbird.Base{
+						PathMeta: hummingbird.MetaHdr{
+							CurrINF:   0,
+							CurrHF:    3,
+							SegLen:    [3]uint8{3 + 5, 6, 0},
+							BaseTS:    util.TimeToSecs(now),
+							HighResTS: 500 << 22,
+						},
+						NumINF:   2,
+						NumLines: 3 + 5 + 6,
+					},
+					InfoFields: []path.InfoField{
+						// up seg
+						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
+						// down seg
+						{SegID: 0x222, ConsDir: true, Timestamp: util.TimeToSecs(now)},
+					},
+					HopFields: []hummingbird.FlyoverHopField{
+						{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}},
+						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1},
+							Flyover: true, ResID: 42, Bw: 129, ResStartTime: 5, Duration: 301},
+						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 2}},
+						{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}},
+					},
+				}
+				// Reservation spans ingress 1 (incoming hop) and egress 2 (outgoing hop).
+				scionMac1 := computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[1].HopField)
+				dpath.HopFields[1].HopField.Mac = computeAggregateMacForInterfaces(
+					t, key, hbirdKey, spkt, dpath, 1, 2,
+					dpath.InfoFields[0], dpath.HopFields[1], dpath.PathMeta)
+				dpath.HopFields[2].HopField.Mac =
+					computeMAC(t, key, dpath.InfoFields[1], dpath.HopFields[2].HopField)
+				ingress := uint16(1)
+				egress := uint16(0)
+				if afterProcessing {
+					dpath.HopFields[1].HopField.Mac = scionMac1
+					require.NoError(t, dpath.IncPath(hummingbird.FlyoverLines))
+					require.NoError(t, dpath.IncPath(hummingbird.HopLines))
+					dpath.InfoFields[1].UpdateSegID(dpath.HopFields[2].HopField.Mac)
+					egress = 2
+				} else {
+					dpath.InfoFields[0].UpdateSegID(scionMac1)
+				}
+				return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, ingress, egress,
+					pr.WithPriority)
+			},
+			assertFunc: notDiscarded,
+		},
+		"brtransit_peering_consdir_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
@@ -1145,7 +1381,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				// Story: the packet just left segment 0 which ends at
 				// (peering) hop 0 and is landing on segment 1 which
 				// begins at (peering) hop 1. We do not care what hop 0
@@ -1204,8 +1440,8 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"brtransit peering non consdir flyovers": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"brtransit_peering_non_consdir_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
@@ -1216,7 +1452,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				// Story: the packet lands on the last (peering) hop of
 				// segment 0. After processing, the packet is ready to
 				// be processed by the first (peering) hop of segment 1.
@@ -1279,10 +1515,10 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"peering consdir downstream flyovers": {
+		"peering_consdir_downstream_flyover": {
 			// Similar to previous test case but looking at what
 			// happens on the next hop.
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
@@ -1293,7 +1529,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				// Story: the packet just left hop 1 (the first hop
 				// of peering down segment 1) and is processed at hop 2
 				// which is not a peering hop.
@@ -1356,8 +1592,8 @@ func TestProcessHbirdPacket(t *testing.T) {
 			},
 			assertFunc: notDiscarded,
 		},
-		"peering non consdir upstream flyovers": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"peering_non_consdir_upstream_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2},
 					map[uint16]topology.LinkType{
@@ -1368,7 +1604,7 @@ func TestProcessHbirdPacket(t *testing.T) {
 					mockInternalNextHops,
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
-			mockMsg: func(afterProcessing bool, _ *router.DataPlane) *router.Packet {
+			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				// Story: the packet lands on the second (non-peering) hop of
 				// segment 0 (a peering segment). After processing, the packet
 				// is ready to be processed by the third (peering) hop of segment 0.
@@ -1446,8 +1682,8 @@ func TestProcessHbirdPacket(t *testing.T) {
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			dp := tc.prepareDP(ctrl)
-			pkt, want := tc.mockMsg(false, dp), tc.mockMsg(true, dp)
+			dp := tc.prepareDP()
+			pkt, want := tc.mockMsg(t, false, dp), tc.mockMsg(t, true, dp)
 			disp := dp.ProcessPkt(pkt)
 			tc.assertFunc(t, disp)
 			if disp == router.PDiscard {
@@ -1458,24 +1694,101 @@ func TestProcessHbirdPacket(t *testing.T) {
 	}
 }
 
+// TestHbirdTokenBucketReservationIdentityAndConcurrency checks that the per-reservation token
+// bucket used by checkReservationBandwidth is keyed by reservation ID and ingress/egress
+// interfaces (not bandwidth), and that concurrent packets for the same reservation are
+// accounted for safely.
+func TestHbirdTokenBucketReservationIdentityAndConcurrency(t *testing.T) {
+	key := []byte("testkey_xxxxxxxx")
+	hbirdKey := []byte("test_secretvalue")
+	now := time.Now()
+
+	newDP := func() *router.DataPlane {
+		return router.NewDPWithHummingbirdKey(
+			[]uint16{1, 2},
+			map[uint16]topology.LinkType{1: topology.Child, 2: topology.Child},
+			nil, map[uint16]netip.AddrPort{}, addr.MustParseIA("1-ff00:0:110"),
+			nil, key, hbirdKey)
+	}
+	makePkt := func(t *testing.T, resID uint32, egress, bw uint16) *router.Packet {
+		t.Helper()
+		spkt, dpath := prepHbirdMsg(now)
+		spkt.SrcIA = addr.MustParseIA("1-ff00:0:110")
+		dpath.PathMeta.CurrHF = 0
+		dpath.PathMeta.SegLen = [3]uint8{8, 0, 0}
+		dpath.NumLines = 8
+		dpath.HopFields = []hummingbird.FlyoverHopField{
+			{HopField: path.HopField{ConsIngress: 0, ConsEgress: egress}, Flyover: true,
+				ResID: resID, Bw: bw, ResStartTime: 5, Duration: 301},
+			{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}},
+		}
+		dpath.HopFields[0].HopField.Mac = computeAggregateMac(
+			t, key, hbirdKey, spkt, dpath, dpath.InfoFields[0], dpath.HopFields[0], dpath.PathMeta)
+		return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, 0, 0, pr.WithPriority)
+	}
+
+	t.Run("reservation key includes ID and interfaces but not bandwidth", func(t *testing.T) {
+		dp := newDP()
+		for _, tc := range []struct {
+			resID  uint32
+			egress uint16
+			bw     uint16
+			want   int
+		}{
+			{resID: 42, egress: 1, bw: 129, want: 1},
+			{resID: 43, egress: 1, bw: 129, want: 2},
+			{resID: 42, egress: 2, bw: 129, want: 3},
+			{resID: 42, egress: 1, bw: 130, want: 3},
+		} {
+			pkt := makePkt(t, tc.resID, tc.egress, tc.bw)
+			assert.NotEqual(t, router.PDiscard, dp.ProcessPkt(pkt))
+			assert.Equal(t, tc.want, router.HummingbirdTokenBucketCount(dp))
+		}
+	})
+
+	t.Run("concurrent packets share one bucket", func(t *testing.T) {
+		dp := newDP()
+		const packetCount = 64
+		packets := make([]*router.Packet, packetCount)
+		for i := range packets {
+			packets[i] = makePkt(t, 42, 1, 1023)
+		}
+		dispositions := make([]router.Disposition, packetCount)
+		var wg sync.WaitGroup
+		for i := range packets {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				dispositions[i] = dp.ProcessPkt(packets[i])
+			}()
+		}
+		wg.Wait()
+		for _, disposition := range dispositions {
+			assert.NotEqual(t, router.PDiscard, disposition)
+		}
+		assert.Equal(t, 1, router.HummingbirdTokenBucketCount(dp))
+	})
+}
+
+// TestProcessHbirdSCMP checks that invalid Hummingbird packets (bad MAC, invalid source or
+// destination IA, both inbound and outbound, both best-effort and flyover) are diverted to the
+// slow path with the expected SCMP type/code/pointer, and produce a correctly addressed
+// ParameterProblem reply quoting the offending packet.
 func TestProcessHbirdSCMP(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
 
 	key := []byte("testkey_xxxxxxxx")
 	hbirdKey := []byte("test_secretvalue")
 	now := time.Now()
 
 	testCases := map[string]struct {
-		prepareDP            func(*gomock.Controller) *router.DataPlane
-		mockPkt              func(*testing.T, *router.DataPlane) (*router.Packet, []byte)
-		expectedSlowPath     router.SlowPathRequestView
-		expectedSCMPTypeCode slayers.SCMPTypeCode
-		expectedLayerType    gopacket.LayerType
-		assertReply          func(*testing.T, gopacket.Packet, []byte)
+		prepareDP         func() *router.DataPlane
+		mockPkt           func(*testing.T, *router.DataPlane) (*router.Packet, []byte)
+		expectedSlowPath  router.SlowPathRequestView
+		expectedLayerType gopacket.LayerType
+		assertReply       func(*testing.T, gopacket.Packet, []byte)
 	}{
-		"invalid flyover aggregate MAC on inbound packet": {
-			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+		"invalid_mac_inbound_flyover": {
+			prepareDP: func() *router.DataPlane {
 				return router.NewDPWithHummingbirdKey(
 					[]uint16{1, 2, 3},
 					nil,
@@ -1484,34 +1797,9 @@ func TestProcessHbirdSCMP(t *testing.T) {
 					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
 			},
 			mockPkt: func(t *testing.T, dp *router.DataPlane) (*router.Packet, []byte) {
-				// Start from the valid inbound flyover case used in TestProcessHbirdPacket,
-				// then corrupt only the aggregate MAC so the rest of the path remains
-				// well-formed and the failure is unambiguously a MAC verification error.
-				spkt, dpath := prepHbirdMsg(now)
-				spkt.DstIA = addr.MustParseIA("1-ff00:0:110")
-				dst := addr.MustParseHost("10.0.100.100")
-				require.NoError(t, spkt.SetDstAddr(dst))
-				dpath.HopFields = []hummingbird.FlyoverHopField{
-					{HopField: path.HopField{ConsIngress: 41, ConsEgress: 40}},
-					{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
-					{HopField: path.HopField{ConsIngress: 1, ConsEgress: 0},
-						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 16},
-				}
-				dpath.Base.PathMeta.SegLen[0] = 6 + 5
-				dpath.Base.NumLines = 6 + 5
-				dpath.Base.PathMeta.CurrHF = 6
-				dpath.HopFields[2].HopField.Mac = computeAggregateMac(
-					t, key, hbirdKey, spkt, dpath, dpath.InfoFields[0], dpath.HopFields[2],
-					dpath.PathMeta)
-				// Flip one byte to turn the valid aggregate MAC into the malformed one
-				// that should trigger the SCMP slow path.
-				dpath.HopFields[2].HopField.Mac[0] ^= 0xff
-
-				raw := toBytes(t, spkt, dpath)
-				original := bytes.Clone(raw)
-				pkt := router.NewPacket(raw, nil, nil, 1, 0, pr.WithBestEffort)
-				pkt.Link = router.ExtractInterfaces(dp)[1]
-				return pkt, original
+				// Derived from TestProcessHbirdPacket/inbound_flyover.
+				return invalidHbirdPkt(
+					t, dp, now, key, hbirdKey, true, invalidHbirdInbound, invalidHbirdMAC)
 			},
 			expectedSlowPath: router.SlowPathRequestView{
 				SPType: int8(slayers.SCMPTypeParameterProblem),
@@ -1521,10 +1809,6 @@ func TestProcessHbirdSCMP(t *testing.T) {
 			},
 			// The slow-path response should be an SCMP Parameter Problem reporting the
 			// invalid hop/flyover MAC.
-			expectedSCMPTypeCode: slayers.CreateSCMPTypeCode(
-				slayers.SCMPTypeParameterProblem,
-				slayers.SCMPCodeInvalidHopFieldMAC,
-			),
 			expectedLayerType: slayers.LayerTypeSCMPParameterProblem,
 			assertReply: func(t *testing.T, packet gopacket.Packet, original []byte) {
 				scionLayer := packet.Layer(slayers.LayerTypeSCION)
@@ -1545,13 +1829,193 @@ func TestProcessHbirdSCMP(t *testing.T) {
 				assert.True(t, bytes.Equal(original[:len(quote)], quote))
 			},
 		},
+		"invalid_mac_inbound_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2, 3},
+					nil,
+					nil,
+					map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) (*router.Packet, []byte) {
+				// Derived from TestProcessHbirdPacket/inbound_best-effort.
+				return invalidHbirdPkt(
+					t, dp, now, key, hbirdKey, false, invalidHbirdInbound, invalidHbirdMAC)
+			},
+			expectedSlowPath: router.SlowPathRequestView{
+				SPType:  int8(slayers.SCMPTypeParameterProblem),
+				Code:    slayers.SCMPCodeInvalidHopFieldMAC,
+				Pointer: 80,
+			},
+			expectedLayerType: slayers.LayerTypeSCMPParameterProblem,
+		},
+		"invalid_source_ia_inbound_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2, 3},
+					nil,
+					nil,
+					map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) (*router.Packet, []byte) {
+				// Derived from TestProcessHbirdPacket/inbound_best-effort.
+				return invalidHbirdPkt(
+					t, dp, now, key, hbirdKey, false, invalidHbirdInbound,
+					invalidHbirdSourceIA)
+			},
+			expectedSlowPath: router.SlowPathRequestView{
+				SPType:  int8(slayers.SCMPTypeParameterProblem),
+				Code:    slayers.SCMPCodeInvalidSourceAddress,
+				Pointer: uint16(slayers.CmnHdrLen + addr.IABytes),
+			},
+			expectedLayerType: slayers.LayerTypeSCMPParameterProblem,
+		},
+		"invalid_source_ia_inbound_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2, 3}, nil, nil, map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) (*router.Packet, []byte) {
+				// Derived from TestProcessHbirdPacket/inbound_flyover.
+				return invalidHbirdPkt(
+					t, dp, now, key, hbirdKey, true, invalidHbirdInbound,
+					invalidHbirdSourceIA)
+			},
+			expectedSlowPath: router.SlowPathRequestView{
+				SPType:  int8(slayers.SCMPTypeParameterProblem),
+				Code:    slayers.SCMPCodeInvalidSourceAddress,
+				Pointer: uint16(slayers.CmnHdrLen + addr.IABytes),
+			},
+			expectedLayerType: slayers.LayerTypeSCMPParameterProblem,
+		},
+		"invalid_destination_ia_inbound_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2, 3}, nil, nil, map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) (*router.Packet, []byte) {
+				// Derived from TestProcessHbirdPacket/inbound_best-effort.
+				return invalidHbirdPkt(
+					t, dp, now, key, hbirdKey, false, invalidHbirdInbound,
+					invalidHbirdDestinationIA)
+			},
+			expectedSlowPath: router.SlowPathRequestView{
+				SPType:  int8(slayers.SCMPTypeParameterProblem),
+				Code:    slayers.SCMPCodeInvalidDestinationAddress,
+				Pointer: uint16(slayers.CmnHdrLen),
+			},
+			expectedLayerType: slayers.LayerTypeSCMPParameterProblem,
+		},
+		"invalid_destination_ia_inbound_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2, 3}, nil, nil, map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) (*router.Packet, []byte) {
+				// Derived from TestProcessHbirdPacket/inbound_flyover.
+				return invalidHbirdPkt(
+					t, dp, now, key, hbirdKey, true, invalidHbirdInbound,
+					invalidHbirdDestinationIA)
+			},
+			expectedSlowPath: router.SlowPathRequestView{
+				SPType:  int8(slayers.SCMPTypeParameterProblem),
+				Code:    slayers.SCMPCodeInvalidDestinationAddress,
+				Pointer: uint16(slayers.CmnHdrLen),
+			},
+			expectedLayerType: slayers.LayerTypeSCMPParameterProblem,
+		},
+		"invalid_source_ia_outbound_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1}, map[uint16]topology.LinkType{1: topology.Child},
+					nil, map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) (*router.Packet, []byte) {
+				// Derived from TestProcessHbirdPacket/outbound_best-effort.
+				return invalidHbirdPkt(
+					t, dp, now, key, hbirdKey, false, invalidHbirdOutbound,
+					invalidHbirdSourceIA)
+			},
+			expectedSlowPath: router.SlowPathRequestView{
+				SPType:  int8(slayers.SCMPTypeParameterProblem),
+				Code:    slayers.SCMPCodeInvalidSourceAddress,
+				Pointer: uint16(slayers.CmnHdrLen + addr.IABytes),
+			},
+			expectedLayerType: slayers.LayerTypeSCMPParameterProblem,
+		},
+		"invalid_source_ia_outbound_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1}, map[uint16]topology.LinkType{1: topology.Child},
+					nil, map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) (*router.Packet, []byte) {
+				// Derived from TestProcessHbirdPacket/outbound_flyover.
+				return invalidHbirdPkt(
+					t, dp, now, key, hbirdKey, true, invalidHbirdOutbound,
+					invalidHbirdSourceIA)
+			},
+			expectedSlowPath: router.SlowPathRequestView{
+				SPType:  int8(slayers.SCMPTypeParameterProblem),
+				Code:    slayers.SCMPCodeInvalidSourceAddress,
+				Pointer: uint16(slayers.CmnHdrLen + addr.IABytes),
+			},
+			expectedLayerType: slayers.LayerTypeSCMPParameterProblem,
+		},
+		"invalid_destination_ia_outbound_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1}, map[uint16]topology.LinkType{1: topology.Child},
+					nil, map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) (*router.Packet, []byte) {
+				// Derived from TestProcessHbirdPacket/outbound_best-effort.
+				return invalidHbirdPkt(
+					t, dp, now, key, hbirdKey, false, invalidHbirdOutbound,
+					invalidHbirdDestinationIA)
+			},
+			expectedSlowPath: router.SlowPathRequestView{
+				SPType:  int8(slayers.SCMPTypeParameterProblem),
+				Code:    slayers.SCMPCodeInvalidDestinationAddress,
+				Pointer: uint16(slayers.CmnHdrLen),
+			},
+			expectedLayerType: slayers.LayerTypeSCMPParameterProblem,
+		},
+		"invalid_destination_ia_outbound_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1}, map[uint16]topology.LinkType{1: topology.Child},
+					nil, map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) (*router.Packet, []byte) {
+				// Derived from TestProcessHbirdPacket/outbound_flyover.
+				return invalidHbirdPkt(
+					t, dp, now, key, hbirdKey, true, invalidHbirdOutbound,
+					invalidHbirdDestinationIA)
+			},
+			expectedSlowPath: router.SlowPathRequestView{
+				SPType:  int8(slayers.SCMPTypeParameterProblem),
+				Code:    slayers.SCMPCodeInvalidDestinationAddress,
+				Pointer: uint16(slayers.CmnHdrLen),
+			},
+			expectedLayerType: slayers.LayerTypeSCMPParameterProblem,
+		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dp := tc.prepareDP(ctrl)
+			dp := tc.prepareDP()
 			pkt, original := tc.mockPkt(t, dp)
 
 			disp := dp.ProcessPkt(pkt)
@@ -1565,7 +2029,9 @@ func TestProcessHbirdSCMP(t *testing.T) {
 			scmpLayer := packet.Layer(slayers.LayerTypeSCMP)
 			require.NotNil(t, scmpLayer)
 			scmp := scmpLayer.(*slayers.SCMP)
-			assert.Equal(t, tc.expectedSCMPTypeCode, scmp.TypeCode)
+			expectedTypeCode := slayers.CreateSCMPTypeCode(
+				slayers.SCMPType(tc.expectedSlowPath.SPType), tc.expectedSlowPath.Code)
+			assert.Equal(t, expectedTypeCode, scmp.TypeCode)
 			assert.NotNil(t, packet.Layer(tc.expectedLayerType))
 
 			if tc.assertReply != nil {
@@ -1575,2340 +2041,103 @@ func TestProcessHbirdSCMP(t *testing.T) {
 	}
 }
 
-// func TestHbirdPacketPath(t *testing.T) {
-// 	ctrl := gomock.NewController(t)
-// 	defer ctrl.Finish()
-// 	key := []byte("testkey_xxxxxxxx")
-// 	sv := []byte("test_secretvalue")
-// 	now := time.Now()
-// 	testCases := map[string]struct {
-// 		mockMsg       func() *ipv4.Message
-// 		prepareDPs    func(*gomock.Controller) []*router.DataPlane
-// 		srcInterfaces []uint16
-// 	}{
-// 		"two hops consdir": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:111"),
-// 					xtest.MustParseIA("1-ff00:0:110"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{6, 0, 0},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   1,
-// 						NumLines: 6,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 40}},
-// 						{HopField: path.HopField{ConsIngress: 01, ConsEgress: 0}},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				// Reset SegID to original value
-// 				dpath.InfoFields[0].SegID = 0x111
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [2]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(01): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						01: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 01},
-// 		},
-// 		"two hops non consdir": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:111"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{6, 0, 0},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   1,
-// 						NumLines: 6,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{HopField: path.HopField{ConsIngress: 01, ConsEgress: 0}},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 40}},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				//dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [2]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(01): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						01: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 40},
-// 		},
-// 		"six hops astransit xover consdir": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:111"),
-// 					xtest.MustParseIA("3-ff00:0:333"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{9, 9, 0},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 18,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 40}},
-// 						{HopField: path.HopField{ConsIngress: 1, ConsEgress: 31}},
-// 						{HopField: path.HopField{ConsIngress: 5, ConsEgress: 0}},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 7}},
-// 						{HopField: path.HopField{ConsIngress: 11, ConsEgress: 8}},
-// 						{HopField: path.HopField{ConsIngress: 3, ConsEgress: 0}},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[2].HopField)
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[3].HopField.Mac)
-// 				dpath.HopFields[4].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[4].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[4].HopField.Mac)
-// 				dpath.HopFields[5].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[5].HopField)
-// 				// Reset SegID to original value
-// 				dpath.InfoFields[0].SegID = 0x111
-// 				dpath.InfoFields[1].SegID = 0x222
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [7]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(1):  mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						31: topology.Parent,
-// 						1:  topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Child,
-// 						7: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(7): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(7): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Child,
-// 						7: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(5): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(11): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Core,
-// 						11: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(8): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("2-ff00:0:222"), nil, key, sv)
-// 				dps[5] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(8): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Core,
-// 						11: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(11): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("2-ff00:0:222"), nil, key, sv)
-// 				dps[6] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(3): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						3: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("3-ff00:0:333"), nil, key, sv)
-// 				return dps[:]
-// 			}, // middle hop of second segment is astransit
-// 			srcInterfaces: []uint16{0, 1, 5, 0, 11, 0, 3},
-// 		},
-// 		"six hops astransit xover non consdir": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:111"),
-// 					xtest.MustParseIA("3-ff00:0:333"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{9, 9, 0},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 18,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{HopField: path.HopField{ConsIngress: 40, ConsEgress: 0}},
-// 						{HopField: path.HopField{ConsIngress: 31, ConsEgress: 1}},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 5}},
-// 						{HopField: path.HopField{ConsIngress: 7, ConsEgress: 0}},
-// 						{HopField: path.HopField{ConsIngress: 8, ConsEgress: 11}},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 3}},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[2].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[2].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.HopFields[5].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[5].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[5].HopField.Mac)
-// 				dpath.HopFields[4].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[4].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[4].HopField.Mac)
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				// Reset SegID to original value
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [7]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(1):  mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						31: topology.Parent,
-// 						1:  topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Child,
-// 						7: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(7): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(7): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Child,
-// 						7: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(5): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(11): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Core,
-// 						11: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(8): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("2-ff00:0:222"), nil, key, sv)
-// 				dps[5] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(8): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Core,
-// 						11: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(11): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("2-ff00:0:222"), nil, key, sv)
-// 				dps[6] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(3): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						3: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("3-ff00:0:333"), nil, key, sv)
-// 				return dps[:]
-// 			}, // middle hop of second segment is astransit
-// 			srcInterfaces: []uint16{0, 1, 5, 0, 11, 0, 3},
-// 		},
-// 		"six hops brtransit xover mixed consdir": {
-// 			// up segment non consdir, down segment consdir
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:111"),
-// 					xtest.MustParseIA("3-ff00:0:333"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{9, 9, 0},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 18,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{HopField: path.HopField{ConsIngress: 40, ConsEgress: 0}},
-// 						{HopField: path.HopField{ConsIngress: 31, ConsEgress: 1}},
-// 						{HopField: path.HopField{ConsIngress: 7, ConsEgress: 5}},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 7}},
-// 						{HopField: path.HopField{ConsIngress: 11, ConsEgress: 8}},
-// 						{HopField: path.HopField{ConsIngress: 3, ConsEgress: 0}},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[2].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[2].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[3].HopField.Mac)
-// 				dpath.HopFields[4].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[4].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[4].HopField.Mac)
-// 				dpath.HopFields[5].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[5].HopField)
-// 				// Reset SegID to original value
-// 				dpath.InfoFields[1].SegID = 0x222
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [5]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(1):  mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						31: topology.Parent,
-// 						1:  topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(7): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Child,
-// 						7: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(8):  mock_router.NewMockBatchConn(ctrl),
-// 						uint16(11): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Child,
-// 						11: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("2-ff00:0:222"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(3): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						3: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("3-ff00:0:333"), nil, key, sv)
-// 				return dps[:]
-// 			}, // middle hop of second segment is astransit
-// 			srcInterfaces: []uint16{0, 1, 5, 11, 3},
-// 		},
-// 		"six hops three segs mixed consdir": {
-// 			// two crossovers, first crossover is brtransit, second one is astransit
-// 			// core segment is non consdir
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:113"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{6, 6, 6},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   3,
-// 						NumLines: 18,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x333, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 40}},
-// 						{HopField: path.HopField{ConsIngress: 1, ConsEgress: 0}},
-// 						{HopField: path.HopField{ConsIngress: 5, ConsEgress: 0}},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 31}},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 8}},
-// 						{HopField: path.HopField{ConsIngress: 3, ConsEgress: 0}},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[3].HopField.Mac)
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[2].HopField)
-// 				dpath.HopFields[4].HopField.Mac = computeMAC(t, key, dpath.InfoFields[2],
-// 					dpath.HopFields[4].HopField)
-// 				dpath.InfoFields[2].UpdateSegID(dpath.HopFields[4].HopField.Mac)
-// 				dpath.HopFields[5].HopField.Mac = computeMAC(t, key, dpath.InfoFields[2],
-// 					dpath.HopFields[5].HopField)
-// 				// Reset SegID to original value
-// 				dpath.InfoFields[0].SegID = 0x111
-// 				dpath.InfoFields[2].SegID = 0x333
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [5]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(1): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Child,
-// 						5: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Child,
-// 						31: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(8): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(8): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Child,
-// 						31: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(31): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(3): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						3: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 1, 31, 0, 3},
-// 		},
-// 		"three hops peering brtransit consdir": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:113"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{3, 6},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 9,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, Peer: true, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, Peer: true, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 40}},
-// 						{HopField: path.HopField{ConsIngress: 1, ConsEgress: 2}},
-// 						{HopField: path.HopField{ConsIngress: 5, ConsEgress: 0}},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[1].HopField)
-// 				// No Segment update here as the second hop of a peering path
-// 				// Uses the same segID as it's following hop
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[2].HopField)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [3]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Peer,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(1): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 1, 5},
-// 		},
-// 		"three hops peering brtransit non consdir": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:113"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{3, 6},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 9,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, Peer: true, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, Peer: true, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{HopField: path.HopField{ConsIngress: 40, ConsEgress: 0}},
-// 						{HopField: path.HopField{ConsIngress: 2, ConsEgress: 1}},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 5}},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[2].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[2].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[1].HopField)
-// 				// No Segment update here as the second hop of a peering path
-// 				// Uses the same segID as it's following hop
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [3]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Peer,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(1): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 1, 5},
-// 		},
-// 		"four hops peering astransit consdir": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:113"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{6, 6},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 12,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, Peer: true, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, Peer: true, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 40}},
-// 						{HopField: path.HopField{ConsIngress: 31, ConsEgress: 7}},
-// 						{HopField: path.HopField{ConsIngress: 1, ConsEgress: 2}},
-// 						{HopField: path.HopField{ConsIngress: 5, ConsEgress: 0}},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[2].HopField)
-// 				// No Segment update here
-// 				// the second hop of a peering path uses the same segID as it's following hop
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				// reset segID
-// 				dpath.InfoFields[0].SegID = 0x111
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [6]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						7:  topology.Peer,
-// 						31: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(7): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(7): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						7:  topology.Peer,
-// 						31: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(31): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(1): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(2): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(1): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[5] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 31, 0, 1, 0, 5},
-// 		},
-// 		"four hops peering astransit non consdir": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:113"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{6, 6},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 12,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, Peer: true, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, Peer: true, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{HopField: path.HopField{ConsIngress: 40, ConsEgress: 0}},
-// 						{HopField: path.HopField{ConsIngress: 7, ConsEgress: 31}},
-// 						{HopField: path.HopField{ConsIngress: 2, ConsEgress: 1}},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 5}},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				// No Segment update here
-// 				// the second hop of a peering path uses the same segID as it's following hop
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[3].HopField.Mac)
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[2].HopField)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [6]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						7:  topology.Peer,
-// 						31: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(7): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(7): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						7:  topology.Peer,
-// 						31: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(31): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(1): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(2): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(1): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[5] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 31, 0, 1, 0, 5},
-// 		},
-// 		"two hops consdir flyovers": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:111"),
-// 					xtest.MustParseIA("1-ff00:0:110"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{10, 0, 0},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   1,
-// 						NumLines: 10,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 40},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 01, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				// add flyover macs
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 0, 40,
-// 					dpath.InfoFields[0], &dpath.HopFields[0], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 1, 0,
-// 					dpath.InfoFields[0], &dpath.HopFields[1], dpath.PathMeta)
-// 				// Reset SegID to original value
-// 				dpath.InfoFields[0].SegID = 0x111
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [2]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(01): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						01: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 01},
-// 		},
-// 		"two hops non consdir flyovers": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:111"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{10, 0, 0},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   1,
-// 						NumLines: 10,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 01, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 40},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				// aggregate macs
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 0, 1,
-// 					dpath.InfoFields[0], &dpath.HopFields[0], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 40, 0,
-// 					dpath.InfoFields[0], &dpath.HopFields[1], dpath.PathMeta)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [2]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(01): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						01: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 40},
-// 		},
-// 		"six hops astransit xover consdir flyovers": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:111"),
-// 					xtest.MustParseIA("3-ff00:0:333"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{15, 13, 0},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 28,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 40},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 1, ConsEgress: 31},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 5, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 7}},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 11, ConsEgress: 8},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 3, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[2].HopField)
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[3].HopField.Mac)
-// 				dpath.HopFields[4].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[4].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[4].HopField.Mac)
-// 				dpath.HopFields[5].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[5].HopField)
-// 				// Reset SegID to original value
-// 				dpath.InfoFields[0].SegID = 0x111
-// 				dpath.InfoFields[1].SegID = 0x222
-// 				// aggregate flyover macs
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 0, 40,
-// 					dpath.InfoFields[0], &dpath.HopFields[0], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 1, 31,
-// 					dpath.InfoFields[0], &dpath.HopFields[1], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 5, 7,
-// 					dpath.InfoFields[0], &dpath.HopFields[2], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 11, 8,
-// 					dpath.InfoFields[1], &dpath.HopFields[4], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 3, 0,
-// 					dpath.InfoFields[1], &dpath.HopFields[5], dpath.PathMeta)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [7]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(1):  mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						31: topology.Parent,
-// 						1:  topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Child,
-// 						7: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(7): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(7): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Child,
-// 						7: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(5): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(11): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Core,
-// 						11: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(8): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("2-ff00:0:222"), nil, key, sv)
-// 				dps[5] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(8): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Core,
-// 						11: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(11): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("2-ff00:0:222"), nil, key, sv)
-// 				dps[6] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(3): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						3: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("3-ff00:0:333"), nil, key, sv)
-// 				return dps[:]
-// 			}, // middle hop of second segment is astransit
-// 			srcInterfaces: []uint16{0, 1, 5, 0, 11, 0, 3},
-// 		},
-// 		"six hops astransit xover non consdir flyovers": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:111"),
-// 					xtest.MustParseIA("3-ff00:0:333"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{15, 13, 0},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 28,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 40, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 31, ConsEgress: 1},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 5},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{HopField: path.HopField{ConsIngress: 7, ConsEgress: 0}},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 8, ConsEgress: 11},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 3},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[2].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[2].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.HopFields[5].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[5].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[5].HopField.Mac)
-// 				dpath.HopFields[4].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[4].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[4].HopField.Mac)
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				// aggregate with flyover macs
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 0, 40,
-// 					dpath.InfoFields[0], &dpath.HopFields[0], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 1, 31,
-// 					dpath.InfoFields[0], &dpath.HopFields[1], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 5, 7,
-// 					dpath.InfoFields[0], &dpath.HopFields[2], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 11, 8,
-// 					dpath.InfoFields[1], &dpath.HopFields[4], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 3, 0,
-// 					dpath.InfoFields[1], &dpath.HopFields[5], dpath.PathMeta)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [7]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(1):  mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						31: topology.Parent,
-// 						1:  topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Child,
-// 						7: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(7): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(7): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Child,
-// 						7: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(5): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(11): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Core,
-// 						11: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(8): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("2-ff00:0:222"), nil, key, sv)
-// 				dps[5] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(8): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Core,
-// 						11: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(11): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("2-ff00:0:222"), nil, key, sv)
-// 				dps[6] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(3): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						3: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("3-ff00:0:333"), nil, key, sv)
-// 				return dps[:]
-// 			}, // middle hop of second segment is astransit
-// 			srcInterfaces: []uint16{0, 1, 5, 0, 11, 0, 3},
-// 		},
-// 		"six hops brtransit xover mixed consdir flyovers": {
-// 			// up segment non consdir, down segment consdir
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:111"),
-// 					xtest.MustParseIA("3-ff00:0:333"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{15, 13, 0},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 28,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 40, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 31, ConsEgress: 1},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 5},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 7}},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 11, ConsEgress: 8},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 3, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[2].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[2].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[3].HopField.Mac)
-// 				dpath.HopFields[4].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[4].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[4].HopField.Mac)
-// 				dpath.HopFields[5].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[5].HopField)
-// 				// Reset SegID to original value
-// 				dpath.InfoFields[1].SegID = 0x222
-// 				//aggregate MACs
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 0, 40,
-// 					dpath.InfoFields[0], &dpath.HopFields[0], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 1, 31,
-// 					dpath.InfoFields[0], &dpath.HopFields[1], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 5, 7,
-// 					dpath.InfoFields[0], &dpath.HopFields[2], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 11, 8,
-// 					dpath.InfoFields[1], &dpath.HopFields[4], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 3, 0,
-// 					dpath.InfoFields[1], &dpath.HopFields[5], dpath.PathMeta)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [5]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(1):  mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						31: topology.Parent,
-// 						1:  topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(7): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Child,
-// 						7: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(8):  mock_router.NewMockBatchConn(ctrl),
-// 						uint16(11): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Child,
-// 						11: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("2-ff00:0:222"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(3): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						3: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("3-ff00:0:333"), nil, key, sv)
-// 				return dps[:]
-// 			}, // middle hop of second segment is astransit
-// 			srcInterfaces: []uint16{0, 1, 5, 11, 3},
-// 		},
-// 		"six hops three segs mixed consdir flyovers": {
-// 			// two crossovers, first crossover is brtransit, second one is astransit
-// 			// core segment is non consdir
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:113"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{10, 8, 8},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   3,
-// 						NumLines: 26,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x333, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 40},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 1, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{HopField: path.HopField{ConsIngress: 5, ConsEgress: 0}},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 31},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{HopField: path.HopField{ConsIngress: 0, ConsEgress: 8}},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 3, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[3].HopField.Mac)
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[2].HopField)
-// 				dpath.HopFields[4].HopField.Mac = computeMAC(t, key, dpath.InfoFields[2],
-// 					dpath.HopFields[4].HopField)
-// 				dpath.InfoFields[2].UpdateSegID(dpath.HopFields[4].HopField.Mac)
-// 				dpath.HopFields[5].HopField.Mac = computeMAC(t, key, dpath.InfoFields[2],
-// 					dpath.HopFields[5].HopField)
-// 				// Reset SegID to original value
-// 				dpath.InfoFields[0].SegID = 0x111
-// 				dpath.InfoFields[2].SegID = 0x333
-// 				// aggregate flyover macs
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 0, 40,
-// 					dpath.InfoFields[0], &dpath.HopFields[0], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 1, 5,
-// 					dpath.InfoFields[0], &dpath.HopFields[1], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 31, 8,
-// 					dpath.InfoFields[1], &dpath.HopFields[3], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 3, 0,
-// 					dpath.InfoFields[2], &dpath.HopFields[5], dpath.PathMeta)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [5]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(1): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Child,
-// 						5: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Child,
-// 						31: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(8): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(8): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						8:  topology.Child,
-// 						31: topology.Core,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(31): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(3): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						3: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 1, 31, 0, 3},
-// 		},
-// 		"three hops peering brtransit consdir flyovers": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:113"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{5, 10},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 15,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, Peer: true, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, Peer: true, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 40},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 1, ConsEgress: 2},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 5, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[1].HopField)
-// 				// No Segment update here
-// 				// The second hop of a peering path uses the same segID as it's following hop
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[2].HopField)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 0, 40,
-// 					dpath.InfoFields[0], &dpath.HopFields[0], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 1, 2,
-// 					dpath.InfoFields[1], &dpath.HopFields[1], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 5, 0,
-// 					dpath.InfoFields[1], &dpath.HopFields[2], dpath.PathMeta)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [3]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Peer,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(1): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 1, 5},
-// 		},
-// 		"three hops peering brtransit non consdir flyovers": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:113"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{5, 10},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 15,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, Peer: true, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, Peer: true, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 40, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 2, ConsEgress: 1},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 5},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[2].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[2].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[1].HopField)
-// 				// No Segment update here
-// 				// The second hop of a peering path uses the same segID as it's following hop
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 0, 40,
-// 					dpath.InfoFields[0], &dpath.HopFields[0], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 1, 2,
-// 					dpath.InfoFields[1], &dpath.HopFields[1], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 5, 0,
-// 					dpath.InfoFields[1], &dpath.HopFields[2], dpath.PathMeta)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [3]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Peer,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 						uint16(1): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 1, 5},
-// 		},
-// 		"four hops peering astransit consdir flyovers": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:113"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{10, 10},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 20,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, Peer: true, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, Peer: true, ConsDir: true, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 40},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 31, ConsEgress: 7},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 1, ConsEgress: 2},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 5, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[2].HopField)
-// 				// No Segment update here
-// 				// The second hop of a peering path uses the same segID as it's following hop
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				// reset segID
-// 				dpath.InfoFields[0].SegID = 0x111
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 0, 40,
-// 					dpath.InfoFields[0], &dpath.HopFields[0], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 31, 7,
-// 					dpath.InfoFields[0], &dpath.HopFields[1], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 1, 2,
-// 					dpath.InfoFields[1], &dpath.HopFields[2], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 5, 0,
-// 					dpath.InfoFields[1], &dpath.HopFields[3], dpath.PathMeta)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [6]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						7:  topology.Peer,
-// 						31: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(7): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(7): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						7:  topology.Peer,
-// 						31: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(31): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(1): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(2): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(1): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[5] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 31, 0, 1, 0, 5},
-// 		},
-// 		"four hops peering astransit non consdir flyovers": {
-// 			mockMsg: func() *ipv4.Message {
-// 				spkt := prepHbirdSlayers(xtest.MustParseIA("1-ff00:0:110"),
-// 					xtest.MustParseIA("1-ff00:0:113"))
-// 				dst := addr.MustParseHost("10.0.100.100")
-// 				_ = spkt.SetDstAddr(dst)
-// 				dpath := &hummingbird.Decoded{
-// 					Base: hummingbird.Base{
-// 						PathMeta: hummingbird.MetaHdr{
-// 							CurrINF:   0,
-// 							CurrHF:    0,
-// 							SegLen:    [3]uint8{10, 10},
-// 							BaseTS:    util.TimeToSecs(now),
-// 							HighResTS: 500 << 22,
-// 						},
-// 						NumINF:   2,
-// 						NumLines: 20,
-// 					},
-// 					InfoFields: []path.InfoField{
-// 						{SegID: 0x111, Peer: true, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 						{SegID: 0x222, Peer: true, ConsDir: false, Timestamp: util.TimeToSecs(now)},
-// 					},
-// 					HopFields: []hummingbird.FlyoverHopField{
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 40, ConsEgress: 0},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 7, ConsEgress: 31},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 2, ConsEgress: 1},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 						{Flyover: true, HopField: path.HopField{ConsIngress: 0, ConsEgress: 5},
-// 							Bw: 5, ResStartTime: 123, Duration: 304},
-// 					},
-// 				}
-// 				// Compute MACs and increase SegID while doing so
-// 				dpath.HopFields[1].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[1].HopField)
-// 				// No Segment update here
-// 				// The second hop of a peering path uses the same segID as it's following hop
-// 				dpath.HopFields[0].HopField.Mac = computeMAC(t, key, dpath.InfoFields[0],
-// 					dpath.HopFields[0].HopField)
-// 				dpath.HopFields[3].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[3].HopField)
-// 				dpath.InfoFields[1].UpdateSegID(dpath.HopFields[3].HopField.Mac)
-// 				dpath.HopFields[2].HopField.Mac = computeMAC(t, key, dpath.InfoFields[1],
-// 					dpath.HopFields[2].HopField)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 0, 40,
-// 					dpath.InfoFields[0], &dpath.HopFields[0], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 31, 7,
-// 					dpath.InfoFields[0], &dpath.HopFields[1], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 1, 2,
-// 					dpath.InfoFields[1], &dpath.HopFields[2], dpath.PathMeta)
-// 				aggregateOntoScionMac(t, sv, spkt.DstIA, spkt.PayloadLen, 5, 0,
-// 					dpath.InfoFields[1], &dpath.HopFields[3], dpath.PathMeta)
-// 				ret := toMsg(t, spkt, dpath)
-// 				return ret
-// 			},
-// 			prepareDPs: func(*gomock.Controller) []*router.DataPlane {
-// 				var dps [6]*router.DataPlane
-// 				dps[0] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(40): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						40: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-// 				dps[1] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(31): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						7:  topology.Peer,
-// 						31: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(7): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[2] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(7): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						7:  topology.Peer,
-// 						31: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(31): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:111"), nil, key, sv)
-// 				dps[3] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(1): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(2): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[4] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						1: topology.Peer,
-// 						2: topology.Child,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					map[uint16]*net.UDPAddr{
-// 						uint16(1): {IP: net.ParseIP("10.0.200.200").To4(), Port: 30043},
-// 					}, nil, xtest.MustParseIA("1-ff00:0:112"), nil, key, sv)
-// 				dps[5] = router.NewDP(
-// 					map[uint16]router.BatchConn{
-// 						uint16(5): mock_router.NewMockBatchConn(ctrl),
-// 					},
-// 					map[uint16]topology.LinkType{
-// 						5: topology.Parent,
-// 					},
-// 					mock_router.NewMockBatchConn(ctrl),
-// 					nil, nil, xtest.MustParseIA("1-ff00:0:113"), nil, key, sv)
-// 				return dps[:]
-// 			},
-// 			srcInterfaces: []uint16{0, 31, 0, 1, 0, 5},
-// 		},
-// 	}
-// 	for name, tc := range testCases {
-// 		name, tc := name, tc
-// 		t.Run(name, func(t *testing.T) {
-// 			t.Parallel()
-// 			dps := tc.prepareDPs(ctrl)
-// 			input := tc.mockMsg()
-// 			for i, dp := range dps {
-// 				result, err := dp.ProcessPkt(tc.srcInterfaces[i], input)
-// 				assert.NoError(t, err)
-// 				input = &ipv4.Message{
-// 					Buffers: [][]byte{result.OutPkt},
-// 					Addr:    result.OutAddr,
-// 					N:       len(result.OutPkt),
-// 				}
-// 			}
-// 		})
-// 	}
-// }
+// TestProcessHbirdRouterAlert checks that a Hummingbird packet whose current hop
+// field carries a router-alert flag is diverted to the slow path (for a traceroute
+// reply) rather than forwarded on the fast path.
+func TestProcessHbirdRouterAlert(t *testing.T) {
 
-// TODO(juagargi): write test for concurrent bandwidth check calls
+	key := []byte("testkey_xxxxxxxx")
+	hbirdKey := []byte("test_secretvalue")
+	now := time.Now()
 
-// func TestBandwidthCheck(t *testing.T) {
-// 	ctrl := gomock.NewController(t)
-// 	defer ctrl.Finish()
+	// slowPathRouterAlert{Ingress,Egress} are -1 and -2 respectively (see dataplane.go).
+	const (
+		spTypeRouterAlertIngress int8 = -1
+		spTypeRouterAlertEgress  int8 = -2
+	)
 
-// 	key := []byte("testkey_xxxxxxxx")
-// 	sv := []byte("test_secretvalue")
-// 	now := time.Now()
+	testCases := map[string]struct {
+		prepareDP      func() *router.DataPlane
+		mockPkt        func(*testing.T, *router.DataPlane) *router.Packet
+		expectedSPType int8
+	}{
+		"ingress_router_alert_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2},
+					map[uint16]topology.LinkType{
+						1: topology.Parent,
+						2: topology.Child,
+					},
+					nil,
+					map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) *router.Packet {
+				return routerAlertPkt(t, dp, now, key, hbirdKey, false, true)
+			},
+			expectedSPType: spTypeRouterAlertIngress,
+		},
+		"egress_router_alert_best-effort": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2},
+					map[uint16]topology.LinkType{
+						1: topology.Parent,
+						2: topology.Child,
+					},
+					nil,
+					map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) *router.Packet {
+				return routerAlertPkt(t, dp, now, key, hbirdKey, false, false)
+			},
+			expectedSPType: spTypeRouterAlertEgress,
+		},
+		"ingress_router_alert_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2},
+					map[uint16]topology.LinkType{1: topology.Parent, 2: topology.Child},
+					nil, map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) *router.Packet {
+				return routerAlertPkt(t, dp, now, key, hbirdKey, true, true)
+			},
+			expectedSPType: spTypeRouterAlertIngress,
+		},
+		"egress_router_alert_flyover": {
+			prepareDP: func() *router.DataPlane {
+				return router.NewDPWithHummingbirdKey(
+					[]uint16{1, 2},
+					map[uint16]topology.LinkType{1: topology.Parent, 2: topology.Child},
+					nil, map[uint16]netip.AddrPort{},
+					addr.MustParseIA("1-ff00:0:110"), nil, key, hbirdKey)
+			},
+			mockPkt: func(t *testing.T, dp *router.DataPlane) *router.Packet {
+				return routerAlertPkt(t, dp, now, key, hbirdKey, true, false)
+			},
+			expectedSPType: spTypeRouterAlertEgress,
+		},
+	}
 
-// 	dp := router.NewDP(
-// 		map[uint16]router.BatchConn{
-// 			uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 		},
-// 		map[uint16]topology.LinkType{
-// 			1: topology.Parent,
-// 			2: topology.Child,
-// 		},
-// 		nil, nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dp := tc.prepareDP()
+			pkt := tc.mockPkt(t, dp)
+			disp := dp.ProcessPkt(pkt)
+			assert.Equal(t, router.PSlowPath, disp)
+			assert.Equal(t, tc.expectedSPType, router.ExtractSlowPathRequest(pkt).SPType)
+		})
+	}
+}
 
-// 	spkt, dpath := prepHbirdMsg(now)
-// 	dpath.HopFields = []hummingbird.FlyoverHopField{
-// 		{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
-// 		{Flyover: true, HopField: path.HopField{ConsIngress: 1, ConsEgress: 2}, ResID: 42,
-// 			Bw: 2, ResStartTime: 123, Duration: 304},
-// 		{HopField: path.HopField{ConsIngress: 40, ConsEgress: 41}},
-// 	}
-// 	dpath.Base.PathMeta.SegLen[0] = 11
-// 	dpath.Base.PathMeta.CurrHF = 3
-// 	dpath.Base.NumLines = 11
-
-// 	spkt.PayloadLen = 120
-// 	dpath.HopFields[1].HopField.Mac = computeAggregateMac(t, key, sv, spkt.DstIA,
-// 		spkt.PayloadLen, dpath.InfoFields[0], dpath.HopFields[1], dpath.Base.PathMeta)
-
-// 	msg := toLongMsg(t, spkt, dpath)
-
-// 	_, err := dp.ProcessPkt(1, msg)
-// 	assert.NoError(t, err)
-
-// 	msg = toLongMsg(t, spkt, dpath)
-// 	_, err = dp.ProcessPkt(1, msg)
-// 	assert.Error(t, err)
-
-// 	time.Sleep(time.Duration(1) * time.Second)
-
-// 	msg = toLongMsg(t, spkt, dpath)
-// 	_, err = dp.ProcessPkt(1, msg)
-// 	assert.NoError(t, err)
-// }
-
-// func TestBandwidthCheckDifferentResID(t *testing.T) {
-// 	// Verifies that packets of one reservation do not affect
-// 	// available bandwidth of another reservation
-// 	ctrl := gomock.NewController(t)
-// 	defer ctrl.Finish()
-
-// 	key := []byte("testkey_xxxxxxxx")
-// 	sv := []byte("test_secretvalue")
-// 	now := time.Now()
-
-// 	dp := router.NewDP(
-// 		map[uint16]router.BatchConn{
-// 			uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 		},
-// 		map[uint16]topology.LinkType{
-// 			1: topology.Parent,
-// 			2: topology.Child,
-// 		},
-// 		nil, nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-
-// 	spkt, dpath := prepHbirdMsg(now)
-// 	dpath.HopFields = []hummingbird.FlyoverHopField{
-// 		{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
-// 		{Flyover: true, HopField: path.HopField{ConsIngress: 1, ConsEgress: 2}, ResID: 24,
-// 			Bw: 2, ResStartTime: 123, Duration: 304},
-// 		{HopField: path.HopField{ConsIngress: 40, ConsEgress: 41}},
-// 	}
-// 	dpath.Base.PathMeta.SegLen[0] = 11
-// 	dpath.Base.PathMeta.CurrHF = 3
-// 	dpath.Base.NumLines = 11
-
-// 	spkt.PayloadLen = 120
-// 	dpath.HopFields[1].HopField.Mac = computeAggregateMac(t, key, sv, spkt.DstIA,
-// 		spkt.PayloadLen, dpath.InfoFields[0], dpath.HopFields[1], dpath.Base.PathMeta)
-
-// 	msg := toLongMsg(t, spkt, dpath)
-
-// 	_, err := dp.ProcessPkt(1, msg)
-// 	assert.NoError(t, err)
-
-// 	dpath.HopFields[1].ResID = 32
-// 	dpath.HopFields[1].HopField.Mac = computeAggregateMac(t, key, sv, spkt.DstIA,
-// 		spkt.PayloadLen, dpath.InfoFields[0], dpath.HopFields[1], dpath.Base.PathMeta)
-
-// 	msg = toLongMsg(t, spkt, dpath)
-// 	_, err = dp.ProcessPkt(1, msg)
-// 	assert.NoError(t, err)
-
-// 	dpath.HopFields[1].ResID = 42
-// 	dpath.HopFields[1].HopField.Mac = computeAggregateMac(t, key, sv, spkt.DstIA,
-// 		spkt.PayloadLen, dpath.InfoFields[0], dpath.HopFields[1], dpath.Base.PathMeta)
-
-// 	msg = toLongMsg(t, spkt, dpath)
-// 	_, err = dp.ProcessPkt(1, msg)
-// 	assert.NoError(t, err)
-// }
-
-// func TestBandwidthCheckDifferentEgress(t *testing.T) {
-// 	ctrl := gomock.NewController(t)
-// 	defer ctrl.Finish()
-
-// 	key := []byte("testkey_xxxxxxxx")
-// 	sv := []byte("test_secretvalue")
-// 	now := time.Now()
-
-// 	dp := router.NewDP(
-// 		map[uint16]router.BatchConn{
-// 			uint16(2): mock_router.NewMockBatchConn(ctrl),
-// 			uint16(3): mock_router.NewMockBatchConn(ctrl),
-// 		},
-// 		map[uint16]topology.LinkType{
-// 			1: topology.Parent,
-// 			2: topology.Child,
-// 			3: topology.Child,
-// 		},
-// 		nil, nil, nil, xtest.MustParseIA("1-ff00:0:110"), nil, key, sv)
-
-// 	spkt, dpath := prepHbirdMsg(now)
-// 	dpath.HopFields = []hummingbird.FlyoverHopField{
-// 		{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
-// 		{Flyover: true, HopField: path.HopField{ConsIngress: 1, ConsEgress: 2}, ResID: 42,
-// 			Bw: 2, ResStartTime: 123, Duration: 304},
-// 		{HopField: path.HopField{ConsIngress: 40, ConsEgress: 41}},
-// 	}
-// 	dpath.Base.PathMeta.SegLen[0] = 11
-// 	dpath.Base.PathMeta.CurrHF = 3
-// 	dpath.Base.NumLines = 11
-
-// 	spkt.PayloadLen = 120
-// 	dpath.HopFields[1].HopField.Mac = computeAggregateMac(t, key, sv, spkt.DstIA,
-// 		spkt.PayloadLen, dpath.InfoFields[0], dpath.HopFields[1], dpath.Base.PathMeta)
-
-// 	msg := toLongMsg(t, spkt, dpath)
-
-// 	_, err := dp.ProcessPkt(1, msg)
-// 	assert.NoError(t, err)
-
-// 	msg = toLongMsg(t, spkt, dpath)
-// 	_, err = dp.ProcessPkt(1, msg)
-// 	assert.Error(t, err)
-
-// 	// Reservation with same resID but different Ingress/Egress pair is a different reservation
-// 	dpath.HopFields[1].HopField.ConsEgress = 3
-// 	spkt.PayloadLen = 120
-// 	dpath.HopFields[1].HopField.Mac = computeAggregateMac(t, key, sv, spkt.DstIA,
-// 		spkt.PayloadLen, dpath.InfoFields[0], dpath.HopFields[1], dpath.Base.PathMeta)
-// 	msg = toLongMsg(t, spkt, dpath)
-// 	_, err = dp.ProcessPkt(1, msg)
-// 	assert.NoError(t, err)
-// }
-
-// func toLongMsg(t *testing.T, spkt *slayers.SCION, dpath path.Path) *ipv4.Message {
-// 	t.Helper()
-// 	ret := &ipv4.Message{}
-// 	spkt.Path = dpath
-// 	buffer := gopacket.NewSerializeBuffer()
-// 	payload := [120]byte{}
-// 	err := gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true},
-// 		spkt, gopacket.Payload(payload[:]))
-// 	require.NoError(t, err)
-// 	raw := buffer.Bytes()
-// 	ret.Buffers = make([][]byte, 1)
-// 	ret.Buffers[0] = make([]byte, 1500)
-// 	copy(ret.Buffers[0], raw)
-// 	ret.N = len(raw)
-// 	ret.Buffers[0] = ret.Buffers[0][:ret.N]
-// 	return ret
-// }
-
+// prepHbirdMsg builds a minimal, otherwise-empty Hummingbird SCION header and decoded path
+// (with a single info field and no hop fields) for callers to fill in with their own hop fields
+// and path metadata.
 func prepHbirdMsg(now time.Time) (*slayers.SCION, *hummingbird.Decoded) {
 	spkt := &slayers.SCION{
 		Version:      0,
@@ -3942,7 +2171,10 @@ func prepHbirdMsg(now time.Time) (*slayers.SCION, *hummingbird.Decoded) {
 	return spkt, dpath
 }
 
-func prepReversedScionPathForInboundFlyover(t *testing.T, now time.Time) *scion.Decoded {
+// prepReversedScionPathForInbound builds a plain SCION path already reversed into construction
+// direction, for the "inbound_reversed_scion_path_*" cases that check delivery of a packet
+// converted from a SCION reply path into a Hummingbird one.
+func prepReversedScionPathForInbound(t *testing.T, now time.Time) *scion.Decoded {
 	t.Helper()
 
 	sp := &scion.Decoded{
@@ -3968,21 +2200,352 @@ func prepReversedScionPathForInboundFlyover(t *testing.T, now time.Time) *scion.
 	return reversed.(*scion.Decoded)
 }
 
-func prepHbirdSlayers(src, dst addr.IA) *slayers.SCION {
-	spkt := &slayers.SCION{
-		Version:      0,
-		TrafficClass: 0xb8,
-		FlowID:       0xdead,
-		NextHdr:      slayers.L4UDP,
-		PathType:     hummingbird.PathType,
-		DstIA:        dst,
-		SrcIA:        src,
-		Path:         &hummingbird.Raw{},
-		PayloadLen:   26, // scionudpLayer + len("actualpayloadbytes")
+// prepMalformedHbirdPath builds a Hummingbird path whose CurrHF points into the middle of a
+// hop (a three-line regular hop, or an eleven-line encoding with a five-line flyover hop when
+// flyover is true), which the router must reject as a malformed path.
+func prepMalformedHbirdPath(now time.Time, flyover bool) *hummingbird.Decoded {
+	dpath := &hummingbird.Decoded{
+		Base: hummingbird.Base{
+			PathMeta: hummingbird.MetaHdr{
+				CurrHF: 4, SegLen: [3]uint8{9, 0, 0}, BaseTS: util.TimeToSecs(now),
+			},
+			NumINF: 1, NumLines: 9,
+		},
+		InfoFields: []path.InfoField{
+			{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)},
+		},
+		HopFields: []hummingbird.FlyoverHopField{
+			{HopField: path.HopField{ConsIngress: 41, ConsEgress: 40}},
+			{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
+			{HopField: path.HopField{ConsIngress: 1, ConsEgress: 0}},
+		},
 	}
-	return spkt
+	if flyover {
+		dpath.PathMeta.SegLen[0] = 11
+		dpath.NumLines = 11
+		dpath.HopFields[1].Flyover = true
+		dpath.HopFields[1].Bw = 16
+		dpath.HopFields[1].ResStartTime = 123
+		dpath.HopFields[1].Duration = 304
+	}
+	return dpath
 }
 
+// prepASTransitXoverEgressPath builds a two-segment Hummingbird path positioned at the
+// down-segment hop of an AS-transit segment crossover, as seen by the egress BR: the packet
+// arrives internally from the sibling ingress BR and is about to leave externally. If flyover
+// is true, the down-segment hop carries the flyover moved there by the ingress BR.
+func prepASTransitXoverEgressPath(now time.Time, flyover bool) *hummingbird.Decoded {
+	dpath := &hummingbird.Decoded{
+		Base: hummingbird.Base{
+			PathMeta: hummingbird.MetaHdr{
+				CurrINF: 1, CurrHF: 6, SegLen: [3]uint8{6, 6, 0},
+				BaseTS: util.TimeToSecs(now),
+			},
+			NumINF: 2, NumLines: 12,
+		},
+		InfoFields: []path.InfoField{
+			{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
+			{SegID: 0x222, ConsDir: true, Timestamp: util.TimeToSecs(now)},
+		},
+		HopFields: []hummingbird.FlyoverHopField{
+			{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}},
+			{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1}},
+			{HopField: path.HopField{ConsIngress: 0, ConsEgress: 2}},
+			{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}},
+		},
+	}
+	if flyover {
+		dpath.PathMeta.SegLen[1] += 2
+		dpath.NumLines += 2
+		dpath.HopFields[2].Flyover = true
+		dpath.HopFields[2].Bw = 129
+		dpath.HopFields[2].ResStartTime = 5
+		dpath.HopFields[2].Duration = 310
+	}
+	return dpath
+}
+
+// freshnessFlyoverPkt builds a valid outbound flyover whose packet timestamp is
+// supplied by the caller. The reservation remains valid; only the freshness
+// check demotes the processed packet to best effort.
+func freshnessFlyoverPkt(
+	t *testing.T,
+	packetTime time.Time,
+	key []byte,
+	hbirdKey []byte,
+	afterProcessing bool,
+) *router.Packet {
+	t.Helper()
+	spkt, dpath := prepHbirdMsg(packetTime)
+	spkt.SrcIA = addr.MustParseIA("1-ff00:0:110")
+	dpath.PathMeta.CurrHF = 0
+	dpath.PathMeta.SegLen[0] = 8
+	dpath.NumLines = 8
+	dpath.HopFields = []hummingbird.FlyoverHopField{
+		{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1}, Flyover: true,
+			Bw: 129, ResStartTime: 123, Duration: 304},
+		{HopField: path.HopField{ConsIngress: 41, ConsEgress: 0}},
+	}
+	dpath.HopFields[0].HopField.Mac = computeAggregateMac(
+		t, key, hbirdKey, spkt, dpath, dpath.InfoFields[0], dpath.HopFields[0],
+		dpath.PathMeta)
+	priority := pr.WithPriority
+	egress := uint16(0)
+	if afterProcessing {
+		dpath.HopFields[0].HopField.Mac =
+			computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[0].HopField)
+		dpath.InfoFields[0].UpdateSegID(dpath.HopFields[0].HopField.Mac)
+		require.NoError(t, dpath.IncPath(hummingbird.FlyoverLines))
+		priority = pr.WithBestEffort
+		egress = 1
+	}
+	return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, 0, egress, priority)
+}
+
+// directASTransitPkt builds one half of split-BR AS transit without a segment
+// crossover. The ingress BR authenticates the current hop and forwards it
+// internally without advancing; the egress BR completes egress processing,
+// advances the path, and sends it externally.
+func directASTransitPkt(
+	t *testing.T,
+	dp *router.DataPlane,
+	now time.Time,
+	key []byte,
+	hbirdKey []byte,
+	flyover bool,
+	egressBR bool,
+	afterProcessing bool,
+) *router.Packet {
+	t.Helper()
+	spkt, dpath := prepHbirdMsg(now)
+	dpath.HopFields = []hummingbird.FlyoverHopField{
+		{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
+		{HopField: path.HopField{ConsIngress: 1, ConsEgress: 3}},
+		{HopField: path.HopField{ConsIngress: 50, ConsEgress: 51}},
+	}
+	dpath.PathMeta.CurrHF = 3
+	priority := pr.WithBestEffort
+	advance := hummingbird.HopLines
+	if flyover {
+		dpath.PathMeta.SegLen[0] = 11
+		dpath.NumLines = 11
+		dpath.HopFields[1].Flyover = true
+		dpath.HopFields[1].ResID = 42
+		dpath.HopFields[1].ResStartTime = 5
+		dpath.HopFields[1].Duration = 301
+		dpath.HopFields[1].Bw = 129
+		dpath.HopFields[1].HopField.Mac = computeAggregateMac(
+			t, key, hbirdKey, spkt, dpath, dpath.InfoFields[0], dpath.HopFields[1],
+			dpath.PathMeta)
+		priority = pr.WithPriority
+		advance = hummingbird.FlyoverLines
+	} else {
+		dpath.HopFields[1].HopField.Mac =
+			computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[1].HopField)
+	}
+
+	if !egressBR {
+		egress := uint16(0)
+		if afterProcessing {
+			egress = 3 // Interface 3 belongs to the sibling egress BR.
+		}
+		return router.NewPacket(toBytes(t, spkt, dpath), nil, nil, 1, egress, priority)
+	}
+
+	if afterProcessing {
+		if flyover {
+			dpath.HopFields[1].HopField.Mac =
+				computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[1].HopField)
+		}
+		dpath.InfoFields[0].UpdateSegID(dpath.HopFields[1].HopField.Mac)
+		require.NoError(t, dpath.IncPath(advance))
+	}
+	pkt := router.NewPacket(toBytes(t, spkt, dpath), nil, nil, 0, 3, priority)
+	// Interface 1 is external on the sibling ingress BR and identifies the link
+	// on which this AS received the packet before internal forwarding.
+	pkt.Link = router.ExtractInterfaces(dp)[1]
+	return pkt
+}
+
+// invalidHbirdPosition selects where in the path invalidHbirdPkt places the packet's current
+// hop.
+type invalidHbirdPosition uint8
+
+const (
+	invalidHbirdInbound invalidHbirdPosition = iota
+	invalidHbirdOutbound
+)
+
+// invalidHbirdField selects which field invalidHbirdPkt corrupts.
+type invalidHbirdField uint8
+
+const (
+	invalidHbirdMAC invalidHbirdField = iota
+	invalidHbirdSourceIA
+	invalidHbirdDestinationIA
+)
+
+// invalidHbirdPkt derives an invalid packet from the valid inbound or outbound
+// cases in TestProcessHbirdPacket. It authenticates every field except the one
+// selected by invalidField, making that field the packet's only failure cause.
+func invalidHbirdPkt(
+	t *testing.T,
+	dp *router.DataPlane,
+	now time.Time,
+	key []byte,
+	hbirdKey []byte,
+	flyover bool,
+	position invalidHbirdPosition,
+	invalidField invalidHbirdField,
+) (*router.Packet, []byte) {
+	t.Helper()
+
+	// Start with the endpoint IAs from the base packet. The position-specific
+	// setup below makes the appropriate endpoint local and moves the packet to
+	// either the first or final hop of the path.
+	spkt, dpath := prepHbirdMsg(now)
+	var current int
+	var ingress uint16
+	switch position {
+	case invalidHbirdInbound:
+		// Reproduce TestProcessHbirdPacket/inbound_{best-effort,flyover}: the
+		// final hop enters the local AS through external interface 1.
+		spkt.DstIA = addr.MustParseIA("1-ff00:0:110")
+		require.NoError(t, spkt.SetDstAddr(addr.MustParseHost("10.0.100.100")))
+		dpath.HopFields = []hummingbird.FlyoverHopField{
+			{HopField: path.HopField{ConsIngress: 41, ConsEgress: 40}},
+			{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
+			{HopField: path.HopField{ConsIngress: 1, ConsEgress: 0}},
+		}
+		current = 2
+		dpath.PathMeta.CurrHF = 6
+		ingress = 1
+	case invalidHbirdOutbound:
+		// Reproduce TestProcessHbirdPacket/outbound_{best-effort,flyover}: the
+		// first hop enters the BR internally and leaves on interface 1.
+		spkt.SrcIA = addr.MustParseIA("1-ff00:0:110")
+		dpath.HopFields = []hummingbird.FlyoverHopField{
+			{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1}},
+			{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
+			{HopField: path.HopField{ConsIngress: 41, ConsEgress: 40}},
+		}
+		current = 0
+		dpath.PathMeta.CurrHF = 0
+	default:
+		require.FailNow(t, "unknown Hummingbird packet position", "position: %d", position)
+	}
+
+	// Invalidate the selected IA before computing the MAC because both IAs are
+	// covered by a flyover aggregate MAC.
+	switch invalidField {
+	case invalidHbirdMAC:
+	case invalidHbirdSourceIA:
+		if position == invalidHbirdInbound {
+			spkt.SrcIA = addr.MustParseIA("1-ff00:0:110")
+		} else {
+			spkt.SrcIA = addr.MustParseIA("2-ff00:0:222")
+		}
+	case invalidHbirdDestinationIA:
+		if position == invalidHbirdInbound {
+			spkt.DstIA = addr.MustParseIA("4-ff00:0:411")
+		} else {
+			spkt.DstIA = addr.MustParseIA("1-ff00:0:110")
+		}
+	default:
+		require.FailNow(t, "unknown invalid Hummingbird field", "field: %d", invalidField)
+	}
+
+	// Authenticate the current hop according to the selected packet mode. For
+	// IA failures this ensures that IA validation is the only failing check.
+	priority := pr.WithBestEffort
+	if flyover {
+		dpath.PathMeta.SegLen[0] = 11
+		dpath.NumLines = 11
+		dpath.HopFields[current].Flyover = true
+		dpath.HopFields[current].Bw = 129
+		dpath.HopFields[current].ResStartTime = 123
+		dpath.HopFields[current].Duration = 304
+		dpath.HopFields[current].HopField.Mac = computeAggregateMac(
+			t, key, hbirdKey, spkt, dpath, dpath.InfoFields[0], dpath.HopFields[current],
+			dpath.PathMeta)
+		priority = pr.WithPriority
+	} else {
+		dpath.HopFields[current].HopField.Mac =
+			computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[current].HopField)
+	}
+	if invalidField == invalidHbirdMAC {
+		dpath.HopFields[current].HopField.Mac[0] ^= 0xff
+	}
+
+	// Preserve the exact offending packet before handing the mutable copy to the
+	// dataplane; ProcessSlowPath must quote these original bytes in its response.
+	raw := toBytes(t, spkt, dpath)
+	original := bytes.Clone(raw)
+	pkt := router.NewPacket(raw, nil, nil, ingress, 0, priority)
+	if ingress != 0 {
+		pkt.Link = router.ExtractInterfaces(dp)[ingress]
+	}
+	return pkt, original
+}
+
+// routerAlertPkt builds a valid BR-transit Hummingbird packet with exactly one
+// router-alert flag set on its current hop. The packet can use either a regular
+// hop MAC or a flyover aggregate MAC.
+func routerAlertPkt(
+	t *testing.T,
+	dp *router.DataPlane,
+	now time.Time,
+	key []byte,
+	hbirdKey []byte,
+	flyover bool,
+	ingressAlert bool,
+) *router.Packet {
+	t.Helper()
+
+	// Create the current transit hop and set exactly the requested alert bit.
+	spkt, dpath := prepHbirdMsg(now)
+	current := hummingbird.FlyoverHopField{
+		HopField: path.HopField{ConsIngress: 1, ConsEgress: 2},
+		Flyover:  flyover, Bw: 129, ResStartTime: 123, Duration: 304,
+	}
+	current.HopField.IngressRouterAlert = ingressAlert
+	current.HopField.EgressRouterAlert = !ingressAlert
+
+	// Place the alert-bearing hop between neighboring hops and make it current.
+	dpath.HopFields = []hummingbird.FlyoverHopField{
+		{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30}},
+		current,
+		{HopField: path.HopField{ConsIngress: 40, ConsEgress: 41}},
+	}
+	dpath.PathMeta.CurrHF = 3
+
+	// Compute the MAC only after setting the alert flag because router-alert bits
+	// are authenticated. Flyovers additionally require the five-line encoding.
+	priority := pr.WithBestEffort
+	if flyover {
+		dpath.PathMeta.SegLen[0] = 11
+		dpath.NumLines = 11
+		dpath.HopFields[1].HopField.Mac = computeAggregateMac(
+			t, key, hbirdKey, spkt, dpath, dpath.InfoFields[0], dpath.HopFields[1],
+			dpath.PathMeta)
+		priority = pr.WithPriority
+	} else {
+		dpath.HopFields[1].HopField.Mac =
+			computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[1].HopField)
+	}
+
+	// Attach the configured external ingress link so ingress/egress alert logic
+	// observes the same link scope as normal dataplane processing.
+	pkt := router.NewPacket(toBytes(t, spkt, dpath), nil, nil, 1, 0, priority)
+	pkt.Link = router.ExtractInterfaces(dp)[1]
+	return pkt
+}
+
+// computeAggregateMac computes an aggregate MAC (SCION MAC XORed with flyover MAC) for hf,
+// deriving the reservation's ingress/egress interfaces from hf's ConsIngress/ConsEgress and
+// info's construction direction. Use computeAggregateMacForInterfaces directly when the
+// reservation's interfaces differ from the hop field's (e.g. at a crossover).
 func computeAggregateMac(
 	t *testing.T,
 	key []byte,
@@ -3993,19 +2556,25 @@ func computeAggregateMac(
 	hf hummingbird.FlyoverHopField,
 	meta hummingbird.MetaHdr,
 ) [path.MacLen]byte {
-	return computeAggregateMacExplicitInEg(
-		t, key, sv, spkt, dpath, hf.HopField.ConsIngress, hf.HopField.ConsEgress,
+	ingress, egress := hf.HopField.ConsIngress, hf.HopField.ConsEgress
+	if !info.ConsDir {
+		ingress, egress = egress, ingress
+	}
+	return computeAggregateMacForInterfaces(
+		t, key, sv, spkt, dpath, ingress, egress,
 		info, hf, meta)
 }
 
-func computeAggregateMacExplicitInEg(
+// computeAggregateMacForInterfaces computes an aggregate MAC using ingress and
+// egress in packet traversal direction, independent of construction direction.
+func computeAggregateMacForInterfaces(
 	t *testing.T,
 	key []byte,
 	sv []byte,
 	spkt *slayers.SCION,
 	dpath *hummingbird.Decoded,
-	hin uint16,
-	heg uint16,
+	ingress uint16,
+	egress uint16,
 	info path.InfoField,
 	hf hummingbird.FlyoverHopField,
 	meta hummingbird.MetaHdr,
@@ -4014,13 +2583,6 @@ func computeAggregateMacExplicitInEg(
 
 	block, err := aes.NewCipher(sv)
 	require.NoError(t, err)
-	ingress, egress := hin, heg
-	if !info.ConsDir {
-		// Since reservations are not bidirectional,
-		// specify here the exact ingress and egress that was used to make the reservation.
-		ingress, egress = egress, ingress
-	}
-
 	akBuffer := make([]byte, hummingbird.AkBufferSize)
 	macBuffer := make([]byte, hummingbird.FlyoverMacBufferSize)
 	xkBuffer := make([]uint32, hummingbird.XkBufferSize)
@@ -4038,46 +2600,9 @@ func computeAggregateMacExplicitInEg(
 	return scionMac
 }
 
-// deaggregateFlyoverFromMac removes the flyover from the SCION MAC.
-func deaggregateFlyoverFromMac(
-	t *testing.T,
-	key []byte,
-	info path.InfoField,
-	flyover hummingbird.FlyoverHopField,
-) [6]byte {
-	scionMac := computeMAC(t, key, info, flyover.HopField) // Compute SCION MAC
-	mac := flyover.HopField.Mac                            // Copy MAC.
-	// MAC = S^F (SCION XOR Flyover).
-	mac[0] = (mac[0] ^ scionMac[0]) ^ mac[0] // S^F ^ S = F ; F ^ S^F = S
-	mac[1] = (mac[1] ^ scionMac[1]) ^ mac[1]
-
-	return mac
-}
-
-// Computes flyovermac and aggregates it to existing mac in hopfield
-func aggregateOntoScionMac(t *testing.T, sv []byte, spkt *slayers.SCION, dpath *hummingbird.Decoded,
-	hin, heg uint16,
-	info path.InfoField, hf *hummingbird.FlyoverHopField, meta hummingbird.MetaHdr) {
-	block, err := aes.NewCipher(sv)
-	require.NoError(t, err)
-	ingress, egress := hin, heg
-
-	akBuffer := make([]byte, hummingbird.AkBufferSize)
-	macBuffer := make([]byte, hummingbird.FlyoverMacBufferSize)
-	xkBuffer := make([]uint32, hummingbird.XkBufferSize)
-
-	ak := hummingbird.DeriveAuthKey(block, hf.ResID, hf.Bw, ingress, egress,
-		meta.BaseTS-uint32(hf.ResStartTime), hf.Duration, akBuffer)
-	flyoverMac := hummingbird.FullFlyoverMac(ak, spkt.DstIA,
-		packetLenFromRouterView(t, spkt, dpath),
-		hf.ResStartTime,
-		meta.HighResTS, macBuffer, xkBuffer)
-
-	for i := range hf.HopField.Mac {
-		hf.HopField.Mac[i] ^= flyoverMac[i]
-	}
-}
-
+// packetLenFromRouterView returns the total packet length as the router computes it for the
+// flyover MAC (via slayers.SCION.PacketLen), by round-tripping dpath through its raw encoding
+// exactly as the router would see it on the wire.
 func packetLenFromRouterView(
 	t *testing.T,
 	spkt *slayers.SCION,
