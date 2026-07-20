@@ -3,11 +3,12 @@ import sqlite3
 import hashlib
 import bcrypt
 import argparse
+import re
 
 """
 Example JSON file:
 {
-    "version": "06fbea578eb436ef800197b1c27df8c581899723b1505919a4d8103b18f16f7f",
+    "version": "60ed70e88a24d3aa759955c5f5c3d5c9343523c75e5cfaf075467e0d92cd9248",
     "users": [
         {
             "name": "Alice",
@@ -167,11 +168,10 @@ def insertAll(db, data) -> bool:
     return insertDelegations(db, data.get("delegations"))
 
 def hash_file(filename):
-    sha256 = hashlib.sha256()
-    with open(filename, "rb") as f:
-        while chunk := f.read(8192):
-            sha256.update(chunk)
-    return sha256.hexdigest()
+    with open(filename, "r", encoding="utf-8") as f:
+        sql = f.read()
+    normalized = re.sub(r"\s+", " ", sql).strip()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 def verifyScheme(schemePath, version):
     actualVersion = hash_file(schemePath)
