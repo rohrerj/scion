@@ -107,7 +107,9 @@ func (s *MarketplaceStorage) UpdateListedAsset(ctx context.Context, a *marketpla
 func (s *MarketplaceStorage) DeleteListedAsset(ctx context.Context, ia addr.IA, assetID int64) (int64, error) {
 	return s.db.DeleteListedAsset(ctx, ia, assetID)
 }
-
+func (s *MarketplaceStorage) GetAccountsByUser(ctx context.Context, id int64) ([]*marketplacedb.DBAccount, error) {
+	return s.db.GetAccountsByUser(ctx, id)
+}
 func (s *MarketplaceStorage) GetUser(ctx context.Context, id int64) (*marketplacedb.DBUser, error) {
 	return s.db.GetUser(ctx, id)
 }
@@ -124,8 +126,111 @@ func (s *MarketplaceStorage) GetUserByName(ctx context.Context, name string) (*m
 	return s.db.GetUserByName(ctx, name)
 }
 
+func (s *MarketplaceStorage) CreateAccount(ctx context.Context, account *marketplacedb.DBAccount) (int64, error) {
+	return s.db.CreateAccount(ctx, account)
+}
+
+func (s *MarketplaceStorage) GetAccountByAccountID(ctx context.Context, id int64) (*marketplacedb.DBAccount, error) {
+	return s.db.GetAccountByAccountID(ctx, id)
+}
+
+func (s *MarketplaceStorage) DeleteAccount(ctx context.Context, user_id int64, accountId int64) (int64, error) {
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	allUserAccounts, err := tx.GetAccountsByUser(ctx, user_id)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	var targetAccount *marketplacedb.DBAccount
+	var mainAccount *marketplacedb.DBAccount
+	for _, account := range allUserAccounts {
+		if account.ID == accountId {
+			targetAccount = account
+		} else if account.Scope == nil {
+			mainAccount = account
+		}
+	}
+	if targetAccount == nil || mainAccount == nil {
+		if err != nil {
+			return 0, serrors.Join(serrors.New("invalid account"), tx.Rollback())
+		}
+	}
+	_, err = tx.TransferAllAssetsToAccount(ctx, targetAccount.ID, mainAccount.ID)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	_, err = tx.TransferAllReservations(ctx, targetAccount.ID, mainAccount.ID)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	_, err = tx.UpdateAccountMoney(ctx, mainAccount.ID, targetAccount.Balance)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	x, err := tx.DeleteAccount(ctx, targetAccount.ID)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	if x != 1 {
+		return 0, serrors.Join(serrors.New("account not found"), tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	return 1, nil
+}
+
+func (s *MarketplaceStorage) TransferMoneyBetweenAccounts(ctx context.Context, user_id int64, accountFrom int64, accountTo int64, balance int64) (int64, error) {
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	x, err := tx.UpdateAccountMoneyWithUser(ctx, user_id, accountFrom, -balance)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	if x != 1 {
+		return 0, serrors.Join(serrors.New("account not found"), tx.Rollback())
+	}
+	x, err = tx.UpdateAccountMoneyWithUser(ctx, user_id, accountTo, balance)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	if x != 1 {
+		return 0, serrors.Join(serrors.New("account not found"), tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	return 1, nil
+}
+
 func (s *MarketplaceStorage) CreateUser(ctx context.Context, user *marketplacedb.DBUser) (int64, error) {
-	return s.db.CreateUser(ctx, user)
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	userId, err := tx.CreateUser(ctx, user)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	baseAccount := &marketplacedb.DBAccount{
+		UserID: userId,
+		Scope:  nil,
+	}
+	_, err = tx.CreateAccount(ctx, baseAccount)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	return userId, nil
 }
 
 func (s *MarketplaceStorage) CreateASUser(ctx context.Context, user *marketplacedb.DBASUser) (int64, error) {
@@ -228,8 +333,13 @@ func (s *MarketplaceStorage) totalPrice(price uint32, bw uint32, startsAt time.T
 func (s *MarketplaceStorage) IncrementASJWTVersion(ctx context.Context, ia addr.IA, current int64) (int64, error) {
 	return s.db.IncrementASJWTVersion(ctx, ia, current)
 }
-func (s *MarketplaceStorage) IncrementUserJWTVersion(ctx context.Context, userid int64, current int64) (int64, error) {
-	return s.db.IncrementUserJWTVersion(ctx, userid, current)
+
+func (s *MarketplaceStorage) IncrementAccountJWTVersion(ctx context.Context, accountId int64, current int64) (int64, error) {
+	return s.db.IncrementAccountJWTVersion(ctx, accountId, current)
+}
+
+func (s *MarketplaceStorage) IncrementUserJWTVersion(ctx context.Context, userId int64, accountId int64) (int64, error) {
+	return s.db.IncrementUserJWTVersion(ctx, userId, accountId)
 }
 
 func gcd(a, b uint32) uint32 {
@@ -243,20 +353,20 @@ func lcm(a, b uint32) uint32 {
 	return a / gcd(a, b) * b
 }
 
-func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, assetId1 int64, assetId2 int64) (int64, error) {
+func (s *MarketplaceStorage) CombineAssets(ctx context.Context, accountID int64, assetId1 int64, assetId2 int64) (int64, error) {
 	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
 	if err != nil {
 		return 0, err
 	}
-	_, err = tx.UpdateMoney(ctx, user_id, -int64(s.splitCombineFeeAbsolute))
+	_, err = tx.UpdateAccountMoney(ctx, accountID, -int64(s.splitCombineFeeAbsolute))
 	if err != nil {
 		return 0, serrors.Join(err, tx.Rollback())
 	}
-	a1, err := tx.PrepareCombine(ctx, assetId1, user_id)
+	a1, err := tx.PrepareCombine(ctx, assetId1, accountID)
 	if err != nil {
 		return 0, serrors.Join(err, tx.Rollback())
 	}
-	a2, err := tx.PrepareCombine(ctx, assetId2, user_id)
+	a2, err := tx.PrepareCombine(ctx, assetId2, accountID)
 	if err != nil {
 		return 0, serrors.Join(err, tx.Rollback())
 	}
@@ -272,7 +382,7 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 	var combinedAsset *marketplacedb.DBAsset
 	if a1.StartAt.Equal(a2.StartAt) && a1.StopsAt.Equal(a2.StopsAt) {
 		combinedAsset = &marketplacedb.DBAsset{
-			OwnerId:         a1.OwnerId,
+			AccountId:       a1.AccountId,
 			IA:              a1.IA,
 			Bandwidth:       a1.Bandwidth + a2.Bandwidth,
 			BandwidthMin:    max(a1.BandwidthMin, a2.BandwidthMin),
@@ -288,7 +398,7 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 	} else if a1.Bandwidth == a2.Bandwidth {
 		if a1.StartAt.Equal(a2.StopsAt) {
 			combinedAsset = &marketplacedb.DBAsset{
-				OwnerId:         a1.OwnerId,
+				AccountId:       a1.AccountId,
 				IA:              a1.IA,
 				Bandwidth:       a1.Bandwidth,
 				BandwidthMin:    max(a1.BandwidthMin, a2.BandwidthMin),
@@ -303,7 +413,7 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 			}
 		} else if a2.StartAt.Equal(a1.StopsAt) {
 			combinedAsset = &marketplacedb.DBAsset{
-				OwnerId:         a1.OwnerId,
+				AccountId:       a1.AccountId,
 				IA:              a1.IA,
 				Bandwidth:       a1.Bandwidth,
 				BandwidthMin:    max(a1.BandwidthMin, a2.BandwidthMin),
@@ -341,7 +451,7 @@ func (s *MarketplaceStorage) CombineAssets(ctx context.Context, user_id int64, a
 	return newId, nil
 }
 
-func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, assetId int64, bwSplit *uint32, timeSplit *time.Time) (int64, int64, error) {
+func (s *MarketplaceStorage) SplitAsset(ctx context.Context, accountID int64, assetId int64, bwSplit *uint32, timeSplit *time.Time) (int64, int64, error) {
 	if bwSplit == nil && timeSplit == nil {
 		return 0, 0, serrors.New("invalid split request")
 	}
@@ -349,11 +459,11 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 	if err != nil {
 		return 0, 0, err
 	}
-	_, err = tx.UpdateMoney(ctx, user_id, -int64(s.splitCombineFeeAbsolute))
+	_, err = tx.UpdateAccountMoney(ctx, accountID, -int64(s.splitCombineFeeAbsolute))
 	if err != nil {
 		return 0, 0, serrors.Join(err, tx.Rollback())
 	}
-	dbAsset, err := tx.PrepareSplit(ctx, assetId, user_id)
+	dbAsset, err := tx.PrepareSplit(ctx, assetId, accountID)
 	if err != nil {
 		return 0, 0, serrors.Join(err, tx.Rollback())
 	}
@@ -381,7 +491,7 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 		return 0, 0, serrors.Join(serrors.New("invalid split result"), tx.Rollback())
 	}
 	asset1 := &marketplacedb.DBAsset{
-		OwnerId:         dbAsset.OwnerId,
+		AccountId:       dbAsset.AccountId,
 		IA:              dbAsset.IA,
 		BandwidthMin:    dbAsset.BandwidthMin,
 		BandwidthMax:    dbAsset.BandwidthMax,
@@ -395,7 +505,7 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, user_id int64, asse
 		StopsAt:         splitResult.Split.StopsAt,
 	}
 	asset2 := &marketplacedb.DBAsset{
-		OwnerId:         dbAsset.OwnerId,
+		AccountId:       dbAsset.AccountId,
 		IA:              dbAsset.IA,
 		BandwidthMin:    dbAsset.BandwidthMin,
 		BandwidthMax:    dbAsset.BandwidthMax,
@@ -435,7 +545,7 @@ func (s *MarketplaceStorage) FindUsedReservations(ctx context.Context, params *m
 	return s.db.FindUsedReservations(ctx, params)
 }
 
-func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, assets []*hummingbird.BuyAsset, maxPrice uint64) ([]int64, int64, error) {
+func (s *MarketplaceStorage) BuyAssets(ctx context.Context, accountID int64, assets []*hummingbird.BuyAsset, maxPrice uint64) ([]int64, int64, error) {
 	uniqueCheck := make(map[string]bool)
 	for _, asset := range assets {
 		if uniqueCheck[asset.AssetId] {
@@ -470,8 +580,8 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, asset
 			return nil, 0, serrors.Join(err, tx.Rollback())
 		}
 		newAsset := &marketplacedb.DBAsset{
-			OwnerId: sql.NullInt64{
-				Int64: user_id,
+			AccountId: sql.NullInt64{
+				Int64: accountID,
 				Valid: true,
 			},
 			IA:              dbAsset.IA,
@@ -534,7 +644,7 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, user_id int64, asset
 	if uint64(costAcc) > maxPrice {
 		return nil, 0, serrors.Join(serrors.New("cost higher than max price"), tx.Rollback())
 	}
-	_, err = tx.UpdateMoney(ctx, user_id, -costAcc)
+	_, err = tx.UpdateAccountMoney(ctx, accountID, -costAcc)
 	if err != nil {
 		return nil, 0, serrors.Join(err, tx.Rollback())
 	}
@@ -685,7 +795,7 @@ func (s *MarketplaceStorage) DepositMoneyAndGet(ctx context.Context, id int64, a
 	if err != nil {
 		return nil, err
 	}
-	_, err = tx.UpdateMoney(ctx, id, amount)
+	_, err = tx.UpdateAccountMoney(ctx, id, amount)
 	if err != nil {
 		return nil, serrors.Join(err, tx.Rollback())
 	}

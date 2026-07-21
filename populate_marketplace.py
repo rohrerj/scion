@@ -8,11 +8,22 @@ import re
 """
 Example JSON file:
 {
-    "version": "60ed70e88a24d3aa759955c5f5c3d5c9343523c75e5cfaf075467e0d92cd9248",
+    "version": "8a8fb99bea7d38dc6df2fe8db0e389b3c8b4b660367c70a681b50422b4eb85fd",
     "users": [
         {
             "name": "Alice",
             "password": "1234"
+        }
+    ],
+    "accounts": [
+        {
+            "user": "Alice",
+            "balance": 1000000000
+        },
+        {
+            "user": "Alice",
+            "scope": "bandwidth-tester",
+            "balance": 100000
         }
     ],
     "ases": [
@@ -159,6 +170,8 @@ def loadJson(path):
 def insertAll(db, data) -> bool:
     if not insertUsers(db, data.get("users")):
         return False
+    if not insertAccounts(db, data.get("accounts")):
+        return False
     if not insertASes(db, data.get("ases")):
         return False
     if not insertAssets(db, data.get("assets")):
@@ -189,22 +202,38 @@ def hash_password(password: str) -> str:
     )
     return hashed.decode("utf-8")
 
+def insertAccounts(db, accounts) -> bool:
+    if accounts is None:
+        return True
+    db.executemany(
+        """
+        INSERT OR REPLACE INTO Accounts (scope, balance, user_id)
+        VALUES (?, ?, (
+            SELECT id
+            FROM Users
+            WHERE name = ?
+            LIMIT 1
+        ))
+        """,
+        [
+            (u.get("scope"), u.get("balance"), u.get("user"))
+            for u in accounts
+        ],
+    )
+    return True
+
 def insertUsers(db,users) -> bool:
     if users is None:
         return True
     for u in users:
         u["pw_hash"] = hash_password(u.get("password"))
-        if u.get("jwt_version") == None:
-            u["jwt_version"] = 0
-        if u.get("balance") == None:
-            u["balance"] = 0
     db.executemany(
         """
-        INSERT OR REPLACE INTO Users (name, pw_hash, jwt_version, balance)
-        VALUES (?, ?, ?, ?)
+        INSERT OR REPLACE INTO Users (name, pw_hash)
+        VALUES (?, ?)
         """,
         [
-            (u.get("name"), u.get("pw_hash"), u.get("jwt_version"), u.get("balance"))
+            (u.get("name"), u.get("pw_hash"))
             for u in users
         ],
     )
@@ -237,11 +266,16 @@ def insertAssets(db, assets) -> bool:
         a["as_id"] = as_id
     db.executemany(
         """
-        INSERT INTO Assets (owner_id, isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress, account_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
+            SELECT id
+            FROM Users
+            WHERE name = ?
+            LIMIT 1
+        ))
         """,
         [
-            (u.get("owner_id"), u.get("isd_id"), u.get("as_id"), u.get("bandwidth"), u.get("bandwidth_min"), u.get("bandwidth_max"), u.get("price"), u.get("time_granularity"), u.get("time_min_duration"), u.get("starts_at"), u.get("stops_at"), u.get("ingress"), u.get("egress"))
+            (u.get("isd_id"), u.get("as_id"), u.get("bandwidth"), u.get("bandwidth_min"), u.get("bandwidth_max"), u.get("price"), u.get("time_granularity"), u.get("time_min_duration"), u.get("starts_at"), u.get("stops_at"), u.get("ingress"), u.get("egress"), u.get("user"),)
             for u in assets
         ],
     )
@@ -288,7 +322,7 @@ def insertReservations(db, reservations):
     for u in reservations:
         db.execute(
             """
-        INSERT OR REPLACE INTO Reservations (id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key, owner_id)
+        INSERT OR REPLACE INTO Reservations (id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key, account_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
             SELECT id
             FROM Users
@@ -343,7 +377,8 @@ def main(args):
         else:
             conn.rollback()
             print("changes rolled back")
-    except:
+    except Exception as e:
+        print("error", e)
         conn.rollback()
     finally:
         conn.close()

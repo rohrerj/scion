@@ -195,7 +195,7 @@ func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hu
 		StartsAt:  startsAt,
 		StopsAt:   stopsAt,
 		Bandwidth: req.Msg.Bandwidth,
-		OwnerId:   user,
+		AccountId: user,
 	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -462,7 +462,7 @@ func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingb
 				EncodedBandwidth: uint16(r.ResInfo.BwDataplaneEncoding),
 				StartsAt:         startsAt,
 				StopsAt:          stopsAt,
-				OwnerId:          user,
+				AccountId:        user,
 				Key:              r.ResInfo.AuthenticationKey,
 			})
 			if err != nil {
@@ -610,7 +610,7 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 		ia = &tmp
 	}
 	assets, err := s.store.Search(ctx, &db.AssetQuery{
-		OwnerId:              owner_id,
+		AccountId:            owner_id,
 		IA:                   ia,
 		Ingress:              req.Msg.IfIdIngress,
 		Egress:               req.Msg.IfIdEgress,

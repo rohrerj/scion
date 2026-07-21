@@ -35,16 +35,19 @@ type MarketplaceDB interface {
 	FetchReservations(ctx context.Context, params *ReservationQuery) ([]*DBReservation, error)
 	GetUser(ctx context.Context, id int64) (*DBUser, error)
 	GetUserByName(ctx context.Context, name string) (*DBUser, error)
-	CreateUser(ctx context.Context, user *DBUser) (int64, error)
+	GetAccountsByUser(ctx context.Context, id int64) ([]*DBAccount, error)
+	GetAccountByAccountID(ctx context.Context, id int64) (*DBAccount, error)
+	CreateAccount(ctx context.Context, account *DBAccount) (int64, error)
 	CreateASUser(ctx context.Context, user *DBASUser) (int64, error)
-	UpdateMoney(ctx context.Context, id int64, amount int64) (int64, error)
+	UpdateAccountMoney(ctx context.Context, id int64, amount int64) (int64, error)
 	UpdateASMoney(ctx context.Context, ia addr.IA, amount int64) (int64, error)
 	SearchAssetsForStatistics(ctx context.Context, params *StatisticsQuery) ([]*DBStat, error)
 	FindUsedReservations(ctx context.Context, params *UsedReservationsQuery) ([]*UsedReservation, error)
 	CreateOrUpdateRedemptionDelegations(ctx context.Context, r *RedemptionDelegation) (int64, error)
 	FindRedemptionDelegations(ctx context.Context) ([]*RedemptionDelegation, error)
 	IncrementASJWTVersion(ctx context.Context, ia addr.IA, current int64) (int64, error)
-	IncrementUserJWTVersion(ctx context.Context, userid int64, current int64) (int64, error)
+	IncrementUserJWTVersion(ctx context.Context, userId int64, accountId int64) (int64, error)
+	IncrementAccountJWTVersion(ctx context.Context, userid int64, current int64) (int64, error)
 	GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error)
 	DeleteListedAsset(ctx context.Context, ia addr.IA, assetID int64) (int64, error)
 	SetASAuthenticationToken(ctx context.Context, ia addr.IA, auth string) (int64, error)
@@ -151,32 +154,33 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 	var args []any
 	where := []string{}
 	query := []string{
-		"SELECT id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key FROM Reservations",
+		"SELECT r.id, r.isd_id, r.as_id, r.ingress, r.egress, r.bandwidth, r.bw_encoded, r.starts_at, r.stops_at, r.key FROM Reservations r",
 	}
-	where = append(where, "(owner_id = ?)")
-	args = append(args, params.OwnerId)
+	query = append(query, "JOIN Accounts owner ON r.account_id = owner.id JOIN Accounts current ON current.id = ?")
+	where = append(where, "(current.scope IS NULL AND owner.user_id = current.user_id) OR (current.scope IS NOT NULL AND owner.id = current.id)")
+	args = append(args, params.AccountId)
 	if params.IA != nil {
-		where = append(where, "(isd_id=?) AND (as_id=?)")
+		where = append(where, "(r.isd_id=?) AND (r.as_id=?)")
 		args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()))
 	}
 	if params.StartsAt != nil {
-		where = append(where, "(starts_at<=?)")
+		where = append(where, "(r.starts_at<=?)")
 		args = append(args, *params.StartsAt)
 	}
 	if params.StopsAt != nil {
-		where = append(where, "(stops_at>=?)")
+		where = append(where, "(r.stops_at>=?)")
 		args = append(args, *params.StopsAt)
 	}
 	if params.Ingress != nil {
-		where = append(where, "(ingress=?)")
+		where = append(where, "(r.ingress=?)")
 		args = append(args, *params.Ingress)
 	}
 	if params.Egress != nil {
-		where = append(where, "(egress=?)")
+		where = append(where, "(r.egress=?)")
 		args = append(args, *params.Egress)
 	}
 	if params.Bandwidth != nil {
-		where = append(where, "(bandwidth>=?)")
+		where = append(where, "(r.bandwidth>=?)")
 		args = append(args, *params.Bandwidth)
 	}
 	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
@@ -274,18 +278,39 @@ func (e *executor) IncrementASJWTVersion(ctx context.Context, ia addr.IA, curren
 	return newVersion, nil
 }
 
-func (e *executor) IncrementUserJWTVersion(ctx context.Context, userid int64, current int64) (int64, error) {
+func (e *executor) IncrementUserJWTVersion(ctx context.Context, userId int64, accountId int64) (int64, error) {
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	q := `UPDATE Users SET jwt_version = jwt_version + 1 WHERE id = ? AND jwt_version = ? RETURNING jwt_version`
-	rows, err := e.write.QueryContext(ctx, q, userid, current)
+	q := `UPDATE Accounts SET jwt_version = jwt_version + 1 WHERE id = ? AND user_id = ? RETURNING jwt_version`
+	rows, err := e.write.QueryContext(ctx, q, accountId, userId)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
 	if !rows.Next() {
-		return 0, serrors.New("User not found", "userid", userid)
+		return 0, serrors.New("Account not found", "accountid", accountId)
+	}
+	var newVersion int64
+	err = rows.Scan(&newVersion)
+	if err != nil {
+		return 0, serrors.Wrap("Error reading DB response", err)
+	}
+	return newVersion, nil
+}
+
+func (e *executor) IncrementAccountJWTVersion(ctx context.Context, accountid int64, current int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	q := `UPDATE Accounts SET jwt_version = jwt_version + 1 WHERE id = ? AND jwt_version = ? RETURNING jwt_version`
+	rows, err := e.write.QueryContext(ctx, q, accountid, current)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return 0, serrors.New("Account not found", "accountid", accountid)
 	}
 	var newVersion int64
 	err = rows.Scan(&newVersion)
@@ -395,7 +420,7 @@ func (e *executor) buildStatisticsQuery(params *StatisticsQuery) (string, []any)
 	var args []any
 	where := []string{}
 	query := []string{
-		"SELECT owner_id, bandwidth, price, starts_at, stops_at FROM Assets",
+		"SELECT account_id, bandwidth, price, starts_at, stops_at FROM Assets",
 	}
 	where = append(where, "(isd_id=?) AND (as_id=?) AND (stops_at > ?) AND (starts_at <= ?)")
 	args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()), params.WindowStart, params.WindowEnd)
@@ -428,7 +453,7 @@ func (e *executor) Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, 
 		var stopsAtString string
 		var isd uint16
 		var as uint64
-		err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+		err = rows.Scan(&a.ID, &a.AccountId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 		if err != nil {
 			return nil, serrors.Wrap("Error reading DB response", err)
 		}
@@ -450,49 +475,50 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 	var args []any
 	where := []string{}
 	query := []string{
-		"SELECT id, owner_id, isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress FROM Assets",
+		"SELECT a.id, a.account_id, a.isd_id, a.as_id, a.bandwidth, a.bandwidth_min, a.bandwidth_max, a.price, a.time_granularity, a.time_min_duration, a.starts_at, a.stops_at, a.ingress, a.egress FROM Assets a",
 	}
-	where = append(where, "(state = 0)")
-	if params.OwnerId == nil {
-		where = append(where, "(owner_id IS NULL)")
+	where = append(where, "(a.state = 0)")
+	if params.AccountId == nil {
+		where = append(where, "(a.account_id IS NULL)")
 	} else {
-		where = append(where, "(owner_id=?)")
-		args = append(args, *params.OwnerId)
+		query = append(query, "JOIN Accounts owner ON a.account_id = owner.id JOIN Accounts current ON current.id = ?")
+		where = append(where, "(current.scope IS NULL AND owner.user_id = current.user_id) OR (current.scope IS NOT NULL AND owner.id = current.id)")
+		args = append(args, *params.AccountId)
 	}
 	if params.IA != nil {
-		where = append(where, "(isd_id=?) AND (as_id=?)")
+		where = append(where, "(a.isd_id=?) AND (a.as_id=?)")
 		args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()))
 	}
 	if params.StartsAt != nil {
-		where = append(where, "(starts_at<=?)")
+		where = append(where, "(a.starts_at<=?)")
 		args = append(args, *params.StartsAt)
 	}
 	if params.StopsAt != nil {
-		where = append(where, "(stops_at>=?)")
+		where = append(where, "(a.stops_at>=?)")
 		args = append(args, *params.StopsAt)
 	}
 	if params.Price != nil {
-		where = append(where, "(price<=?)")
+		where = append(where, "(a.price<=?)")
 		args = append(args, *params.Price)
 	}
 	if params.MinRequiredBandwidth != nil {
-		where = append(where, "(bandwidth>=?)")
+		where = append(where, "(a.bandwidth>=?)")
 		args = append(args, *params.MinRequiredBandwidth)
 	}
 	if params.Ingress != nil {
-		where = append(where, "(ingress=?)")
+		where = append(where, "(a.ingress=?)")
 		args = append(args, *params.Ingress)
 	}
 	if params.Egress != nil {
-		where = append(where, "(egress=?)")
+		where = append(where, "(a.egress=?)")
 		args = append(args, *params.Egress)
 	}
 	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
-	query = append(query, "ORDER BY LENGTH(id) ASC, id ASC")
+	query = append(query, "ORDER BY LENGTH(a.id) ASC, a.id ASC")
 	return strings.Join(query, "\n"), args
 }
 
-func (e *executor) PrepareCombine(ctx context.Context, id int64, userId int64) (*DBAsset, error) {
+func (e *executor) PrepareCombine(ctx context.Context, id int64, accountId int64) (*DBAsset, error) {
 	if e.write == nil {
 		return nil, serrors.New("No database open")
 	}
@@ -501,10 +527,10 @@ func (e *executor) PrepareCombine(ctx context.Context, id int64, userId int64) (
 	SET state = 4
 	WHERE id = ?
 	AND state = 0
-	AND owner_id = ?
+	AND account_id = ?
 	RETURNING
 		id,
-		owner_id,
+		account_id,
 		isd_id,
 		as_id,
 		bandwidth,
@@ -517,7 +543,7 @@ func (e *executor) PrepareCombine(ctx context.Context, id int64, userId int64) (
 		stops_at,
 		ingress,
 		egress;`
-	rows, err := e.write.QueryContext(ctx, q, id, userId)
+	rows, err := e.write.QueryContext(ctx, q, id, accountId)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +556,7 @@ func (e *executor) PrepareCombine(ctx context.Context, id int64, userId int64) (
 	var stopsAtString string
 	var isd uint16
 	var as uint64
-	err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	err = rows.Scan(&a.ID, &a.AccountId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
@@ -546,7 +572,7 @@ func (e *executor) PrepareCombine(ctx context.Context, id int64, userId int64) (
 	return a, nil
 }
 
-func (e *executor) PrepareSplit(ctx context.Context, id int64, userId int64) (*DBAsset, error) {
+func (e *executor) PrepareSplit(ctx context.Context, id int64, accountId int64) (*DBAsset, error) {
 	if e.write == nil {
 		return nil, serrors.New("No database open")
 	}
@@ -555,10 +581,10 @@ func (e *executor) PrepareSplit(ctx context.Context, id int64, userId int64) (*D
 	SET state = 3
 	WHERE id = ?
 	AND state = 0
-	AND owner_id = ?
+	AND account_id = ?
 	RETURNING
 		id,
-		owner_id,
+		account_id,
 		isd_id,
 		as_id,
 		bandwidth,
@@ -571,7 +597,7 @@ func (e *executor) PrepareSplit(ctx context.Context, id int64, userId int64) (*D
 		stops_at,
 		ingress,
 		egress;`
-	rows, err := e.write.QueryContext(ctx, q, id, userId)
+	rows, err := e.write.QueryContext(ctx, q, id, accountId)
 	if err != nil {
 		return nil, err
 	}
@@ -584,7 +610,7 @@ func (e *executor) PrepareSplit(ctx context.Context, id int64, userId int64) (*D
 	var stopsAtString string
 	var isd uint16
 	var as uint64
-	err = rows.Scan(&a.ID, &a.OwnerId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
+	err = rows.Scan(&a.ID, &a.AccountId, &isd, &as, &a.Bandwidth, &a.BandwidthMin, &a.BandwidthMax, &a.Price, &a.TimeGranularity, &a.TimeMinDuration, &startsAtString, &stopsAtString, &a.IfIdIngress, &a.IfIdEgress)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
@@ -609,7 +635,7 @@ func (e *executor) CheckoutAsset(ctx context.Context, id int64) (*DBAsset, error
 	SET state = 1
 	WHERE id = ?
 	AND state = 0
-	AND owner_id IS NULL
+	AND account_id IS NULL
 	RETURNING
 		id,
 		isd_id,
@@ -653,7 +679,7 @@ func (e *executor) CheckoutAsset(ctx context.Context, id int64) (*DBAsset, error
 	return a, nil
 }
 
-func (e *executor) UndoRedemption(ctx context.Context, user_id int64, id int64) (int64, error) {
+func (e *executor) UndoRedemption(ctx context.Context, account_id int64, id int64) (int64, error) {
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
@@ -661,17 +687,17 @@ func (e *executor) UndoRedemption(ctx context.Context, user_id int64, id int64) 
 	UPDATE Assets
 	SET state = 0
 	WHERE id = ?
-	AND owner_id = ?
+	AND account_id = ?
 	AND state = 2`
 
-	res, err := e.write.ExecContext(ctx, q, id, user_id)
+	res, err := e.write.ExecContext(ctx, q, id, account_id)
 	if err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
 }
 
-func (e *executor) PrepareRedemption(ctx context.Context, user_id int64, id int64) (*DBAsset, error) {
+func (e *executor) PrepareRedemption(ctx context.Context, account_id int64, id int64) (*DBAsset, error) {
 	if e.write == nil {
 		return nil, serrors.New("No database open")
 	}
@@ -680,7 +706,7 @@ func (e *executor) PrepareRedemption(ctx context.Context, user_id int64, id int6
 	SET state = 2
 	WHERE id = ?
 	AND state = 0
-	AND owner_id = ?
+	AND account_id = ?
 	RETURNING
 		id,
 		isd_id,
@@ -695,7 +721,7 @@ func (e *executor) PrepareRedemption(ctx context.Context, user_id int64, id int6
 		stops_at,
 		ingress,
 		egress;`
-	rows, err := e.write.QueryContext(ctx, q, id, user_id)
+	rows, err := e.write.QueryContext(ctx, q, id, account_id)
 	if err != nil {
 		return nil, err
 	}
@@ -728,11 +754,11 @@ func (e *executor) InsertReservation(ctx context.Context, r *DBReservation) (int
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	q := `INSERT INTO Reservations (id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key, owner_id)
+	q := `INSERT INTO Reservations (id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key, account_id)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?)`
 	res, err := e.write.ExecContext(ctx, q, r.ID, r.IA.ISD(), r.IA.AS(), r.Ingress, r.Egress, r.Bandwidth, r.EncodedBandwidth,
 		r.StartsAt.UTC().Format(time.RFC3339), r.StopsAt.UTC().Format(time.RFC3339),
-		r.Key, r.OwnerId)
+		r.Key, r.AccountId)
 	if err != nil {
 		return 0, err
 	}
@@ -745,12 +771,12 @@ func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
 	}
 	var res sql.Result
 	var err error
-	if a.OwnerId.Valid {
+	if a.AccountId.Valid {
 		inst := `INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price, time_granularity,
-	time_min_duration, starts_at, stops_at, ingress, egress, owner_id)
+	time_min_duration, starts_at, stops_at, ingress, egress, account_id)
 	VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`
 		res, err = e.write.ExecContext(ctx, inst, a.IA.ISD(), a.IA.AS(), a.Bandwidth, a.BandwidthMin, a.BandwidthMax, a.Price, a.TimeGranularity,
-			a.TimeMinDuration, a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.IfIdIngress, a.IfIdEgress, a.OwnerId.Int64)
+			a.TimeMinDuration, a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.IfIdIngress, a.IfIdEgress, a.AccountId)
 	} else {
 		inst := `INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price, time_granularity,
 	time_min_duration, starts_at, stops_at, ingress, egress)
@@ -768,7 +794,7 @@ func (e *executor) DeleteListedAsset(ctx context.Context, ia addr.IA, assetID in
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	inst := `DELETE FROM Assets WHERE id = ? AND isd_id = ? AND as_id = ? AND owner_id IS NULL AND state = 0`
+	inst := `DELETE FROM Assets WHERE id = ? AND isd_id = ? AND as_id = ? AND account_id IS NULL AND state = 0`
 	res, err := e.write.ExecContext(ctx, inst, assetID, ia.ISD(), ia.AS())
 	if err != nil {
 		return 0, err
@@ -789,7 +815,7 @@ func (e *executor) GetUser(ctx context.Context, id int64) (*DBUser, error) {
 	if e.read == nil {
 		return nil, serrors.New("No database open")
 	}
-	q := `SELECT id, name, pw_hash, jwt_version, balance FROM Users WHERE id=?`
+	q := `SELECT id, name, pw_hash FROM Users WHERE id=?`
 	rows, err := e.read.QueryContext(ctx, q, id)
 	if err != nil {
 		return nil, err
@@ -799,7 +825,7 @@ func (e *executor) GetUser(ctx context.Context, id int64) (*DBUser, error) {
 		return nil, nil
 	}
 	user := &DBUser{}
-	err = rows.Scan(&user.ID, &user.Name, &user.PasswordHash, &user.TokenVersion, &user.Balance)
+	err = rows.Scan(&user.ID, &user.Name, &user.PasswordHash)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
@@ -809,7 +835,7 @@ func (e *executor) GetUserByName(ctx context.Context, name string) (*DBUser, err
 	if e.read == nil {
 		return nil, serrors.New("No database open")
 	}
-	q := `SELECT id, name, pw_hash, balance FROM Users WHERE name=?`
+	q := `SELECT id, name, pw_hash FROM Users WHERE name=?`
 	rows, err := e.read.QueryContext(ctx, q, name)
 	if err != nil {
 		return nil, err
@@ -819,20 +845,75 @@ func (e *executor) GetUserByName(ctx context.Context, name string) (*DBUser, err
 		return nil, nil
 	}
 	user := &DBUser{}
-	err = rows.Scan(&user.ID, &user.Name, &user.PasswordHash, &user.Balance)
+	err = rows.Scan(&user.ID, &user.Name, &user.PasswordHash)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
 	return user, nil
 }
 
+func (e *executor) GetAccountByAccountID(ctx context.Context, id int64) (*DBAccount, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	q := `SELECT id, user_id, scope, balance, jwt_version FROM Accounts WHERE id = ?`
+	rows, err := e.read.QueryContext(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, serrors.New("account not found")
+	}
+	account := &DBAccount{}
+	err = rows.Scan(&account.ID, &account.UserID, &account.Scope, &account.Balance, &account.TokenVersion)
+	if err != nil {
+		return nil, serrors.Wrap("Error reading DB response", err)
+	}
+	return account, nil
+}
+
+func (e *executor) GetAccountsByUser(ctx context.Context, id int64) ([]*DBAccount, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	q := `SELECT id, scope, balance, jwt_version FROM Accounts WHERE user_id = ?`
+	rows, err := e.read.QueryContext(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ret := []*DBAccount{}
+	for rows.Next() {
+		account := &DBAccount{}
+		err = rows.Scan(&account.ID, &account.Scope, &account.Balance, &account.TokenVersion)
+		if err != nil {
+			return nil, serrors.Wrap("Error reading DB response", err)
+		}
+		ret = append(ret, account)
+	}
+	return ret, nil
+}
+
+func (e *executor) CreateAccount(ctx context.Context, account *DBAccount) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `INSERT INTO Accounts (user_id, scope, balance) VALUES(?,?, ?)`
+	res, err := e.write.ExecContext(ctx, inst, account.UserID, account.Scope, account.Balance)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
 func (e *executor) CreateUser(ctx context.Context, user *DBUser) (int64, error) {
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	inst := `INSERT INTO Users (name, pw_hash, balance)
-	VALUES(?,?,?) ON CONFLICT(name) DO NOTHING`
-	res, err := e.write.ExecContext(ctx, inst, user.Name, user.PasswordHash, user.Balance)
+	inst := `INSERT INTO Users (name, pw_hash)
+	VALUES(?,?) ON CONFLICT(name) DO NOTHING`
+	res, err := e.write.ExecContext(ctx, inst, user.Name, user.PasswordHash)
 	if err != nil {
 		return 0, err
 	}
@@ -878,11 +959,23 @@ func (e *executor) GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error)
 	return user, nil
 }
 
-func (e *executor) UpdateMoney(ctx context.Context, id int64, amount int64) (int64, error) {
+func (e *executor) UpdateAccountMoneyWithUser(ctx context.Context, userId int64, accountId int64, amount int64) (int64, error) {
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	inst := `UPDATE users SET balance = balance + ? WHERE id = ?`
+	inst := `UPDATE Accounts SET balance = balance + ? WHERE id = ? AND user_id = ?`
+	res, err := e.write.ExecContext(ctx, inst, amount, accountId, userId)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *executor) UpdateAccountMoney(ctx context.Context, id int64, amount int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `UPDATE Accounts SET balance = balance + ? WHERE id = ?`
 	res, err := e.write.ExecContext(ctx, inst, amount, id)
 	if err != nil {
 		return 0, err
@@ -907,6 +1000,42 @@ func (e *executor) SetASAuthenticationToken(ctx context.Context, ia addr.IA, aut
 	}
 	inst := `UPDATE Ases SET pw_hash = ? WHERE isd_id = ? AND as_id = ?`
 	res, err := e.write.ExecContext(ctx, inst, auth, ia.ISD(), ia.AS())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *executor) TransferAllAssetsToAccount(ctx context.Context, accountIdFrom int64, accountIdTo int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `UPDATE Assets SET account_id = ? WHERE account_id = ?`
+	res, err := e.write.ExecContext(ctx, inst, accountIdTo, accountIdFrom)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *executor) TransferAllReservations(ctx context.Context, accountIdFrom int64, accountIdTo int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `UPDATE Reservations SET account_id = ? WHERE account_id = ?`
+	res, err := e.write.ExecContext(ctx, inst, accountIdTo, accountIdFrom)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *executor) DeleteAccount(ctx context.Context, accountID int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `DELETE FROM Accounts WHERE id = ? AND scope IS NOT NULL`
+	res, err := e.write.ExecContext(ctx, inst, accountID)
 	if err != nil {
 		return 0, err
 	}

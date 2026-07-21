@@ -11,8 +11,7 @@
     <nav>
         <div class="nav-left">
             {{if .Username}}
-            <a href="/token">Token</a>
-            <a href="/balance">Balance</a>
+            <a href="/account">Account</a>
             {{else}}
             <a href="/aslogin">AS Login</a>
             <a href="/login">Login</a>
@@ -26,16 +25,22 @@
         </div>
         {{end}}
     </nav>
-    <div class="container">
-        <h2>Register</h2>
-        {{if .Error}}
-        <p style="color:red;">{{.Error}}</p>
-        {{end}}
-        <form method="POST" action="/register">
-            User ID: <input name="username">
-            Password: <input name="password" type="password">
-            <button type="submit">Login</button>
-        </form>
+    <div class="page">
+        <section class="card small">
+            <h2>Register</h2>
+            {{if .Error}}
+            <p class="error">{{.Error}}</p>
+            {{end}}
+            <form class="form-vertical" method="POST" action="/register">
+                <label>User ID</label>
+                <input name="username">
+
+                <label>Password</label>
+                <input name="password" type="password">
+
+                <button type="submit">Register</button>
+            </form>
+        </section>
     </div>
 </body>
 

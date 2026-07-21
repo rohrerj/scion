@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -53,14 +54,21 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 		store:                   store,
 		disableUserRegistration: disableUserRegistration,
 	}
-	mux.HandleFunc("/", h.tokenHandler)
-	mux.HandleFunc("/token", h.tokenHandler)
+	mux.HandleFunc("/", h.accountHandler)
 	mux.HandleFunc("/login", h.loginHandler)
 	mux.HandleFunc("/register", h.registerHandler)
-	mux.HandleFunc("/balance", h.balanceHandler)
+	mux.HandleFunc("/account/balance", h.accountBalanceHandler)
+	mux.HandleFunc("/account/create", h.accountCreateHandler)
+	mux.HandleFunc("/account/delete", h.accountDeletionHandler)
+	mux.HandleFunc("/account/token", h.accountTokenHandler)
+	mux.HandleFunc("/account/resetjwt", h.accountResetJWTHandler)
+	mux.HandleFunc("/account", h.accountHandler)
 	mux.HandleFunc("/logout", h.logoutHandler)
 	mux.HandleFunc("/aslogin", h.asLoginHandler)
 	mux.HandleFunc("/asbalance", h.asBalanceHandler)
+	mux.HandleFunc("/static/script.js", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "./marketplace/static/script.js")
+	})
 	mux.HandleFunc("/static/style.css", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./marketplace/static/style.css")
 	})
@@ -75,6 +83,12 @@ type Handler struct {
 type User struct {
 	ID   int64
 	Name string
+}
+type Account struct {
+	ID           int64
+	Scope        *string
+	Balance      int64
+	TokenVersion int64
 }
 
 func (h *Handler) SetSessionUser(w http.ResponseWriter, r *http.Request, user any) error {
@@ -112,7 +126,7 @@ func (h *Handler) asLoginHandler(w http.ResponseWriter, r *http.Request) {
 	dbUser, err := h.store.GetASUser(r.Context(), ia)
 	if err != nil {
 		log.Debug("AS login handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if dbUser == nil {
@@ -135,7 +149,7 @@ func (h *Handler) asLoginHandler(w http.ResponseWriter, r *http.Request) {
 	err = h.SetSessionUser(w, r, dbUser.IA)
 	if err != nil {
 		log.Debug("AS login handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -153,58 +167,174 @@ func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
 		return
 	}
-	if r.Method == http.MethodGet {
-		dbUser, err := h.store.GetASUser(r.Context(), ia)
-		if err != nil {
-			log.Debug("AS balance handler", "err", err)
-			http.Error(w, "Bad Request", http.StatusBadRequest)
-			return
-		}
-		if dbUser == nil {
-			http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
-			return
-		}
-		templates.ExecuteTemplate(w, "asbalance.html", map[string]any{
-			"Balance":  strconv.Itoa(int(dbUser.Balance)),
-			"Username": ia.String(),
-		})
-		return
-	}
-	r.ParseForm()
-	deposit := r.FormValue("deposit")
-	depositInt, err := strconv.Atoi(deposit)
-	if err != nil || depositInt < 0 {
-		dbUser, err := h.store.GetASUser(r.Context(), ia)
-		if err != nil {
-			log.Debug("AS balance handler", "err", err)
-			http.Error(w, "Bad Request", http.StatusBadRequest)
-			return
-		}
-		if dbUser == nil {
-			http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
-			return
-		}
-		templates.ExecuteTemplate(w, "asbalance.html", map[string]any{
-			"Error":    "Invalid deposit amount",
-			"Balance":  strconv.Itoa(int(dbUser.Balance)),
-			"Username": ia.String(),
-		})
-		return
-	}
-
-	user, err := h.store.DepositMoneyAndGetAS(r.Context(), ia, int64(depositInt))
+	dbUser, err := h.store.GetASUser(r.Context(), ia)
 	if err != nil {
 		log.Debug("AS balance handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if dbUser == nil {
+		http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
 		return
 	}
 	templates.ExecuteTemplate(w, "asbalance.html", map[string]any{
-		"Balance":  strconv.Itoa(int(user.Balance)),
+		"Balance":  strconv.Itoa(int(dbUser.Balance)),
 		"Username": ia.String(),
 	})
 }
 
-func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) accountBalanceHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	user, ok := session.Values["user"].(User)
+	if !ok {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseForm()
+	accountFromID, err := strconv.ParseInt(r.FormValue("from"), 10, 64)
+	if err != nil {
+		log.Debug("User account balance handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	accountToID, err := strconv.ParseInt(r.FormValue("to"), 10, 64)
+	if err != nil {
+		log.Debug("User account balance handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	amount, err := strconv.ParseInt(r.FormValue("amount"), 10, 64)
+	if err != nil {
+		log.Debug("User account balance handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, err = h.store.TransferMoneyBetweenAccounts(r.Context(), user.ID, accountFromID, accountToID, amount)
+	if err != nil {
+		log.Debug("User account balance handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) accountTokenHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	user, ok := session.Values["user"].(User)
+	if !ok {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseForm()
+	accountIDString := r.FormValue("id")
+	accountID, err := strconv.ParseInt(accountIDString, 10, 64)
+	if err != nil {
+		log.Debug("User account token handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	dbAccount, err := h.store.GetAccountByAccountID(r.Context(), accountID)
+	if err != nil {
+		log.Debug("User account token handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if dbAccount.UserID != user.ID {
+		log.Debug("User account token handler. Account does not belong to user", "dbAccount.UserID", dbAccount.UserID, "user.ID", user.ID)
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	token, err := h.createToken(strconv.FormatInt(dbAccount.ID, 10), dbAccount.TokenVersion)
+	if err != nil {
+		log.Debug("User token handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write([]byte(token))
+}
+
+func (h *Handler) accountDeletionHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	user, ok := session.Values["user"].(User)
+	if !ok {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseForm()
+	accountId, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+	if err != nil {
+		log.Debug("User account deletion handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, err = h.store.DeleteAccount(r.Context(), user.ID, accountId)
+	if err != nil {
+		log.Debug("User account creation handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) accountResetJWTHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	user, ok := session.Values["user"].(User)
+	if !ok {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseForm()
+	accountId, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+	if err != nil {
+		log.Debug("User account jwt reset handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, err = h.store.IncrementUserJWTVersion(r.Context(), user.ID, accountId)
+	if err != nil {
+		log.Debug("User account jwt reset handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+var accountScopeRegex = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
+
+func (h *Handler) accountCreateHandler(w http.ResponseWriter, r *http.Request) {
 	session, err := h.GetSession(r)
 	if err != nil {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -215,53 +345,68 @@ func (h *Handler) balanceHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	if r.Method == http.MethodGet {
-		dbUser, err := h.store.GetUser(r.Context(), user.ID)
-		if err != nil {
-			log.Debug("User balance handler", "err", err)
-			http.Error(w, "Bad Request", http.StatusBadRequest)
-			return
-		}
-		if dbUser == nil {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
-			return
-		}
-		templates.ExecuteTemplate(w, "balance.html", map[string]any{
-			"Username": user.Name,
-			"Balance":  strconv.Itoa(int(dbUser.Balance)),
-		})
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/account", http.StatusSeeOther)
 		return
 	}
 	r.ParseForm()
-	deposit := r.FormValue("deposit")
-	depositInt, err := strconv.Atoi(deposit)
-	if err != nil || depositInt < 0 {
-		dbUser, err := h.store.GetUser(r.Context(), user.ID)
-		if err != nil {
-			log.Debug("User balance handler", "err", err)
-			http.Error(w, "Bad Request", http.StatusBadRequest)
-			return
-		}
-		if dbUser == nil {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
-			return
-		}
-		templates.ExecuteTemplate(w, "balance.html", map[string]any{
-			"Username": user.Name,
-			"Error":    "Invalid deposit amount",
-			"Balance":  strconv.Itoa(int(dbUser.Balance)),
-		})
+	accountScope := r.FormValue("name")
+	if !accountScopeRegex.MatchString(accountScope) {
+		http.Error(w, "invalid name", http.StatusBadRequest)
 		return
 	}
-	dbUser, err := h.store.DepositMoneyAndGet(r.Context(), user.ID, int64(depositInt))
+	_, err = h.store.CreateAccount(r.Context(), &db.DBAccount{
+		UserID: user.ID,
+		Scope:  &accountScope,
+	})
 	if err != nil {
-		log.Debug("User balance handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		log.Debug("User account creation handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	templates.ExecuteTemplate(w, "balance.html", map[string]any{
+	http.Redirect(w, r, "/account", http.StatusSeeOther)
+}
+
+func (h *Handler) accountHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	user, ok := session.Values["user"].(User)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	accounts, err := h.store.GetAccountsByUser(r.Context(), user.ID)
+	if err != nil {
+		log.Debug("User account handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	accs := []Account{}
+	mainAccount := Account{}
+	for _, a := range accounts {
+		if a.Scope == nil {
+			mainAccount = Account{
+				ID:           a.ID,
+				Balance:      a.Balance,
+				TokenVersion: a.TokenVersion,
+			}
+		} else {
+			accs = append(accs, Account{
+				ID:           a.ID,
+				Scope:        a.Scope,
+				Balance:      a.Balance,
+				TokenVersion: a.TokenVersion,
+			})
+		}
+
+	}
+	templates.ExecuteTemplate(w, "account.html", map[string]any{
 		"Username": user.Name,
-		"Balance":  strconv.Itoa(int(dbUser.Balance)),
+		"Main":     mainAccount,
+		"Accounts": accs,
 	})
 }
 
@@ -284,7 +429,7 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.GetUserByName(r.Context(), username)
 	if err != nil {
 		log.Debug("User register handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if user != nil {
@@ -299,7 +444,7 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		log.Debug("User register handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -309,7 +454,7 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Debug("User register handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -319,10 +464,10 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Debug("User register handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	http.Redirect(w, r, "/token", http.StatusSeeOther)
+	http.Redirect(w, r, "/account", http.StatusSeeOther)
 }
 
 func (h *Handler) logoutHandler(w http.ResponseWriter, r *http.Request) {
@@ -336,7 +481,7 @@ func (h *Handler) logoutHandler(w http.ResponseWriter, r *http.Request) {
 	err = session.Save(r, w)
 	if err != nil {
 		log.Debug("Logout handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -355,7 +500,7 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 	dbUser, err := h.store.GetUserByName(r.Context(), username)
 	if err != nil {
 		log.Debug("User login handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if dbUser == nil {
@@ -386,44 +531,7 @@ func (h *Handler) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/token", http.StatusSeeOther)
-}
-
-func (h *Handler) tokenHandler(w http.ResponseWriter, r *http.Request) {
-	session, err := h.GetSession(r)
-	if err != nil {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	user, ok := session.Values["user"].(User)
-	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	dbUser, err := h.store.GetUser(r.Context(), user.ID)
-	if err != nil {
-		templates.ExecuteTemplate(w, "token.html", map[string]any{
-			"Username": user.Name,
-			"Error":    err,
-		})
-		return
-	}
-	token, err := h.createToken(strconv.FormatInt(user.ID, 10), dbUser.TokenVersion)
-	if err != nil {
-		log.Debug("User token handler", "err", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	if r.Method == http.MethodGet {
-		templates.ExecuteTemplate(w, "token.html", map[string]any{
-			"Username": user.Name,
-			"Token":    token,
-		})
-	} else {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Write([]byte(token))
-	}
-
+	http.Redirect(w, r, "/account", http.StatusSeeOther)
 }
 
 func (h *Handler) createToken(user string, tokenVersion int64) (string, error) {

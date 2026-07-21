@@ -70,14 +70,14 @@ func (a *TokenVerifier) verifyTokenVersion(ctx context.Context, user any, claims
 		}
 		tokenVersion = dbUser.TokenVersion
 	} else if scopes["User"] {
-		dbUser, err := a.Store.GetUser(ctx, user.(int64))
+		dbAccount, err := a.Store.GetAccountByAccountID(ctx, user.(int64))
 		if err != nil {
 			return 0, connect.NewError(
 				connect.CodeUnauthenticated,
 				fmt.Errorf("invalid token"),
 			)
 		}
-		tokenVersion = dbUser.TokenVersion
+		tokenVersion = dbAccount.TokenVersion
 	} else {
 		return 0, connect.NewError(
 			connect.CodeUnauthenticated,

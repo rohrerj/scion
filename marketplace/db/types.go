@@ -23,7 +23,7 @@ import (
 )
 
 type AssetQuery struct {
-	OwnerId              *int64
+	AccountId            *int64
 	IA                   *addr.IA
 	Ingress              *uint32
 	Egress               *uint32
@@ -54,7 +54,7 @@ type RedemptionDelegation struct {
 }
 
 type ReservationQuery struct {
-	OwnerId   int64
+	AccountId int64
 	IA        *addr.IA
 	Ingress   *uint32
 	Egress    *uint32
@@ -86,13 +86,13 @@ type DBReservation struct {
 	EncodedBandwidth uint16
 	StartsAt         time.Time
 	StopsAt          time.Time
-	OwnerId          int64
+	AccountId        int64
 	Key              []byte
 }
 
 type DBAsset struct {
 	ID              int64
-	OwnerId         sql.NullInt64
+	AccountId       sql.NullInt64
 	IA              addr.IA
 	Bandwidth       uint32
 	BandwidthMin    uint32
@@ -109,8 +109,14 @@ type DBAsset struct {
 type DBUser struct {
 	ID           int64
 	Name         string
-	Balance      int64
 	PasswordHash string
+}
+
+type DBAccount struct {
+	ID           int64
+	UserID       int64
+	Scope        *string
+	Balance      int64
 	TokenVersion int64
 }
 

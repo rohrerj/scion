@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS Assets(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    owner_id INTEGER,
+    account_id INTEGER,
     isd_id INTEGER NOT NULL,
     as_id INTEGER NOT NULL,
     bandwidth INTEGER NOT NULL,
@@ -14,15 +14,15 @@ CREATE TABLE IF NOT EXISTS Assets(
     ingress INTEGER,
     egress INTEGER,
     state INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (owner_id) REFERENCES Users(id)
+    FOREIGN KEY (account_id) REFERENCES Accounts(id)
 );
-CREATE INDEX IF NOT EXISTS idx_asset_owner ON Assets(owner_id);
+CREATE INDEX IF NOT EXISTS idx_asset_owner ON Assets(account_id);
 CREATE INDEX IF NOT EXISTS idx_asset_validity ON Assets(starts_at, stops_at);
 CREATE INDEX IF NOT EXISTS idx_assets_ia_validity_start ON Assets(isd_id, as_id, starts_at, stops_at);
 CREATE INDEX IF NOT EXISTS idx_assets_ia_validity_end ON Assets(isd_id, as_id, stops_at, starts_at);
 CREATE TABLE IF NOT EXISTS Reservations(
     id INTEGER NOT NULL,
-    owner_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
     isd_id INTEGER NOT NULL,
     as_id INTEGER NOT NULL,
     ingress INTEGER NOT NULL,
@@ -32,18 +32,26 @@ CREATE TABLE IF NOT EXISTS Reservations(
     starts_at TEXT NOT NULL,
     stops_at TEXT NOT NULL,
     key BLOB NOT NULL,
-    FOREIGN KEY (owner_id) REFERENCES Users(id)
+    FOREIGN KEY (account_id) REFERENCES Accounts(id)
 );
-CREATE INDEX IF NOT EXISTS idx_reservations_owner ON Reservations(owner_id);
+CREATE INDEX IF NOT EXISTS idx_reservations_owner ON Reservations(account_id);
 CREATE INDEX IF NOT EXISTS idx_reservations_used ON Reservations(isd_id, as_id, starts_at, stops_at);
 CREATE TABLE IF NOT EXISTS Users(
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    pw_hash TEXT NOT NULL,
-    jwt_version INTEGER NOT NULL DEFAULT 0,
-    balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0)
+    pw_hash TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_users_name ON Users(name);
+CREATE TABLE IF NOT EXISTS Accounts(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    scope TEXT,
+    balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+    jwt_version INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, scope),
+    FOREIGN KEY(user_id) REFERENCES Users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_accounts ON Accounts(user_id);
 CREATE TABLE IF NOT EXISTS Ases(
     isd_id INTEGER NOT NULL,
     as_id INTEGER NOT NULL,
