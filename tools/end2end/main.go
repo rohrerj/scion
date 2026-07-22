@@ -638,7 +638,6 @@ func (c *client) buildReservationFromSecretValues(
 		return nil, err
 	}
 	return snetpath.NewReservation(
-		snetpath.WithNow(func() time.Time { return now }),
 		snetpath.WithDataplanePath(scionPath, dstIA, flyovers),
 	)
 }

@@ -33,18 +33,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewWithNow(t *testing.T) {
-	const referenceEpochTime uint32 = 123456
-	r, err := path.NewReservation(
-		path.WithNow(func() time.Time {
-			return util.SecsToTime(referenceEpochTime)
-		}),
-		path.WithDstIA(addr.MustParseIA("1-ff00:0:112")),
-	)
-	require.NoError(t, err)
-	require.Equal(t, referenceEpochTime, util.TimeToSecs(r.Now()))
-}
-
 // TestInterfacesToBaseHops checks that the InterfacesToBaseHops function correctly maps the
 // path individual interfaces to a BaseHop sequence. We use tiny topo's 111->112 path here.
 func TestInterfacesToBaseHops(t *testing.T) {
@@ -70,7 +58,6 @@ func TestSetFlyover(t *testing.T) {
 	r := path.Reservation{
 		DstIA: addr.MustParseIA("1-ff00:0:112"),
 		Dec:   createHummingbirdPath(referenceTime),
-		Now:   func() time.Time { return referenceTime },
 	}
 	r.Hops = make([]*path.Hop, len(r.Dec.HopFields))
 	*r.AesBlocks() = make([]cipher.Block, len(r.Hops))

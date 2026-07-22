@@ -32,15 +32,14 @@ import (
 	"github.com/scionproto/scion/pkg/snet"
 )
 
-// Reservation is the snet path for a Reservation path type.
+// Reservation is the snet path for a Hummingbird reservation path type.
 // When creating a packet with a Reservation path, the flyover fields must contain the MAC that
 // was computed using the correct payload size.
 // This path represents a possibly partially reserved path, with zero or more flyovers.
 type Reservation struct {
-	Now   func() time.Time // The current time.
-	DstIA addr.IA          // Destination IA of the path.
-	Dec   *dphum.Decoded   // The Hummingbird path.
-	Hops  []*Hop           // Same length as `Dec`. Hops[i]==nil iff no hop at i (eg. xover hop).
+	DstIA addr.IA        // Destination IA of the path.
+	Dec   *dphum.Decoded // The Hummingbird path.
+	Hops  []*Hop         // Same length as `Dec`. Hops[i]==nil iff no hop at i (eg. xover hop).
 
 	reverseReservation     *slayers.EndToEndExtn
 	sentToPacketReverseRsv *slayers.EndToEndExtn
@@ -56,7 +55,6 @@ var _ snet.DataplanePacketExtender = (*Reservation)(nil)
 // options passed.
 func NewReservation(opts ...ReservationModFcn) (*Reservation, error) {
 	r := &Reservation{
-		Now: time.Now,
 		Dec: &dphum.Decoded{},
 	}
 	// Run all options on this object.
@@ -87,7 +85,7 @@ func (r *Reservation) SetPath(s *slayers.SCION) error {
 	// use the decoded Hummingbird path initially before deriving the correct dataplane path.
 	s.Path, s.PathType = r.Dec, r.Dec.Type()
 	pktLen := s.PacketLen()
-	r.deriveDataPlanePath(pktLen, r.Now())
+	r.deriveDataPlanePath(pktLen, time.Now())
 
 	// The correct dataplane path in the SCION layer is still r.Dec (pointer to path),
 	// nothing else to do.
@@ -129,6 +127,7 @@ func (r *Reservation) deriveDataPlanePath(
 	millis |= r.counter
 	r.Dec.Base.PathMeta.BaseTS = secs
 	r.Dec.Base.PathMeta.HighResTS = millis
+
 	// Increment counter for the next packet. Make sure it always fits in 22 bits.
 	r.counter++
 	r.counter %= 1 << 22 // Counter is the "tail" of the timestamp, using the 22 LSBs.
@@ -180,15 +179,6 @@ func (r *Reservation) Expiry() time.Time {
 
 // ReservationModFcn is a options setting function for a reservation.
 type ReservationModFcn func(*Reservation) error
-
-// WithNow modifies the current point in time for this reservation. It is useful to filter
-// the different flyovers that can be passed to WithScionPath.
-func WithNow(now func() time.Time) ReservationModFcn {
-	return func(r *Reservation) error {
-		r.Now = now
-		return nil
-	}
-}
 
 // WithDstIA changes the destination IA of the reservation.
 func WithDstIA(dstIA addr.IA) ReservationModFcn {
@@ -281,7 +271,6 @@ func WithReverseFromBidirectional(
 		// 3. Rebind the reversed dataplane path onto the serialized reverse reservation state.
 		r.Dec = &dec
 		r.DstIA = otherIA
-		r.Now = time.Now
 		r.blocksPerAk = make([]cipher.Block, len(r.Hops))
 		for i, hop := range r.Hops {
 			if hop == nil {

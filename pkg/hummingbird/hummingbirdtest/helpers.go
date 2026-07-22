@@ -336,7 +336,6 @@ func newHummingbirdReservationFromBaseHops(
 	}
 
 	reservation, err := snetpath.NewReservation(
-		snetpath.WithNow(func() time.Time { return now }),
 		snetpath.WithDataplanePath(scionPath, dstIA, flyovers),
 	)
 	if err != nil {

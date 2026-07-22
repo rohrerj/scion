@@ -247,10 +247,16 @@ func (p *scionPacketProcessor) verifyHbirdFlyoverMac() disposition {
 		return disp
 	}
 
-	ak := hummingbird.DeriveAuthKey(p.prf, p.flyoverField.ResID, p.flyoverField.Bw,
-		ingress, egress, p.hbirdPath.PathMeta.BaseTS-uint32(p.flyoverField.ResStartTime),
+	ak := hummingbird.DeriveAuthKey(
+		p.prf,
+		p.flyoverField.ResID,
+		p.flyoverField.Bw,
+		ingress,
+		egress,
+		p.hbirdPath.PathMeta.BaseTS-uint32(p.flyoverField.ResStartTime),
 		p.flyoverField.Duration,
-		p.macInputBuffer[path.MACBufferSize+hummingbird.FlyoverMacBufferSize:])
+		p.macInputBuffer[path.MACBufferSize+hummingbird.FlyoverMacBufferSize:],
+	)
 	log.Debug("Hummingbird packet AK derived",
 		"ak", fmt.Sprintf("%x", ak),
 		"cons_dir", p.infoField.ConsDir,
@@ -269,7 +275,8 @@ func (p *scionPacketProcessor) verifyHbirdFlyoverMac() disposition {
 		"start_time", p.hbirdPath.PathMeta.BaseTS-uint32(p.flyoverField.ResStartTime),
 		"res_start_time", p.flyoverField.ResStartTime,
 		"duration", p.flyoverField.Duration,
-		"high_res_ts", p.hbirdPath.PathMeta.HighResTS)
+		"high_res_ts", p.hbirdPath.PathMeta.HighResTS,
+	)
 	flyoverMac = hummingbird.FullFlyoverMac(ak, p.scionLayer.DstIA, p.scionLayer.PacketLen(),
 		p.flyoverField.ResStartTime, p.hbirdPath.PathMeta.HighResTS,
 		p.macInputBuffer[path.MACBufferSize:], p.hbirdXkbuffer)
@@ -406,6 +413,9 @@ func (p *scionPacketProcessor) validatePathMetaTimestamp(sc sizeClass) {
 
 	if time.Until(timestamp).Abs() > MaxFreshnessTolerance {
 		// Forward with best-effort if timestamp is too old.
+		log.Debug("packet is not fresh, demoting",
+			"timestamp", timestamp.Format(time.StampMilli),
+			"now", time.Now().Format(time.StampMilli))
 		p.pkt.PriorityLabel = pr.WithBestEffort
 		p.pkt.Link.Metrics()[sc].HummDemotedFreshnessPkts.Inc()
 	}
@@ -451,8 +461,8 @@ func (p *scionPacketProcessor) checkReservationBandwidth(sc sizeClass) dispositi
 	// they do not overlap in time. Reconfiguration and application must be one
 	// atomic operation because packets are processed concurrently.
 	if !tb.ReconfigureAndApply(int(p.scionLayer.PayloadLen), time.Now(), resBw, resBw) {
-		log.Debug("hummingbird packet exceeding allowed bandwidth token bucket",
-			"resID", fmt.Sprintf("%x", p.flyoverField.ResID))
+		log.Debug("hummingbird packet exceeding allowed bandwidth token bucket, demoting",
+			"resID", p.flyoverField.ResID)
 		p.pkt.PriorityLabel = pr.WithBestEffort
 		p.pkt.Link.Metrics()[sc].HummDemotedTokenBucketPkts.Inc()
 	} else {

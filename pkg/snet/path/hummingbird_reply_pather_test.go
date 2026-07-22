@@ -616,7 +616,6 @@ func mustSerializedReverseReservationState(t testing.TB, when time.Time) []byte 
 
 	reservation, err := path.NewReservation(
 		path.WithDataplanePath(reverseSCION, srcIA, reverseHops),
-		path.WithNow(func() time.Time { return when }),
 	)
 	require.NoError(t, err)
 	return mustSerializeReservation(t, reservation)
@@ -658,7 +657,6 @@ func mustSerializedReverseReservationStateNoFlyovers(t testing.TB, when time.Tim
 
 	reservation, err := path.NewReservation(
 		path.WithDataplanePath(reverseSCION, srcIA, reverseHops),
-		path.WithNow(func() time.Time { return when }),
 	)
 	require.NoError(t, err)
 	return mustSerializeReservation(t, reservation)

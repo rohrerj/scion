@@ -104,7 +104,6 @@ func TestSerializeReversedReservationState(t *testing.T) {
 
 	reservation, err := snetpath.NewReservation(
 		snetpath.WithDataplanePath(scionPath, srcIA, hops),
-		snetpath.WithNow(func() time.Time { return time.Unix(123, 0) }),
 	)
 	require.NoError(t, err)
 

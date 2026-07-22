@@ -242,9 +242,6 @@ func buildReservationWithSecretValues(
 	params hummingbirdParameters,
 	now time.Time,
 ) (*snetpath.Reservation, error) {
-	returnNow := func() time.Time {
-		return now
-	}
 	baseHops := snetpath.InterfacesToBaseHops(path.Metadata().Interfaces)
 	flyovers := make([]*snetpath.Hop, 0, len(baseHops))
 	startTime := uint32(now.Add(hummStartOffset).Unix())
@@ -288,7 +285,6 @@ func buildReservationWithSecretValues(
 		})
 	}
 	return snetpath.NewReservation(
-		snetpath.WithNow(returnNow),
 		snetpath.WithDataplanePath(path.Dataplane(), path.Destination(), flyovers),
 	)
 }
