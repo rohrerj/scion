@@ -36,7 +36,8 @@
                 <input name="username">
 
                 <label>Password</label>
-                <input name="password" type="password">
+                <input name="password" type="password" pattern="[A-Za-z0-9_\-]{1,32}"
+                            title="Must contain only letters, numbers, '_' or '-' with a length between 1 and 32 characters">
 
                 <button type="submit">Register</button>
             </form>

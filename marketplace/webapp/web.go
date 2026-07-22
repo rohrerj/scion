@@ -257,7 +257,7 @@ func (h *Handler) accountTokenHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if dbAccount.UserID != user.ID {
 		log.Debug("User account token handler. Account does not belong to user", "dbAccount.UserID", dbAccount.UserID, "user.ID", user.ID)
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		http.Error(w, "invalid account", http.StatusUnauthorized)
 		return
 	}
 	token, err := h.createToken(strconv.FormatInt(dbAccount.ID, 10), dbAccount.TokenVersion)
@@ -425,7 +425,12 @@ func (h *Handler) registerHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	username := r.FormValue("username")
 	password := r.FormValue("password")
-
+	if !accountScopeRegex.MatchString(username) {
+		templates.ExecuteTemplate(w, "register.html", map[string]any{
+			"Error": "Invalid username",
+		})
+		return
+	}
 	user, err := h.store.GetUserByName(r.Context(), username)
 	if err != nil {
 		log.Debug("User register handler", "err", err)
