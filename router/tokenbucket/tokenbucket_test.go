@@ -156,6 +156,36 @@ func TestReconfigureAndApply(t *testing.T) {
 	require.False(t, bucket.Apply(1, start.Add(time.Second)))
 }
 
+func TestHighBandwidthRefillDoesNotOverflow(t *testing.T) {
+	type testCase struct {
+		codepoint uint16
+		idleTime  time.Duration
+	}
+	var testCases []testCase
+	for codepoint := uint16(1000); codepoint <= 1023; codepoint++ {
+		for _, idleTime := range []time.Duration{2 * time.Second, 10 * time.Second, time.Minute} {
+			testCases = append(testCases, testCase{
+				codepoint: codepoint,
+				idleTime:  idleTime,
+			})
+		}
+	}
+
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("codepoint=%d/idle_time=%s", tc.codepoint, tc.idleTime), func(t *testing.T) {
+			start := time.Unix(0, 0)
+			rate := tokenbucket.ConvertBW(tc.codepoint)
+			bucket := tokenbucket.NewTokenBucket(start, rate, rate)
+			bucket.CurrentTokens = 0
+
+			// Multiplying the idle interval in nanoseconds by these rates exceeds
+			// math.MaxInt64. The bucket should saturate before accepting the packet.
+			require.True(t, bucket.Apply(96, start.Add(tc.idleTime)))
+			require.Equal(t, rate-96, bucket.CurrentTokens)
+		})
+	}
+}
+
 // TestConvertBW checks that ConvertBW(BW uint16) works as expected.
 // The 10 bits of BW are divided into 5 for mantissa, and 5 for exponent.
 // Always positive and integer.

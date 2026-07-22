@@ -79,12 +79,36 @@ func (t *TokenBucket) ReconfigureAndApply(size int, now time.Time, rate, burstSi
 }
 
 func (t *TokenBucket) apply(size int, now time.Time) bool {
-	// Increase available tokens according to time passed since last call
-	// Apply() is expected to be called from different threads
-	// As a consequence, it is possible for now to be older than LastTimeApplied
+	// Increase available tokens according to time passed since last call;
+	// Calls to apply() are serialized by the mutex, but callers may capture `now` before
+	// acquiring it. Concurrent calls can therefore arrive with `now` older than `LastTimeApplied`.
 	if !now.Before(t.LastTimeApplied) {
-		t.CurrentTokens += now.Sub(t.LastTimeApplied).Nanoseconds() * t.CIR / (1e9)
 		t.CurrentTokens = min(t.CurrentTokens, t.CBS)
+		// Carefully (avoid int64 overflows) refill the bucket, if any available tokens.
+		if t.CIR > 0 && t.CurrentTokens < t.CBS {
+			// There are new tokens (CIR>0) and the current tokens do not saturate CBS (curr<CBS).
+			elapsed := now.Sub(t.LastTimeApplied)
+			available := t.CBS - t.CurrentTokens    // Always >0; max possible refill.
+			seconds := int64(elapsed / time.Second) // Always >0
+			// Saturate before multiplying whole seconds by the rate.
+			if seconds > (available-1)/t.CIR {
+				// Long time since last applied: saturate.
+				t.CurrentTokens = t.CBS
+			} else {
+				tokens := seconds * t.CIR
+				t.CurrentTokens += tokens
+				available -= tokens
+				nanoseconds := int64(elapsed % time.Second)
+				// Split the rate so neither sub-second product can overflow int64.
+				tokens = nanoseconds * (t.CIR / int64(time.Second))
+				tokens += nanoseconds * (t.CIR % int64(time.Second)) / int64(time.Second)
+				if tokens >= available {
+					t.CurrentTokens = t.CBS
+				} else {
+					t.CurrentTokens += tokens
+				}
+			}
+		}
 		t.LastTimeApplied = now
 	}
 	if t.CurrentTokens >= int64(size) {
