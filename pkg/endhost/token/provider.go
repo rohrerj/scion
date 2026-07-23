@@ -17,7 +17,11 @@ package token
 import "context"
 
 type Provider interface {
+	// Token should always return a not expired token or an error otherwise.
 	Token(context.Context) (string, error)
+	// Renew can be called to manually request a token renewal independent of the token expiration.
+	Renew(context.Context) error
+	Close() error
 }
 
 type StaticTokenProvider struct {
@@ -32,4 +36,12 @@ func NewStaticTokenProvider(token string) *StaticTokenProvider {
 
 func (s *StaticTokenProvider) Token(_ context.Context) (string, error) {
 	return s.token, nil
+}
+
+func (s *StaticTokenProvider) Renew(_ context.Context) error {
+	return nil
+}
+
+func (s *StaticTokenProvider) Close() error {
+	return nil
 }
