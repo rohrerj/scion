@@ -78,7 +78,8 @@ type DBStat struct {
 }
 
 type DBReservation struct {
-	ID               uint32
+	ID               int64
+	ReservationID    uint32
 	IA               addr.IA
 	Ingress          uint32
 	Egress           uint32

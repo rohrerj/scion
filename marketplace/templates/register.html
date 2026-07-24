@@ -12,6 +12,8 @@
         <div class="nav-left">
             {{if .Username}}
             <a href="/account">Account</a>
+            <a href="/assets">Assets</a>
+            <a href="/reservations">Reservations</a>
             {{else}}
             <a href="/aslogin">AS Login</a>
             <a href="/login">Login</a>
@@ -36,8 +38,8 @@
                 <input name="username">
 
                 <label>Password</label>
-                <input name="password" type="password" pattern="[A-Za-z0-9_\-]{1,32}"
-                            title="Must contain only letters, numbers, '_' or '-' with a length between 1 and 32 characters">
+                <input name="password" type="password" pattern="[A-Za-z0-9_\-]{1,20}"
+                    title="Must contain only letters, numbers, '_' or '-' with a length between 1 and 20 characters">
 
                 <button type="submit">Register</button>
             </form>

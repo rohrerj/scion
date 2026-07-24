@@ -132,7 +132,7 @@ func (e *executor) FetchReservations(ctx context.Context, params *ReservationQue
 		var stopsAtString string
 		var isd uint16
 		var as uint64
-		err = rows.Scan(&a.ID, &isd, &as, &a.Ingress, &a.Egress, &a.Bandwidth, &a.EncodedBandwidth, &startsAtString, &stopsAtString, &a.Key)
+		err = rows.Scan(&a.ID, &a.AccountId, &a.ReservationID, &isd, &as, &a.Ingress, &a.Egress, &a.Bandwidth, &a.EncodedBandwidth, &startsAtString, &stopsAtString, &a.Key)
 		if err != nil {
 			return nil, serrors.Wrap("Error reading DB response", err)
 		}
@@ -154,7 +154,7 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 	var args []any
 	where := []string{}
 	query := []string{
-		"SELECT r.id, r.isd_id, r.as_id, r.ingress, r.egress, r.bandwidth, r.bw_encoded, r.starts_at, r.stops_at, r.key FROM Reservations r",
+		"SELECT r.id, r.account_id, r.reservation_id, r.isd_id, r.as_id, r.ingress, r.egress, r.bandwidth, r.bw_encoded, r.starts_at, r.stops_at, r.key FROM Reservations r",
 	}
 	query = append(query, "JOIN Accounts owner ON r.account_id = owner.id JOIN Accounts current ON current.id = ?")
 	where = append(where, "(current.scope IS NULL AND owner.user_id = current.user_id) OR (current.scope IS NOT NULL AND owner.id = current.id)")
@@ -754,9 +754,9 @@ func (e *executor) InsertReservation(ctx context.Context, r *DBReservation) (int
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	q := `INSERT INTO Reservations (id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key, account_id)
+	q := `INSERT INTO Reservations (reservation_id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key, account_id)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?)`
-	res, err := e.write.ExecContext(ctx, q, r.ID, r.IA.ISD(), r.IA.AS(), r.Ingress, r.Egress, r.Bandwidth, r.EncodedBandwidth,
+	res, err := e.write.ExecContext(ctx, q, r.ReservationID, r.IA.ISD(), r.IA.AS(), r.Ingress, r.Egress, r.Bandwidth, r.EncodedBandwidth,
 		r.StartsAt.UTC().Format(time.RFC3339), r.StopsAt.UTC().Format(time.RFC3339),
 		r.Key, r.AccountId)
 	if err != nil {
@@ -1036,6 +1036,30 @@ func (e *executor) DeleteAccount(ctx context.Context, accountID int64) (int64, e
 	}
 	inst := `DELETE FROM Accounts WHERE id = ? AND scope IS NOT NULL`
 	res, err := e.write.ExecContext(ctx, inst, accountID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *executor) AssignAsset(ctx context.Context, assetID int64, accountIDFrom int64, accountIDTo int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `UPDATE Assets SET account_id = ? WHERE id=? AND account_id = ?`
+	res, err := e.write.ExecContext(ctx, inst, accountIDTo, assetID, accountIDFrom)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *executor) AssignReservation(ctx context.Context, id int64, accountIDFrom int64, accountIDTo int64) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `UPDATE Reservations SET account_id = ? WHERE id=? AND account_id = ?`
+	res, err := e.write.ExecContext(ctx, inst, accountIDTo, id, accountIDFrom)
 	if err != nil {
 		return 0, err
 	}

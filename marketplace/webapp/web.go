@@ -45,6 +45,7 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 		Secure:   true,
 		HttpOnly: true,
 		MaxAge:   0,
+		SameSite: http.SameSiteLaxMode,
 	}
 	gob.Register(User{})
 	gob.Register(addr.IA(0))
@@ -63,6 +64,10 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 	mux.HandleFunc("/account/token", h.accountTokenHandler)
 	mux.HandleFunc("/account/resetjwt", h.accountResetJWTHandler)
 	mux.HandleFunc("/account", h.accountHandler)
+	mux.HandleFunc("/assets", h.assetsHandler)
+	mux.HandleFunc("/assets/assign", h.assignAssetHandler)
+	mux.HandleFunc("/reservations", h.reservationsHandler)
+	mux.HandleFunc("/reservations/assign", h.assignReservationHandler)
 	mux.HandleFunc("/logout", h.logoutHandler)
 	mux.HandleFunc("/aslogin", h.asLoginHandler)
 	mux.HandleFunc("/asbalance", h.asBalanceHandler)
@@ -332,7 +337,7 @@ func (h *Handler) accountResetJWTHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 }
 
-var accountScopeRegex = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
+var accountScopeRegex = regexp.MustCompile(`^[A-Za-z0-9_-]{1,20}$`)
 
 func (h *Handler) accountCreateHandler(w http.ResponseWriter, r *http.Request) {
 	session, err := h.GetSession(r)
@@ -365,6 +370,218 @@ func (h *Handler) accountCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/account", http.StatusSeeOther)
+}
+
+func (h *Handler) assignReservationHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	user, ok := session.Values["user"].(User)
+	if !ok {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseForm()
+	id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+	if err != nil {
+		log.Debug("User assign reservation handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fromAccountId, err := strconv.ParseInt(r.FormValue("from"), 10, 64)
+	if err != nil {
+		log.Debug("User assign reservation handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	toAccountId, err := strconv.ParseInt(r.FormValue("to"), 10, 64)
+	if err != nil {
+		log.Debug("User assign reservation handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, err = h.store.AssignReservation(r.Context(), id, user.ID, fromAccountId, toAccountId)
+	if err != nil {
+		log.Debug("User assign reservation handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) assignAssetHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	user, ok := session.Values["user"].(User)
+	if !ok {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseForm()
+	assetId, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+	if err != nil {
+		log.Debug("User assign asset handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fromAccountId, err := strconv.ParseInt(r.FormValue("from"), 10, 64)
+	if err != nil {
+		log.Debug("User assign asset handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	toAccountId, err := strconv.ParseInt(r.FormValue("to"), 10, 64)
+	if err != nil {
+		log.Debug("User assign asset handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, err = h.store.AssignAsset(r.Context(), assetId, user.ID, fromAccountId, toAccountId)
+	if err != nil {
+		log.Debug("User assign asset handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) assetsHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	user, ok := session.Values["user"].(User)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	r.ParseForm()
+	accountIdFilterString := r.FormValue("id")
+	var accountIdFilter int64
+	if accountIdFilterString != "" {
+		accountIdFilter, err = strconv.ParseInt(accountIdFilterString, 10, 64)
+		if err != nil {
+			log.Debug("User assign asset handler", "err", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	dbAccounts, err := h.store.GetAccountsByUser(r.Context(), user.ID)
+	if err != nil {
+		log.Debug("User assets handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var filterAccount *db.DBAccount
+	var mainAccount *db.DBAccount
+	for _, a := range dbAccounts {
+		if a.Scope == nil {
+			a.Scope = &user.Name
+			mainAccount = a
+		}
+		if accountIdFilterString != "" && a.ID == accountIdFilter {
+			filterAccount = a
+		}
+	}
+	if filterAccount == nil {
+		filterAccount = mainAccount
+	}
+	if mainAccount == nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	assets, err := h.store.Search(r.Context(), &db.AssetQuery{
+		AccountId: &filterAccount.ID,
+	})
+	if err != nil {
+		log.Debug("User assets handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	templates.ExecuteTemplate(w, "assets.html", map[string]any{
+		"Username": user.Name,
+		"Assets":   assets,
+		"Accounts": dbAccounts,
+		"Account":  filterAccount,
+	})
+}
+
+func (h *Handler) reservationsHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	user, ok := session.Values["user"].(User)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	r.ParseForm()
+	accountIdFilterString := r.FormValue("id")
+	var accountIdFilter int64
+	if accountIdFilterString != "" {
+		accountIdFilter, err = strconv.ParseInt(accountIdFilterString, 10, 64)
+		if err != nil {
+			log.Debug("User assign asset handler", "err", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	dbAccounts, err := h.store.GetAccountsByUser(r.Context(), user.ID)
+	if err != nil {
+		log.Debug("User assets handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var filterAccount *db.DBAccount
+	var mainAccount *db.DBAccount
+	for _, a := range dbAccounts {
+		if a.Scope == nil {
+			a.Scope = &user.Name
+			mainAccount = a
+		}
+		if accountIdFilterString != "" && a.ID == accountIdFilter {
+			filterAccount = a
+		}
+	}
+	if filterAccount == nil {
+		filterAccount = mainAccount
+	}
+	if mainAccount == nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	reservations, err := h.store.FetchReservations(r.Context(), &db.ReservationQuery{
+		AccountId: filterAccount.ID,
+	})
+	if err != nil {
+		log.Debug("User assets handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	templates.ExecuteTemplate(w, "reservations.html", map[string]any{
+		"Username":     user.Name,
+		"Reservations": reservations,
+		"Accounts":     dbAccounts,
+		"Account":      filterAccount,
+	})
 }
 
 func (h *Handler) accountHandler(w http.ResponseWriter, r *http.Request) {

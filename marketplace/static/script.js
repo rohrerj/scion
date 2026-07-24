@@ -117,3 +117,47 @@ function copyJWT() {
             document.getElementById("error").textContent = "Could not copy token: " + err;
         });
 }
+
+async function assignAsset(id, accountid, select) {
+    const response = await fetch("/assets/assign", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: "id=" + encodeURIComponent(id) + "&from=" + encodeURIComponent(accountid) + "&to=" + encodeURIComponent(select.value)
+    });
+
+    if (!response.ok) {
+        if (response.status == 401) {
+            location.reload();
+            return;
+        }
+        document.getElementById("error").textContent = await response.text();
+        return;
+    }
+    location.reload();
+}
+async function assignReservation(id, accountid, select) {
+    const response = await fetch("/reservations/assign", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: "id=" + encodeURIComponent(id) + "&from=" + encodeURIComponent(accountid) + "&to=" + encodeURIComponent(select.value)
+    });
+
+    if (!response.ok) {
+        if (response.status == 401) {
+            location.reload();
+            return;
+        }
+        document.getElementById("error").textContent = await response.text();
+        return;
+    }
+    location.reload();
+}
+function reloadWithId(id) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("id", id);
+    window.location.href = url.toString();
+}

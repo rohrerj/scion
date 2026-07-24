@@ -268,14 +268,15 @@ def insertAssets(db, assets) -> bool:
         """
         INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress, account_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
-            SELECT id
-            FROM Users
-            WHERE name = ?
+            SELECT a.id
+            FROM Accounts a
+            JOIN Users u ON u.ID = a.user_id
+            WHERE u.name = ? AND a.scope IS NULL
             LIMIT 1
         ))
         """,
         [
-            (u.get("isd_id"), u.get("as_id"), u.get("bandwidth"), u.get("bandwidth_min"), u.get("bandwidth_max"), u.get("price"), u.get("time_granularity"), u.get("time_min_duration"), u.get("starts_at"), u.get("stops_at"), u.get("ingress"), u.get("egress"), u.get("user"),)
+            (u.get("isd_id"), u.get("as_id"), u.get("bandwidth"), u.get("bandwidth_min"), u.get("bandwidth_max"), u.get("price"), u.get("time_granularity"), u.get("time_min_duration"), u.get("starts_at"), u.get("stops_at"), u.get("ingress"), u.get("egress"), u.get("owner"),)
             for u in assets
         ],
     )
@@ -322,7 +323,7 @@ def insertReservations(db, reservations):
     for u in reservations:
         db.execute(
             """
-        INSERT OR REPLACE INTO Reservations (id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key, account_id)
+        INSERT OR REPLACE INTO Reservations (reservation_id, isd_id, as_id, ingress, egress, bandwidth, bw_encoded, starts_at, stops_at, key, account_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
             SELECT id
             FROM Users

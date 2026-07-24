@@ -13,6 +13,8 @@
         <div class="nav-left">
             {{if .Username}}
             <a href="/account">Account</a>
+            <a href="/assets">Assets</a>
+            <a href="/reservations">Reservations</a>
             {{else}}
             <a href="/aslogin">AS Login</a>
             <a href="/login">Login</a>
@@ -51,33 +53,37 @@
         <section class="card">
             <h3>Sub Accounts</h3>
             <table>
-                <tr>
-                    <th>Name</th>
-                    <th>Balance</th>
-                    <th>Token Version</th>
-                    <th>Actions</th>
-                </tr>
-                {{range .Accounts}}
-                <tr>
-                    <td>
-                        {{with .Scope}}
-                        {{.}}
-                        {{end}}
-                    </td>
-                    <td>{{.Balance}}</td>
-                    <td>{{.TokenVersion}}</td>
-                    <td>
-                        <div class="table-actions">
-                            <button type="button" onclick="requestJWT('{{.ID}}','{{.Scope}}')">Get JWT</button>
-                            <button type="button" onclick="resetJWT('{{.ID}}','{{.Scope}}')">Reset JWT</button>
-                            <button type="submit" onclick="editBalance('{{.ID}}','{{.Scope}}')">Edit
-                                Balance</button>
-                            <button type="submit" onclick="deleteAccount('{{.ID}}','{{.Scope}}')"
-                                class="danger">Delete</button>
-                        </div>
-                    </td>
-                </tr>
-                {{end}}
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Balance</th>
+                        <th>Token Version</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Accounts}}
+                    <tr>
+                        <td>
+                            {{with .Scope}}
+                            {{.}}
+                            {{end}}
+                        </td>
+                        <td>{{.Balance}}</td>
+                        <td>{{.TokenVersion}}</td>
+                        <td>
+                            <div class="table-actions">
+                                <button type="button" onclick="requestJWT('{{.ID}}','{{.Scope}}')">Get JWT</button>
+                                <button type="button" onclick="resetJWT('{{.ID}}','{{.Scope}}')">Reset JWT</button>
+                                <button type="submit" onclick="editBalance('{{.ID}}','{{.Scope}}')">Edit
+                                    Balance</button>
+                                <button type="submit" onclick="deleteAccount('{{.ID}}','{{.Scope}}')"
+                                    class="danger">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
             </table>
         </section>
         <section class="card" id="balance-editor" style="display:none">
@@ -105,8 +111,8 @@
                 <form class="form-horizontal" method="POST" action="/account/create">
                     <label>
                         Name:
-                        <input type="text" name="name" pattern="[A-Za-z0-9_\-]{1,32}"
-                            title="Must contain only letters, numbers, '_' or '-' with a length between 1 and 32 characters"
+                        <input type="text" name="name" pattern="[A-Za-z0-9_\-]{1,20}"
+                            title="Must contain only letters, numbers, '_' or '-' with a length between 1 and 20 characters"
                             required>
                     </label>
                     <button type="submit">Create</button>

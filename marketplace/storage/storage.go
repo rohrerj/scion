@@ -829,3 +829,71 @@ func (s *MarketplaceStorage) DepositMoneyAndGetAS(ctx context.Context, ia addr.I
 	}
 	return user, nil
 }
+
+func (s *MarketplaceStorage) AssignAsset(ctx context.Context, assetID int64, userID int64, accountIDFrom int64, accountIDTo int64) (int64, error) {
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	accounts, err := tx.GetAccountsByUser(ctx, userID)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	var fromAcc, toAcc *marketplacedb.DBAccount
+	for _, acc := range accounts {
+		if acc.ID == accountIDFrom {
+			fromAcc = acc
+		} else if acc.ID == accountIDTo {
+			toAcc = acc
+		}
+	}
+	if fromAcc == nil || toAcc == nil {
+		return 0, serrors.Join(serrors.New("invalid account or asset"), tx.Rollback())
+	}
+	x, err := tx.AssignAsset(ctx, assetID, fromAcc.ID, toAcc.ID)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	if x != 1 {
+		return 0, serrors.Join(serrors.New("invalid account or asset"), tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	return 1, nil
+}
+
+func (s *MarketplaceStorage) AssignReservation(ctx context.Context, id int64, userID int64, accountIDFrom int64, accountIDTo int64) (int64, error) {
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	accounts, err := tx.GetAccountsByUser(ctx, userID)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	var fromAcc, toAcc *marketplacedb.DBAccount
+	for _, acc := range accounts {
+		if acc.ID == accountIDFrom {
+			fromAcc = acc
+		} else if acc.ID == accountIDTo {
+			toAcc = acc
+		}
+	}
+	if fromAcc == nil || toAcc == nil {
+		return 0, serrors.Join(serrors.New("invalid account or reservation"), tx.Rollback())
+	}
+	x, err := tx.AssignReservation(ctx, id, fromAcc.ID, toAcc.ID)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	if x != 1 {
+		return 0, serrors.Join(serrors.New("invalid account or reservation"), tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	return 1, nil
+}

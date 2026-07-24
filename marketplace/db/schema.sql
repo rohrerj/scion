@@ -21,7 +21,8 @@ CREATE INDEX IF NOT EXISTS idx_asset_validity ON Assets(starts_at, stops_at);
 CREATE INDEX IF NOT EXISTS idx_assets_ia_validity_start ON Assets(isd_id, as_id, starts_at, stops_at);
 CREATE INDEX IF NOT EXISTS idx_assets_ia_validity_end ON Assets(isd_id, as_id, stops_at, starts_at);
 CREATE TABLE IF NOT EXISTS Reservations(
-    id INTEGER NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reservation_id INTEGER NOT NULL,
     account_id INTEGER NOT NULL,
     isd_id INTEGER NOT NULL,
     as_id INTEGER NOT NULL,
