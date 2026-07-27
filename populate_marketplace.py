@@ -8,7 +8,7 @@ import re
 """
 Example JSON file:
 {
-    "version": "8a8fb99bea7d38dc6df2fe8db0e389b3c8b4b660367c70a681b50422b4eb85fd",
+    "version": "4abdd9041b766012ed2b58222505e0a8aeead3208b7dab513bc338eacb6eb11f",
     "users": [
         {
             "name": "Alice",
