@@ -112,8 +112,12 @@ On other errors, showpaths will exit with code 2.
 			ctx, cancel := context.WithTimeout(traceCtx, flags.timeout)
 			defer cancel()
 			if envFlags.EndhostApi() != "" {
+				tokenProvider, err := token.NewAnapayaAuthProvider(traceCtx, envFlags.EndhostApiToken())
+				if err != nil {
+					return serrors.Wrap("init anapaya auth provider", err)
+				}
 				endhostOpts := []endhost.ConnectOption{
-					endhost.WithTokenProvider(token.NewStaticTokenProvider(envFlags.EndhostApiToken())),
+					endhost.WithTokenProvider(tokenProvider),
 				}
 				if envFlags.ConfigDir() != "" {
 					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")

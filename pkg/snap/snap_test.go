@@ -16,188 +16,155 @@ package snap_test
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
-	"log"
+	"io"
 	"net"
+	"net/http"
 	"testing"
 	"time"
 
-	"github.com/gopacket/gopacket"
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/pkg/addr"
-	anapayaauth "github.com/scionproto/scion/pkg/anapaya_auth"
+	libconnect "github.com/scionproto/scion/pkg/connect"
 	"github.com/scionproto/scion/pkg/endhost"
-	"github.com/scionproto/scion/pkg/slayers"
-	"github.com/scionproto/scion/pkg/snap"
+	"github.com/scionproto/scion/pkg/endhost/token"
 	"github.com/scionproto/scion/pkg/snet"
+	"github.com/scionproto/scion/pkg/snet/squic"
+	"github.com/scionproto/scion/private/app/appnet"
 )
 
-func TestSnap(t *testing.T) {
-	/*snapControlURL := "http://s01.chgtg1.snap.anapaya.net:5001"
-	token := "REDACTED"
-	ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancelF()
-	t.Fail()*/
-}
+var anapaya_auth_key = ""
 
 func TestFullEndhost(t *testing.T) {
 	ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancelF()
-	aaClient := anapayaauth.NewClient("")
-
+	tokenProvider, err := token.NewAnapayaAuthProvider(ctx, anapaya_auth_key)
+	if err != nil {
+		t.Fatal(err)
+	}
 	endhostAPIURL := "https://s01.chgtg1.snap.anapaya.net:5001"
-	connector, err := endhost.NewConnector(ctx, endhostAPIURL, endhost.WithToken(aaClient.Token()))
+	connector, err := endhost.NewConnector(ctx, endhostAPIURL, endhost.WithTokenProvider(tokenProvider))
 	if err != nil {
 		t.Fatal(err)
 	}
-	underlays, err := connector.UnderlayService.ListUnderlays(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
+	defer connector.Close()
+	sn := snet.SCIONNetwork{
+		Topology:    connector.Topology,
+		SCMPHandler: snet.DefaultSCMPHandler{},
 	}
-	if underlays.Snap == nil {
-		t.Fatal("snap is nil")
-	}
-	var targetSnap endhost.Snap
-	for _, snap := range underlays.Snap.Snaps {
-		fmt.Println(snap.Address, snap.IsdASes)
-		if snap.Address == "https://93.185.219.2:5001/" {
-			targetSnap = snap
-		}
-	}
-	fmt.Println(targetSnap)
 	dstIA := addr.MustParseIA("64-2:0:9")
-	paths, err := connector.PathService.Paths(ctx, dstIA, endhost.WithDisabledSegVerification())
+	paths, err := connector.PathService.Paths(ctx, dstIA, endhost.WithSkipSegmentVerificationIfUnsupportedByAS())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(paths) == 0 {
 		t.Fatal("no paths")
 	}
-	snapApi := connector.Topology.Snap.ControlApi
-
-	tunnel, err := snap.NewSnapTunnel(ctx, snapApi, aaClient.Token())
-	if err != nil {
-		t.Fatal(err)
-	}
 	remoteAddr, err := net.ResolveUDPAddr("udp", "129.132.175.104:30041")
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	pkt := snet.Packet{
-		PacketInfo: snet.PacketInfo{
-			Source: snet.SCIONAddress{
-				IA:   connector.Topology.LocalIA,
-				Host: addr.HostIP(tunnel.LocalAddr.AddrPort().Addr()),
-			},
-			Destination: snet.SCIONAddress{
-				IA:   addr.MustParseIA("64-2:0:9"),
-				Host: addr.HostIP(remoteAddr.AddrPort().Addr()),
-			},
-			Path: paths[0].Dataplane(),
-			Payload: snet.UDPPayload{
-				SrcPort: 8888,
-				DstPort: 30041,
-				Payload: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
-			},
-		},
-		Bytes: make(snet.Bytes, 1024),
+	remote := &snet.UDPAddr{
+		IA:   dstIA,
+		Path: paths[0].Dataplane(),
+		Host: remoteAddr,
 	}
-	err = pkt.Serialize()
+	s, err := sn.DialSnap(ctx, remote)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tunnel.SendChannel() <- pkt.Bytes
-	var buf []byte
-	select {
-	case buf = <-tunnel.ReceiveChannel():
-	case <-time.After(time.Second):
-		t.Log("no response")
-		t.Fail()
-		return
-	}
-
-	udpLayer := slayers.UDP{}
-	scionLayer := slayers.SCION{}
-	scmpLayer := slayers.SCMP{}
-	_, err = decodeLayers(buf, &scionLayer, &scmpLayer, &udpLayer)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("scmp type code", scmpLayer.TypeCode)
-
-	fmt.Println("received", buf)
-	time.Sleep(time.Second)
-	/*b, err := conn.WriteTo([]byte("helloworld"), tunnel.DataplaneAddr)
+	defer s.Close()
+	_, err = s.Write([]byte("testtesttesttest"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("written %d bytes\n", b)
-	time.Sleep(time.Second)
-	buf := make([]byte, 1024)
-	conn.SetReadDeadline(time.Now().Add(time.Second))
-	b, raddr, err := conn.ReadFrom(buf)
+	resp := make([]byte, 1024)
+	s.SetReadDeadline(time.Now().Add(time.Second))
+	n, err := s.Read(resp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("packet from remote %v packet:\n%v\n", raddr, buf[:b])*/
-
+	fmt.Println(resp[:n])
 	t.Fail()
 }
 
-func decodeLayers(data []byte, base gopacket.DecodingLayer,
-	opts ...gopacket.DecodingLayer) (gopacket.DecodingLayer, error) {
-
-	if err := base.DecodeFromBytes(data, gopacket.NilDecodeFeedback); err != nil {
-		return nil, err
+func TestQUICToMarketplace(t *testing.T) {
+	ctx, cancelF := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancelF()
+	tokenProvider, err := token.NewAnapayaAuthProvider(ctx, anapaya_auth_key)
+	if err != nil {
+		t.Fatal(err)
 	}
-	last := base
-	for _, opt := range opts {
-		if opt.CanDecode().Contains(last.NextLayerType()) {
-			data := last.LayerPayload()
-			if err := opt.DecodeFromBytes(data, gopacket.NilDecodeFeedback); err != nil {
-				return nil, err
-			}
-			last = opt
-		}
+	endhostAPIURL := "https://s01.chgtg1.snap.anapaya.net:5001"
+	connector, err := endhost.NewConnector(ctx, endhostAPIURL, endhost.WithTokenProvider(tokenProvider))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return last, nil
+	defer connector.Close()
+	sn := snet.SCIONNetwork{
+		Topology:    connector.Topology,
+		SCMPHandler: snet.DefaultSCMPHandler{},
+	}
+	dstIA := addr.MustParseIA("64-2:0:9")
+	paths, err := connector.PathService.Paths(ctx, dstIA, endhost.WithSkipSegmentVerificationIfUnsupportedByAS())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no paths")
+	}
+	remoteAddr, err := net.ResolveUDPAddr("udp", "129.132.121.169:8888")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := &snet.UDPAddr{
+		IA:   dstIA,
+		Path: paths[0].Dataplane(),
+		Host: remoteAddr,
+	}
+	//
+	client, err := sn.ListenSnap(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTransport := &quic.Transport{
+		Conn: client,
+	}
+	//
+	dialerFunc := (&squic.EarlyDialerFactory{
+		Transport: clientTransport,
+		TLSConfig: &tls.Config{
+			NextProtos: []string{"h3", "SCION"},
+			ServerName: "scion-marketplace.netsec.ethz.ch",
+		},
+		Rewriter: &appnet.AddressRewriter{
+			Router: &snet.BaseRouter{
+				Querier: connector.PathService,
+			},
+		},
+		QUICConfig: &quic.Config{
+			DisablePathMTUDiscovery: true,
+			InitialPacketSize:       1200,
+			HandshakeIdleTimeout:    5 * time.Second,
+		},
+	}).NewDialer
+	dialer := dialerFunc(remote)
+	httpClient := libconnect.HTTPClient{
+		RoundTripper: &http3.Transport{
+			Dial: dialer.DialEarly,
+		},
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://scion-marketplace.netsec.ethz.ch:8888/login", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	fmt.Println(io.ReadAll(resp.Body))
+	t.Fail()
 }
-
-/*sn := snet.SCIONNetwork{
-	Topology: connector.Topology,
-}*/
-/*remoteAddr, err := net.ResolveUDPAddr("udp", "129.132.175.104:30041")
-if err != nil {
-	t.Fatal(err)
-}*/
-// nextHop is the tunnel gateway - use the tunnel's local IP itself
-/*nextHop, err := net.ResolveUDPAddr("udp", "127.0.0.10:30000")
-if err != nil {
-	t.Fatal(err)
-}*/
-/*remote := &snet.UDPAddr{
-	IA:      dstIA,
-	Path:    paths[0].Dataplane(),
-	NextHop: tunnel.DataplaneAddr,
-	Host:    remoteAddr,
-}
-conn, err := sn.DialSnap(ctx, tunnel, localAddr, remote)
-if err != nil {
-	t.Fatal(err)
-}
-
-defer conn.Close()
-_, err = conn.Write([]byte("helloworld"))
-if err != nil {
-	t.Fatal(err)
-}
-buf := make([]byte, 1024)
-conn.SetReadDeadline(time.Now().Add(time.Second * 2))
-_, err = conn.Read(buf)
-if err != nil {
-	t.Fatal(err)
-}
-time.Sleep(time.Second)
-fmt.Println("Metrics")
-fmt.Println(tunnel.Metrics())
-*/

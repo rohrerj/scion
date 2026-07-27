@@ -74,7 +74,7 @@ func establishWireGuardTunnel(
 	clientPrivateKey []byte,
 	psk []byte,
 ) (*SnapTunnel, error) {
-	memtun := tun.CreateInMemoryTunnel(1000, 1000, 8)
+	memtun := tun.CreateInMemoryTunnel(1400, 1000, 8)
 	logger := device.NewLogger(
 		device.LogLevelError,
 		"snaptun",
@@ -115,6 +115,7 @@ func establishWireGuardTunnel(
 	if err != nil {
 		return nil, fmt.Errorf("localAddr: %w", err)
 	}
+	localAddr = canonicalUDPAddr(localAddr)
 
 	return &SnapTunnel{
 		device:        wg,
@@ -122,6 +123,17 @@ func establishWireGuardTunnel(
 		DataplaneAddr: remoteAddr,
 		LocalAddr:     localAddr,
 	}, nil
+}
+
+func canonicalUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
+	if ip4 := addr.IP.To4(); ip4 != nil {
+		return &net.UDPAddr{
+			IP:   ip4,
+			Port: addr.Port,
+			Zone: "", // IPv4 has no zone
+		}
+	}
+	return addr
 }
 
 func (t *SnapTunnel) Close() error {

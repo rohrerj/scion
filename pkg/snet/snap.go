@@ -65,7 +65,7 @@ func (s *SnapConn) NextHop() *net.UDPAddr {
 func (s *SnapConn) ReadFrom(pkt *Packet, ov *net.UDPAddr) error {
 	pkt.Prepare()
 	addr := *s.tunnel.DataplaneAddr
-	ov = &addr
+	*ov = addr
 	var b []byte
 	if s.readTimer != nil {
 		select {

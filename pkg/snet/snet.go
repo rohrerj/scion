@@ -237,6 +237,18 @@ func (n *SCIONNetwork) Listen(
 	return NewCookedConn(packetConn, n.Topology, WithReplyPather(n.ReplyPather))
 }
 
+func (n *SCIONNetwork) ListenSnap(
+	ctx context.Context,
+) (*Conn, error) {
+
+	packetConn, err := n.OpenSnap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	log.FromCtx(ctx).Debug("UDP socket opened on", "addr", packetConn.LocalAddr())
+	return NewCookedConn(packetConn, n.Topology, WithReplyPather(n.ReplyPather))
+}
+
 func listenUDPRange(addr *net.UDPAddr, start, end uint16) (*net.UDPConn, error) {
 	// XXX(JordiSubira): For now, we iterate on the complete SCION/UDP
 	// range, in decreasing order, taking the first unused port.

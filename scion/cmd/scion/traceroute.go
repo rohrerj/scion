@@ -127,8 +127,12 @@ On other errors, traceroute will exit with code 2.
 				path.WithEPIC(flags.epic),
 			}
 			if envFlags.EndhostApi() != "" {
+				tokenProvider, err := token.NewAnapayaAuthProvider(traceCtx, envFlags.EndhostApiToken())
+				if err != nil {
+					return serrors.Wrap("init anapaya auth provider", err)
+				}
 				endhostOpts := []endhost.ConnectOption{
-					endhost.WithTokenProvider(token.NewStaticTokenProvider(envFlags.EndhostApiToken())),
+					endhost.WithTokenProvider(tokenProvider),
 				}
 				if envFlags.ConfigDir() != "" {
 					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")
