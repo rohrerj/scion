@@ -29,6 +29,7 @@ import (
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/daemon"
 	"github.com/scionproto/scion/pkg/endhost"
+	"github.com/scionproto/scion/pkg/endhost/token"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/private/app"
@@ -112,7 +113,7 @@ On other errors, showpaths will exit with code 2.
 			defer cancel()
 			if envFlags.EndhostApi() != "" {
 				endhostOpts := []endhost.ConnectOption{
-					endhost.WithToken(envFlags.EndhostApiToken()),
+					endhost.WithTokenProvider(token.NewStaticTokenProvider(envFlags.EndhostApiToken())),
 				}
 				if envFlags.ConfigDir() != "" {
 					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")

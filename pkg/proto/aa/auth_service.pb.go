@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v6.31.1
-// source: proto/aa/v1/auth.proto
+// source: proto/aa/v1/auth_service.proto
 
 package aa
 
@@ -36,7 +36,7 @@ type AuthenticateByKeyRequest struct {
 
 func (x *AuthenticateByKeyRequest) Reset() {
 	*x = AuthenticateByKeyRequest{}
-	mi := &file_proto_aa_v1_auth_proto_msgTypes[0]
+	mi := &file_proto_aa_v1_auth_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +48,7 @@ func (x *AuthenticateByKeyRequest) String() string {
 func (*AuthenticateByKeyRequest) ProtoMessage() {}
 
 func (x *AuthenticateByKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_aa_v1_auth_proto_msgTypes[0]
+	mi := &file_proto_aa_v1_auth_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,7 +61,7 @@ func (x *AuthenticateByKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthenticateByKeyRequest.ProtoReflect.Descriptor instead.
 func (*AuthenticateByKeyRequest) Descriptor() ([]byte, []int) {
-	return file_proto_aa_v1_auth_proto_rawDescGZIP(), []int{0}
+	return file_proto_aa_v1_auth_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *AuthenticateByKeyRequest) GetApiKey() string {
@@ -94,7 +94,7 @@ type Metadata struct {
 
 func (x *Metadata) Reset() {
 	*x = Metadata{}
-	mi := &file_proto_aa_v1_auth_proto_msgTypes[1]
+	mi := &file_proto_aa_v1_auth_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -106,7 +106,7 @@ func (x *Metadata) String() string {
 func (*Metadata) ProtoMessage() {}
 
 func (x *Metadata) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_aa_v1_auth_proto_msgTypes[1]
+	mi := &file_proto_aa_v1_auth_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -119,7 +119,7 @@ func (x *Metadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Metadata.ProtoReflect.Descriptor instead.
 func (*Metadata) Descriptor() ([]byte, []int) {
-	return file_proto_aa_v1_auth_proto_rawDescGZIP(), []int{1}
+	return file_proto_aa_v1_auth_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Metadata) GetEndhostApiDiscoveryUrl() string {
@@ -139,7 +139,7 @@ type AuthenticateByKeyResponse struct {
 
 func (x *AuthenticateByKeyResponse) Reset() {
 	*x = AuthenticateByKeyResponse{}
-	mi := &file_proto_aa_v1_auth_proto_msgTypes[2]
+	mi := &file_proto_aa_v1_auth_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -151,7 +151,7 @@ func (x *AuthenticateByKeyResponse) String() string {
 func (*AuthenticateByKeyResponse) ProtoMessage() {}
 
 func (x *AuthenticateByKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_aa_v1_auth_proto_msgTypes[2]
+	mi := &file_proto_aa_v1_auth_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -164,7 +164,7 @@ func (x *AuthenticateByKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthenticateByKeyResponse.ProtoReflect.Descriptor instead.
 func (*AuthenticateByKeyResponse) Descriptor() ([]byte, []int) {
-	return file_proto_aa_v1_auth_proto_rawDescGZIP(), []int{2}
+	return file_proto_aa_v1_auth_service_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AuthenticateByKeyResponse) GetSnapToken() string {
@@ -181,11 +181,11 @@ func (x *AuthenticateByKeyResponse) GetMetadata() *Metadata {
 	return nil
 }
 
-var File_proto_aa_v1_auth_proto protoreflect.FileDescriptor
+var File_proto_aa_v1_auth_service_proto protoreflect.FileDescriptor
 
-const file_proto_aa_v1_auth_proto_rawDesc = "" +
+const file_proto_aa_v1_auth_service_proto_rawDesc = "" +
 	"\n" +
-	"\x16proto/aa/v1/auth.proto\x12\ranapaya.aa.v1\"\x7f\n" +
+	"\x1eproto/aa/v1/auth_service.proto\x12\ranapaya.aa.v1\"\x7f\n" +
 	"\x18AuthenticateByKeyRequest\x12\x17\n" +
 	"\aapi_key\x18\x01 \x01(\tR\x06apiKey\x12\x1b\n" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12-\n" +
@@ -202,24 +202,24 @@ const file_proto_aa_v1_auth_proto_rawDesc = "" +
 	"\x11AuthenticateByKey\x12'.anapaya.aa.v1.AuthenticateByKeyRequest\x1a(.anapaya.aa.v1.AuthenticateByKeyResponseb\x06proto3"
 
 var (
-	file_proto_aa_v1_auth_proto_rawDescOnce sync.Once
-	file_proto_aa_v1_auth_proto_rawDescData []byte
+	file_proto_aa_v1_auth_service_proto_rawDescOnce sync.Once
+	file_proto_aa_v1_auth_service_proto_rawDescData []byte
 )
 
-func file_proto_aa_v1_auth_proto_rawDescGZIP() []byte {
-	file_proto_aa_v1_auth_proto_rawDescOnce.Do(func() {
-		file_proto_aa_v1_auth_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_aa_v1_auth_proto_rawDesc), len(file_proto_aa_v1_auth_proto_rawDesc)))
+func file_proto_aa_v1_auth_service_proto_rawDescGZIP() []byte {
+	file_proto_aa_v1_auth_service_proto_rawDescOnce.Do(func() {
+		file_proto_aa_v1_auth_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_aa_v1_auth_service_proto_rawDesc), len(file_proto_aa_v1_auth_service_proto_rawDesc)))
 	})
-	return file_proto_aa_v1_auth_proto_rawDescData
+	return file_proto_aa_v1_auth_service_proto_rawDescData
 }
 
-var file_proto_aa_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
-var file_proto_aa_v1_auth_proto_goTypes = []any{
+var file_proto_aa_v1_auth_service_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_proto_aa_v1_auth_service_proto_goTypes = []any{
 	(*AuthenticateByKeyRequest)(nil),  // 0: anapaya.aa.v1.AuthenticateByKeyRequest
 	(*Metadata)(nil),                  // 1: anapaya.aa.v1.Metadata
 	(*AuthenticateByKeyResponse)(nil), // 2: anapaya.aa.v1.AuthenticateByKeyResponse
 }
-var file_proto_aa_v1_auth_proto_depIdxs = []int32{
+var file_proto_aa_v1_auth_service_proto_depIdxs = []int32{
 	1, // 0: anapaya.aa.v1.AuthenticateByKeyResponse.metadata:type_name -> anapaya.aa.v1.Metadata
 	0, // 1: anapaya.aa.v1.AuthService.AuthenticateByKey:input_type -> anapaya.aa.v1.AuthenticateByKeyRequest
 	2, // 2: anapaya.aa.v1.AuthService.AuthenticateByKey:output_type -> anapaya.aa.v1.AuthenticateByKeyResponse
@@ -230,30 +230,30 @@ var file_proto_aa_v1_auth_proto_depIdxs = []int32{
 	0, // [0:1] is the sub-list for field type_name
 }
 
-func init() { file_proto_aa_v1_auth_proto_init() }
-func file_proto_aa_v1_auth_proto_init() {
-	if File_proto_aa_v1_auth_proto != nil {
+func init() { file_proto_aa_v1_auth_service_proto_init() }
+func file_proto_aa_v1_auth_service_proto_init() {
+	if File_proto_aa_v1_auth_service_proto != nil {
 		return
 	}
-	file_proto_aa_v1_auth_proto_msgTypes[1].OneofWrappers = []any{}
-	file_proto_aa_v1_auth_proto_msgTypes[2].OneofWrappers = []any{}
+	file_proto_aa_v1_auth_service_proto_msgTypes[1].OneofWrappers = []any{}
+	file_proto_aa_v1_auth_service_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_aa_v1_auth_proto_rawDesc), len(file_proto_aa_v1_auth_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_aa_v1_auth_service_proto_rawDesc), len(file_proto_aa_v1_auth_service_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_proto_aa_v1_auth_proto_goTypes,
-		DependencyIndexes: file_proto_aa_v1_auth_proto_depIdxs,
-		MessageInfos:      file_proto_aa_v1_auth_proto_msgTypes,
+		GoTypes:           file_proto_aa_v1_auth_service_proto_goTypes,
+		DependencyIndexes: file_proto_aa_v1_auth_service_proto_depIdxs,
+		MessageInfos:      file_proto_aa_v1_auth_service_proto_msgTypes,
 	}.Build()
-	File_proto_aa_v1_auth_proto = out.File
-	file_proto_aa_v1_auth_proto_goTypes = nil
-	file_proto_aa_v1_auth_proto_depIdxs = nil
+	File_proto_aa_v1_auth_service_proto = out.File
+	file_proto_aa_v1_auth_service_proto_goTypes = nil
+	file_proto_aa_v1_auth_service_proto_depIdxs = nil
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -333,5 +333,5 @@ var _AuthService_serviceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/aa/v1/auth.proto",
+	Metadata: "proto/aa/v1/auth_service.proto",
 }

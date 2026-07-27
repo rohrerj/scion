@@ -18,12 +18,17 @@ import (
 	"context"
 
 	"connectrpc.com/connect"
+	"github.com/scionproto/scion/pkg/endhost/token"
 )
 
-func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
+func authInterceptor(tokenProvider token.Provider) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			req.Header().Set("Authorization", "Bearer "+jwtToken)
+			jwt, err := tokenProvider.Token(ctx)
+			if err != nil {
+				return nil, err
+			}
+			req.Header().Set("Authorization", "Bearer "+jwt)
 			return next(ctx, req)
 		}
 	}

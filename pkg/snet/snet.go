@@ -42,6 +42,7 @@ import (
 	"net/netip"
 
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/endhost/token"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/metrics/v2"
 	"github.com/scionproto/scion/pkg/private/common"
@@ -53,7 +54,7 @@ type SnapConfig struct {
 	ControlApi string
 	// The nexthop address for the SNAP
 	DataplaneAddress string
-	Token            string
+	TokenProvider    token.Provider
 }
 
 // Topology provides information about the topology of the local ISD-AS.
@@ -107,7 +108,7 @@ func (n *SCIONNetwork) OpenSnap(ctx context.Context) (PacketConn, error) {
 	if n.Topology.Snap.ControlApi == "" {
 		return nil, serrors.New("Cannot use SNAP without SNAP enabled topology")
 	}
-	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.ControlApi, n.Topology.Snap.Token)
+	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.ControlApi, n.Topology.Snap.TokenProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +122,7 @@ func (n *SCIONNetwork) DialSnap(ctx context.Context, remote *UDPAddr) (*Conn, er
 	if remote == nil {
 		return nil, serrors.New("Unable to dial to nil remote")
 	}
-	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.ControlApi, n.Topology.Snap.Token)
+	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.ControlApi, n.Topology.Snap.TokenProvider)
 	if err != nil {
 		return nil, err
 	}

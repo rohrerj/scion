@@ -3,7 +3,7 @@ load("//tools/proto:connect.bzl", "go_connect_library")
 go_connect_library(
     name = "go_default_library",
     files = [
-        "auth.connect.go",
+        "auth_service.connect.go",
     ],
     proto = "aa",
 )

@@ -32,6 +32,7 @@ import (
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/daemon"
 	"github.com/scionproto/scion/pkg/endhost"
+	"github.com/scionproto/scion/pkg/endhost/token"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/snet"
@@ -127,7 +128,7 @@ On other errors, traceroute will exit with code 2.
 			}
 			if envFlags.EndhostApi() != "" {
 				endhostOpts := []endhost.ConnectOption{
-					endhost.WithToken(envFlags.EndhostApiToken()),
+					endhost.WithTokenProvider(token.NewStaticTokenProvider(envFlags.EndhostApiToken())),
 				}
 				if envFlags.ConfigDir() != "" {
 					trcDir := filepath.Join(envFlags.ConfigDir(), "certs")

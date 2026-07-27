@@ -22,16 +22,17 @@ import (
 	"net/url"
 
 	"connectrpc.com/connect"
+	"github.com/scionproto/scion/pkg/endhost/token"
 	"github.com/scionproto/scion/pkg/proto/snap"
 	snapconnect "github.com/scionproto/scion/pkg/proto/snap/v1/snapconnect"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 type SnapControlClient struct {
-	httpClient *http.Client
-	token      string
-	api        string
-	privateKey wgtypes.Key
+	httpClient    *http.Client
+	tokenProvider token.Provider
+	api           string
+	privateKey    wgtypes.Key
 }
 
 type SnapDataPlane struct {
@@ -43,7 +44,7 @@ type SnapDataPlane struct {
 // NewSnapControlClient returns a client that can communicate with the SNAP control endpoint.
 // It is used by the NewTunnel function, or if the endhost needs to query the DataPlane address
 // of the SNAP endpoint.
-func NewSnapControlClient(baseURL string, httpClient *http.Client, token string) (*SnapControlClient, error) {
+func NewSnapControlClient(baseURL string, httpClient *http.Client, tokenProvider token.Provider) (*SnapControlClient, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -55,15 +56,15 @@ func NewSnapControlClient(baseURL string, httpClient *http.Client, token string)
 		return nil, fmt.Errorf("generate private key: %w", err)
 	}
 	return &SnapControlClient{
-		httpClient: httpClient,
-		api:        baseURL,
-		token:      token,
-		privateKey: privateKey,
+		httpClient:    httpClient,
+		api:           baseURL,
+		tokenProvider: tokenProvider,
+		privateKey:    privateKey,
 	}, nil
 }
 
 func (c *SnapControlClient) GetDataPlaneAddress(ctx context.Context) (*SnapDataPlane, error) {
-	client := snapconnect.NewSnapControlClient(c.httpClient, c.api, connect.WithInterceptors(authInterceptor(c.token)))
+	client := snapconnect.NewSnapControlClient(c.httpClient, c.api, connect.WithInterceptors(authInterceptor(c.tokenProvider)))
 	resp, err := client.GetSnapDataPlaneAddress(ctx, connect.NewRequest(&snap.GetSnapDataPlaneRequest{}))
 	if err != nil {
 		return nil, fmt.Errorf("get dataplane address failed: %w", err)
@@ -96,7 +97,7 @@ func (c *SnapControlClient) registerTunnelIdentity(ctx context.Context, addr str
 	if len(psk) != 0 && len(psk) != 32 {
 		return nil, fmt.Errorf("psk must be 32 bytes or empty")
 	}
-	client := snapconnect.NewSnapControlClient(c.httpClient, addr, connect.WithInterceptors(authInterceptor(c.token)))
+	client := snapconnect.NewSnapControlClient(c.httpClient, addr, connect.WithInterceptors(authInterceptor(c.tokenProvider)))
 	req := &snap.RegisterSnapTunIdentityRequest{
 		InitiatorStaticX25519: clientPublicKey,
 		PskShare:              make([]byte, 32),

@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/scionproto/scion/pkg/endhost/token"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/snap"
@@ -34,8 +35,8 @@ type SnapConn struct {
 	receiveChannel chan []byte
 }
 
-func (n *SCIONNetwork) newSnapConn(ctx context.Context, snapControlURL string, token string) (*SnapConn, error) {
-	tunnel, err := snap.NewSnapTunnel(ctx, snapControlURL, token)
+func (n *SCIONNetwork) newSnapConn(ctx context.Context, snapControlURL string, tokenProvider token.Provider) (*SnapConn, error) {
+	tunnel, err := snap.NewSnapTunnel(ctx, snapControlURL, tokenProvider)
 	if err != nil {
 		return nil, err
 	}

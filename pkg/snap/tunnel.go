@@ -24,6 +24,7 @@ import (
 	"github.com/rohrerj/scion-over-wireguard/conn"
 	"github.com/rohrerj/scion-over-wireguard/device"
 	"github.com/rohrerj/scion-over-wireguard/tun"
+	"github.com/scionproto/scion/pkg/endhost/token"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
@@ -34,8 +35,8 @@ type SnapTunnel struct {
 	LocalAddr     *net.UDPAddr
 }
 
-func NewSnapTunnel(ctx context.Context, snapControlURL string, token string) (*SnapTunnel, error) {
-	client, err := NewSnapControlClient(snapControlURL, &http.Client{}, token)
+func NewSnapTunnel(ctx context.Context, snapControlURL string, tokenProvider token.Provider) (*SnapTunnel, error) {
+	client, err := NewSnapControlClient(snapControlURL, &http.Client{}, tokenProvider)
 	if err != nil {
 		return nil, fmt.Errorf("create snap control client: %w", err)
 	}
