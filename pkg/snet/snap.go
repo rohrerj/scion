@@ -20,7 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/scionproto/scion/pkg/endhost/token"
+	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/pkg/metrics/v2"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/slayers"
 	"github.com/scionproto/scion/pkg/snap"
@@ -28,6 +29,7 @@ import (
 
 type SnapConn struct {
 	SCMPHandler    SCMPHandler
+	metrics        SCIONPacketConnMetrics
 	tunnel         *snap.SnapTunnel
 	readTimer      *time.Timer
 	writeTimer     *time.Timer
@@ -35,8 +37,8 @@ type SnapConn struct {
 	receiveChannel chan []byte
 }
 
-func (n *SCIONNetwork) newSnapConn(ctx context.Context, snapControlURL string, tokenProvider token.Provider) (*SnapConn, error) {
-	tunnel, err := snap.NewSnapTunnel(ctx, snapControlURL, tokenProvider)
+func (n *SCIONNetwork) newSnapConn(ctx context.Context) (*SnapConn, error) {
+	tunnel, err := snap.NewSnapTunnel(ctx, n.Topology.Snap.ControlApi, snap.WithTokenProvider(n.Topology.Snap.TokenProvider))
 	if err != nil {
 		return nil, err
 	}
@@ -45,11 +47,13 @@ func (n *SCIONNetwork) newSnapConn(ctx context.Context, snapControlURL string, t
 		sendChannel:    tunnel.SendChannel(),
 		receiveChannel: tunnel.ReceiveChannel(),
 		SCMPHandler:    n.SCMPHandler,
+		metrics:        n.PacketConnMetrics,
 	}
 	return conn, nil
 }
 
 func (s *SnapConn) Close() error {
+	metrics.CounterInc(s.metrics.Closes)
 	return s.tunnel.Close()
 }
 
@@ -78,12 +82,18 @@ func (s *SnapConn) ReadFrom(pkt *Packet, ov *net.UDPAddr) error {
 		b = <-s.receiveChannel
 		copy(pkt.Bytes, b)
 	}
-	pkt.Bytes = pkt.Bytes[:len(b)]
+	n := len(b)
+	metrics.CounterAdd(s.metrics.ReadBytes, float64(n))
+	metrics.CounterInc(s.metrics.ReadPackets)
+	pkt.Bytes = pkt.Bytes[:n]
 	if err := pkt.Decode(); err != nil {
+		metrics.CounterInc(s.metrics.ParseErrors)
+		log.Debug("decoding packet", "error", err)
 		return err
 	}
 	if scmp, ok := pkt.Payload.(SCMPPayload); ok {
 		if s.SCMPHandler == nil {
+			metrics.CounterInc(s.metrics.SCMPErrors)
 			return serrors.New("scmp packet received, but no handler found",
 				"type_code", slayers.CreateSCMPTypeCode(scmp.Type(), scmp.Code()),
 				"src", pkt.Source)
@@ -128,6 +138,9 @@ func (s *SnapConn) WriteTo(pkt *Packet, _ *net.UDPAddr) error {
 	if err := pkt.Serialize(); err != nil {
 		return serrors.Wrap("serialize SCION packet", err)
 	}
+	if len(pkt.Bytes) > s.tunnel.MTU() {
+		return serrors.New("SCION packet too big. Either path or payload too long.", "max size", s.tunnel.MTU(), "current size", len(pkt.Bytes))
+	}
 	b := make([]byte, len(pkt.Bytes))
 	copy(b, pkt.Bytes)
 	if s.writeTimer != nil {
@@ -139,5 +152,7 @@ func (s *SnapConn) WriteTo(pkt *Packet, _ *net.UDPAddr) error {
 	} else {
 		s.sendChannel <- b
 	}
+	metrics.CounterAdd(s.metrics.WriteBytes, float64(len(pkt.Bytes)))
+	metrics.CounterInc(s.metrics.WritePackets)
 	return nil
 }

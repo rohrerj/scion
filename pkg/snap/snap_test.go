@@ -15,12 +15,15 @@
 package snap_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"testing"
 	"time"
 
@@ -145,9 +148,7 @@ func TestQUICToMarketplace(t *testing.T) {
 			},
 		},
 		QUICConfig: &quic.Config{
-			DisablePathMTUDiscovery: true,
-			InitialPacketSize:       1200,
-			HandshakeIdleTimeout:    5 * time.Second,
+			InitialPacketSize: 1200,
 		},
 	}).NewDialer
 	dialer := dialerFunc(remote)
@@ -156,15 +157,63 @@ func TestQUICToMarketplace(t *testing.T) {
 			Dial: dialer.DialEarly,
 		},
 	}
-	req, err := http.NewRequest(http.MethodGet, "https://scion-marketplace.netsec.ethz.ch:8888/login", nil)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		panic(err)
+	}
+	testValue := make([]byte, 1000)
+	for i := range testValue {
+		testValue[i] = 'a'
+	}
+	form := url.Values{}
+	form.Set("username", "Alice")
+	form.Set("password", "")
+	form.Set("test", string(testValue))
+	loginURL, _ := url.Parse("https://scion-marketplace.netsec.ethz.ch:8888/login")
+	loginReq, err := http.NewRequest(
+		http.MethodPost,
+		loginURL.String(),
+		bytes.NewBufferString(form.Encode()),
+	)
+	if err != nil {
+		panic(err)
+	}
+	loginReq.Header.Set(
+		"Content-Type",
+		"application/x-www-form-urlencoded",
+	)
+	loginResp, err := httpClient.Do(loginReq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := httpClient.Do(req)
+	defer loginResp.Body.Close()
+	jar.SetCookies(loginURL, loginResp.Cookies())
+	fmt.Println("login cookies:", jar.Cookies(loginURL))
+
+	apiURL, _ := url.Parse("https://scion-marketplace.netsec.ethz.ch:8888/assets")
+
+	apiReq, err := http.NewRequest(
+		http.MethodGet,
+		apiURL.String(),
+		nil,
+	)
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
-	defer resp.Body.Close()
-	fmt.Println(io.ReadAll(resp.Body))
+
+	for _, c := range jar.Cookies(apiURL) {
+		apiReq.AddCookie(c)
+	}
+
+	apiResp, err := httpClient.Do(apiReq)
+	if err != nil {
+		panic(err)
+	}
+	defer apiResp.Body.Close()
+	content, err := io.ReadAll(apiResp.Body)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(content))
 	t.Fail()
 }

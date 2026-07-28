@@ -108,7 +108,7 @@ func (n *SCIONNetwork) OpenSnap(ctx context.Context) (PacketConn, error) {
 	if n.Topology.Snap.ControlApi == "" {
 		return nil, serrors.New("Cannot use SNAP without SNAP enabled topology")
 	}
-	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.ControlApi, n.Topology.Snap.TokenProvider)
+	snapConn, err := n.newSnapConn(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (n *SCIONNetwork) DialSnap(ctx context.Context, remote *UDPAddr) (*Conn, er
 	if remote == nil {
 		return nil, serrors.New("Unable to dial to nil remote")
 	}
-	snapConn, err := n.newSnapConn(ctx, n.Topology.Snap.ControlApi, n.Topology.Snap.TokenProvider)
+	snapConn, err := n.newSnapConn(ctx)
 	if err != nil {
 		return nil, err
 	}

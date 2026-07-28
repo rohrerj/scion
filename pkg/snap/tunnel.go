@@ -16,6 +16,7 @@ package snap
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -28,15 +29,58 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
+// The maximum size of a SCION packet that can be sent using SNAP.
+// TODO: instead of using this constant value, identify what the actual MTU is
+// and subtract the IP, UDP and Wireguard header from it.
+const MaxSnapPacketSize int = 1500 - 20 - 8 - 32
+
 type SnapTunnel struct {
 	device        *device.Device
 	tnet          *tun.MemoryTun
 	DataplaneAddr *net.UDPAddr
 	LocalAddr     *net.UDPAddr
+	mtu           int
 }
 
-func NewSnapTunnel(ctx context.Context, snapControlURL string, tokenProvider token.Provider) (*SnapTunnel, error) {
-	client, err := NewSnapControlClient(snapControlURL, &http.Client{}, tokenProvider)
+type SnapConfigOption func(*snapConfigOption)
+type snapConfigOption struct {
+	insecure      bool
+	mtu           int
+	tokenProvider token.Provider
+}
+
+func WithInsecureConnection() SnapConfigOption {
+	return func(o *snapConfigOption) {
+		o.insecure = true
+	}
+}
+
+func WithMTU(mtu int) SnapConfigOption {
+	return func(o *snapConfigOption) {
+		o.mtu = mtu
+	}
+}
+
+func WithTokenProvider(provider token.Provider) SnapConfigOption {
+	return func(o *snapConfigOption) {
+		o.tokenProvider = provider
+	}
+}
+
+func NewSnapTunnel(ctx context.Context, snapControlURL string, opts ...SnapConfigOption) (*SnapTunnel, error) {
+	options := &snapConfigOption{
+		mtu: MaxSnapPacketSize,
+	}
+	for _, opt := range opts {
+		opt(options)
+	}
+	client, err := NewSnapControlClient(snapControlURL, &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: options.insecure,
+			},
+		},
+	}, options.tokenProvider)
 	if err != nil {
 		return nil, fmt.Errorf("create snap control client: %w", err)
 	}
@@ -60,7 +104,7 @@ func NewSnapTunnel(ctx context.Context, snapControlURL string, tokenProvider tok
 	if err != nil {
 		return nil, fmt.Errorf("resolve endpoint: %w", err)
 	}
-	tunnel, err := establishWireGuardTunnel(remoteAddr, dp.SnapStaticX25519, client.privateKey[:], psk)
+	tunnel, err := establishWireGuardTunnel(remoteAddr, dp.SnapStaticX25519, client.privateKey[:], psk, options.mtu)
 	if err != nil {
 		return nil, fmt.Errorf("establish wireguard tunnel: %w", err)
 	}
@@ -73,8 +117,9 @@ func establishWireGuardTunnel(
 	serverPublicKey []byte,
 	clientPrivateKey []byte,
 	psk []byte,
+	mtu int,
 ) (*SnapTunnel, error) {
-	memtun := tun.CreateInMemoryTunnel(1400, 1000, 8)
+	memtun := tun.CreateInMemoryTunnel(mtu, 64, 8)
 	logger := device.NewLogger(
 		device.LogLevelError,
 		"snaptun",
@@ -122,6 +167,7 @@ func establishWireGuardTunnel(
 		tnet:          memtun,
 		DataplaneAddr: remoteAddr,
 		LocalAddr:     localAddr,
+		mtu:           mtu,
 	}, nil
 }
 
@@ -130,10 +176,14 @@ func canonicalUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
 		return &net.UDPAddr{
 			IP:   ip4,
 			Port: addr.Port,
-			Zone: "", // IPv4 has no zone
+			Zone: "",
 		}
 	}
 	return addr
+}
+
+func (t *SnapTunnel) MTU() int {
+	return t.mtu
 }
 
 func (t *SnapTunnel) Close() error {
