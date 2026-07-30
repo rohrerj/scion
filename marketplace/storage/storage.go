@@ -153,9 +153,7 @@ func (s *MarketplaceStorage) DeleteAccount(ctx context.Context, user_id int64, a
 		}
 	}
 	if targetAccount == nil || mainAccount == nil {
-		if err != nil {
-			return 0, serrors.Join(serrors.New("invalid account"), tx.Rollback())
-		}
+		return 0, serrors.Join(serrors.New("invalid account"), tx.Rollback())
 	}
 	_, err = tx.TransferAllAssetsToAccount(ctx, targetAccount.ID, mainAccount.ID)
 	if err != nil {
