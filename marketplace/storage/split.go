@@ -76,9 +76,9 @@ func SplitAsset(asset *db.DBAsset, split RequestedSplit) (*SplitResult, error) {
 		})
 		remainingAsset.Bandwidth = split.ExactBandwidth
 	}
-	if split.ExactFrom == remainingAsset.StartsAt {
+	if split.ExactFrom.Equal(remainingAsset.StartsAt) {
 		// no left remainder asset exists
-		if split.ExactTo == remainingAsset.StopsAt {
+		if split.ExactTo.Equal(remainingAsset.StopsAt) {
 			// no right remainder asset exists -> split = asset
 			splitResult.Split = AssetSegment{
 				Bandwidth: remainingAsset.Bandwidth,
@@ -100,7 +100,7 @@ func SplitAsset(asset *db.DBAsset, split RequestedSplit) (*SplitResult, error) {
 		}
 	} else {
 		// a left remainder asset exists
-		if split.ExactTo == remainingAsset.StopsAt {
+		if split.ExactTo.Equal(remainingAsset.StopsAt) {
 			// no right remainder asset exists -> only a left remainder exists
 			splitResult.Split = AssetSegment{
 				Bandwidth: remainingAsset.Bandwidth,
