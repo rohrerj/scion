@@ -38,9 +38,12 @@ go_library(
 
 go_test(
     name = "go_default_test",
-    srcs = ["redemption_service_test.go"],
+    srcs = [
+        "export_test.go",
+        "redemption_service_test.go",
+    ],
+    embed = [":go_default_library"],
     deps = [
-        ":go_default_library",
         "//marketplace/db:go_default_library",
         "@com_github_stretchr_testify//assert:go_default_library",
     ],

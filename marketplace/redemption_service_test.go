@@ -15,6 +15,7 @@
 package marketplace_test
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -47,4 +48,33 @@ func TestIDStore(t *testing.T) {
 	assert.Equal(t, uint32(1), nextId)
 	nextId, err = store.Next(b+1, b+1, b+2)
 	assert.Error(t, err)
+}
+
+func TestEncoding(t *testing.T) {
+	const (
+		minBwKbps        = 10.0
+		maxBwKbps        = 10_000_000.0
+		levels           = 1024
+		logEncodingStart = 60
+	)
+	var step = math.Pow(maxBwKbps/(minBwKbps+float64(logEncodingStart)), 1.0/float64(levels-logEncodingStart-1))
+	indexToBwKbps := func(i int) int {
+		if i < logEncodingStart {
+			return i + minBwKbps
+		}
+		bw := (minBwKbps + logEncodingStart) * math.Pow(step, float64(i-logEncodingStart))
+		return int(math.Ceil(bw))
+	}
+	encodings := make([]uint32, levels)
+	for i := 0; i < levels; i++ {
+		encodings[i] = uint32(indexToBwKbps(i))
+	}
+	s := &marketplace.RedemptionService{}
+	s.SetEncodingPoints(encodings)
+	assert.Equal(t, uint16(0), s.EncodeBandwidth(minBwKbps))
+	assert.Equal(t, uint16(1), s.EncodeBandwidth(minBwKbps+1))
+	assert.Equal(t, uint16(59), s.EncodeBandwidth(minBwKbps+59))
+	assert.Equal(t, uint16(60), s.EncodeBandwidth(minBwKbps+60))
+	assert.Equal(t, uint16(levels-1), s.EncodeBandwidth(maxBwKbps))
+	assert.Equal(t, uint16(levels-1), s.EncodeBandwidth(math.MaxUint32))
 }

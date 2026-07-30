@@ -193,9 +193,9 @@ func (s *RedemptionService) handleRequest(now time.Time, r *hummingbird.RedeemAs
 }
 
 func (s *RedemptionService) encodeBandwidth(bw uint32) uint16 {
-	return uint16(sort.Search(len(s.encodingPoints), func(i int) bool {
+	return min(uint16(len(s.encodingPoints)-1), uint16(sort.Search(len(s.encodingPoints), func(i int) bool {
 		return s.encodingPoints[i] >= bw
-	}))
+	})))
 }
 
 type entry struct {
