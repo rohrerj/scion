@@ -55,7 +55,7 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 		store:                   store,
 		disableUserRegistration: disableUserRegistration,
 	}
-	mux.HandleFunc("/", h.accountHandler)
+	mux.HandleFunc("/", h.indexHandler)
 	mux.HandleFunc("/login", h.loginHandler)
 	mux.HandleFunc("/register", h.registerHandler)
 	mux.HandleFunc("/account/balance", h.accountBalanceHandler)
@@ -582,6 +582,33 @@ func (h *Handler) reservationsHandler(w http.ResponseWriter, r *http.Request) {
 		"Accounts":     dbAccounts,
 		"Account":      filterAccount,
 	})
+}
+
+func (h *Handler) indexHandler(w http.ResponseWriter, r *http.Request) {
+	var user *User
+	session, err := h.GetSession(r)
+	if err == nil {
+		sessionUser, ok := session.Values["user"].(User)
+		if ok {
+			user = &sessionUser
+		}
+	}
+	ases, err := h.store.FindAses(r.Context())
+	if err != nil {
+		log.Debug("Index handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if user != nil {
+		templates.ExecuteTemplate(w, "index.html", map[string]any{
+			"Username": user.Name,
+			"Ases":     ases,
+		})
+	} else {
+		templates.ExecuteTemplate(w, "index.html", map[string]any{
+			"Ases": ases,
+		})
+	}
 }
 
 func (h *Handler) accountHandler(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Accounts</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script type="text/javascript" src="/static/script.js"></script>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-left">
+            <a href="/">Info</a>
+            {{if .Username}}
+            <a href="/account">Account</a>
+            <a href="/assets">Assets</a>
+            <a href="/reservations">Reservations</a>
+            {{else}}
+            <a href="/aslogin">AS Login</a>
+            <a href="/login">Login</a>
+            <a href="/register">Register</a>
+            {{end}}
+        </div>
+        {{if .Username}}
+        <div class="nav-right">
+            👤 {{.Username}}
+            <a class="logout-link" href="/logout">Logout</a>
+        </div>
+        {{end}}
+    </nav>
+    <div class="page">
+        <h2>Info</h2>
+        <p class="error" id="error">{{.Error}}</p>
+        <section class="card">
+            <h3>Marketplace</h3>
+            <p>This is a proof of concept marketplace for hummingbird bandwidth reservations.</p>
+        </section>
+        <section class="card">
+            <h3>Autonomous Systems selling Bandwidth on this marketplace</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Ases}}
+                    <tr>
+                        <td>{{.}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </section>
+    </div>
+</body>
+
+</html>

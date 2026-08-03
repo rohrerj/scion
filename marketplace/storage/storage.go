@@ -71,6 +71,10 @@ func (s *MarketplaceStorage) FetchReservations(ctx context.Context, params *mark
 	return s.db.FetchReservations(ctx, params)
 }
 
+func (s *MarketplaceStorage) FindAses(ctx context.Context) ([]addr.IA, error) {
+	return s.db.FindAses(ctx)
+}
+
 func (s *MarketplaceStorage) PublishAsset(ctx context.Context, a *marketplacedb.DBAsset) (int64, error) {
 	err := validateAsset(a)
 	if err != nil {

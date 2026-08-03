@@ -51,6 +51,7 @@ type MarketplaceDB interface {
 	GetASUser(ctx context.Context, ia addr.IA) (*DBASUser, error)
 	DeleteListedAsset(ctx context.Context, ia addr.IA, assetID int64) (int64, error)
 	SetASAuthenticationToken(ctx context.Context, ia addr.IA, auth string) (int64, error)
+	FindAses(ctx context.Context) ([]addr.IA, error)
 	BeginTransaction(ctx context.Context, opts *sql.TxOptions) (*transaction, error)
 }
 
@@ -255,6 +256,33 @@ func (e *executor) FindRedemptionDelegation(ctx context.Context, ia addr.IA) (*R
 	}
 	a.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
 	return a, nil
+}
+
+func (e *executor) FindAses(ctx context.Context) ([]addr.IA, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	stmt := `SELECT isd_id, as_id FROM Ases`
+	rows, err := e.read.QueryContext(ctx, stmt)
+	if err != nil {
+		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
+	}
+	defer rows.Close()
+	ases := []addr.IA{}
+	for rows.Next() {
+		var isd uint16
+		var as uint64
+		err = rows.Scan(&isd, &as)
+		if err != nil {
+			return nil, serrors.Wrap("Error reading DB response", err)
+		}
+		ia, err := addr.IAFrom(addr.ISD(isd), addr.AS(as))
+		if err != nil {
+			return nil, err
+		}
+		ases = append(ases, ia)
+	}
+	return ases, nil
 }
 
 func (e *executor) IncrementASJWTVersion(ctx context.Context, ia addr.IA, current int64) (int64, error) {
