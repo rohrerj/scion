@@ -74,7 +74,6 @@ type DBStat struct {
 	Bandwidth int64
 	StartsAt  time.Time
 	StopsAt   time.Time
-	OwnerId   sql.NullInt64
 }
 
 type DBReservation struct {

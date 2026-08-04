@@ -41,7 +41,7 @@ type MarketplaceDB interface {
 	CreateASUser(ctx context.Context, user *DBASUser) (int64, error)
 	UpdateAccountMoney(ctx context.Context, id int64, amount int64) (int64, error)
 	UpdateASMoney(ctx context.Context, ia addr.IA, amount int64) (int64, error)
-	SearchAssetsForStatistics(ctx context.Context, params *StatisticsQuery) ([]*DBStat, error)
+	SearchAssetsForStatistics(ctx context.Context, params *StatisticsQuery) ([]*DBStat, []*DBStat, error)
 	FindUsedReservations(ctx context.Context, params *UsedReservationsQuery) ([]*UsedReservation, error)
 	CreateOrUpdateRedemptionDelegations(ctx context.Context, r *RedemptionDelegation) (int64, error)
 	FindRedemptionDelegations(ctx context.Context) ([]*RedemptionDelegation, error)
@@ -384,43 +384,88 @@ func (e *executor) buildUsedReservationsQuery(params *UsedReservationsQuery) (st
 	return strings.Join(query, "\n"), args
 }
 
-func (e *executor) SearchAssetsForStatistics(ctx context.Context, params *StatisticsQuery) ([]*DBStat, error) {
+func (e *executor) SearchAssetsForStatistics(ctx context.Context, params *StatisticsQuery) ([]*DBStat, []*DBStat, error) {
 	if e.read == nil {
-		return nil, serrors.New("No database open")
+		return nil, nil, serrors.New("No database open")
 	}
-	stmt, args := e.buildStatisticsQuery(params)
-	rows, err := e.read.QueryContext(ctx, stmt, args...)
+	publishStmt, args := e.buildPublishedBandwidthQuery(params)
+	publishRows, err := e.read.QueryContext(ctx, publishStmt, args...)
 	if err != nil {
-		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
+		return nil, nil, serrors.New("Error looking up assets", "err", err, "q", publishStmt)
 	}
-	defer rows.Close()
-	var res []*DBStat
-	for rows.Next() {
+	defer publishRows.Close()
+	var publishedAssets []*DBStat
+	for publishRows.Next() {
 		a := &DBStat{}
 		var startsAtString string
 		var stopsAtString string
-		err = rows.Scan(&a.OwnerId, &a.Bandwidth, &a.Price, &startsAtString, &stopsAtString)
+		err = publishRows.Scan(&a.Bandwidth, &a.Price, &startsAtString, &stopsAtString)
 		if err != nil {
-			return nil, serrors.Wrap("Error reading DB response", err)
+			return nil, nil, serrors.Wrap("Error reading DB response", err)
 		}
 		a.StartsAt, err = time.Parse(time.RFC3339, startsAtString)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		res = append(res, a)
+		publishedAssets = append(publishedAssets, a)
 	}
-	return res, nil
+	boughtStmt, args := e.buildBoughtBandwidthQuery(params)
+	boughtRows, err := e.read.QueryContext(ctx, boughtStmt, args...)
+	if err != nil {
+		return nil, nil, serrors.New("Error looking up assets", "err", err, "q", boughtStmt)
+	}
+	defer boughtRows.Close()
+	var boughtAssets []*DBStat
+	for boughtRows.Next() {
+		a := &DBStat{}
+		var startsAtString string
+		var stopsAtString string
+		err = boughtRows.Scan(&a.Bandwidth, &a.Price, &startsAtString, &stopsAtString)
+		if err != nil {
+			return nil, nil, serrors.Wrap("Error reading DB response", err)
+		}
+		a.StartsAt, err = time.Parse(time.RFC3339, startsAtString)
+		if err != nil {
+			return nil, nil, err
+		}
+		a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
+		if err != nil {
+			return nil, nil, err
+		}
+		boughtAssets = append(boughtAssets, a)
+	}
+	return publishedAssets, boughtAssets, nil
 }
 
-func (e *executor) buildStatisticsQuery(params *StatisticsQuery) (string, []any) {
+func (e *executor) buildPublishedBandwidthQuery(params *StatisticsQuery) (string, []any) {
 	var args []any
 	where := []string{}
 	query := []string{
-		"SELECT account_id, bandwidth, price, starts_at, stops_at FROM Assets",
+		"SELECT bandwidth, price, starts_at, stops_at FROM Published_Bandwidth",
+	}
+	where = append(where, "(isd_id=?) AND (as_id=?) AND (stops_at > ?) AND (starts_at <= ?)")
+	args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()), params.WindowStart, params.WindowEnd)
+	if params.Ingress != nil {
+		where = append(where, "(ingress=?)")
+		args = append(args, *params.Ingress)
+	}
+	if params.Egress != nil {
+		where = append(where, "(egress=?)")
+		args = append(args, *params.Egress)
+	}
+	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
+	return strings.Join(query, "\n"), args
+}
+
+func (e *executor) buildBoughtBandwidthQuery(params *StatisticsQuery) (string, []any) {
+	var args []any
+	where := []string{}
+	query := []string{
+		"SELECT bandwidth, price, starts_at, stops_at FROM Bought_Bandwidth",
 	}
 	where = append(where, "(isd_id=?) AND (as_id=?) AND (stops_at > ?) AND (starts_at <= ?)")
 	args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()), params.WindowStart, params.WindowEnd)
@@ -1064,4 +1109,34 @@ func (e *executor) AssignReservation(ctx context.Context, id int64, accountIDFro
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (e *executor) RegisterPublishedBandwidth(ctx context.Context, a *DBAsset) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	var err error
+	inst := `INSERT INTO Published_Bandwidth (isd_id, as_id, ingress, egress, bandwidth, starts_at, stops_at, price)
+	VALUES(?,?,?,?,?,?,?,?)`
+	res, err := e.write.ExecContext(ctx, inst, a.IA.ISD(), a.IA.AS(), a.IfIdIngress, a.IfIdEgress, a.Bandwidth,
+		a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.Price)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (e *executor) RegisterBoughtBandwidth(ctx context.Context, a *DBAsset) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	var err error
+	inst := `INSERT INTO Bought_Bandwidth (isd_id, as_id, ingress, egress, bandwidth, starts_at, stops_at, price)
+	VALUES(?,?,?,?,?,?,?,?)`
+	res, err := e.write.ExecContext(ctx, inst, a.IA.ISD(), a.IA.AS(), a.IfIdIngress, a.IfIdEgress, a.Bandwidth,
+		a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.Price)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }

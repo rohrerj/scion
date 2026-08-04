@@ -17,7 +17,6 @@ package marketplace
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -145,7 +144,6 @@ func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbi
 }
 
 func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbird.BuyAssetsRequest]) (*connect.Response[hummingbird.BuyAssetsResponse], error) {
-	fmt.Println("BuyAssets")
 	user, ok := ctx.Value("user").(int64)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
@@ -222,7 +220,6 @@ func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hu
 }
 
 func (s *Service) Info(context.Context, *connect.Request[hummingbird.MarketplaceInfoRequest]) (*connect.Response[hummingbird.MarketplaceInfoResponse], error) {
-	fmt.Println("Info")
 	return &connect.Response[hummingbird.MarketplaceInfoResponse]{
 		Msg: &hummingbird.MarketplaceInfoResponse{
 			ApiMajorVersion:              s.info.ApiMajorVersion,
@@ -241,7 +238,6 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 }
 
 func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[hummingbird.UpdateAssetsRequest]) (*connect.Response[hummingbird.UpdateAssetsResponse], error) {
-	fmt.Println("UpdateAssets")
 	ia, ok := ctx.Value("user").(addr.IA)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
@@ -320,7 +316,6 @@ func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[humming
 }
 
 func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[hummingbird.PublishAssetRequest]) (*connect.Response[hummingbird.PublishAssetResponse], error) {
-	fmt.Println("PublishAsset")
 	ia, ok := ctx.Value("user").(addr.IA)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
@@ -362,7 +357,6 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 }
 
 func (s *Service) RedeemAsset(ctx context.Context, req *connect.Request[hummingbird.RedeemAssetRequest]) (*connect.Response[hummingbird.RedeemAssetResponse], error) {
-	fmt.Println("RedeemAsset")
 	user, ok := ctx.Value("user").(int64)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
@@ -502,23 +496,26 @@ func ceilTime(base time.Time, multiple time.Duration) time.Time {
 }
 
 func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error) {
-	fmt.Println("Statistics")
 	ia, ok := ctx.Value("user").(addr.IA)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
 	}
-	step := ceilDuration(time.Duration(req.Msg.Step)*time.Second, (time.Duration(s.info.StatisticsTimeGranularity) * time.Second))
+	var step time.Duration
+	if req.Msg.Step == 0 {
+		step = time.Duration(s.info.StatisticsTimeGranularity) * time.Second
+	} else {
+		step = ceilDuration(time.Duration(req.Msg.Step)*time.Second, (time.Duration(s.info.StatisticsTimeGranularity) * time.Second))
+	}
 	windowStart := req.Msg.Start.AsTime().UTC().Truncate(time.Duration(s.info.StatisticsTimeGranularity))
 	windowEnd := ceilTime(req.Msg.End.AsTime().UTC(), time.Duration(s.info.StatisticsTimeGranularity))
 	num_intervals := int(windowEnd.Sub(windowStart) / step)
-	fmt.Println(step, windowStart, windowEnd)
 	if num_intervals > 1024 {
 		return nil, connect.NewError(connect.CodeResourceExhausted, serrors.New("too many intervals"))
 	}
 	income := make([]uint64, num_intervals)
 	bwBought := make([]uint64, num_intervals)
-	bwListed := make([]uint64, num_intervals)
-	assets, err := s.store.Statistics(ctx, &db.StatisticsQuery{
+	bwPublished := make([]uint64, num_intervals)
+	publishedAssets, boughtAssets, err := s.store.Statistics(ctx, &db.StatisticsQuery{
 		IA:          ia,
 		WindowStart: windowStart.Format(time.RFC3339),
 		WindowEnd:   windowEnd.Format(time.RFC3339),
@@ -528,8 +525,7 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-
-	for _, asset := range assets {
+	for _, asset := range publishedAssets {
 		start := asset.StartsAt
 		stop := asset.StopsAt
 		if asset.StartsAt.Before(windowStart) {
@@ -560,19 +556,50 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 			}
 			duration := uint64(overlapEnd.Sub(overlapStart).Seconds())
 			bwTimesDuration := uint64(asset.Bandwidth) * duration
-			if !asset.OwnerId.Valid {
-				bwListed[i] += bwTimesDuration
-			} else {
-				bwBought[i] += bwTimesDuration
-				income[i] += bwTimesDuration * uint64(asset.Price)
+			bwPublished[i] += bwTimesDuration
+		}
+	}
+
+	for _, asset := range boughtAssets {
+		start := asset.StartsAt
+		stop := asset.StopsAt
+		if asset.StartsAt.Before(windowStart) {
+			start = windowStart
+		}
+		if asset.StopsAt.After(windowEnd) {
+			stop = windowEnd
+		}
+		first := int(start.Sub(windowStart) / step)
+
+		last := int(stop.Sub(windowStart) / step)
+		if first < 0 || last > num_intervals {
+			continue
+		}
+		if stop.Equal(windowStart.Add(time.Duration(last) * step)) {
+			last--
+		}
+		for i := first; i <= last && i < num_intervals; i++ {
+			intervalStart := windowStart.Add(time.Duration(i) * step)
+			intervalEnd := intervalStart.Add(step)
+			overlapStart := start
+			overlapEnd := stop
+			if asset.StartsAt.Before(intervalStart) {
+				overlapStart = intervalStart
 			}
+			if asset.StopsAt.After(intervalEnd) {
+				overlapEnd = intervalEnd
+			}
+			duration := uint64(overlapEnd.Sub(overlapStart).Seconds())
+			bwTimesDuration := uint64(asset.Bandwidth) * duration
+			bwBought[i] += bwTimesDuration
+			income[i] += bwTimesDuration * uint64(asset.Price)
 		}
 	}
 	respEntries := make([]*hummingbird.StatisticsResponseEntry, num_intervals)
 	for i := 0; i < num_intervals; i++ {
 		respEntries[i] = &hummingbird.StatisticsResponseEntry{
 			Revenue:              income[i],
-			BandwidthUtilization: float64(bwBought[i]) / float64(bwBought[i]+bwListed[i]),
+			BandwidthUtilization: float64(bwBought[i]) / float64(bwPublished[i]),
 		}
 	}
 	return &connect.Response[hummingbird.StatisticsResponse]{
@@ -583,7 +610,6 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 }
 
 func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[hummingbird.SearchAssetsRequest]) (*connect.Response[hummingbird.SearchAssetsResponse], error) {
-	fmt.Println("SearchAssets")
 	var owner_id *int64
 	switch user := ctx.Value("user").(type) {
 	case int64:

@@ -45,7 +45,6 @@ func AccountManagerInterceptor(verifier *TokenVerifier) connect.UnaryInterceptor
 			requiredScope, found := methodScopes[method]
 			if !found {
 				//no rules apply
-				fmt.Println("no rules apply for", method)
 				return next(ctx, req)
 			}
 			if strings.HasPrefix(authHeader, "Bearer ") {

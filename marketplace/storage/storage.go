@@ -76,7 +76,29 @@ func (s *MarketplaceStorage) PublishAsset(ctx context.Context, a *marketplacedb.
 	if err != nil {
 		return 0, err
 	}
-	return s.db.InsertAsset(ctx, a)
+	tx, err := s.db.BeginTransaction(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	assetId, err := tx.InsertAsset(ctx, a)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	if assetId != 1 {
+		return 0, serrors.Join(serrors.New("asset could not get inserted"), tx.Rollback())
+	}
+	y, err := tx.RegisterPublishedBandwidth(ctx, a)
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	if y != 1 {
+		return 0, serrors.Join(serrors.New("asset could not get inserted"), tx.Rollback())
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, serrors.Join(err, tx.Rollback())
+	}
+	return assetId, nil
 }
 func (s *MarketplaceStorage) UpdateListedAsset(ctx context.Context, a *marketplacedb.DBAsset) (int64, error) {
 	err := validateAsset(a)
@@ -535,7 +557,7 @@ func (s *MarketplaceStorage) SplitAsset(ctx context.Context, accountID int64, as
 	return assetId1, assetId2, nil
 }
 
-func (s *MarketplaceStorage) Statistics(ctx context.Context, params *marketplacedb.StatisticsQuery) ([]*marketplacedb.DBStat, error) {
+func (s *MarketplaceStorage) Statistics(ctx context.Context, params *marketplacedb.StatisticsQuery) ([]*marketplacedb.DBStat, []*marketplacedb.DBStat, error) {
 	return s.db.SearchAssetsForStatistics(ctx, params)
 }
 
@@ -597,6 +619,13 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, accountID int64, ass
 		id, err := tx.InsertAsset(ctx, newAsset)
 		if err != nil {
 			return nil, 0, serrors.Join(err, tx.Rollback())
+		}
+		x, err := tx.RegisterBoughtBandwidth(ctx, newAsset)
+		if err != nil {
+			return nil, 0, serrors.Join(err, tx.Rollback())
+		}
+		if x != 1 {
+			return nil, 0, serrors.Join(serrors.New("asset could not get registered"), tx.Rollback())
 		}
 		totalAssetPrice, fee, safe := s.totalPrice(dbAsset.Price, split.Split.Bandwidth, split.Split.StartsAt, split.Split.StopsAt)
 		if !safe {

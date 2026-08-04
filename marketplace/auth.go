@@ -182,11 +182,9 @@ func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	) (connect.AnyResponse, error) {
 
 		method := req.Spec().Procedure
-		fmt.Printf("Auth Interceptor for %s\n", method)
 		requiredScope, found := methodScopes[method]
 		if !found {
 			//no rules apply
-			fmt.Println("no rules apply for", method)
 			return next(ctx, req)
 		}
 		authHeader := req.Header().Get("Authorization")
@@ -212,11 +210,9 @@ func (a *AuthInterceptor) WrapStreamingHandler(
 
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
 		method := conn.Spec().Procedure
-		fmt.Printf("Auth Interceptor for %s\n", method)
 		requiredScope, found := methodScopes[method]
 		if !found {
 			//no rules apply
-			fmt.Println("no rules apply for", method)
 			return next(ctx, conn)
 		}
 		authHeader := conn.RequestHeader().Get("Authorization")

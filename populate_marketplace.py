@@ -264,6 +264,20 @@ def insertAssets(db, assets) -> bool:
             return False
         a["isd_id"] = isd_id
         a["as_id"] = as_id
+        if a.get("owner") is None:
+            db.execute(
+                """
+                INSERT INTO Published_Bandwidth (isd_id, as_id, ingress, egress, bandwidth, starts_at, stops_at, price)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (a.get("isd_id") , a.get("as_id"),  a.get("ingress"), a.get("egress"), a.get("bandwidth"), a.get("starts_at"), a.get("stops_at"), a.get("price"))
+            )
+        else:
+            db.execute(
+                """
+                INSERT INTO Bought_Bandwidth (isd_id, as_id, ingress, egress, bandwidth, starts_at, stops_at, price)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (a.get("isd_id") , a.get("as_id"),  a.get("ingress"), a.get("egress"), a.get("bandwidth"), a.get("starts_at"), a.get("stops_at"), a.get("price"))
+            )
     db.executemany(
         """
         INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price, time_granularity, time_min_duration, starts_at, stops_at, ingress, egress, account_id)
@@ -276,7 +290,7 @@ def insertAssets(db, assets) -> bool:
         ))
         """,
         [
-            (u.get("isd_id"), u.get("as_id"), u.get("bandwidth"), u.get("bandwidth_min"), u.get("bandwidth_max"), u.get("price"), u.get("time_granularity"), u.get("time_min_duration"), u.get("starts_at"), u.get("stops_at"), u.get("ingress"), u.get("egress"), u.get("owner"),)
+            (u.get("isd_id"), u.get("as_id"), u.get("bandwidth"), u.get("bandwidth_min"), u.get("bandwidth_max"), u.get("price"), u.get("time_granularity"), u.get("time_min_duration"), u.get("starts_at"), u.get("stops_at"), u.get("ingress"), u.get("egress"), u.get("owner"))
             for u in assets
         ],
     )
