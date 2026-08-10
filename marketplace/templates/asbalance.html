@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>View AS Account Balance</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <nav>
+        <div class="nav-left">
+            {{if .Username}}
+            <a href="/asbalance">Balance</a>
+            {{else}}
+            <a href="/aslogin">AS Login</a>
+            <a href="/login">Login</a>
+            <a href="/register">Register</a>
+            {{end}}
+        </div>
+        {{if .Username}}
+        <div class="nav-right">
+            👤 {{.Username}}
+            <a class="logout-link" href="/logout">Logout</a>
+        </div>
+        {{end}}
+    </nav>
+    <div class="page">
+        <section class="card small">
+            <h2>Account Balance</h2>
+
+            {{if .Error}}
+            <p class="error">{{.Error}}</p>
+            {{end}}
+
+            <h4>Current balance</h4>
+
+            {{if .Balance}}
+            <p class="success">{{.Balance}}</p>
+            {{end}}
+        </section>
+    </div>
+</body>
+
+</html>

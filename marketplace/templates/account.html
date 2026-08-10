@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Accounts</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script type="text/javascript" src="/static/script.js"></script>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-left">
+            {{if .Username}}
+            <a href="/account">Account</a>
+            <a href="/assets">Assets</a>
+            <a href="/reservations">Reservations</a>
+            {{else}}
+            <a href="/aslogin">AS Login</a>
+            <a href="/login">Login</a>
+            <a href="/register">Register</a>
+            {{end}}
+        </div>
+        {{if .Username}}
+        <div class="nav-right">
+            👤 {{.Username}}
+            <a class="logout-link" href="/logout">Logout</a>
+        </div>
+        {{end}}
+    </nav>
+    <div class="page">
+        <h2>Accounts</h2>
+        <p class="error" id="error">{{.Error}}</p>
+
+        <section class="card">
+            <h3>Account balance</h3>
+            <p class="balance">{{.Main.Balance}}</p>
+            <h3>Token version</h3>
+            <p>{{.Main.TokenVersion}}</p>
+
+            <div style="display:none" id="main-account-id">{{.Main.ID}}</div>
+            <button type="button" onclick="requestJWT('{{.Main.ID}}', '{{.Username}}')">Get JWT</button>
+            <button type="button" onclick="resetJWT('{{.Main.ID}}','{{.Username}}')">Reset JWT</button>
+        </section>
+        <section class="card" id="jwt-container" style="display:none">
+            <h3>JWT Token</h3>
+            <p>
+                Account:
+                <strong id="jwt-user-name"></strong>
+            </p>
+            <div id="jwt-token" onclick="copyJWT()" title="Click to copy"></div>
+        </section>
+        <section class="card">
+            <h3>Sub Accounts</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Balance</th>
+                        <th>Token Version</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Accounts}}
+                    <tr>
+                        <td>
+                            {{with .Scope}}
+                            {{.}}
+                            {{end}}
+                        </td>
+                        <td>{{.Balance}}</td>
+                        <td>{{.TokenVersion}}</td>
+                        <td>
+                            <div class="table-actions">
+                                <button type="button" onclick="requestJWT('{{.ID}}','{{.Scope}}')">Get JWT</button>
+                                <button type="button" onclick="resetJWT('{{.ID}}','{{.Scope}}')">Reset JWT</button>
+                                <button type="submit" onclick="editBalance('{{.ID}}','{{.Scope}}')">Edit
+                                    Balance</button>
+                                <button type="submit" onclick="deleteAccount('{{.ID}}','{{.Scope}}')"
+                                    class="danger">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </section>
+        <section class="card" id="balance-editor" style="display:none">
+            <h3>Transfer funds</h3>
+            <p>
+                Moving funds to/from:
+                <strong id="balance-user-name"></strong>
+            </p>
+            <p class="transfer-info">
+                Positive amount: transfers funds from user account to selected account<br>
+                Negative amount: transfers funds from selected account to user account
+            </p>
+
+            <label>
+                Amount:
+                <input id="balance-value" type="number" step="1">
+            </label>
+
+            <button onclick="saveBalance()">
+                Transfer
+            </button>
+        </section>
+        <section class="card">
+            <h3>Create new sub Account</h2>
+                <form class="form-horizontal" method="POST" action="/account/create">
+                    <label>
+                        Name:
+                        <input type="text" name="name" pattern="[A-Za-z0-9_\-]{1,20}"
+                            title="Must contain only letters, numbers, '_' or '-' with a length between 1 and 20 characters"
+                            required>
+                    </label>
+                    <button type="submit">Create</button>
+                </form>
+        </section>
+    </div>
+</body>
+
+</html>
