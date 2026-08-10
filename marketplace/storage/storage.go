@@ -84,15 +84,9 @@ func (s *MarketplaceStorage) PublishAsset(ctx context.Context, a *marketplacedb.
 	if err != nil {
 		return 0, serrors.Join(err, tx.Rollback())
 	}
-	if assetId != 1 {
-		return 0, serrors.Join(serrors.New("asset could not get inserted"), tx.Rollback())
-	}
-	y, err := tx.RegisterPublishedBandwidth(ctx, a)
+	_, err = tx.RegisterPublishedBandwidth(ctx, a)
 	if err != nil {
 		return 0, serrors.Join(err, tx.Rollback())
-	}
-	if y != 1 {
-		return 0, serrors.Join(serrors.New("asset could not get inserted"), tx.Rollback())
 	}
 	err = tx.Commit()
 	if err != nil {
@@ -620,12 +614,9 @@ func (s *MarketplaceStorage) BuyAssets(ctx context.Context, accountID int64, ass
 		if err != nil {
 			return nil, 0, serrors.Join(err, tx.Rollback())
 		}
-		x, err := tx.RegisterBoughtBandwidth(ctx, newAsset)
+		_, err = tx.RegisterBoughtBandwidth(ctx, newAsset)
 		if err != nil {
 			return nil, 0, serrors.Join(err, tx.Rollback())
-		}
-		if x != 1 {
-			return nil, 0, serrors.Join(serrors.New("asset could not get registered"), tx.Rollback())
 		}
 		totalAssetPrice, fee, safe := s.totalPrice(dbAsset.Price, split.Split.Bandwidth, split.Split.StartsAt, split.Split.StopsAt)
 		if !safe {
