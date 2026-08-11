@@ -1,9 +1,13 @@
+#!/usr/bin/env python3
+
 import json
 import sqlite3
 import hashlib
 import bcrypt
 import argparse
 import re
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 """
 Example JSON file:
@@ -162,10 +166,125 @@ Example JSON file:
 }
 """
 
+DEFAULT_PASSWORD = "1234"
+DEFAULT_USERS = ["alice", "bob"]
+DEFAULT_USER_BALANCE = 1000000
+DEFAULT_AS_BALANCE = 0
+DEFAULT_ASSET_BANDWIDTH = 1000000
+DEFAULT_ASSET_BANDWIDTH_MIN = 10
+DEFAULT_ASSET_BANDWIDTH_MAX = 1000000
+DEFAULT_ASSET_PRICE = 1
+DEFAULT_ASSET_TIME_GRANULARITY = 10
+DEFAULT_ASSET_TIME_MIN_DURATION = 10
+DEFAULT_ASSET_DURATION = timedelta(days=100)
+
 def loadJson(path):
     with open(path, "r", encoding="utf-8") as file:
         data = json.load(file)
     return data
+
+def loadTopology(genDir):
+    """Reads the IA and interface IDs of every AS of a generated topology."""
+    topologies = sorted(Path(genDir).glob("AS*/topology.json"))
+    if not topologies:
+        raise FileNotFoundError(f"no AS*/topology.json found in {genDir}")
+    ases = []
+    for path in topologies:
+        topo = loadJson(path)
+        ia = topo.get("isd_as")
+        if ia is None:
+            raise ValueError(f"{path} has no isd_as")
+        ifids = sorted(
+            int(ifid)
+            for router in topo.get("border_routers", {}).values()
+            for ifid in router.get("interfaces", {})
+        )
+        ases.append((ia, ifids))
+    return ases
+
+def interfacePairs(ifids):
+    """The (ingress, egress) pairs of an AS.
+
+    Interface 0 stands for no interface, i.e. a flyover that starts or ends in
+    this AS, so that ASes with a single interface get assets as well.
+    """
+    pairs = [(i, e) for i in ifids for e in ifids if i != e]
+    pairs += [(0, e) for e in ifids]
+    pairs += [(i, 0) for i in ifids]
+    return pairs
+
+def defaultEntries(genDir, now=None):
+    """Builds the default users, ASes and assets for the topology in genDir."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    startsAt = now.replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stopsAt = (now + DEFAULT_ASSET_DURATION).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    ases = loadTopology(genDir)
+    assets = [
+        {
+            "ia": ia,
+            "bandwidth": DEFAULT_ASSET_BANDWIDTH,
+            "bandwidth_min": DEFAULT_ASSET_BANDWIDTH_MIN,
+            "bandwidth_max": DEFAULT_ASSET_BANDWIDTH_MAX,
+            "price": DEFAULT_ASSET_PRICE,
+            "time_granularity": DEFAULT_ASSET_TIME_GRANULARITY,
+            "time_min_duration": DEFAULT_ASSET_TIME_MIN_DURATION,
+            "starts_at": startsAt,
+            "stops_at": stopsAt,
+            "ingress": ingress,
+            "egress": egress,
+        }
+        for ia, ifids in ases
+        for ingress, egress in interfacePairs(ifids)
+    ]
+    return {
+        "users": [
+            {"name": name, "password": DEFAULT_PASSWORD}
+            for name in DEFAULT_USERS
+        ],
+        "accounts": [
+            {"user": name, "balance": DEFAULT_USER_BALANCE}
+            for name in DEFAULT_USERS
+        ],
+        "ases": [
+            {"ia": ia, "password": DEFAULT_PASSWORD, "balance": DEFAULT_AS_BALANCE}
+            for ia, _ in ases
+        ],
+        "assets": assets,
+    }
+
+def removeExisting(db, data):
+    """Drops the entries that the database already contains.
+
+    The default entries can this way be applied repeatedly without duplicating
+    rows, and without resetting the balances of what is already there.
+    """
+    users = {name for (name,) in db.execute("SELECT name FROM Users")}
+    accounts = set(db.execute(
+        "SELECT u.name, a.scope FROM Accounts a JOIN Users u ON u.id = a.user_id"
+    ))
+    ases = set(db.execute("SELECT isd_id, as_id FROM Ases"))
+    assets = set(db.execute("SELECT isd_id, as_id, ingress, egress FROM Assets"))
+
+    remaining = dict(data)
+    remaining["users"] = [
+        u for u in data.get("users", [])
+        if u.get("name") not in users
+    ]
+    remaining["accounts"] = [
+        a for a in data.get("accounts", [])
+        if (a.get("user"), a.get("scope")) not in accounts
+    ]
+    remaining["ases"] = [
+        a for a in data.get("ases", [])
+        if parseIA(a.get("ia")) not in ases
+    ]
+    remaining["assets"] = [
+        a for a in data.get("assets", [])
+        if parseIA(a.get("ia")) + (a.get("ingress"), a.get("egress")) not in assets
+    ]
+    return remaining
 
 def insertAll(db, data) -> bool:
     if not insertUsers(db, data.get("users")):
@@ -365,13 +484,28 @@ def applyScheme(db, schemePath):
         db.executescript(f.read())
 
 def main(args):
-    data = loadJson(args.file)
-    if not verifyScheme(args.schema, data.get("version")):
-        return
+    data = {}
+    if args.file is not None:
+        data = loadJson(args.file)
+        if not verifyScheme(args.schema, data.get("version")):
+            return
+    if args.default_entries:
+        try:
+            data = defaultEntries(args.gen_dir)
+        except (OSError, ValueError) as e:
+            print("cannot read the topology:", e)
+            return
     conn = sqlite3.connect(args.db)
     cursor = conn.cursor()
     try:
         applyScheme(cursor, args.schema)
+        if args.default_entries:
+            data = removeExisting(cursor, data)
+            added = {section: len(e) for section, e in data.items() if e}
+            if not added:
+                print("the default entries are already in the database")
+                return
+            print("adding " + ", ".join(f"{n} {section}" for section, n in added.items()))
         if insertAll(cursor, data):
             conn.commit()
             print("stored in database")
@@ -396,10 +530,21 @@ if __name__ == "__main__":
         default="marketplace/db/schema.sql",
         help="Path to the schema.sql file."
     )
-    parser.add_argument(
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
         "--file",
-        required=True,
         help="Path to the JSON file to import."
+    )
+    source.add_argument(
+        "--default-entries",
+        action="store_true",
+        help="Add the default users, ASes and assets for the topology in --gen-dir. "
+             "Entries that are already in the database are left untouched."
+    )
+    parser.add_argument(
+        "--gen-dir",
+        default="gen",
+        help="Path to the generated topology, read by --default-entries (default: gen)."
     )
 
     args = parser.parse_args()
