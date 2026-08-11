@@ -258,37 +258,20 @@ def defaultEntries(genDir, now=None):
         "assets": assets,
     }
 
-def removeExisting(db, data):
-    """Drops the entries that the database already contains.
+def dropTables(db):
+    """Drops every table, so that the schema and the entries are recreated.
 
-    The default entries can this way be applied repeatedly without duplicating
-    rows, and without resetting the balances of what is already there.
+    Indexes are dropped along with their table, and so are the AUTOINCREMENT
+    counters that SQLite keeps in its internal sqlite_sequence table.
     """
-    users = {name for (name,) in db.execute("SELECT name FROM Users")}
-    accounts = set(db.execute(
-        "SELECT u.name, a.scope FROM Accounts a JOIN Users u ON u.id = a.user_id"
-    ))
-    ases = set(db.execute("SELECT isd_id, as_id FROM Ases"))
-    assets = set(db.execute("SELECT isd_id, as_id, ingress, egress FROM Assets"))
-
-    remaining = dict(data)
-    remaining["users"] = [
-        u for u in data.get("users", [])
-        if u.get("name") not in users
+    tables = [
+        name for (name,) in db.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
     ]
-    remaining["accounts"] = [
-        a for a in data.get("accounts", [])
-        if (a.get("user"), a.get("scope") or "") not in accounts
-    ]
-    remaining["ases"] = [
-        a for a in data.get("ases", [])
-        if parseIA(a.get("ia")) not in ases
-    ]
-    remaining["assets"] = [
-        a for a in data.get("assets", [])
-        if parseIA(a.get("ia")) + (a.get("ingress"), a.get("egress")) not in assets
-    ]
-    return remaining
+    for table in tables:
+        db.execute(f'DROP TABLE "{table}"')
+    return tables
 
 def insertAll(db, data) -> bool:
     if not insertUsers(db, data.get("users")):
@@ -504,17 +487,17 @@ def main(args):
         except (OSError, ValueError) as e:
             print("cannot read the topology:", e)
             return
-    conn = sqlite3.connect(args.db)
+    try:
+        conn = sqlite3.connect(args.db)
+    except sqlite3.Error as e:
+        print("cannot open the database:", e)
+        return
     cursor = conn.cursor()
     try:
+        dropped = dropTables(cursor)
+        if dropped:
+            print("dropped", ", ".join(dropped))
         applyScheme(cursor, args.schema)
-        if args.default_entries:
-            data = removeExisting(cursor, data)
-            added = {section: len(e) for section, e in data.items() if e}
-            if not added:
-                print("the default entries are already in the database")
-                return
-            print("adding " + ", ".join(f"{n} {section}" for section, n in added.items()))
         if insertAll(cursor, data):
             conn.commit()
             print("stored in database")
@@ -528,11 +511,14 @@ def main(args):
         conn.close()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Loads assets, users, reservations and delegations into marketplace db")
+    parser = argparse.ArgumentParser(
+        description="Loads assets, users, reservations and delegations into marketplace db. "
+                    "Every table is dropped first, and rebuilt from the given entries."
+    )
     parser.add_argument(
         "--db",
         default="gen-cache/marketplace.db",
-        help="Path to the SQLite database."
+        help="Path to the SQLite database. Its tables are dropped and recreated on every run."
     )
     parser.add_argument(
         "--schema",
@@ -547,8 +533,8 @@ if __name__ == "__main__":
     source.add_argument(
         "--default-entries",
         action="store_true",
-        help="Add the default users, ASes and assets for the topology in --gen-dir. "
-             "Entries that are already in the database are left untouched."
+        help="Fill the database with the default users, ASes and assets for the "
+             "topology in --gen-dir."
     )
     parser.add_argument(
         "--gen-dir",
