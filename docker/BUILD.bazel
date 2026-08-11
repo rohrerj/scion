@@ -10,6 +10,7 @@ filegroup(
         ":dispatcher.tarball",
         ":gateway.tarball",
         ":hummingbird.tarball",
+        ":marketplace.tarball",
         ":router.tarball",
     ],
 )
@@ -74,6 +75,16 @@ scion_app_image(
         "/etc/scion/hbird.toml",
     ],
     entrypoint = ["/app/hummingbird"],
+)
+
+scion_app_image(
+    name = "marketplace",
+    src = "//marketplace/cmd/marketplace",
+    cmd = [
+        "--config",
+        "/etc/scion/marketplace.toml",
+    ],
+    entrypoint = ["/app/marketplace"],
 )
 
 scion_app_image(

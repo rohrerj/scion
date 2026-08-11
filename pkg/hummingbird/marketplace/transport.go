@@ -68,10 +68,10 @@ func IsSCIONURL(rawURL string) bool {
 //
 // Valid URL forms include:
 //
-//	https://127.0.0.1:8888
-//	https://my-marketplace.local:8888
-//	[1-ff00:0:111,127.0.0.1]:9888
-//	[1-ff00:0:111,my-marketplace.local]:9888
+//	https://127.0.0.1:31888
+//	https://my-marketplace.local:31888
+//	[1-ff00:0:111,127.0.0.1]:31888
+//	[1-ff00:0:111,my-marketplace.local]:31888
 func NewClientSet(
 	ctx context.Context,
 	rawURL string,

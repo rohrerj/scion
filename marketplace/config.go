@@ -23,6 +23,12 @@ import (
 	"github.com/scionproto/scion/private/env"
 )
 
+// DefaultAddr is where both APIs listen: the TCP one, serving the ConnectRPC API
+// and the web app from a single mux, and the SCION one, which is UDP. They do not
+// collide. Port 31888 is inside the default dispatched_ports range of an AS, so
+// that the border router delivers SCION packets to it without a shim dispatcher.
+const DefaultAddr = "localhost:31888"
+
 type Config struct {
 	General       env.General                 `toml:"general,omitempty"`
 	Logging       log.Config                  `toml:"log,omitempty"`
@@ -65,10 +71,10 @@ type MarketplaceConfig struct {
 
 func (cfg *MarketplaceConfig) InitDefaults() {
 	if cfg.APIAddr == "" {
-		cfg.APIAddr = "localhost:8888"
+		cfg.APIAddr = DefaultAddr
 	}
 	if cfg.SCIONAPIAddr == "" {
-		cfg.SCIONAPIAddr = "localhost:9888"
+		cfg.SCIONAPIAddr = DefaultAddr
 	}
 	if cfg.Currency == "" {
 		cfg.Currency = "CHF"

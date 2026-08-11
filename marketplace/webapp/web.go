@@ -16,6 +16,7 @@ package webapp
 
 import (
 	"crypto/rand"
+	"embed"
 	"encoding/gob"
 	"fmt"
 	"html/template"
@@ -35,7 +36,16 @@ import (
 	"github.com/scionproto/scion/pkg/log"
 )
 
-var templates = template.Must(template.ParseGlob("marketplace/templates/*.html"))
+// The templates and the static assets are embedded, so that the marketplace does
+// not depend on being started from the root of the repository.
+//
+//go:embed templates/*.html
+var templateFS embed.FS
+
+//go:embed static
+var staticFS embed.FS
+
+var templates = template.Must(template.ParseFS(templateFS, "templates/*.html"))
 
 func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *http.ServeMux, disableUserRegistration bool) {
 	sessionKey := make([]byte, 32)
@@ -71,12 +81,7 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 	mux.HandleFunc("/logout", h.logoutHandler)
 	mux.HandleFunc("/aslogin", h.asLoginHandler)
 	mux.HandleFunc("/asbalance", h.asBalanceHandler)
-	mux.HandleFunc("/static/script.js", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "./marketplace/static/script.js")
-	})
-	mux.HandleFunc("/static/style.css", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "./marketplace/static/style.css")
-	})
+	mux.Handle("/static/", http.FileServerFS(staticFS))
 }
 
 type Handler struct {

@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -305,7 +306,11 @@ func realMain(ctx context.Context) error {
 		return cleanup.Do()
 	})
 
-	g.Wait()
+	// Without this, a server failing to listen, e.g. because its port is already
+	// taken, ends the process with neither an error nor a message.
+	if err := g.Wait(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
 	return nil
 }
 
@@ -378,9 +383,6 @@ func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrS
 }
 
 func saveSignatureKeys(pubKey ed25519.PublicKey, privKey ed25519.PrivateKey) error {
-	if err := os.MkdirAll("gen/marketplace", 0755); err != nil {
-		return err
-	}
 	privBytes, err := x509.MarshalPKCS8PrivateKey(privKey)
 	if err != nil {
 		return err

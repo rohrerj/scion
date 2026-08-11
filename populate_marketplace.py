@@ -501,6 +501,11 @@ def main(args):
         if insertAll(cursor, data):
             conn.commit()
             print("stored in database")
+            # The database is the one bind mounted into the containers, but a
+            # running marketplace keeps its handles on the tables just dropped.
+            if (Path(args.gen_dir) / "scion-dc.yml").is_file():
+                print("this topology runs on docker: restart the marketplace service "
+                      "if it is already running")
         else:
             conn.rollback()
             print("changes rolled back")
