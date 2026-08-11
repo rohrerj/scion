@@ -10,9 +10,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 """
+An account without a scope, or with an empty one, is the main account of its
+user; there can be only one per user. Assets and reservations given an "owner"
+are owned by the main account of that user.
+
 Example JSON file:
 {
-    "version": "4abdd9041b766012ed2b58222505e0a8aeead3208b7dab513bc338eacb6eb11f",
+    "version": "390412f2780897af26f11debb387aed30a2e52eefcca33d9fc204b9f1217011b",
     "users": [
         {
             "name": "Alice",
@@ -274,7 +278,7 @@ def removeExisting(db, data):
     ]
     remaining["accounts"] = [
         a for a in data.get("accounts", [])
-        if (a.get("user"), a.get("scope")) not in accounts
+        if (a.get("user"), a.get("scope") or "") not in accounts
     ]
     remaining["ases"] = [
         a for a in data.get("ases", [])
@@ -324,18 +328,22 @@ def hash_password(password: str) -> str:
 def insertAccounts(db, accounts) -> bool:
     if accounts is None:
         return True
+    # Updated instead of replaced: a replace would delete the conflicting row and
+    # insert it under a new id, orphaning the assets and reservations that refer
+    # to it.
     db.executemany(
         """
-        INSERT OR REPLACE INTO Accounts (scope, balance, user_id)
+        INSERT INTO Accounts (scope, balance, user_id)
         VALUES (?, ?, (
             SELECT id
             FROM Users
             WHERE name = ?
             LIMIT 1
         ))
+        ON CONFLICT(user_id, scope) DO UPDATE SET balance = excluded.balance
         """,
         [
-            (u.get("scope"), u.get("balance"), u.get("user"))
+            (u.get("scope") or "", u.get("balance"), u.get("user"))
             for u in accounts
         ],
     )
@@ -348,8 +356,9 @@ def insertUsers(db,users) -> bool:
         u["pw_hash"] = hash_password(u.get("password"))
     db.executemany(
         """
-        INSERT OR REPLACE INTO Users (name, pw_hash)
+        INSERT INTO Users (name, pw_hash)
         VALUES (?, ?)
+        ON CONFLICT(name) DO UPDATE SET pw_hash = excluded.pw_hash
         """,
         [
             (u.get("name"), u.get("pw_hash"))
@@ -390,7 +399,7 @@ def insertAssets(db, assets) -> bool:
             SELECT a.id
             FROM Accounts a
             JOIN Users u ON u.ID = a.user_id
-            WHERE u.name = ? AND a.scope IS NULL
+            WHERE u.name = ? AND a.scope = ''
             LIMIT 1
         ))
         """,

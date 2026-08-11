@@ -186,7 +186,7 @@ func (s *MarketplaceStorage) DeleteAccount(
 		for _, account := range allUserAccounts {
 			if account.ID == accountId {
 				targetAccount = account
-			} else if account.Scope == nil {
+			} else if account.Scope == "" {
 				mainAccount = account
 			}
 		}

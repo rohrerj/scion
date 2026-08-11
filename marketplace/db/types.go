@@ -140,9 +140,10 @@ type DBUser struct {
 }
 
 type DBAccount struct {
-	ID           int64
-	UserID       int64
-	Scope        *string
+	ID     int64
+	UserID int64
+	// Scope names a sub account. It is empty for the main account of a user.
+	Scope        string
 	Balance      int64
 	TokenVersion int64
 }

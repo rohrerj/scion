@@ -145,3 +145,35 @@ func TestAssetTransitionAndRowScanners(t *testing.T) {
 	require.Equal(t, reservation.StartsAt, got.StartsAt)
 	require.Equal(t, reservation.StopsAt, got.StopsAt)
 }
+
+// TestCreateAccountRejectsSecondMainAccount verifies that a user has at most one
+// main account. The main account is the one with an empty scope, so that
+// UNIQUE(user_id, scope) rejects the duplicate: a NULL scope would not, because
+// SQLite considers every NULL distinct.
+func TestCreateAccountRejectsSecondMainAccount(t *testing.T) {
+	ctx := context.Background()
+	backend := newTestBackend(t)
+
+	userID, err := backend.CreateUser(ctx, &DBUser{Name: "alice", PasswordHash: "hash"})
+	require.NoError(t, err)
+
+	_, err = backend.CreateAccount(ctx, &DBAccount{UserID: userID})
+	require.NoError(t, err)
+	_, err = backend.CreateAccount(ctx, &DBAccount{UserID: userID})
+	require.Error(t, err, "a user must not get a second main account")
+
+	accounts, err := backend.GetAccountsByUser(ctx, userID)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	require.Equal(t, "", accounts[0].Scope)
+
+	// Sub accounts are still one per name, and do not collide with the main one.
+	_, err = backend.CreateAccount(ctx, &DBAccount{UserID: userID, Scope: "publisher"})
+	require.NoError(t, err)
+	_, err = backend.CreateAccount(ctx, &DBAccount{UserID: userID, Scope: "publisher"})
+	require.Error(t, err, "a user must not get two sub accounts with the same name")
+
+	accounts, err = backend.GetAccountsByUser(ctx, userID)
+	require.NoError(t, err)
+	require.Len(t, accounts, 2)
+}

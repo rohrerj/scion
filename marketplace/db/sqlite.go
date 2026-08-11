@@ -262,8 +262,8 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 	}
 	query = append(query, "JOIN Accounts owner ON r.account_id = owner.id JOIN "+
 		"Accounts current ON current.id = ?")
-	where = append(where, "(current.scope IS NULL AND owner.user_id = current.user_id) OR "+
-		"(current.scope IS NOT NULL AND owner.id = current.id)")
+	where = append(where, "(current.scope = '' AND owner.user_id = current.user_id) OR "+
+		"(current.scope != '' AND owner.id = current.id)")
 	args = append(args, params.AccountId)
 	if params.IA != nil {
 		where = append(where, "(r.isd_id=?) AND (r.as_id=?)")
@@ -635,8 +635,8 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 	} else {
 		query = append(query, "JOIN Accounts owner ON a.account_id = owner.id JOIN "+
 			"Accounts current ON current.id = ?")
-		where = append(where, "(current.scope IS NULL AND owner.user_id = current.user_id) OR "+
-			"(current.scope IS NOT NULL AND owner.id = current.id)")
+		where = append(where, "(current.scope = '' AND owner.user_id = current.user_id) OR "+
+			"(current.scope != '' AND owner.id = current.id)")
 		args = append(args, *params.AccountId)
 	}
 	if params.IA != nil {
@@ -1060,7 +1060,7 @@ func (e *executor) DeleteAccount(ctx context.Context, accountID int64) (int64, e
 	if e.write == nil {
 		return 0, serrors.New("No database open")
 	}
-	inst := `DELETE FROM Accounts WHERE id = ? AND scope IS NOT NULL`
+	inst := `DELETE FROM Accounts WHERE id = ? AND scope != ''`
 	res, err := e.write.ExecContext(ctx, inst, accountID)
 	if err != nil {
 		return 0, err

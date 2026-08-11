@@ -90,8 +90,10 @@ type User struct {
 	Name string
 }
 type Account struct {
-	ID           int64
-	Scope        *string
+	ID int64
+	// Scope names a sub account, and is empty for the main account. The handlers
+	// fill it with the user name before rendering the main account.
+	Scope        string
 	Balance      int64
 	TokenVersion int64
 }
@@ -362,7 +364,7 @@ func (h *Handler) accountCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = h.store.CreateAccount(r.Context(), &db.DBAccount{
 		UserID: user.ID,
-		Scope:  &accountScope,
+		Scope:  accountScope,
 	})
 	if err != nil {
 		log.Debug("User account creation handler", "err", err)
@@ -490,8 +492,8 @@ func (h *Handler) assetsHandler(w http.ResponseWriter, r *http.Request) {
 	var filterAccount *db.DBAccount
 	var mainAccount *db.DBAccount
 	for _, a := range dbAccounts {
-		if a.Scope == nil {
-			a.Scope = &user.Name
+		if a.Scope == "" {
+			a.Scope = user.Name
 			mainAccount = a
 		}
 		if accountIdFilterString != "" && a.ID == accountIdFilter {
@@ -553,8 +555,8 @@ func (h *Handler) reservationsHandler(w http.ResponseWriter, r *http.Request) {
 	var filterAccount *db.DBAccount
 	var mainAccount *db.DBAccount
 	for _, a := range dbAccounts {
-		if a.Scope == nil {
-			a.Scope = &user.Name
+		if a.Scope == "" {
+			a.Scope = user.Name
 			mainAccount = a
 		}
 		if accountIdFilterString != "" && a.ID == accountIdFilter {
@@ -604,7 +606,7 @@ func (h *Handler) accountHandler(w http.ResponseWriter, r *http.Request) {
 	accs := []Account{}
 	mainAccount := Account{}
 	for _, a := range accounts {
-		if a.Scope == nil {
+		if a.Scope == "" {
 			mainAccount = Account{
 				ID:           a.ID,
 				Balance:      a.Balance,

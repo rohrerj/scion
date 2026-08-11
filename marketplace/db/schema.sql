@@ -46,7 +46,10 @@ CREATE INDEX IF NOT EXISTS idx_users_name ON Users(name);
 CREATE TABLE IF NOT EXISTS Accounts(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
-    scope TEXT,
+    -- The main account of a user has an empty scope. It must not be NULL: SQLite
+    -- considers every NULL distinct, so UNIQUE(user_id, scope) would not keep a
+    -- user from having several main accounts.
+    scope TEXT NOT NULL DEFAULT '',
     balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
     jwt_version INTEGER NOT NULL DEFAULT 0,
     UNIQUE(user_id, scope),
