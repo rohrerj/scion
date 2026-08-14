@@ -15,6 +15,7 @@
 package marketplace
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -181,9 +182,9 @@ func (c *MarketplaceClient) recursiveSelectStart(assets []*hummingbird.SearchAss
 	sort.Slice(assets, func(i, j int) bool {
 		return assets[i].StartsAt.Seconds < assets[j].StartsAt.Seconds
 	})
-	assetMap := make(map[uint64]*hummingbird.SearchAsset)
+	assetMap := make(map[string]*hummingbird.SearchAsset)
 	for _, asset := range assets {
-		assetMap[asset.AssetId] = asset
+		assetMap[string(asset.AssetId)] = asset
 	}
 	filterValidAt := func(t time.Time, assets []*hummingbird.SearchAsset) []*hummingbird.SearchAsset {
 		return activeAt(assets, t, bwInKbps)
@@ -222,7 +223,7 @@ func (c *MarketplaceClient) recursiveSelectStart(assets []*hummingbird.SearchAss
 		currCost := uint64(0)
 		currSelect := []*hummingbird.BuyAsset{}
 		if len(chain.ids) == 1 {
-			asset := assetMap[chain.ids[0]]
+			asset := assetMap[string(chain.ids[0])]
 			currCost += actualPrice(asset, chain.stopsAt.Sub(startsAt))
 			currSelect = append(currSelect, &hummingbird.BuyAsset{
 				AssetId:         asset.AssetId,
@@ -235,8 +236,8 @@ func (c *MarketplaceClient) recursiveSelectStart(assets []*hummingbird.SearchAss
 			currStartsAt := startsAt
 			i := 0
 			for ; i < len(chain.ids)-1; i++ {
-				currAsset := assetMap[chain.ids[i]]
-				nextAsset := assetMap[chain.ids[i+1]]
+				currAsset := assetMap[string(chain.ids[i])]
+				nextAsset := assetMap[string(chain.ids[i+1])]
 				if currAsset.Price <= nextAsset.Price {
 					duration := timeMin(currAsset.StopsAt.AsTime(), chain.stopsAt).Sub(currStartsAt)
 					currCost += actualPrice(currAsset, duration)
@@ -261,7 +262,7 @@ func (c *MarketplaceClient) recursiveSelectStart(assets []*hummingbird.SearchAss
 					currStartsAt = timeMin(nextAsset.StartsAt.AsTime(), chain.stopsAt)
 				}
 			}
-			lastAsset := assetMap[chain.ids[i]]
+			lastAsset := assetMap[string(chain.ids[i])]
 			duration := timeMin(lastAsset.StopsAt.AsTime(), chain.stopsAt).Sub(currStartsAt)
 			currCost += actualPrice(lastAsset, duration)
 
@@ -282,7 +283,7 @@ func (c *MarketplaceClient) recursiveSelectStart(assets []*hummingbird.SearchAss
 }
 
 type chain struct {
-	ids             []uint64
+	ids             [][]byte
 	timeGranularity uint32
 	timeMinDuration uint32
 	bandwidthMin    uint32
@@ -307,7 +308,7 @@ func (c *MarketplaceClient) recursiveSelect(currentAsset *hummingbird.SearchAsse
 	}
 	if !currentAsset.StopsAt.AsTime().Before(globalStop) {
 		// with this asset we found a chain from start till end
-		return []chain{{ids: []uint64{currentAsset.AssetId}, bandwidthMin: currBW, timeGranularity: timeGranularity, timeMinDuration: timeMinDuration, stopsAt: globalStop}}, true
+		return []chain{{ids: [][]byte{currentAsset.AssetId}, bandwidthMin: currBW, timeGranularity: timeGranularity, timeMinDuration: timeMinDuration, stopsAt: globalStop}}, true
 	}
 	nextAssets := filterValidAt(currentAsset.StopsAt.AsTime(), otherAssets)
 	if len(nextAssets) == 0 {
@@ -326,7 +327,7 @@ func (c *MarketplaceClient) recursiveSelect(currentAsset *hummingbird.SearchAsse
 				fmt.Println("bandwidth cannot be satisfied")
 				continue
 			}
-			resultChain.ids = append([]uint64{currentAsset.AssetId}, resultChain.ids...)
+			resultChain.ids = append([][]byte{currentAsset.AssetId}, resultChain.ids...)
 			allChains = append(allChains, resultChain)
 		}
 	}
@@ -534,7 +535,7 @@ func (c *MarketplaceClient) checkoutAssetForInterfacePair(ctx context.Context, p
 }
 
 type assetInfo struct {
-	id       uint64
+	id       []byte
 	startsAt time.Time
 	stopsAt  time.Time
 }
@@ -641,7 +642,7 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 	foundAssetsMap := make(map[uint64][]*hummingbird.SearchAsset)
 	for _, boughtAsset := range boughtAssets {
 		for _, foundAsset := range foundAssets {
-			if boughtAsset.AssetId == foundAsset.AssetId {
+			if bytes.Compare(boughtAsset.AssetId, foundAsset.AssetId) == 0 {
 				currentSlice, found := foundAssetsMap[foundAsset.Ia]
 				if found {
 					foundAssetsMap[foundAsset.Ia] = append(currentSlice, foundAsset)
@@ -676,8 +677,10 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 				for i := 0; i < len(pairAssets)-1; i++ {
 					combineResp, err := c.client.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
 						Msg: &hummingbird.CombineAssetRequest{
-							AssetId_1: currAssetId,
-							AssetId_2: pairAssets[i+1].AssetId,
+							AssetIds: [][]byte{
+								currAssetId,
+								pairAssets[i+1].AssetId,
+							},
 						},
 					})
 					if err != nil {
@@ -695,8 +698,10 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 				for i := 0; i < len(ingressAssets)-1; i++ {
 					combineResp, err := c.client.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
 						Msg: &hummingbird.CombineAssetRequest{
-							AssetId_1: currIngressAssetId,
-							AssetId_2: ingressAssets[i+1].AssetId,
+							AssetIds: [][]byte{
+								currIngressAssetId,
+								ingressAssets[i+1].AssetId,
+							},
 						},
 					})
 					if err != nil {
@@ -711,8 +716,10 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 				for i := 0; i < len(egressAssets)-1; i++ {
 					combineResp, err := c.client.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
 						Msg: &hummingbird.CombineAssetRequest{
-							AssetId_1: currEgressAssetId,
-							AssetId_2: egressAssets[i+1].AssetId,
+							AssetIds: [][]byte{
+								currEgressAssetId,
+								egressAssets[i+1].AssetId,
+							},
 						},
 					})
 					if err != nil {
