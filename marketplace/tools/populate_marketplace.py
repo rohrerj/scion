@@ -154,7 +154,8 @@ Example JSON file:
     "delegations": [
         {
             "ia": "1-ff00:0:110",
-            "res_id_limit": 100000,
+            "res_id_limit_low": 0,
+            "res_id_limit_high": 100000,
             "expiration": "2027-01-01T00:00:00Z",
             "paid_until": "2027-01-01T00:00:00Z",
             "key": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
