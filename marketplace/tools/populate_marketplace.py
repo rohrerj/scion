@@ -12,7 +12,7 @@ are owned by the main account of that user.
 
 Example JSON file:
 {
-    "version": "390412f2780897af26f11debb387aed30a2e52eefcca33d9fc204b9f1217011b",
+    "version": "ed2a98d8b4293e3572981790d28037e7a6cdbd0a2ecde3398eec3ec4e521d502",
     "users": [
         {
             "name": "Alice",
