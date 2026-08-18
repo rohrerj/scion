@@ -48,7 +48,14 @@ type MarketplaceClient struct {
 // If a dns name is provided, dns resolution will be done using local dns resolver.
 // If insecure = true, server certificate validation will be disabled.
 // path querier and local topology is only required for scion connections
-func NewMarketplaceClient(ctx context.Context, url string, token string, querier snet.PathQuerier, topo snet.Topology, insecure bool) (*MarketplaceClient, error) {
+func NewMarketplaceClient(
+	ctx context.Context,
+	url string,
+	token string,
+	querier snet.PathQuerier,
+	topo snet.Topology,
+	insecure bool,
+) (*MarketplaceClient, error) {
 	clients, err := NewClientSet(ctx, url, token, ClientOptions{
 		Querier:  querier,
 		Topology: topo,
