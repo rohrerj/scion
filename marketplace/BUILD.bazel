@@ -46,6 +46,7 @@ go_test(
     embed = [":go_default_library"],
     deps = [
         "//marketplace/db:go_default_library",
+        "//pkg/hummingbird/bwencoding:go_default_library",
         "@com_github_stretchr_testify//assert:go_default_library",
     ],
 )

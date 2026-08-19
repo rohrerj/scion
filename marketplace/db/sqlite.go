@@ -262,8 +262,8 @@ func (e *executor) buildReservationQuery(params *ReservationQuery) (string, []an
 	}
 	query = append(query, "JOIN Accounts owner ON r.account_id = owner.id JOIN "+
 		"Accounts current ON current.id = ?")
-	where = append(where, "(current.scope = '' AND owner.user_id = current.user_id) OR "+
-		"(current.scope != '' AND owner.id = current.id)")
+	where = append(where, "( (current.scope = '' AND owner.user_id = current.user_id) OR "+
+		"(current.scope != '' AND owner.id = current.id) )")
 	args = append(args, params.AccountId)
 	if params.IA != nil {
 		where = append(where, "(r.isd_id=?) AND (r.as_id=?)")
@@ -628,17 +628,20 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 	query := []string{
 		"SELECT " + assetColumnsWithAlias + " FROM Assets a",
 	}
-	where = append(where, "(a.state = ?)")
-	args = append(args, AssetStateAvailable)
+
 	if params.AccountId == nil {
 		where = append(where, "(a.account_id IS NULL)")
 	} else {
+		// The JOIN clause will be the first parametrized entry. Fill up the arguments for it.
 		query = append(query, "JOIN Accounts owner ON a.account_id = owner.id JOIN "+
 			"Accounts current ON current.id = ?")
-		where = append(where, "(current.scope = '' AND owner.user_id = current.user_id) OR "+
-			"(current.scope != '' AND owner.id = current.id)")
 		args = append(args, *params.AccountId)
+		// Parenthesized as a whole: AND to all where[i] binds tighter than OR.
+		where = append(where, "( (current.scope = '' AND owner.user_id = current.user_id) OR "+
+			"(current.scope != '' AND owner.id = current.id) )")
 	}
+	where = append(where, "(a.state = ?)")
+	args = append(args, AssetStateAvailable)
 	if params.IA != nil {
 		where = append(where, "(a.isd_id=?) AND (a.as_id=?)")
 		args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()))

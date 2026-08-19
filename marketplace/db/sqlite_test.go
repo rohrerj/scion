@@ -16,6 +16,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"math"
 	"testing"
@@ -176,4 +177,66 @@ func TestCreateAccountRejectsSecondMainAccount(t *testing.T) {
 	accounts, err = backend.GetAccountsByUser(ctx, userID)
 	require.NoError(t, err)
 	require.Len(t, accounts, 2)
+}
+
+// TestSearchOwnedAssets covers searching the assets of an account: the account
+// is bound to a JOIN that precedes the WHERE clause in the statement, and the
+// ownership check must not swallow the remaining filters.
+func TestSearchOwnedAssets(t *testing.T) {
+	ctx := context.Background()
+	backend := newTestBackend(t)
+
+	userID, err := backend.CreateUser(ctx, &DBUser{Name: "alice", PasswordHash: "hash"})
+	require.NoError(t, err)
+	alicesAccountID, err := backend.CreateAccount(ctx, &DBAccount{UserID: userID})
+	require.NoError(t, err)
+
+	owned := testAsset()
+	owned.AccountId = sql.NullInt64{Int64: alicesAccountID, Valid: true}
+	ownedID, err := backend.InsertAsset(ctx, owned)
+	require.NoError(t, err)
+
+	// An asset nobody owns, and one owned by somebody else.
+	notOwnedAssetID, err := backend.InsertAsset(ctx, testAsset())
+	require.NoError(t, err)
+	bobUserID, err := backend.CreateUser(ctx, &DBUser{Name: "bob", PasswordHash: "hash"})
+	require.NoError(t, err)
+	bobsAccountID, err := backend.CreateAccount(ctx, &DBAccount{UserID: bobUserID})
+	require.NoError(t, err)
+	otherAsset := testAsset()
+	otherAsset.AccountId = sql.NullInt64{Int64: bobsAccountID, Valid: true}
+	_, err = backend.InsertAsset(ctx, otherAsset)
+	require.NoError(t, err)
+
+	assets, err := backend.Search(ctx, &AssetQuery{AccountId: &alicesAccountID})
+	require.NoError(t, err)
+	require.Len(t, assets, 1)
+	require.Equal(t, ownedID, assets[0].ID)
+
+	// The validity filters still apply to the assets of the account.
+	startsAt := owned.StartAt.UTC().Format(time.RFC3339)
+	stopsAt := owned.StopsAt.UTC().Format(time.RFC3339)
+	assets, err = backend.Search(ctx, &AssetQuery{
+		AccountId: &alicesAccountID,
+		StartsAt:  &startsAt,
+		StopsAt:   &stopsAt,
+	})
+	require.NoError(t, err)
+	require.Len(t, assets, 1)
+
+	tooLate := owned.StopsAt.Add(time.Hour).UTC().Format(time.RFC3339)
+	assets, err = backend.Search(ctx, &AssetQuery{
+		AccountId: &alicesAccountID,
+		StartsAt:  &startsAt,
+		StopsAt:   &tooLate,
+	})
+	require.NoError(t, err)
+	require.Empty(t, assets, "an asset that stops too early must not be returned")
+
+	// Without an account, only the assets nobody owns are listed.
+	assets, err = backend.Search(ctx, &AssetQuery{})
+	require.NoError(t, err)
+	require.Len(t, assets, 1)
+	require.Equal(t, notOwnedAssetID, assets[0].ID)
+	require.False(t, assets[0].AccountId.Valid)
 }
