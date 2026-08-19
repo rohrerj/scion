@@ -49,7 +49,7 @@ func TestDeriveAuthKey(t *testing.T) {
 	expected := make([]byte, hummingbird.AkBufferSize)
 	binary.BigEndian.PutUint16(expected[0:2], in)
 	binary.BigEndian.PutUint16(expected[2:4], eg)
-	binary.BigEndian.PutUint32(expected[4:8], resId<<10)
+	binary.BigEndian.PutUint32(expected[4:8], resId<<hummingbird.BwBits)
 	expected[6] |= byte(bw >> 8)
 	expected[7] = byte(bw)
 	binary.BigEndian.PutUint32(expected[8:12], start)
@@ -120,7 +120,7 @@ func BenchmarkDeriveAuthKeyStdLib(b *testing.B) {
 
 			binary.BigEndian.PutUint16(buffer[0:2], in)
 			binary.BigEndian.PutUint16(buffer[2:4], eg)
-			binary.BigEndian.PutUint32(buffer[4:8], resId<<10|uint32(bw))
+			binary.BigEndian.PutUint32(buffer[4:8], resId<<hummingbird.BwBits|uint32(bw))
 			binary.BigEndian.PutUint32(buffer[8:12], start)
 			binary.BigEndian.PutUint16(buffer[12:14], duration)
 			binary.BigEndian.PutUint16(buffer[14:16], 0) //padding

@@ -91,7 +91,7 @@ func DeriveAuthKey(
 	// Prepare input buffer.
 	binary.BigEndian.PutUint16(buffer[0:2], in)
 	binary.BigEndian.PutUint16(buffer[2:4], eg)
-	binary.BigEndian.PutUint32(buffer[4:8], resId<<10|uint32(bw))
+	binary.BigEndian.PutUint32(buffer[4:8], resId<<BwBits|uint32(bw))
 	binary.BigEndian.PutUint32(buffer[8:12], startTime)
 	binary.BigEndian.PutUint16(buffer[12:14], resDuration)
 	binary.BigEndian.PutUint16(buffer[14:16], 0) //padding

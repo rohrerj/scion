@@ -991,15 +991,17 @@ func TestProcessHbirdPacket(t *testing.T) {
 			mockMsg: func(t *testing.T, afterProcessing bool, _ *router.DataPlane) *router.Packet {
 				spkt, dpath := prepHbirdMsg(now)
 				spkt.SrcIA = addr.MustParseIA("1-ff00:0:110")
-				largePayload := bytes.Repeat([]byte{0xab}, 512)
+				// Bandwidth codepoint 0 is the smallest reservation, 10 kbps,
+				// i.e. 1250 bytes per second, which one packet already exceeds.
+				largePayload := bytes.Repeat([]byte{0xab}, 2000)
 				spkt.PayloadLen = uint16(8 + len(largePayload)) // udp header + payload
 				dpath.HopFields = []hummingbird.FlyoverHopField{
 					{HopField: path.HopField{ConsIngress: 0, ConsEgress: 1},
-						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 1},
+						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 0},
 					{HopField: path.HopField{ConsIngress: 31, ConsEgress: 30},
-						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 1},
+						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 0},
 					{HopField: path.HopField{ConsIngress: 41, ConsEgress: 40},
-						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 1},
+						Flyover: true, ResStartTime: 123, Duration: 304, Bw: 0},
 				}
 				dpath.Base.PathMeta.CurrHF = 0
 				dpath.Base.PathMeta.SegLen[0] = 5 * 3 // 3 flyovers
