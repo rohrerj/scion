@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
+import base64
 import json
+import math
 import sqlite3
 import hashlib
 import bcrypt
@@ -181,6 +183,20 @@ DEFAULT_ASSET_PRICE = 1
 DEFAULT_ASSET_TIME_GRANULARITY = 10
 DEFAULT_ASSET_TIME_MIN_DURATION = 10
 DEFAULT_ASSET_DURATION = timedelta(days=100)
+DEFAULT_DELEGATION_RES_ID_LIMIT = 1000
+# The flyover carries the bandwidth as a 10 bit codepoint into the points
+# published by the AS, so there is one point per codepoint. The values must be
+# the ones the router decodes, see ConvertBW in router/tokenbucket/tokenbucket.go.
+BW_CODEPOINTS = 1 << 10
+MIN_BW_KBPS = 10
+MAX_BW_KBPS = 10_000_000
+BW_LOG_ENCODING_START = 60
+
+# Derivation of the Hummingbird secret value of an AS from its master key, see
+# DeriveSecretValue in pkg/slayers/path/hummingbird/mac.go.
+SECRET_VALUE_SALT = b"Derive hbird sv"
+SECRET_VALUE_ITERATIONS = 1000
+SECRET_VALUE_LENGTH = 16
 
 def loadJson(path):
     with open(path, "r", encoding="utf-8") as file:
@@ -188,7 +204,7 @@ def loadJson(path):
     return data
 
 def loadTopology(genDir):
-    """Reads the IA and interface IDs of every AS of a generated topology."""
+    """Reads the IA, interface IDs and directory of every AS of a topology."""
     topologies = sorted(Path(genDir).glob("AS*/topology.json"))
     if not topologies:
         raise FileNotFoundError(f"no AS*/topology.json found in {genDir}")
@@ -203,8 +219,47 @@ def loadTopology(genDir):
             for router in topo.get("border_routers", {}).values()
             for ifid in router.get("interfaces", {})
         )
-        ases.append((ia, ifids))
+        ases.append((ia, ifids, path.parent))
     return ases
+
+def encodingPoints():
+    """The bandwidth points of an AS, in kbps, one per codepoint.
+
+    The first BW_LOG_ENCODING_START points are one kbps apart, starting at
+    MIN_BW_KBPS, and the rest grow geometrically up to MAX_BW_KBPS. The router
+    decodes a flyover with the very same points, so publishing anything else
+    would sell a bandwidth that the router does not enforce.
+    """
+    step = (MAX_BW_KBPS / (MIN_BW_KBPS + BW_LOG_ENCODING_START)) ** (
+        1.0 / (BW_CODEPOINTS - BW_LOG_ENCODING_START - 1)
+    )
+    points = []
+    for codepoint in range(BW_CODEPOINTS):
+        if codepoint < BW_LOG_ENCODING_START:
+            points.append(MIN_BW_KBPS + codepoint)
+        else:
+            kbps = (MIN_BW_KBPS + BW_LOG_ENCODING_START) * step ** (
+                codepoint - BW_LOG_ENCODING_START
+            )
+            points.append(math.ceil(kbps))
+    return points
+
+def secretValue(asDir):
+    """Derives the Hummingbird secret value of an AS from its master key.
+
+    Handing it to the marketplace is what lets the marketplace redeem the assets
+    of that AS, i.e. derive the authenticator of a flyover on its behalf.
+    """
+    path = asDir / "keys" / "master0.key"
+    try:
+        master = base64.b64decode(path.read_text(encoding="utf-8").strip(), validate=True)
+    except OSError as e:
+        raise FileNotFoundError(f"cannot read the master key {path}: {e}")
+    except ValueError as e:
+        raise ValueError(f"{path} is not a base64 encoded key: {e}")
+    return hashlib.pbkdf2_hmac(
+        "sha256", master, SECRET_VALUE_SALT, SECRET_VALUE_ITERATIONS, SECRET_VALUE_LENGTH
+    )
 
 def interfacePairs(ifids):
     """The (ingress, egress) pairs of an AS.
@@ -239,7 +294,7 @@ def defaultEntries(genDir, now=None):
             "ingress": ingress,
             "egress": egress,
         }
-        for ia, ifids in ases
+        for ia, ifids, _ in ases
         for ingress, egress in interfacePairs(ifids)
     ]
     return {
@@ -253,9 +308,23 @@ def defaultEntries(genDir, now=None):
         ],
         "ases": [
             {"ia": ia, "password": DEFAULT_PASSWORD, "balance": DEFAULT_AS_BALANCE}
-            for ia, _ in ases
+            for ia, _, _ in ases
         ],
         "assets": assets,
+        # Every AS delegates the redemption of its assets to the marketplace.
+        # Without this the marketplace cannot derive the flyover authenticators,
+        # and the assets it sells are worthless.
+        "delegations": [
+            {
+                "ia": ia,
+                "res_id_limit": DEFAULT_DELEGATION_RES_ID_LIMIT,
+                "expiration": stopsAt,
+                "paid_until": stopsAt,
+                "key": secretValue(asDir).hex(),
+                "encodings": encodingPoints(),
+            }
+            for ia, _, asDir in ases
+        ],
     }
 
 def dropTables(db):
@@ -538,8 +607,8 @@ if __name__ == "__main__":
     source.add_argument(
         "--default-entries",
         action="store_true",
-        help="Fill the database with the default users, ASes and assets for the "
-             "topology in --gen-dir."
+        help="Fill the database with the default users, ASes, assets and "
+             "redemption delegations for the topology in --gen-dir."
     )
     parser.add_argument(
         "--gen-dir",
