@@ -21,6 +21,7 @@ import (
 
 	"github.com/scionproto/scion/marketplace"
 	"github.com/scionproto/scion/marketplace/db"
+	"github.com/scionproto/scion/pkg/hummingbird/bwencoding"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -51,30 +52,21 @@ func TestIDStore(t *testing.T) {
 }
 
 func TestEncoding(t *testing.T) {
-	const (
-		minBwKbps        = 10.0
-		maxBwKbps        = 10_000_000.0
-		levels           = 1024
-		logEncodingStart = 60
-	)
-	var step = math.Pow(maxBwKbps/(minBwKbps+float64(logEncodingStart)), 1.0/float64(levels-logEncodingStart-1))
-	indexToBwKbps := func(i int) int {
-		if i < logEncodingStart {
-			return i + minBwKbps
-		}
-		bw := (minBwKbps + logEncodingStart) * math.Pow(step, float64(i-logEncodingStart))
-		return int(math.Ceil(bw))
-	}
-	encodings := make([]uint32, levels)
-	for i := 0; i < levels; i++ {
-		encodings[i] = uint32(indexToBwKbps(i))
+	// The points an AS publishes are the bandwidths of the codepoints the
+	// dataplane carries, so a delegated redemption service rounds a request to
+	// one of them.
+	encodings := make([]uint32, bwencoding.Codepoints)
+	for codepoint := range encodings {
+		encodings[codepoint] = bwencoding.EncodeBandwidth(uint16(codepoint))
 	}
 	s := &marketplace.RedemptionService{}
 	s.SetEncodingPoints(encodings)
-	assert.Equal(t, uint16(0), s.EncodeBandwidth(minBwKbps))
-	assert.Equal(t, uint16(1), s.EncodeBandwidth(minBwKbps+1))
-	assert.Equal(t, uint16(59), s.EncodeBandwidth(minBwKbps+59))
-	assert.Equal(t, uint16(60), s.EncodeBandwidth(minBwKbps+60))
-	assert.Equal(t, uint16(levels-1), s.EncodeBandwidth(maxBwKbps))
-	assert.Equal(t, uint16(levels-1), s.EncodeBandwidth(math.MaxUint32))
+
+	assert.Equal(t, uint16(0), s.EncodeBandwidth(bwencoding.MinBwKbps))
+	assert.Equal(t, uint16(1), s.EncodeBandwidth(bwencoding.MinBwKbps+1))
+	assert.Equal(t, uint16(59), s.EncodeBandwidth(bwencoding.MinBwKbps+59))
+	assert.Equal(t, uint16(60), s.EncodeBandwidth(bwencoding.MinBwKbps+60))
+	assert.Equal(t, uint16(bwencoding.Codepoints-1), s.EncodeBandwidth(bwencoding.MaxBwKbps))
+	// More than the largest reservation is capped at the largest codepoint.
+	assert.Equal(t, uint16(bwencoding.Codepoints-1), s.EncodeBandwidth(math.MaxUint32))
 }

@@ -16,6 +16,7 @@ package webapp
 
 import (
 	"crypto/rand"
+	"embed"
 	"encoding/gob"
 	"fmt"
 	"html/template"
@@ -35,7 +36,16 @@ import (
 	"github.com/scionproto/scion/pkg/log"
 )
 
-var templates = template.Must(template.ParseGlob("marketplace/templates/*.html"))
+// The templates and the static assets are embedded, so that the marketplace does
+// not depend on being started from the root of the repository.
+//
+//go:embed templates/*.html
+var templateFS embed.FS
+
+//go:embed static
+var staticFS embed.FS
+
+var templates = template.Must(template.ParseFS(templateFS, "templates/*.html"))
 
 func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *http.ServeMux, disableUserRegistration bool) {
 	sessionKey := make([]byte, 32)
@@ -71,12 +81,7 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 	mux.HandleFunc("/logout", h.logoutHandler)
 	mux.HandleFunc("/aslogin", h.asLoginHandler)
 	mux.HandleFunc("/asbalance", h.asBalanceHandler)
-	mux.HandleFunc("/static/script.js", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "./marketplace/static/script.js")
-	})
-	mux.HandleFunc("/static/style.css", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "./marketplace/static/style.css")
-	})
+	mux.Handle("/static/", http.FileServerFS(staticFS))
 }
 
 type Handler struct {
@@ -90,8 +95,10 @@ type User struct {
 	Name string
 }
 type Account struct {
-	ID           int64
-	Scope        *string
+	ID int64
+	// Scope names a sub account, and is empty for the main account. The handlers
+	// fill it with the user name before rendering the main account.
+	Scope        string
 	Balance      int64
 	TokenVersion int64
 }
@@ -362,7 +369,7 @@ func (h *Handler) accountCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = h.store.CreateAccount(r.Context(), &db.DBAccount{
 		UserID: user.ID,
-		Scope:  &accountScope,
+		Scope:  accountScope,
 	})
 	if err != nil {
 		log.Debug("User account creation handler", "err", err)
@@ -490,8 +497,8 @@ func (h *Handler) assetsHandler(w http.ResponseWriter, r *http.Request) {
 	var filterAccount *db.DBAccount
 	var mainAccount *db.DBAccount
 	for _, a := range dbAccounts {
-		if a.Scope == nil {
-			a.Scope = &user.Name
+		if a.Scope == "" {
+			a.Scope = user.Name
 			mainAccount = a
 		}
 		if accountIdFilterString != "" && a.ID == accountIdFilter {
@@ -553,8 +560,8 @@ func (h *Handler) reservationsHandler(w http.ResponseWriter, r *http.Request) {
 	var filterAccount *db.DBAccount
 	var mainAccount *db.DBAccount
 	for _, a := range dbAccounts {
-		if a.Scope == nil {
-			a.Scope = &user.Name
+		if a.Scope == "" {
+			a.Scope = user.Name
 			mainAccount = a
 		}
 		if accountIdFilterString != "" && a.ID == accountIdFilter {
@@ -604,7 +611,7 @@ func (h *Handler) accountHandler(w http.ResponseWriter, r *http.Request) {
 	accs := []Account{}
 	mainAccount := Account{}
 	for _, a := range accounts {
-		if a.Scope == nil {
+		if a.Scope == "" {
 			mainAccount = Account{
 				ID:           a.ID,
 				Balance:      a.Balance,

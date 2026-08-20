@@ -39,6 +39,13 @@ const (
 
 	// HopLen is the size of a FlyoverHopField in bytes.
 	flyoverLen = LineLen * FlyoverLines
+
+	// BwBits is the width in bits of the bandwidth field of a flyover. The
+	// reservation ID takes the remaining bits of the same 32 bit word.
+	BwBits = 10
+
+	// bwMask selects the bandwidth field out of that word.
+	bwMask = 1<<BwBits - 1
 )
 
 type FlyoverHopField struct {
@@ -74,8 +81,8 @@ func (h *FlyoverHopField) DecodeFromBytes(raw []byte) (err error) {
 			return serrors.New("FlyoverHopField raw too short", "expected",
 				flyoverLen, "actual", len(raw))
 		}
-		h.ResID = binary.BigEndian.Uint32(raw[12:16]) >> 10
-		h.Bw = binary.BigEndian.Uint16(raw[14:16]) & 0x03ff
+		h.ResID = binary.BigEndian.Uint32(raw[12:16]) >> BwBits
+		h.Bw = binary.BigEndian.Uint16(raw[14:16]) & bwMask
 		h.ResStartTime = binary.BigEndian.Uint16(raw[16:18])
 		h.Duration = binary.BigEndian.Uint16(raw[18:20])
 	}
@@ -100,7 +107,7 @@ func (h *FlyoverHopField) SerializeTo(b []byte) (err error) {
 				flyoverLen, "actual", len(b))
 		}
 		b[0] |= 0x80
-		binary.BigEndian.PutUint32(b[12:16], h.ResID<<10+uint32(h.Bw))
+		binary.BigEndian.PutUint32(b[12:16], h.ResID<<BwBits+uint32(h.Bw))
 		binary.BigEndian.PutUint16(b[16:18], h.ResStartTime)
 		binary.BigEndian.PutUint16(b[18:20], h.Duration)
 	}

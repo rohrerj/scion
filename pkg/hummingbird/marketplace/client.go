@@ -16,215 +16,56 @@ package marketplace
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"math"
-	"net"
-	"net/http"
-	"net/netip"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/pkg/addr"
-	libconnect "github.com/scionproto/scion/pkg/connect"
+	hbird "github.com/scionproto/scion/pkg/hummingbird"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"github.com/scionproto/scion/pkg/snet"
-	"github.com/scionproto/scion/pkg/snet/path"
 	snetpath "github.com/scionproto/scion/pkg/snet/path"
-	"github.com/scionproto/scion/pkg/snet/squic"
-	"github.com/scionproto/scion/private/app/appnet"
-	"github.com/scionproto/scion/private/storage"
-	"github.com/scionproto/scion/private/trust"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type MarketplaceClient struct {
-	token  string
-	topo   snet.Topology
 	client hummingbirdconnect.MarketplaceServiceClient
-}
-
-func (c *MarketplaceClient) withSCION(ctx context.Context, querier snet.PathQuerier, remote *snet.UDPAddr, serverName string, insecure bool) (
-	hummingbirdconnect.MarketplaceServiceClient, error) {
-
-	trustDB, err := storage.NewInMemoryTrustStorage()
-	if err != nil {
-		return nil, err
-	}
-	var localPublic *net.UDPAddr
-	var dp snet.DataplanePath
-	var nextHop *net.UDPAddr
-
-	if remote.IA == c.topo.LocalIA {
-		// marketplace is inside local AS
-		dp = path.Empty{}
-		nextHop = remote.Host
-	} else {
-		paths, err := querier.Query(ctx, remote.IA)
-		if err != nil {
-			return nil, err
-		}
-		if len(paths) == 0 {
-			return nil, serrors.New("no paths found to marketplace")
-		}
-		dp = paths[0].Dataplane()
-		nextHop = paths[0].UnderlayNextHop()
-	}
-	remote.Path = dp
-	remote.NextHop = nextHop
-
-	conn, err := net.Dial("udp", nextHop.String())
-	if err != nil {
-		return nil, err
-	}
-	localPublic, ok := conn.LocalAddr().(*net.UDPAddr)
-	if !ok {
-		return nil, serrors.New("localAddr not UDP addr")
-	}
-	conn.Close()
-
-	nc := appnet.NetworkConfig{
-		Topology: c.topo,
-		IA:       c.topo.LocalIA,
-		QUIC: appnet.QUIC{
-			TLSVerifier: trust.NewTLSCryptoVerifier(trustDB),
-		},
-		MTU: 1400,
-		Public: &net.UDPAddr{
-			IP:   localPublic.IP,
-			Port: 0,
-			Zone: localPublic.Zone,
-		},
-	}
-	quicStack, err := nc.QUICStack(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var dialerFunc func(a net.Addr, opts ...squic.EarlyDialerOption) squic.EarlyDialer
-	if insecure {
-		dialerFunc = (&squic.EarlyDialerFactory{
-			Transport: quicStack.Dialer.Transport,
-			TLSConfig: &tls.Config{
-				NextProtos:         []string{"h3", "SCION"},
-				InsecureSkipVerify: true,
-			},
-			Rewriter: &appnet.AddressRewriter{
-				Router: &snet.BaseRouter{
-					Querier: querier,
-				},
-			},
-		}).NewDialer
-	} else {
-		dialerFunc = (&squic.EarlyDialerFactory{
-			Transport: quicStack.Dialer.Transport,
-			TLSConfig: &tls.Config{
-				NextProtos: []string{"h3", "SCION"},
-				ServerName: serverName,
-			},
-			Rewriter: &appnet.AddressRewriter{
-				Router: &snet.BaseRouter{
-					Querier: querier,
-				},
-			},
-		}).NewDialer
-	}
-
-	dialer := dialerFunc(remote)
-	marketplaceClient := hummingbirdconnect.NewMarketplaceServiceClient(
-		libconnect.HTTPClient{
-			RoundTripper: &http3.Transport{
-				Dial: dialer.DialEarly,
-			},
-		}, libconnect.BaseUrl(remote), connect.WithInterceptors(authInterceptor(c.token)))
-	return marketplaceClient, nil
-}
-
-func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			req.Header().Set("Authorization", "Bearer "+jwtToken)
-			return next(ctx, req)
-		}
-	}
-}
-
-func parseAddr(s string) (addr.Addr, uint16, string, error) {
-	host, port, err := net.SplitHostPort(s)
-	if err != nil {
-		return addr.Addr{}, 0, "", serrors.Wrap("invalid address: split host:port", err, "addr", s)
-	}
-	splits := strings.Split(host, ",")
-	if len(splits) != 2 {
-		return addr.Addr{}, 0, "", serrors.Wrap("invalid address: split host:port", err, "addr", s)
-	}
-	_, err = netip.ParseAddr(splits[1])
-	if err != nil {
-		ipAddr, err := net.ResolveIPAddr("ip", splits[1])
-		if err != nil {
-			return addr.Addr{}, 0, "", serrors.Wrap("invalid address: split host:port", err, "addr", s)
-		}
-		s = fmt.Sprintf("[%s,%s]:%s", splits[0], ipAddr.String(), port)
-	}
-	a, p, err := addr.ParseAddrPort(s)
-	return a, p, splits[1], err
 }
 
 // Creates a new marketplace client.
 // Valid URL forms:
-// https://127.0.0.1:8888
-// https://my-marketplace.local:8888
-// [1-ff00:0:111,127.0.0.1]:9888
-// [1-ff00:0:111,my-marketplace.local]:9888
-// If a SCION url is provided, the client will connect over the SCION network, otherwise over the public internet.
+// https://127.0.0.1:31888
+// https://my-marketplace.local:31888
+// [1-ff00:0:111,127.0.0.1]:31888
+// [1-ff00:0:111,my-marketplace.local]:31888
+// If a SCION url is provided, the client will connect over the SCION network,
+// otherwise over the public internet.
 // If a dns name is provided, dns resolution will be done using local dns resolver.
 // If insecure = true, server certificate validation will be disabled.
 // path querier and local topology is only required for scion connections
-func NewMarketplaceClient(ctx context.Context, url string, token string, querier snet.PathQuerier, topo snet.Topology, insecure bool) (*MarketplaceClient, error) {
-	urlSplit := strings.Split(url, "://")
-	api := ""
-	if len(urlSplit) == 1 {
-		api = urlSplit[0]
-	} else if len(urlSplit) == 2 {
-		api = urlSplit[1]
-	} else {
-		return nil, serrors.New("invalid url", "url", url)
+func NewMarketplaceClient(
+	ctx context.Context,
+	url string,
+	token string,
+	querier snet.PathQuerier,
+	topo snet.Topology,
+	insecure bool,
+) (*MarketplaceClient, error) {
+	clients, err := NewClientSet(ctx, url, token, ClientOptions{
+		Querier:  querier,
+		Topology: topo,
+		Insecure: insecure,
+	})
+	if err != nil {
+		return nil, err
 	}
-	c := &MarketplaceClient{
-		token: token,
-		topo:  topo,
-	}
-	scionAddr, port, serverName, err := parseAddr(api)
-	if err == nil {
-		remote := &snet.UDPAddr{
-			IA:   scionAddr.IA,
-			Host: net.UDPAddrFromAddrPort(netip.AddrPortFrom(scionAddr.Host.IP(), port)),
-		}
-		c.client, err = c.withSCION(ctx, querier, remote, serverName, insecure)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if insecure {
-			c.client = hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{
-						InsecureSkipVerify: true,
-					},
-				},
-			}, url, connect.WithInterceptors(authInterceptor(token)))
-		} else {
-			c.client = hummingbirdconnect.NewMarketplaceServiceClient(http.DefaultClient,
-				url, connect.WithInterceptors(authInterceptor(token)))
-		}
-	}
-	return c, nil
+	return &MarketplaceClient{client: clients.Marketplace}, nil
 }
 
 type BuyMode int
@@ -240,15 +81,35 @@ type InterfacePair struct {
 	Egress  uint32
 }
 
-func (c *MarketplaceClient) findExistingReservations(ctx context.Context, pairs []InterfacePair, bwInKbps uint32, startsAt time.Time, stopsAt time.Time) ([]*snetpath.Hop, error) {
+func interfacePairsFromInterfaces(ifaces []snet.PathInterface) []InterfacePair {
+	baseHops := snetpath.InterfacesToBaseHops(ifaces)
+	pairs := make([]InterfacePair, 0, len(baseHops))
+	for _, hop := range baseHops {
+		pairs = append(pairs, InterfacePair{
+			IA:      uint64(hop.IA),
+			Ingress: uint32(hop.Ingress),
+			Egress:  uint32(hop.Egress),
+		})
+	}
+	return pairs
+}
+
+func (c *MarketplaceClient) findExistingReservations(
+	ctx context.Context,
+	pairs []InterfacePair,
+	bwInKbps uint32,
+	startsAt time.Time,
+	stopsAt time.Time,
+) ([]*snetpath.Hop, error) {
 	req := &hummingbird.FetchReservationsRequest{
 		Bandwidth: &bwInKbps,
 		StartsAt:  timestamppb.New(startsAt),
 		StopsAt:   timestamppb.New(stopsAt),
 	}
-	res, err := c.client.FetchReservations(ctx, &connect.Request[hummingbird.FetchReservationsRequest]{
-		Msg: req,
-	})
+	res, err := c.client.FetchReservations(
+		ctx, &connect.Request[hummingbird.FetchReservationsRequest]{
+			Msg: req,
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +166,11 @@ func timeMin(a time.Time, b time.Time) time.Time {
 	return b
 }
 
-func activeAt(elements []*hummingbird.SearchAsset, t time.Time, bw uint32) []*hummingbird.SearchAsset {
+func activeAt(
+	elements []*hummingbird.SearchAsset,
+	t time.Time,
+	bw uint32,
+) []*hummingbird.SearchAsset {
 	// Find first element with StartsAt > t
 	end := sort.Search(len(elements), func(i int) bool {
 		return elements[i].StartsAt.AsTime().After(t)
@@ -322,17 +187,25 @@ func activeAt(elements []*hummingbird.SearchAsset, t time.Time, bw uint32) []*hu
 }
 
 // recursiveSelect
-func (c *MarketplaceClient) recursiveSelectStart(assets []*hummingbird.SearchAsset, bwInKbps uint32,
-	startsAt time.Time, stopsAt time.Time, combineCost uint64) ([]*hummingbird.BuyAsset, uint64, bool) {
+func (c *MarketplaceClient) recursiveSelectStart(
+	assets []*hummingbird.SearchAsset,
+	bwInKbps uint32,
+	startsAt time.Time,
+	stopsAt time.Time,
+	combineCost uint64,
+) ([]*hummingbird.BuyAsset, uint64, bool) {
 
 	sort.Slice(assets, func(i, j int) bool {
 		return assets[i].StartsAt.Seconds < assets[j].StartsAt.Seconds
 	})
-	assetMap := make(map[string]*hummingbird.SearchAsset)
+	assetMap := make(map[uint64]*hummingbird.SearchAsset)
 	for _, asset := range assets {
 		assetMap[asset.AssetId] = asset
 	}
-	filterValidAt := func(t time.Time, assets []*hummingbird.SearchAsset) []*hummingbird.SearchAsset {
+	filterValidAt := func(
+		t time.Time,
+		assets []*hummingbird.SearchAsset,
+	) []*hummingbird.SearchAsset {
 		return activeAt(assets, t, bwInKbps)
 	}
 
@@ -350,9 +223,18 @@ func (c *MarketplaceClient) recursiveSelectStart(assets []*hummingbird.SearchAss
 			allChains = append(allChains, resultChain)
 		}
 	}
-	actualPrice := func(a *hummingbird.SearchAsset, duration uint32) uint32 {
-		granularityAdjustedDuration := duration + (a.TimeGranularity-(duration%a.TimeGranularity))%a.TimeGranularity
-		return a.Price * max(a.BandwidthMin, bwInKbps) * max(a.TimeMinDuration, duration, granularityAdjustedDuration)
+	actualPrice := func(a *hummingbird.SearchAsset, duration time.Duration) uint64 {
+		price, err := hbird.ReservationPrice(
+			a.Price,
+			bwInKbps,
+			a.BandwidthMin,
+			a.TimeMinDuration,
+			a.TimeGranularity,
+			duration)
+		if err != nil {
+			return math.MaxUint64
+		}
+		return price
 	}
 	bestCost := uint64(math.MaxInt64)
 	bestSelect := []*hummingbird.BuyAsset{}
@@ -361,7 +243,7 @@ func (c *MarketplaceClient) recursiveSelectStart(assets []*hummingbird.SearchAss
 		currSelect := []*hummingbird.BuyAsset{}
 		if len(chain.ids) == 1 {
 			asset := assetMap[chain.ids[0]]
-			currCost += uint64(actualPrice(asset, uint32(chain.stopsAt.Sub(startsAt).Seconds())))
+			currCost += actualPrice(asset, chain.stopsAt.Sub(startsAt))
 			currSelect = append(currSelect, &hummingbird.BuyAsset{
 				AssetId:         asset.AssetId,
 				StartsAtExactly: timestamppb.New(startsAt),
@@ -376,38 +258,48 @@ func (c *MarketplaceClient) recursiveSelectStart(assets []*hummingbird.SearchAss
 				currAsset := assetMap[chain.ids[i]]
 				nextAsset := assetMap[chain.ids[i+1]]
 				if currAsset.Price <= nextAsset.Price {
-					duration := uint32(timeMin(currAsset.StopsAt.AsTime(), chain.stopsAt).Sub(currStartsAt).Seconds())
-					currCost += uint64(actualPrice(currAsset, duration))
+					duration := timeMin(
+						currAsset.StopsAt.AsTime(),
+						chain.stopsAt).Sub(currStartsAt)
+					currCost += actualPrice(currAsset, duration)
 
 					currSelect = append(currSelect, &hummingbird.BuyAsset{
 						AssetId:         currAsset.AssetId,
 						StartsAtExactly: timestamppb.New(currStartsAt),
-						StopsAtExactly:  timestamppb.New(timeMin(currAsset.StopsAt.AsTime(), chain.stopsAt)),
-						BandwidthExact:  chain.bandwidthMin,
+						StopsAtExactly: timestamppb.New(timeMin(
+							currAsset.StopsAt.AsTime(),
+							chain.stopsAt)),
+						BandwidthExact: chain.bandwidthMin,
 					})
 					currStartsAt = timeMin(currAsset.StopsAt.AsTime(), chain.stopsAt)
 
 				} else {
-					duration := uint32(timeMin(nextAsset.StartsAt.AsTime(), chain.stopsAt).Sub(currStartsAt).Seconds())
-					currCost += uint64(actualPrice(currAsset, duration))
+					duration := timeMin(
+						nextAsset.StartsAt.AsTime(),
+						chain.stopsAt).Sub(currStartsAt)
+					currCost += actualPrice(currAsset, duration)
 					currSelect = append(currSelect, &hummingbird.BuyAsset{
 						AssetId:         currAsset.AssetId,
 						StartsAtExactly: timestamppb.New(currStartsAt),
-						StopsAtExactly:  timestamppb.New(timeMin(nextAsset.StartsAt.AsTime(), chain.stopsAt)),
-						BandwidthExact:  chain.bandwidthMin,
+						StopsAtExactly: timestamppb.New(timeMin(
+							nextAsset.StartsAt.AsTime(),
+							chain.stopsAt)),
+						BandwidthExact: chain.bandwidthMin,
 					})
 					currStartsAt = timeMin(nextAsset.StartsAt.AsTime(), chain.stopsAt)
 				}
 			}
 			lastAsset := assetMap[chain.ids[i]]
-			duration := uint32(timeMin(lastAsset.StopsAt.AsTime(), chain.stopsAt).Sub(currStartsAt).Seconds())
-			currCost += uint64(actualPrice(lastAsset, duration))
+			duration := timeMin(lastAsset.StopsAt.AsTime(), chain.stopsAt).Sub(currStartsAt)
+			currCost += actualPrice(lastAsset, duration)
 
 			currSelect = append(currSelect, &hummingbird.BuyAsset{
 				AssetId:         lastAsset.AssetId,
 				StartsAtExactly: timestamppb.New(currStartsAt),
-				StopsAtExactly:  timestamppb.New(timeMin(lastAsset.StopsAt.AsTime(), chain.stopsAt)),
-				BandwidthExact:  chain.bandwidthMin,
+				StopsAtExactly: timestamppb.New(timeMin(
+					lastAsset.StopsAt.AsTime(),
+					chain.stopsAt)),
+				BandwidthExact: chain.bandwidthMin,
 			})
 		}
 		if currCost < bestCost {
@@ -420,19 +312,29 @@ func (c *MarketplaceClient) recursiveSelectStart(assets []*hummingbird.SearchAss
 }
 
 type chain struct {
-	ids             []string
+	ids             []uint64
 	timeGranularity uint32
 	timeMinDuration uint32
 	bandwidthMin    uint32
 	stopsAt         time.Time
 }
 
-func (c *MarketplaceClient) recursiveSelect(currentAsset *hummingbird.SearchAsset, otherAssets []*hummingbird.SearchAsset, previousBw uint32, previousTimeMinDuration uint32,
-	previousTimeGranularity uint32, globalStart time.Time, globalStop time.Time) ([]chain, bool) {
+func (c *MarketplaceClient) recursiveSelect(
+	currentAsset *hummingbird.SearchAsset,
+	otherAssets []*hummingbird.SearchAsset,
+	previousBw uint32,
+	previousTimeMinDuration uint32,
+	previousTimeGranularity uint32,
+	globalStart time.Time,
+	globalStop time.Time,
+) ([]chain, bool) {
 	currBW := max(previousBw, currentAsset.BandwidthMin)
 	timeGranularity := lcm(previousTimeGranularity, currentAsset.TimeGranularity)
 	timeMinDuration := max(previousTimeMinDuration, currentAsset.TimeMinDuration)
-	filterValidAt := func(t time.Time, assets []*hummingbird.SearchAsset) []*hummingbird.SearchAsset {
+	filterValidAt := func(
+		t time.Time,
+		assets []*hummingbird.SearchAsset,
+	) []*hummingbird.SearchAsset {
 		return activeAt(assets, t, currBW)
 	}
 	remainder := uint32(globalStop.Sub(globalStart).Seconds()) % timeGranularity
@@ -445,7 +347,12 @@ func (c *MarketplaceClient) recursiveSelect(currentAsset *hummingbird.SearchAsse
 	}
 	if !currentAsset.StopsAt.AsTime().Before(globalStop) {
 		// with this asset we found a chain from start till end
-		return []chain{{ids: []string{currentAsset.AssetId}, bandwidthMin: currBW, timeGranularity: timeGranularity, timeMinDuration: timeMinDuration, stopsAt: globalStop}}, true
+		return []chain{{
+			ids:             []uint64{currentAsset.AssetId},
+			bandwidthMin:    currBW,
+			timeGranularity: timeGranularity,
+			timeMinDuration: timeMinDuration,
+			stopsAt:         globalStop}}, true
 	}
 	nextAssets := filterValidAt(currentAsset.StopsAt.AsTime(), otherAssets)
 	if len(nextAssets) == 0 {
@@ -454,7 +361,14 @@ func (c *MarketplaceClient) recursiveSelect(currentAsset *hummingbird.SearchAsse
 	}
 	allChains := []chain{}
 	for _, nextAsset := range nextAssets {
-		resultChains, ok := c.recursiveSelect(nextAsset, otherAssets, currBW, timeMinDuration, timeGranularity, globalStart, globalStop)
+		resultChains, ok := c.recursiveSelect(
+			nextAsset,
+			otherAssets,
+			currBW,
+			timeMinDuration,
+			timeGranularity,
+			globalStart,
+			globalStop)
 		if !ok {
 			fmt.Println("recursive select failed")
 			continue
@@ -464,7 +378,7 @@ func (c *MarketplaceClient) recursiveSelect(currentAsset *hummingbird.SearchAsse
 				fmt.Println("bandwidth cannot be satisfied")
 				continue
 			}
-			resultChain.ids = append([]string{currentAsset.AssetId}, resultChain.ids...)
+			resultChain.ids = append([]uint64{currentAsset.AssetId}, resultChain.ids...)
 			allChains = append(allChains, resultChain)
 		}
 	}
@@ -472,16 +386,23 @@ func (c *MarketplaceClient) recursiveSelect(currentAsset *hummingbird.SearchAsse
 
 }
 
-// checkoutAssetForInterfacePairWithCombine tries to find assets that can be combined on the time axis. It does not check for combinations on the bandwidth axis.
-func (c *MarketplaceClient) checkoutAssetForInterfacePairWithCombine(ctx context.Context, pair InterfacePair, bwInKbps uint32,
-	startsAt time.Time, stopsAt time.Time, combineCost uint64) ([]*hummingbird.BuyAsset, error) {
+// checkoutAssetForInterfacePairWithCombine tries to find assets that can be combined
+// on the time axis. It does not check for combinations on the bandwidth axis.
+func (c *MarketplaceClient) checkoutAssetForInterfacePairWithCombine(
+	ctx context.Context,
+	pair InterfacePair,
+	bwInKbps uint32,
+	startsAt time.Time,
+	stopsAt time.Time,
+	combineCost uint64,
+) ([]*hummingbird.BuyAsset, error) {
 
 	ingressAndEgressSuccess := false
 	var ingressBuyAssets, egressBuyAssets, pairBuyAssets []*hummingbird.BuyAsset
 	var ingressAssetPrice, egressAssetPrice, pairAssetPrice uint64
 	var ok bool
-	ingressAssetsResponse, err := c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
-		Msg: &hummingbird.SearchAssetsRequest{
+	ingressAssetsResponse, err := c.client.SearchAssets(ctx,
+		&connect.Request[hummingbird.SearchAssetsRequest]{Msg: &hummingbird.SearchAssetsRequest{
 			Owned:           false,
 			Ia:              &pair.IA,
 			IfIdIngress:     &pair.Ingress,
@@ -489,52 +410,59 @@ func (c *MarketplaceClient) checkoutAssetForInterfacePairWithCombine(ctx context
 			StartsAtLatest:  timestamppb.New(stopsAt),
 			StopsAtEarliest: timestamppb.New(startsAt),
 		},
-	})
+		})
 	if err != nil {
 		return nil, err
 	}
-	ingressSearchAssets := filter(ingressAssetsResponse.Msg.Assets, func(a *hummingbird.SearchAsset) bool {
-		return a.IfIdEgress == nil
-	})
-	ingressBuyAssets, ingressAssetPrice, ok = c.recursiveSelectStart(ingressSearchAssets, bwInKbps, startsAt, stopsAt, combineCost)
+	ingressSearchAssets :=
+		filter(ingressAssetsResponse.Msg.Assets, func(a *hummingbird.SearchAsset) bool {
+			return a.IfIdEgress == nil
+		})
+	ingressBuyAssets, ingressAssetPrice, ok =
+		c.recursiveSelectStart(ingressSearchAssets, bwInKbps, startsAt, stopsAt, combineCost)
 	if ok {
-		egressAssetsResponse, err := c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+		egressAssetsResponse, err :=
+			c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+				Msg: &hummingbird.SearchAssetsRequest{
+					Owned:           false,
+					Ia:              &pair.IA,
+					IfIdEgress:      &pair.Egress,
+					MinRequiredBw:   &bwInKbps,
+					StartsAtLatest:  timestamppb.New(stopsAt),
+					StopsAtEarliest: timestamppb.New(startsAt),
+				},
+			})
+		if err != nil {
+			return nil, err
+		}
+		egressSearchAssets :=
+			filter(egressAssetsResponse.Msg.Assets, func(a *hummingbird.SearchAsset) bool {
+				return a.IfIdIngress == nil
+			})
+		egressBuyAssets, egressAssetPrice, ok =
+			c.recursiveSelectStart(egressSearchAssets, bwInKbps, startsAt, stopsAt, combineCost)
+		if ok {
+			ingressAndEgressSuccess = true
+		}
+	}
+
+	pairAssetsResponse, err :=
+		c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
 			Msg: &hummingbird.SearchAssetsRequest{
 				Owned:           false,
 				Ia:              &pair.IA,
+				IfIdIngress:     &pair.Ingress,
 				IfIdEgress:      &pair.Egress,
 				MinRequiredBw:   &bwInKbps,
 				StartsAtLatest:  timestamppb.New(stopsAt),
 				StopsAtEarliest: timestamppb.New(startsAt),
 			},
 		})
-		if err != nil {
-			return nil, err
-		}
-		egressSearchAssets := filter(egressAssetsResponse.Msg.Assets, func(a *hummingbird.SearchAsset) bool {
-			return a.IfIdIngress == nil
-		})
-		egressBuyAssets, egressAssetPrice, ok = c.recursiveSelectStart(egressSearchAssets, bwInKbps, startsAt, stopsAt, combineCost)
-		if ok {
-			ingressAndEgressSuccess = true
-		}
-	}
-
-	pairAssetsResponse, err := c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
-		Msg: &hummingbird.SearchAssetsRequest{
-			Owned:           false,
-			Ia:              &pair.IA,
-			IfIdIngress:     &pair.Ingress,
-			IfIdEgress:      &pair.Egress,
-			MinRequiredBw:   &bwInKbps,
-			StartsAtLatest:  timestamppb.New(stopsAt),
-			StopsAtEarliest: timestamppb.New(startsAt),
-		},
-	})
 	if err != nil {
 		return nil, err
 	}
-	pairBuyAssets, pairAssetPrice, ok = c.recursiveSelectStart(pairAssetsResponse.Msg.Assets, bwInKbps, startsAt, stopsAt, combineCost)
+	pairBuyAssets, pairAssetPrice, ok = c.recursiveSelectStart(
+		pairAssetsResponse.Msg.Assets, bwInKbps, startsAt, stopsAt, combineCost)
 	if ok {
 		if ingressAndEgressSuccess {
 			if ingressAssetPrice+egressAssetPrice < pairAssetPrice {
@@ -553,90 +481,98 @@ func (c *MarketplaceClient) checkoutAssetForInterfacePairWithCombine(ctx context
 	}
 }
 
-// checkoutAssetForInterfacePair searches on the marketplace for assets that match the interface pair. It searches for ingress, egress and interface-pair assets.
-// It ensures that the selected assets when bought should be redeemable without further splits or combines necessary.
-// The function does not combine assets. If no single (ingress-asset, egress-asset) tuple or interface-pair asset can satisfy the request, no buy order is returned.
-func (c *MarketplaceClient) checkoutAssetForInterfacePair(ctx context.Context, pair InterfacePair, bwInKbps uint32, startsAt time.Time, stopsAt time.Time) ([]*hummingbird.BuyAsset, error) {
+// checkoutAssetForInterfacePair searches on the marketplace for assets that match
+// the interface pair. It searches for ingress, egress and interface-pair assets.
+// It ensures that the selected assets when bought should be redeemable without
+// further splits or combines necessary.
+// The function does not combine assets. If no single (ingress-asset, egress-asset) tuple
+// or interface-pair asset can satisfy the request, no buy order is returned.
+func (c *MarketplaceClient) checkoutAssetForInterfacePair(
+	ctx context.Context,
+	pair InterfacePair,
+	bwInKbps uint32,
+	startsAt time.Time,
+	stopsAt time.Time,
+) ([]*hummingbird.BuyAsset, error) {
 	var ingressSearchAssets, egressSearchAssets, pairSearchAssets []*hummingbird.SearchAsset
-	ingressAssetsResponse, err := c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
-		Msg: &hummingbird.SearchAssetsRequest{
-			Owned:           false,
-			Ia:              &pair.IA,
-			IfIdIngress:     &pair.Ingress,
-			MinRequiredBw:   &bwInKbps,
-			StartsAtLatest:  timestamppb.New(startsAt),
-			StopsAtEarliest: timestamppb.New(stopsAt),
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	ingressSearchAssets = filter(ingressAssetsResponse.Msg.Assets, func(a *hummingbird.SearchAsset) bool {
-		return a.IfIdEgress == nil
-	})
-	if len(ingressSearchAssets) != 0 {
-		egressAssetsResponse, err := c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+	ingressAssetsResponse, err :=
+		c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
 			Msg: &hummingbird.SearchAssetsRequest{
 				Owned:           false,
 				Ia:              &pair.IA,
+				IfIdIngress:     &pair.Ingress,
+				MinRequiredBw:   &bwInKbps,
+				StartsAtLatest:  timestamppb.New(startsAt),
+				StopsAtEarliest: timestamppb.New(stopsAt),
+			},
+		})
+	if err != nil {
+		return nil, err
+	}
+	ingressSearchAssets =
+		filter(ingressAssetsResponse.Msg.Assets, func(a *hummingbird.SearchAsset) bool {
+			return a.IfIdEgress == nil
+		})
+	if len(ingressSearchAssets) != 0 {
+		egressAssetsResponse, err :=
+			c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+				Msg: &hummingbird.SearchAssetsRequest{
+					Owned:           false,
+					Ia:              &pair.IA,
+					IfIdEgress:      &pair.Egress,
+					MinRequiredBw:   &bwInKbps,
+					StartsAtLatest:  timestamppb.New(startsAt),
+					StopsAtEarliest: timestamppb.New(stopsAt),
+				},
+			})
+		if err != nil {
+			return nil, err
+		}
+		egressSearchAssets =
+			filter(egressAssetsResponse.Msg.Assets, func(a *hummingbird.SearchAsset) bool {
+				return a.IfIdIngress == nil
+			})
+	}
+
+	pairAssetsResponse, err :=
+		c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+			Msg: &hummingbird.SearchAssetsRequest{
+				Owned:           false,
+				Ia:              &pair.IA,
+				IfIdIngress:     &pair.Ingress,
 				IfIdEgress:      &pair.Egress,
 				MinRequiredBw:   &bwInKbps,
 				StartsAtLatest:  timestamppb.New(startsAt),
 				StopsAtEarliest: timestamppb.New(stopsAt),
 			},
 		})
-		if err != nil {
-			return nil, err
-		}
-		egressSearchAssets = filter(egressAssetsResponse.Msg.Assets, func(a *hummingbird.SearchAsset) bool {
-			return a.IfIdIngress == nil
-		})
-	}
-
-	pairAssetsResponse, err := c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
-		Msg: &hummingbird.SearchAssetsRequest{
-			Owned:           false,
-			Ia:              &pair.IA,
-			IfIdIngress:     &pair.Ingress,
-			IfIdEgress:      &pair.Egress,
-			MinRequiredBw:   &bwInKbps,
-			StartsAtLatest:  timestamppb.New(startsAt),
-			StopsAtEarliest: timestamppb.New(stopsAt),
-		},
-	})
 	if err != nil {
 		return nil, err
 	}
 	pairSearchAssets = pairAssetsResponse.Msg.Assets
 
-	duration := uint32(stopsAt.Sub(startsAt).Seconds())
-	actualPrice := func(a *hummingbird.SearchAsset) uint32 {
-		granularityAdjustedDuration := duration + (a.TimeGranularity-(duration%a.TimeGranularity))%a.TimeGranularity
-		return a.Price * max(a.BandwidthMin, bwInKbps) * max(a.TimeMinDuration, duration, granularityAdjustedDuration)
+	duration := stopsAt.Sub(startsAt)
+	actualPrice := func(a *hummingbird.SearchAsset) uint64 {
+		price, err := hbird.ReservationPrice(
+			a.Price,
+			bwInKbps,
+			a.BandwidthMin,
+			a.TimeMinDuration,
+			a.TimeGranularity,
+			duration)
+		if err != nil {
+			return math.MaxUint64
+		}
+		return price
 	}
 	filterAssets := func(assets []*hummingbird.SearchAsset) []*hummingbird.SearchAsset {
 		return filter(assets, func(a *hummingbird.SearchAsset) bool {
-			if duration < a.TimeMinDuration {
-				if a.StopsAt.Seconds <= startsAt.Unix()+int64(a.TimeMinDuration) {
-					// asset is not valid because when extending duration to the minimum duration, the stops at lies outside validity period
-					return false
-				}
+			billableDuration, err :=
+				hbird.ReservationDuration(duration, a.TimeMinDuration, a.TimeGranularity)
+			if err != nil || a.StopsAt.AsTime().Before(startsAt.Add(billableDuration)) {
+				return false
 			}
-			remainder := duration % a.TimeGranularity
-			if remainder != 0 {
-				addedDuration := a.TimeGranularity - remainder
-				if a.StopsAt.Seconds <= startsAt.Unix()+int64(addedDuration) {
-					// asset is not valid because when extending duration to a multiple of time granularity, the stops at lies outside validity period
-					return false
-				}
-			}
-			if a.BandwidthMin > bwInKbps {
-				if a.Bandwidth < a.BandwidthMin {
-					// there is not enough bandwidth to satisfy bandwidth min
-					return false
-				}
-			}
-			return true
+			return a.Bandwidth >= max(bwInKbps, a.BandwidthMin)
 		})
 	}
 	sortAssets := func(assets []*hummingbird.SearchAsset) []*hummingbird.SearchAsset {
@@ -646,19 +582,13 @@ func (c *MarketplaceClient) checkoutAssetForInterfacePair(ctx context.Context, p
 		return assets
 	}
 	buildBuyRequest := func(a *hummingbird.SearchAsset) *hummingbird.BuyAsset {
-		addedDuration := uint32(0)
-		if duration < a.TimeMinDuration {
-			addedDuration = a.TimeMinDuration - duration
-		}
-		remainder := duration % a.TimeGranularity
-		if remainder != 0 {
-			addedDuration = a.TimeGranularity - remainder
-		}
+		billableDuration, _ :=
+			hbird.ReservationDuration(duration, a.TimeMinDuration, a.TimeGranularity)
 		return &hummingbird.BuyAsset{
 			AssetId:         a.AssetId,
 			BandwidthExact:  max(bwInKbps, a.BandwidthMin),
 			StartsAtExactly: timestamppb.New(startsAt),
-			StopsAtExactly:  timestamppb.New(stopsAt.Add(time.Duration(addedDuration) * time.Second)),
+			StopsAtExactly:  timestamppb.New(startsAt.Add(billableDuration)),
 		}
 	}
 	ingressAssets := sortAssets(filterAssets(ingressSearchAssets))
@@ -668,10 +598,12 @@ func (c *MarketplaceClient) checkoutAssetForInterfacePair(ctx context.Context, p
 	order := []*hummingbird.BuyAsset{}
 	if len(pairAssets) != 0 {
 		if len(ingressAssets) != 0 && len(egressAssets) != 0 {
-			if actualPrice(pairAssets[0]) <= actualPrice(ingressAssets[0])+actualPrice(egressAssets[0]) {
+			if actualPrice(pairAssets[0]) <=
+				actualPrice(ingressAssets[0])+actualPrice(egressAssets[0]) {
 				order = append(order, buildBuyRequest(pairAssets[0]))
 			} else {
-				order = append(order, buildBuyRequest(ingressAssets[0]), buildBuyRequest(egressAssets[0]))
+				order = append(order,
+					buildBuyRequest(ingressAssets[0]), buildBuyRequest(egressAssets[0]))
 			}
 		} else {
 			order = append(order, buildBuyRequest(pairAssets[0]))
@@ -679,20 +611,34 @@ func (c *MarketplaceClient) checkoutAssetForInterfacePair(ctx context.Context, p
 	} else if len(ingressAssets) != 0 && len(egressAssets) != 0 {
 		order = append(order, buildBuyRequest(ingressAssets[0]), buildBuyRequest(egressAssets[0]))
 	} else {
-		log.Debug("no assets found", "ia", addr.IA(pair.IA).String(), "ingress", pair.Ingress, "egress", pair.Egress, "startsat", startsAt, "stopsat", stopsAt)
-		return nil, serrors.New("no assets found", "ia", addr.IA(pair.IA).String(), "ingress", pair.Ingress, "egress", pair.Egress, "startsat", startsAt, "stopsat", stopsAt)
+		log.Debug("no assets found", "ia", addr.IA(pair.IA).String(),
+			"ingress", pair.Ingress, "egress", pair.Egress,
+			"startsat", startsAt, "stopsat", stopsAt)
+		return nil, serrors.New("no assets found", "ia", addr.IA(pair.IA).String(),
+			"ingress", pair.Ingress, "egress", pair.Egress,
+			"startsat", startsAt, "stopsat", stopsAt)
 	}
 	return order, nil
 }
 
 type assetInfo struct {
-	id       string
+	id       uint64
 	startsAt time.Time
 	stopsAt  time.Time
 }
 
-func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Context, pairs []InterfacePair, bwInKbps uint32, startsAt time.Time, stopsAt time.Time,
-	maxPrice uint64, buyMode BuyMode, fetchReservations bool, combineAssets bool, num_retries int) ([]*snetpath.Hop, error) {
+func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(
+	ctx context.Context,
+	pairs []InterfacePair,
+	bwInKbps uint32,
+	startsAt time.Time,
+	stopsAt time.Time,
+	maxPrice uint64,
+	buyMode BuyMode,
+	fetchReservations bool,
+	combineAssets bool,
+	num_retries int,
+) ([]*snetpath.Hop, error) {
 	infoRep, err := c.client.Info(ctx, &connect.Request[hummingbird.MarketplaceInfoRequest]{})
 	if err != nil {
 		return nil, err
@@ -718,7 +664,8 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 				continue
 			}
 			if combineAssets {
-				o, err := c.checkoutAssetForInterfacePairWithCombine(ctx, pair, bwInKbps, startsAt, stopsAt, combineCost)
+				o, err := c.checkoutAssetForInterfacePairWithCombine(
+					ctx, pair, bwInKbps, startsAt, stopsAt, combineCost)
 				if err != nil {
 					if buyMode == FailOnError {
 						return nil, err
@@ -743,12 +690,13 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 			log.FromCtx(ctx).Debug("Skip purchase since no assets are selected for purchasing")
 		} else {
 			log.FromCtx(ctx).Debug("Purchase", "assets", orders)
-			boughtAssetsResponse, err := c.client.BuyAssets(ctx, &connect.Request[hummingbird.BuyAssetsRequest]{
-				Msg: &hummingbird.BuyAssetsRequest{
-					Assets:   orders,
-					MaxPrice: maxPrice,
-				},
-			})
+			boughtAssetsResponse, err :=
+				c.client.BuyAssets(ctx, &connect.Request[hummingbird.BuyAssetsRequest]{
+					Msg: &hummingbird.BuyAssetsRequest{
+						Assets:   orders,
+						MaxPrice: maxPrice,
+					},
+				})
 			if err != nil {
 				log.FromCtx(ctx).Debug("Error buying asset", "err", err)
 				continue
@@ -761,29 +709,34 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 	if !success {
 		return nil, err
 	}
+	// Look up the assets that were just bought, to learn where and when they apply.
+	// If combineAssets == True, we need to find assets that "touch" the time window.
+	// If not, we need to find assets which each one of them covers the time window.
 	var foundAssets []*hummingbird.SearchAsset
 	if combineAssets {
-		foundAssetsResp, err := c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
-			Msg: &hummingbird.SearchAssetsRequest{
-				Owned:           true,
-				MinRequiredBw:   &bwInKbps,
-				StartsAtLatest:  timestamppb.New(stopsAt),
-				StopsAtEarliest: timestamppb.New(startsAt),
-			},
-		})
+		foundAssetsResp, err :=
+			c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+				Msg: &hummingbird.SearchAssetsRequest{
+					Owned:           true,
+					MinRequiredBw:   &bwInKbps,
+					StartsAtLatest:  timestamppb.New(stopsAt),
+					StopsAtEarliest: timestamppb.New(startsAt),
+				},
+			})
 		if err != nil {
 			return nil, err
 		}
 		foundAssets = foundAssetsResp.Msg.Assets
 	} else {
-		foundAssetsResp, err := c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
-			Msg: &hummingbird.SearchAssetsRequest{
-				Owned:           true,
-				MinRequiredBw:   &bwInKbps,
-				StartsAtLatest:  timestamppb.New(startsAt),
-				StopsAtEarliest: timestamppb.New(stopsAt),
-			},
-		})
+		foundAssetsResp, err :=
+			c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+				Msg: &hummingbird.SearchAssetsRequest{
+					Owned:           true,
+					MinRequiredBw:   &bwInKbps,
+					StartsAtLatest:  timestamppb.New(startsAt),
+					StopsAtEarliest: timestamppb.New(stopsAt),
+				},
+			})
 		if err != nil {
 			return nil, err
 		}
@@ -826,18 +779,22 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 				})
 				currAssetId := pairAssets[0].AssetId
 				for i := 0; i < len(pairAssets)-1; i++ {
-					combineResp, err := c.client.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
-						Msg: &hummingbird.CombineAssetRequest{
-							AssetId_1: currAssetId,
-							AssetId_2: pairAssets[i+1].AssetId,
-						},
-					})
+					combineResp, err := c.client.CombineAssets(
+						ctx, &connect.Request[hummingbird.CombineAssetRequest]{
+							Msg: &hummingbird.CombineAssetRequest{
+								AssetId_1: currAssetId,
+								AssetId_2: pairAssets[i+1].AssetId,
+							},
+						})
 					if err != nil {
 						return nil, err
 					}
 					currAssetId = combineResp.Msg.AssetId
 				}
-				iaAssets[k] = []assetInfo{{id: currAssetId, startsAt: pairAssets[0].StartsAt.AsTime(), stopsAt: pairAssets[len(pairAssets)-1].StopsAt.AsTime()}}
+				iaAssets[k] = []assetInfo{{
+					id:       currAssetId,
+					startsAt: pairAssets[0].StartsAt.AsTime(),
+					stopsAt:  pairAssets[len(pairAssets)-1].StopsAt.AsTime()}}
 			}
 			if len(ingressAssets) != 0 && len(ingressAssets) == len(egressAssets) {
 				sort.Slice(ingressAssets, func(i, j int) bool {
@@ -845,12 +802,13 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 				})
 				currIngressAssetId := ingressAssets[0].AssetId
 				for i := 0; i < len(ingressAssets)-1; i++ {
-					combineResp, err := c.client.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
-						Msg: &hummingbird.CombineAssetRequest{
-							AssetId_1: currIngressAssetId,
-							AssetId_2: ingressAssets[i+1].AssetId,
-						},
-					})
+					combineResp, err := c.client.CombineAssets(
+						ctx, &connect.Request[hummingbird.CombineAssetRequest]{
+							Msg: &hummingbird.CombineAssetRequest{
+								AssetId_1: currIngressAssetId,
+								AssetId_2: ingressAssets[i+1].AssetId,
+							},
+						})
 					if err != nil {
 						return nil, err
 					}
@@ -861,20 +819,29 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 				})
 				currEgressAssetId := egressAssets[0].AssetId
 				for i := 0; i < len(egressAssets)-1; i++ {
-					combineResp, err := c.client.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
-						Msg: &hummingbird.CombineAssetRequest{
-							AssetId_1: currEgressAssetId,
-							AssetId_2: egressAssets[i+1].AssetId,
-						},
-					})
+					combineResp, err := c.client.CombineAssets(
+						ctx, &connect.Request[hummingbird.CombineAssetRequest]{
+							Msg: &hummingbird.CombineAssetRequest{
+								AssetId_1: currEgressAssetId,
+								AssetId_2: egressAssets[i+1].AssetId,
+							},
+						})
 					if err != nil {
 						return nil, err
 					}
 					currEgressAssetId = combineResp.Msg.AssetId
 				}
 				iaAssets[k] = []assetInfo{
-					{id: currIngressAssetId, startsAt: ingressAssets[0].StartsAt.AsTime(), stopsAt: ingressAssets[len(ingressAssets)-1].StopsAt.AsTime()},
-					{id: currEgressAssetId, startsAt: egressAssets[0].StartsAt.AsTime(), stopsAt: egressAssets[len(egressAssets)-1].StopsAt.AsTime()},
+					{
+						id:       currIngressAssetId,
+						startsAt: ingressAssets[0].StartsAt.AsTime(),
+						stopsAt:  ingressAssets[len(ingressAssets)-1].StopsAt.AsTime(),
+					},
+					{
+						id:       currEgressAssetId,
+						startsAt: egressAssets[0].StartsAt.AsTime(),
+						stopsAt:  egressAssets[len(egressAssets)-1].StopsAt.AsTime(),
+					},
 				}
 			}
 		}
@@ -883,9 +850,15 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(ctx context.Cont
 			for _, asset := range v {
 				current, found := iaAssets[asset.Ia]
 				if found {
-					iaAssets[asset.Ia] = append(current, assetInfo{id: asset.AssetId, stopsAt: asset.StopsAt.AsTime(), startsAt: asset.StartsAt.AsTime()})
+					iaAssets[asset.Ia] = append(current, assetInfo{
+						id:       asset.AssetId,
+						stopsAt:  asset.StopsAt.AsTime(),
+						startsAt: asset.StartsAt.AsTime()})
 				} else {
-					iaAssets[asset.Ia] = []assetInfo{{id: asset.AssetId, stopsAt: asset.StopsAt.AsTime(), startsAt: asset.StartsAt.AsTime()}}
+					iaAssets[asset.Ia] = []assetInfo{{
+						id:       asset.AssetId,
+						stopsAt:  asset.StopsAt.AsTime(),
+						startsAt: asset.StartsAt.AsTime()}}
 				}
 			}
 		}
@@ -915,7 +888,13 @@ func earlier(a time.Time, b time.Time) time.Time {
 	return b
 }
 
-func (c *MarketplaceClient) redeemHopsConcurrently(ctx context.Context, pairs []InterfacePair, iaAssets map[uint64][]assetInfo, startsAt time.Time, stopsAt time.Time) ([]*snetpath.Hop, error) {
+func (c *MarketplaceClient) redeemHopsConcurrently(
+	ctx context.Context,
+	pairs []InterfacePair,
+	iaAssets map[uint64][]assetInfo,
+	startsAt time.Time,
+	stopsAt time.Time,
+) ([]*snetpath.Hop, error) {
 	type requestInfo struct {
 		request  *hummingbird.RedeemAssetRequest
 		startsAt time.Time
@@ -962,9 +941,8 @@ func (c *MarketplaceClient) redeemHopsConcurrently(ctx context.Context, pairs []
 			if requests[i] == nil {
 				return
 			}
-			rep, err := c.client.RedeemAsset(ctx, &connect.Request[hummingbird.RedeemAssetRequest]{
-				Msg: requests[i].request,
-			})
+			rep, err := c.client.RedeemAsset(
+				ctx, &connect.Request[hummingbird.RedeemAssetRequest]{Msg: requests[i].request})
 			if err != nil {
 				errors[i] = err
 				return
@@ -991,7 +969,9 @@ func (c *MarketplaceClient) redeemHopsConcurrently(ctx context.Context, pairs []
 				},
 			}
 		} else if errors[i] != nil {
-			log.FromCtx(ctx).Debug("error redeeming asset", "asset ID", requests[i].request.Interfaces, "err", errors[i])
+			log.FromCtx(ctx).Debug("error redeeming asset",
+				"asset ID", requests[i].request.Interfaces,
+				"err", errors[i])
 			ret[i] = &snetpath.Hop{
 				BaseHop: snetpath.BaseHop{
 					IA:      addr.IA(pairs[i].IA),
@@ -1013,33 +993,29 @@ func (c *MarketplaceClient) redeemHopsConcurrently(ctx context.Context, pairs []
 }
 
 // ObtainReservationsFullPath tries to obtain reservations for the full path provided.
-// buyMode defines whether it should try to continue searching and buying assets in other ASes if purchase of an asset for one AS fails (e.g. because no asset matching the filters exists)
-// fetchReservations enables fetching already owned reservations. If reservations that match IA, ingress, egress, bwInKbps, startsAt and stopsAt are found, those are used instead of buying new ones.
-// It could happen that an asset gets bought by some other user between searching and buying the asset ourselves. With num_retries we can repeat the search and buy step if this happens.
-func (c *MarketplaceClient) ObtainReservationsFullPath(ctx context.Context, path snet.Path, bwInKbps uint32, startsAt time.Time, stopsAt time.Time,
-	maxPrice uint64, buyMode BuyMode, fetchReservations bool, combineAssets bool, num_retries int) ([]*snetpath.Hop, error) {
+// `buyMode` defines whether it should try to continue searching and buying assets in other ASes
+// if purchase of an asset for one AS fails (e.g. because no asset matching the filters exists).
+// `fetchReservations` enables fetching already owned reservations.
+// If reservations that match IA, ingress, egress, bwInKbps, startsAt and stopsAt are found,
+// those are used instead of buying new ones.
+//
+// It could happen that an asset gets bought by some other user between
+// searching and buying the asset ourselves.
+// With `num_retries` we can repeat the search and buy step if this happens.
+func (c *MarketplaceClient) ObtainReservationsFullPath(
+	ctx context.Context,
+	path snet.Path,
+	bwInKbps uint32,
+	startsAt time.Time,
+	stopsAt time.Time,
+	maxPrice uint64,
+	buyMode BuyMode,
+	fetchReservations bool,
+	combineAssets bool,
+	num_retries int,
+) ([]*snetpath.Hop, error) {
 
-	pairs := []InterfacePair{}
-	ifaces := path.Metadata().Interfaces
-	pairs = append(pairs, InterfacePair{
-		IA:      uint64(ifaces[0].IA),
-		Ingress: uint32(0),
-		Egress:  uint32(ifaces[0].ID),
-	})
-	i := 1
-	for ; i < len(ifaces)-1; i += 2 {
-		pairs = append(pairs, InterfacePair{
-			IA:      uint64(ifaces[i].IA),
-			Ingress: uint32(ifaces[i].ID),
-			Egress:  uint32(ifaces[i+1].ID),
-		})
-	}
-	for ; i < len(ifaces); i++ {
-		pairs = append(pairs, InterfacePair{
-			IA:      uint64(ifaces[i].IA),
-			Ingress: uint32(ifaces[i].ID),
-			Egress:  0,
-		})
-	}
-	return c.ObtainReservationsForInterfacePairs(ctx, pairs, bwInKbps, startsAt, stopsAt, maxPrice, buyMode, fetchReservations, combineAssets, num_retries)
+	pairs := interfacePairsFromInterfaces(path.Metadata().Interfaces)
+	return c.ObtainReservationsForInterfacePairs(ctx, pairs, bwInKbps, startsAt, stopsAt,
+		maxPrice, buyMode, fetchReservations, combineAssets, num_retries)
 }

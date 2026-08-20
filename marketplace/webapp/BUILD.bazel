@@ -3,6 +3,17 @@ load("@rules_go//go:def.bzl", "go_library")
 go_library(
     name = "go_default_library",
     srcs = ["web.go"],
+    embedsrcs = [
+        "static/script.js",
+        "static/style.css",
+        "templates/account.html",
+        "templates/asbalance.html",
+        "templates/aslogin.html",
+        "templates/assets.html",
+        "templates/login.html",
+        "templates/register.html",
+        "templates/reservations.html",
+    ],
     importpath = "github.com/scionproto/scion/marketplace/webapp",
     visibility = ["//visibility:public"],
     deps = [

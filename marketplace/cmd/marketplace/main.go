@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -36,12 +37,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/marketplace"
 	marketplacestorage "github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/marketplace/webapp"
-	libgrpc "github.com/scionproto/scion/pkg/grpc"
+	libconnect "github.com/scionproto/scion/pkg/connect"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -52,7 +52,6 @@ import (
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
 	"github.com/scionproto/scion/pkg/segment/iface"
 	"github.com/scionproto/scion/pkg/snet"
-	"github.com/scionproto/scion/pkg/snet/squic"
 	"github.com/scionproto/scion/private/app"
 	"github.com/scionproto/scion/private/app/appnet"
 	"github.com/scionproto/scion/private/app/launcher"
@@ -307,7 +306,11 @@ func realMain(ctx context.Context) error {
 		return cleanup.Do()
 	})
 
-	g.Wait()
+	// Without this, a server failing to listen, e.g. because its port is already
+	// taken, ends the process with neither an error nor a message.
+	if err := g.Wait(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
 	return nil
 }
 
@@ -350,54 +353,29 @@ func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrS
 	if err != nil {
 		return err
 	}
-	quicServer := grpc.NewServer(
-		grpc.Creds(libgrpc.PassThroughCredentials{}),
-		libgrpc.UnaryServerInterceptor(),
-		libgrpc.DefaultMaxConcurrentStreams(),
-	)
-	cleanup.Add(func() error { quicServer.GracefulStop(); return nil })
 	cleanup.Add(func() error { return quicStack.Listener.Close() })
-	grpcConns := make(chan *quic.Conn)
-	g.Go(func() error {
-		defer log.HandlePanic()
-		listener := quicStack.Listener
-		connectServer := http3.Server{
-			Handler: loggingMiddleware(mux),
+	connectServer := &http3.Server{
+		Handler: loggingMiddleware(mux),
+	}
+	cleanup.Add(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		if err := connectServer.Shutdown(ctx); err != nil && ctx.Err() == nil {
+			return err
 		}
-		cleanup.Add(func() error {
-			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-			defer cancel()
-			if err := connectServer.Shutdown(ctx); err != nil && ctx.Err() == nil {
-				return err
-			}
-			return nil
-		})
-
-		for {
-			conn, err := listener.Accept(ctx)
-			if err == quic.ErrServerClosed {
-				return http.ErrServerClosed
-			}
-			if err != nil {
-				return err
-			}
-			go func() {
-				defer log.HandlePanic()
-				if conn.ConnectionState().TLS.NegotiatedProtocol != "h3" {
-					grpcConns <- conn
-					return
-				}
-				if err := connectServer.ServeQUICConn(conn); err != nil {
-					log.Debug("Error handling connectrpc connection", "err", err)
-				}
-			}()
-		}
+		return nil
 	})
+	connectionDispatcher := libconnect.ConnectionDispatcher{
+		Listener: quicStack.Listener,
+		Connect:  connectServer,
+		Error: func(err error) {
+			log.Debug("Error handling ConnectRPC connection", "err", err)
+		},
+	}
 	g.Go(func() error {
 		defer log.HandlePanic()
-		grpcListener := squic.NewConnListener(grpcConns, quicStack.Listener.Addr())
-		if err := quicServer.Serve(grpcListener); err != nil {
-			return serrors.Wrap("serving gRPC/SCION API", err)
+		if err := connectionDispatcher.Run(ctx); err != nil {
+			return serrors.Wrap("serving ConnectRPC/SCION API", err)
 		}
 		return nil
 	})
@@ -405,9 +383,6 @@ func StartSCIONServer(ctx context.Context, topo snet.Topology, mtu uint16, addrS
 }
 
 func saveSignatureKeys(pubKey ed25519.PublicKey, privKey ed25519.PrivateKey) error {
-	if err := os.MkdirAll("gen/marketplace", 0755); err != nil {
-		return err
-	}
 	privBytes, err := x509.MarshalPKCS8PrivateKey(privKey)
 	if err != nil {
 		return err

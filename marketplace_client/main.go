@@ -17,16 +17,12 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"math"
-	"net"
-	"net/http"
-	"net/netip"
 	"os"
 	"sort"
 	"strconv"
@@ -35,21 +31,16 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt"
-	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/pkg/addr"
-	libconnect "github.com/scionproto/scion/pkg/connect"
 	"github.com/scionproto/scion/pkg/daemon"
 	"github.com/scionproto/scion/pkg/daemon/types"
+	hbird "github.com/scionproto/scion/pkg/hummingbird"
+	marketclient "github.com/scionproto/scion/pkg/hummingbird/marketplace"
 	"github.com/scionproto/scion/pkg/hummingbird/registration"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"github.com/scionproto/scion/pkg/snet"
-	"github.com/scionproto/scion/pkg/snet/path"
-	"github.com/scionproto/scion/pkg/snet/squic"
-	"github.com/scionproto/scion/private/app/appnet"
-	"github.com/scionproto/scion/private/storage"
-	"github.com/scionproto/scion/private/trust"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -61,14 +52,6 @@ const (
 	RedemptionService
 )
 
-func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			req.Header().Set("Authorization", "Bearer "+jwtToken)
-			return next(ctx, req)
-		}
-	}
-}
 func printOptions(t jwtType) {
 	fmt.Println("-> info")
 	switch t {
@@ -90,136 +73,6 @@ func printOptions(t jwtType) {
 	}
 	fmt.Println("-> reset")
 	fmt.Println("-> exit")
-}
-
-func withSCION(ctx context.Context, localIA addr.IA, remote *snet.UDPAddr, serverName string, token string) (
-	hummingbirdconnect.MarketplaceServiceClient, hummingbirdconnect.RedemptionServiceClient, hummingbirdconnect.AccountServiceClient, error) {
-	var topo snet.Topology
-	var err error
-	var localPublic *net.UDPAddr
-	var querier snet.PathQuerier
-
-	connector, err := daemon.NewAutoConnector(ctx, daemon.WithDaemon(sciond))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	localIA, err = connector.LocalIA(ctx)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	querier = daemon.Querier{Connector: connector, IA: localIA}
-	portStart, portEnd, err := connector.PortRange(ctx)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	interfaces, err := connector.Interfaces(ctx)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	topo = snet.Topology{
-		LocalIA:   localIA,
-		PortRange: snet.TopologyPortRange{Start: portStart, End: portEnd},
-		Interface: func(u uint16) (netip.AddrPort, bool) {
-			a, found := interfaces[u]
-			return a, found
-		},
-	}
-	if remote.IA == localIA {
-		remote.Path = path.Empty{}
-		remote.NextHop = remote.Host
-	} else {
-		paths, err := querier.Query(ctx, remote.IA)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if len(paths) == 0 {
-			return nil, nil, nil, serrors.New("no paths found to marketplace")
-		}
-		remote.Path = paths[0].Dataplane()
-		remote.NextHop = paths[0].UnderlayNextHop()
-	}
-
-	trustDB, err := storage.NewInMemoryTrustStorage()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	conn, err := net.Dial("udp", remote.NextHop.String())
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	localPublic, ok := conn.LocalAddr().(*net.UDPAddr)
-	if !ok {
-		return nil, nil, nil, serrors.New("localAddr not UDP addr")
-	}
-	conn.Close()
-
-	nc := appnet.NetworkConfig{
-		Topology: topo,
-		IA:       topo.LocalIA,
-		QUIC: appnet.QUIC{
-			TLSVerifier: trust.NewTLSCryptoVerifier(trustDB),
-		},
-		MTU: 1400,
-		Public: &net.UDPAddr{
-			IP:   localPublic.IP,
-			Port: 0,
-			Zone: localPublic.Zone,
-		},
-	}
-	quicStack, err := nc.QUICStack(ctx)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	var dialerFunc func(a net.Addr, opts ...squic.EarlyDialerOption) squic.EarlyDialer
-	if insecure {
-		dialerFunc = (&squic.EarlyDialerFactory{
-			Transport: quicStack.Dialer.Transport,
-			TLSConfig: &tls.Config{
-				NextProtos:         []string{"h3", "SCION"},
-				InsecureSkipVerify: true,
-			},
-			Rewriter: &appnet.AddressRewriter{
-				Router: &snet.BaseRouter{
-					Querier: querier,
-				},
-			},
-		}).NewDialer
-	} else {
-		dialerFunc = (&squic.EarlyDialerFactory{
-			Transport: quicStack.Dialer.Transport,
-			TLSConfig: &tls.Config{
-				NextProtos: []string{"h3", "SCION"},
-				ServerName: serverName,
-			},
-			Rewriter: &appnet.AddressRewriter{
-				Router: &snet.BaseRouter{
-					Querier: querier,
-				},
-			},
-		}).NewDialer
-	}
-
-	dialer := dialerFunc(remote)
-	marketplaceClient := hummingbirdconnect.NewMarketplaceServiceClient(
-		libconnect.HTTPClient{
-			RoundTripper: &http3.Transport{
-				Dial: dialer.DialEarly,
-			},
-		}, libconnect.BaseUrl(remote), connect.WithInterceptors(authInterceptor(token)))
-	redemptionClient := hummingbirdconnect.NewRedemptionServiceClient(
-		libconnect.HTTPClient{
-			RoundTripper: &http3.Transport{
-				Dial: dialer.DialEarly,
-			},
-		}, libconnect.BaseUrl(remote), connect.WithInterceptors(authInterceptor(token)))
-	accountClient := hummingbirdconnect.NewAccountServiceClient(
-		libconnect.HTTPClient{
-			RoundTripper: &http3.Transport{
-				Dial: dialer.DialEarly,
-			},
-		}, libconnect.BaseUrl(remote), connect.WithInterceptors(authInterceptor(token)))
-	return marketplaceClient, redemptionClient, accountClient, nil
 }
 
 type HummingbirdNotes struct {
@@ -337,28 +190,6 @@ func tokenType(tokenStr string) (string, jwtType, error) {
 	}
 }
 
-func parseAddr(s string) (addr.Addr, uint16, string, error) {
-	host, port, err := net.SplitHostPort(s)
-	if err != nil {
-		return addr.Addr{}, 0, "", serrors.Wrap("invalid address: split host:port", err, "addr", s)
-	}
-	splits := strings.Split(host, ",")
-	if len(splits) != 2 {
-		return addr.Addr{}, 0, "", serrors.Wrap("invalid address: split host:port", err, "addr", s)
-	}
-	_, err = netip.ParseAddr(splits[1])
-	if err != nil {
-		ipAddr, err := net.ResolveIPAddr("ip", splits[1])
-		if err != nil {
-			return addr.Addr{}, 0, "", serrors.Wrap("invalid address: split host:port", err, "addr", s)
-		}
-		s = fmt.Sprintf("[%s,%s]:%s", splits[0], ipAddr.String(), port)
-	}
-	fmt.Println(s)
-	a, p, err := addr.ParseAddrPort(s)
-	return a, p, splits[1], err
-}
-
 func userInteraction() {
 	ctx := context.Background()
 	reader := bufio.NewReader(os.Stdin)
@@ -381,21 +212,6 @@ func userInteraction() {
 	if !as_registration {
 		token = readString(reader, "jwt_token: ")
 	}
-	var marketplaceClient hummingbirdconnect.MarketplaceServiceClient
-	var redemptionClient hummingbirdconnect.RedemptionServiceClient
-	var accountClient hummingbirdconnect.AccountServiceClient
-	urlSplit := strings.Split(url, "://")
-	var httpHost string
-	api := ""
-	if len(urlSplit) == 1 {
-		api = urlSplit[0]
-	} else if len(urlSplit) == 2 {
-		api = urlSplit[1]
-		httpHost = api
-	} else {
-		fmt.Println("invalid url", url)
-		return
-	}
 	var localIA addr.IA
 	if as_registration {
 		localIAString := readString(reader, "local IA: ")
@@ -405,68 +221,44 @@ func userInteraction() {
 			return
 		}
 	}
-	scionAddr, port, serverName, err := parseAddr(api)
-	if err == nil {
-		remote := &snet.UDPAddr{
-			IA:   scionAddr.IA,
-			Host: net.UDPAddrFromAddrPort(netip.AddrPortFrom(scionAddr.Host.IP(), port)),
-		}
-		baseUrlSplit := strings.Split(libconnect.BaseUrl(remote), "https://")
-		if len(baseUrlSplit) != 2 {
-			fmt.Println("base Url is invalid", baseUrlSplit)
-			return
-		}
-		httpHost = baseUrlSplit[1]
+	clientOptions := marketclient.ClientOptions{Insecure: insecure}
+	if marketclient.IsSCIONURL(url) {
 		if sciond == "" {
 			fmt.Println("connecting over SCION requires a SCION daemon address")
 			return
 		}
-		marketplaceClient, redemptionClient, accountClient, err = withSCION(ctx, localIA, remote, serverName, token)
+		connector, err := daemon.NewAutoConnector(ctx, daemon.WithDaemon(sciond))
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
+		topo, err := daemon.LoadTopology(ctx, connector)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		clientOptions.Topology = topo
+		clientOptions.Querier = daemon.Querier{Connector: connector, IA: topo.LocalIA}
+	}
+	clients, err := marketclient.NewClientSet(ctx, url, token, clientOptions)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	marketplaceClient := clients.Marketplace
+	redemptionClient := clients.Redemption
+	accountClient := clients.Account
+	if clients.SCION {
 		fmt.Println("use SCION connection")
 	} else {
-		if insecure {
-			marketplaceClient = hummingbirdconnect.NewMarketplaceServiceClient(&http.Client{
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{
-						InsecureSkipVerify: true,
-					},
-				},
-			}, url, connect.WithInterceptors(authInterceptor(token)))
-			redemptionClient = hummingbirdconnect.NewRedemptionServiceClient(&http.Client{
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{
-						InsecureSkipVerify: true,
-					},
-				},
-			}, url, connect.WithInterceptors(authInterceptor(token)))
-			accountClient = hummingbirdconnect.NewAccountServiceClient(&http.Client{
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{
-						InsecureSkipVerify: true,
-					},
-				},
-			}, url, connect.WithInterceptors(authInterceptor(token)))
-		} else {
-			marketplaceClient = hummingbirdconnect.NewMarketplaceServiceClient(http.DefaultClient,
-				url, connect.WithInterceptors(authInterceptor(token)))
-			redemptionClient = hummingbirdconnect.NewRedemptionServiceClient(http.DefaultClient,
-				url, connect.WithInterceptors(authInterceptor(token)))
-			accountClient = hummingbirdconnect.NewAccountServiceClient(http.DefaultClient,
-				url, connect.WithInterceptors(authInterceptor(token)))
-		}
-
 		fmt.Println("use TCP connection")
 	}
 	if as_registration {
 		trcDir := readString(reader, "trc directory: ")
 		certDir := readString(reader, "certificate directory: ")
 		keyRingDir := readString(reader, "keyring directory: ")
-		fmt.Println("httpHost", httpHost)
-		regClient := registration.NewClient(accountClient, httpHost)
+		fmt.Println("httpHost", clients.Authority)
+		regClient := registration.NewClient(accountClient, clients.Authority)
 		publisherToken, redemptionToken, err := regClient.RegisterWithNewSigner(ctx, localIA, trcDir, certDir, keyRingDir)
 		if err != nil {
 			fmt.Println(err)
@@ -639,22 +431,7 @@ func handlePublish(ctx context.Context, reader *bufio.Reader, c hummingbirdconne
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("Published asset ID %s\n", resp.Msg.AssetId)
-}
-
-func ceilDuration(base time.Duration, multiple time.Duration) time.Duration {
-	truncated := base.Truncate(multiple)
-	if truncated == base {
-		return base
-	}
-	return truncated + multiple
-}
-func ceilTime(base time.Time, multiple time.Duration) time.Time {
-	truncated := base.Truncate(multiple)
-	if truncated.Equal(base) {
-		return base
-	}
-	return truncated.Add(multiple)
+	fmt.Printf("Published asset ID %d\n", resp.Msg.AssetId)
 }
 
 func printUpdateAssetOptions() {
@@ -690,12 +467,12 @@ func handleUpdate(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 			switch {
 			case subOption == "delete":
 				assetUpdates = append(assetUpdates, &hummingbird.AssetUpdate{
-					AssetId:   readString(reader, "AssetID: "),
+					AssetId:   readUint64(reader, "AssetID: "),
 					Operation: &hummingbird.AssetUpdate_Remove{},
 				})
 			case subOption == "update":
 				assetUpdates = append(assetUpdates, &hummingbird.AssetUpdate{
-					AssetId: readString(reader, "AssetID: "),
+					AssetId: readUint64(reader, "AssetID: "),
 					Operation: &hummingbird.AssetUpdate_Update{
 						Update: &hummingbird.PublisherAsset{IfIdIngress: readOptionalUint32(reader, "ingress: "),
 							IfIdEgress:      readOptionalUint32(reader, "egress: "),
@@ -743,15 +520,15 @@ func handleUpdate(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 				}
 				switch t := res.ResultType.(type) {
 				case *hummingbird.UpdateAssetResult_NewId:
-					if t.NewId == "" {
-						fmt.Printf("%s: deleted\n", assetUpdates[i].AssetId)
+					if t.NewId == 0 {
+						fmt.Printf("%d: deleted\n", assetUpdates[i].AssetId)
 					} else {
-						fmt.Printf("%s: updated to -> %s\n", assetUpdates[i].AssetId, t.NewId)
+						fmt.Printf("%d: updated to -> %d\n", assetUpdates[i].AssetId, t.NewId)
 					}
 				case *hummingbird.UpdateAssetResult_Error:
-					fmt.Printf("%s: error: %s\n", assetUpdates[i].AssetId, t.Error)
+					fmt.Printf("%d: error: %s\n", assetUpdates[i].AssetId, t.Error)
 				default:
-					fmt.Printf("%s: unkown result", assetUpdates[i].AssetId)
+					fmt.Printf("%d: unkown result", assetUpdates[i].AssetId)
 				}
 			}
 			return
@@ -769,7 +546,7 @@ func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdco
 		return
 	}
 	startsAt := readTime(reader, "Starts at (2026-06-23T13:25:36Z): ").UTC().Truncate(time.Duration(infoRep.Msg.MaxStatisticsGranularity) * time.Second)
-	stopsAt := ceilTime(readTime(reader, "Stops at (2026-06-23T13:25:36Z): ").UTC(), time.Duration(infoRep.Msg.MaxStatisticsGranularity)*time.Second)
+	stopsAt := hbird.RoundUpTime(readTime(reader, "Stops at (2026-06-23T13:25:36Z): ").UTC(), time.Duration(infoRep.Msg.MaxStatisticsGranularity)*time.Second)
 	stepSize := readUint64(reader, "Step size: ")
 	ingress := readOptionalUint32(reader, "Ingress: ")
 	egress := readOptionalUint32(reader, "Egress: ")
@@ -789,7 +566,7 @@ func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdco
 		fmt.Println(err)
 		return
 	}
-	step := ceilDuration(time.Duration(stepSize)*time.Second, time.Duration(infoRep.Msg.MaxStatisticsGranularity)*time.Second)
+	step := hbird.RoundUpDuration(time.Duration(stepSize)*time.Second, time.Duration(infoRep.Msg.MaxStatisticsGranularity)*time.Second)
 	for i, stat := range resp.Msg.Statistics {
 		intervalStart := startsAt.Add(time.Duration(i) * step)
 		intervalEnd := intervalStart.Add(step)
@@ -799,7 +576,7 @@ func handleStatistics(ctx context.Context, reader *bufio.Reader, c hummingbirdco
 }
 func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	fmt.Println("Handle split asset query.")
-	assetID := readString(reader, "assetID: ")
+	assetID := readUint64(reader, "assetID: ")
 	splitOption := readOptionalString(reader, "spit using axis [bw,time]: ", nil)
 	if splitOption == nil {
 		fmt.Println("invalid split option.")
@@ -833,12 +610,12 @@ func handleSplit(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("asset split into %s and %s\n", resp.Msg.AssetId_1, resp.Msg.AssetId_2)
+	fmt.Printf("asset split into %d and %d\n", resp.Msg.AssetId_1, resp.Msg.AssetId_2)
 }
 func handleCombine(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	fmt.Println("Handle combine assets query.")
-	asset1 := readString(reader, "asset 1: ")
-	asset2 := readString(reader, "asset 2: ")
+	asset1 := readUint64(reader, "asset 1: ")
+	asset2 := readUint64(reader, "asset 2: ")
 	if !readConfirm(reader) {
 		return
 	}
@@ -852,7 +629,7 @@ func handleCombine(ctx context.Context, reader *bufio.Reader, c hummingbirdconne
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("assets combined into %s\n", resp.Msg.AssetId)
+	fmt.Printf("assets combined into %d\n", resp.Msg.AssetId)
 }
 func handleReservation(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.MarketplaceServiceClient) {
 	var ia *uint64
@@ -929,8 +706,8 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 	if option == nil {
 		return
 	} else if *option == 0 {
-		ingressAssetID := readString(reader, "Ingress Asset ID: ")
-		egressAssetID := readString(reader, "Egress Asset ID: ")
+		ingressAssetID := readUint64(reader, "Ingress Asset ID: ")
+		egressAssetID := readUint64(reader, "Egress Asset ID: ")
 		if !readConfirm(reader) {
 			return
 		}
@@ -945,7 +722,7 @@ func handleRedeem(ctx context.Context, reader *bufio.Reader, c hummingbirdconnec
 			},
 		})
 	} else if *option == 1 {
-		assetID := readString(reader, "Interface-pair Asset ID: ")
+		assetID := readUint64(reader, "Interface-pair Asset ID: ")
 		if !readConfirm(reader) {
 			return
 		}
@@ -988,7 +765,7 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 		switch {
 		case option == "add":
 			buyAsset := &hummingbird.BuyAsset{
-				AssetId:         readString(reader, "AssetID: "),
+				AssetId:         readUint64(reader, "AssetID: "),
 				StartsAtExactly: timestamppb.New(readTime(reader, "Starts at exactly (2026-06-23T13:25:36Z): ")),
 				StopsAtExactly:  timestamppb.New(readTime(reader, "Stops at exactly (2026-06-23T13:25:36Z): ")),
 				BandwidthExact:  uint32(readUint64(reader, "BW exact: ")),
@@ -1024,7 +801,7 @@ func handleBuy(ctx context.Context, reader *bufio.Reader, c hummingbirdconnect.M
 			fmt.Printf("Bought assets for a total cost of %d\n", rep.Msg.Cost)
 			fmt.Print("[")
 			for _, boughtAsset := range rep.Msg.Assets {
-				fmt.Printf("%s,", boughtAsset.AssetId)
+				fmt.Printf("%d,", boughtAsset.AssetId)
 			}
 			fmt.Print("]\n")
 			return
@@ -1282,7 +1059,7 @@ func main() {
 }
 
 type Asset struct {
-	ID              string
+	ID              uint64
 	IA              addr.IA
 	Bandwidth       uint32
 	BandwidthMin    uint32
