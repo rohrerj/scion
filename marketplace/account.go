@@ -158,8 +158,7 @@ func (s *Service) ResetJWT(ctx context.Context, req *connect.Request[hummingbird
 		}
 		kickRedemptionService := func() {
 			handler := s.FindRedemptionServerHandler(x)
-			handler.remoteConnectionOpenChannel <- nil
-			_ = <-handler.remoteConnectionCloseChannel
+			handler.CloseRedemptionServerConnection()
 		}
 		kickRedemptionService()
 	default:

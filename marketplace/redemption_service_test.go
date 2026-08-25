@@ -17,39 +17,11 @@ package marketplace_test
 import (
 	"math"
 	"testing"
-	"time"
 
 	"github.com/scionproto/scion/marketplace"
-	"github.com/scionproto/scion/marketplace/db"
 	"github.com/scionproto/scion/pkg/hummingbird/bwencoding"
 	"github.com/stretchr/testify/assert"
 )
-
-func TestIDStore(t *testing.T) {
-	base, err := time.Parse(time.RFC3339, "2026-07-16T00:00:00Z")
-	b := base.Unix()
-	assert.NoError(t, err)
-	store := marketplace.UsedIDStore{}
-	err = store.Init(0, 3, []*db.UsedReservation{
-		{
-			Id:       0,
-			StartsAt: base,
-			StopsAt:  base.Add(time.Second * 3),
-		},
-	})
-	assert.NoError(t, err)
-	nextId, err := store.Next(b, b, b+1)
-	assert.NoError(t, err)
-	assert.Equal(t, uint32(1), nextId)
-	nextId, err = store.Next(b, b, b+2)
-	assert.NoError(t, err)
-	assert.Equal(t, uint32(2), nextId)
-	nextId, err = store.Next(b+1, b+1, b+2)
-	assert.NoError(t, err)
-	assert.Equal(t, uint32(1), nextId)
-	nextId, err = store.Next(b+1, b+1, b+2)
-	assert.Error(t, err)
-}
 
 func TestEncoding(t *testing.T) {
 	// The points an AS publishes are the bandwidths of the codepoints the

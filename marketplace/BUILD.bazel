@@ -42,6 +42,7 @@ go_test(
     name = "go_default_test",
     srcs = [
         "export_test.go",
+        "id_store_test.go",
         "redemption_service_test.go",
     ],
     embed = [":go_default_library"],

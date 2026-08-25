@@ -198,6 +198,13 @@ func (h *RedemptionServerHandler) applyRedemptionDelegationUpdate(ctx context.Co
 	return nil
 }
 
+// CloseRedemptionServerConnection tells the handler to tell the redemption server
+// to close the connection and waits for closure.
+func (h *RedemptionServerHandler) CloseRedemptionServerConnection() {
+	h.remoteConnectionOpenChannel <- nil
+	_ = <-h.remoteConnectionCloseChannel
+}
+
 func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
 	clientID, ok := ctx.Value("user").(addr.IA)
 	if !ok {

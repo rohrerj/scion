@@ -380,6 +380,7 @@ func lcm(
 
 // Combines multiple compatible assets into a single assset.
 // Requires len(assetIds) >= 2.
+// Requires assetIDs sorted by asset validity.
 func (s *MarketplaceStorage) CombineAssets(
 	ctx context.Context,
 	accountID int64,
@@ -767,9 +768,6 @@ func validateAsset(
 	if a.Bandwidth == 0 {
 		return serrors.New("bandwidth is 0")
 	}
-	if duration == 0 {
-		return serrors.New("duration is 0")
-	}
 	if duration <= 0 {
 		return serrors.New("duration of the asset is not positive")
 	}
@@ -779,14 +777,8 @@ func validateAssetForRedemption(
 	a *marketplacedb.DBAsset,
 ) error {
 	duration := a.StopsAt.Sub(a.StartAt)
-	if a.Bandwidth == 0 {
-		return serrors.New("bandwidth is 0")
-	}
-	if duration == 0 {
-		return serrors.New("duration is 0")
-	}
-	if duration <= 0 {
-		return serrors.New("duration of the asset is not positive")
+	if err := validateAsset(a); err != nil {
+		return err
 	}
 	if a.Bandwidth < a.BandwidthMin {
 		return serrors.New("bandwidth < min_bandwidth")

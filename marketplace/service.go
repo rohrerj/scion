@@ -425,17 +425,20 @@ func (s *Service) RedeemAsset(
 			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
 		}
 		assets, err = s.store.PrepareRedemption(ctx, user, &ingressAssetId, &egressAssetId, nil)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
+		}
 	case *hummingbird.RedeemAssetRequest_IfPairAssetId:
 		pairAssetId, err := storage.DatabaseAssetID(t.IfPairAssetId)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
 		}
 		assets, err = s.store.PrepareRedemption(ctx, user, nil, nil, &pairAssetId)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
+		}
 	default:
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid interface pair"))
-	}
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	var bw uint32
 	var ingressID uint32
@@ -681,6 +684,9 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 		ia = &tmp
 	}
 	pageSize := s.info.MaxReturnedAssets
+	if pageSize == 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("page size cannot be 0"))
+	}
 	if req.Msg.MaxReturnedAssets != nil {
 		pageSize = min(pageSize, *req.Msg.MaxReturnedAssets)
 	}
