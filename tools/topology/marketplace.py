@@ -316,8 +316,10 @@ DEFAULT_ASSET_BANDWIDTH_MAX = 1000000
 DEFAULT_ASSET_PRICE = 1
 DEFAULT_ASSET_TIME_GRANULARITY = 10
 DEFAULT_ASSET_TIME_MIN_DURATION = 10
+DEFAULT_ASSET_TIME_MAX_DURATION = 60*60*24
 DEFAULT_ASSET_DURATION = timedelta(days=100)
-DEFAULT_DELEGATION_RES_ID_LIMIT = 1000
+DEFAULT_DELEGATION_RES_ID_LIMIT_LOW = 0
+DEFAULT_DELEGATION_RES_ID_LIMIT_HIGH = 1000
 
 # The flyover carries the bandwidth as a 10 bit codepoint into the points
 # published by the AS, so there is one point per codepoint. The values must be
@@ -432,6 +434,7 @@ def defaultEntries(gen_dir, now=None):
             "price": DEFAULT_ASSET_PRICE,
             "time_granularity": DEFAULT_ASSET_TIME_GRANULARITY,
             "time_min_duration": DEFAULT_ASSET_TIME_MIN_DURATION,
+            "time_max_duration": DEFAULT_ASSET_TIME_MAX_DURATION,
             "starts_at": startsAt,
             "stops_at": stopsAt,
             "ingress": ingress,
@@ -460,7 +463,8 @@ def defaultEntries(gen_dir, now=None):
         "delegations": [
             {
                 "ia": ia,
-                "res_id_limit": DEFAULT_DELEGATION_RES_ID_LIMIT,
+                "res_id_limit_low": DEFAULT_DELEGATION_RES_ID_LIMIT_LOW,
+                "res_id_limit_high": DEFAULT_DELEGATION_RES_ID_LIMIT_HIGH,
                 "expiration": stopsAt,
                 "paid_until": stopsAt,
                 "key": secretValue(as_dir).hex(),
@@ -587,15 +591,15 @@ def insertAssets(db, assets):
         rows.append((
             isd_id, as_id, a.get("bandwidth"), a.get("bandwidth_min"), a.get("bandwidth_max"),
             a.get("price"), a.get("time_granularity"), a.get("time_min_duration"),
-            a.get("starts_at"), a.get("stops_at"), a.get("ingress"), a.get("egress"),
-            a.get("owner"),
+            a.get("time_max_duration"), a.get("starts_at"), a.get("stops_at"),
+            a.get("ingress"), a.get("egress"), a.get("owner"),
         ))
     db.executemany(
         """
         INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price,
-                            time_granularity, time_min_duration, starts_at, stops_at,
-                            ingress, egress, account_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
+                            time_granularity, time_min_duration, time_max_duration, starts_at,
+                            stops_at, ingress, egress, account_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
             SELECT a.id
             FROM Accounts a
             JOIN Users u ON u.ID = a.user_id
@@ -644,14 +648,14 @@ def insertDelegations(db, delegations):
             i.to_bytes(4, byteorder="little") for i in d.get("encodings")
         )
         rows.append((
-            isd_id, as_id, d.get("res_id_limit"), d.get("expiration"), d.get("paid_until"),
-            bytes.fromhex(d.get("key")), encodings,
+            isd_id, as_id, d.get("res_id_limit_low"), d.get("res_id_limit_high"), 
+            d.get("expiration"), d.get("paid_until"), bytes.fromhex(d.get("key")), encodings,
         ))
     db.executemany(
         """
-        INSERT OR REPLACE INTO Redemption_Delegations (isd_id, as_id, res_id_limit, expiration,
-                                                       paid_until, key, encodings)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO Redemption_Delegations (isd_id, as_id, res_id_limit_low,
+            res_id_limit_high, expiration, paid_until, key, encodings)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
