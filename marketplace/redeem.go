@@ -205,7 +205,12 @@ func (h *RedemptionServerHandler) CloseRedemptionServerConnection() {
 	_ = <-h.remoteConnectionCloseChannel
 }
 
-func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[hummingbird.RedeemAssetFromASResponse, hummingbird.RedeemAssetFromASRequest]) error {
+func (s *Service) RedeemASAsset(
+	ctx context.Context,
+	stream *connect.BidiStream[
+		hummingbird.RedeemAssetFromASResponse,
+		hummingbird.RedeemAssetFromASRequest],
+) error {
 	clientID, ok := ctx.Value("user").(addr.IA)
 	if !ok {
 		return connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
@@ -216,44 +221,49 @@ func (s *Service) RedeemASAsset(ctx context.Context, stream *connect.BidiStream[
 	handler.remoteConnectionOpenChannel <- cancelF
 	_ = <-handler.remoteConnectionOpenResultChannel
 	defer func() {
+		// Stop the sender before waiting for the handler to acknowledge the
+		// closure, so that it cannot outlive this call.
+		cancelF()
 		log.Debug("AS redemption server disconnected", "ia", clientID)
 		handler.remoteConnectionCloseChannel <- struct{}{}
 	}()
 
-	_, err := stream.Receive()
-	if err != nil {
-		return err
-	}
+	// One goroutine to send responses back to the AS.
+	// This goroutine can be stopped at any time with cancelCtx.
 	go func() {
 		for {
 			select {
 			case <-cancelCtx.Done():
 				return
-			default:
-				msg, err := stream.Receive()
-				if err != nil {
-					log.Debug("Receive error", "err", err)
+			case req := <-handler.requestOutChannel:
+				if req == nil {
+					// The handler stopped routing requests to this connection.
+					log.Debug("send channel closed", "ia", clientID)
 					return
 				}
-				select {
-				case handler.responseInChannel <- msg:
-				default:
-					log.Debug("response from redemption server dropped due to full queue.")
+				if err := stream.Send(req); err != nil {
+					// The connection is broken, so the receive below fails too,
+					// and tears the stream down.
+					log.Debug("Send error", "err", err)
+					return
 				}
 			}
 		}
 	}()
+
+	// stream.Receive blocks on a read of the request body, cannot be cancelled from the outside.
+	// Receiving here means the stream instead ends by returning from this function,
+	// which closes the body and releases the sender through cancelCtx.
 	for {
-		select {
-		case <-cancelCtx.Done():
+		msg, err := stream.Receive()
+		if err != nil {
+			log.Debug("Receive error", "err", err)
 			return nil
-		case req := <-handler.requestOutChannel:
-			if req == nil {
-				return serrors.New("send channel closed")
-			}
-			if err := stream.Send(req); err != nil {
-				return err
-			}
+		}
+		select {
+		case handler.responseInChannel <- msg:
+		default:
+			log.Debug("response from redemption server dropped due to full queue.")
 		}
 	}
 }
