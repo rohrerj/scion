@@ -44,6 +44,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 1
@@ -56,6 +57,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 2
@@ -68,6 +70,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "egress": 1
@@ -80,6 +83,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "egress": 2
@@ -92,6 +96,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 1,
@@ -105,6 +110,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 2,
@@ -118,6 +124,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 0,
@@ -131,6 +138,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 0,

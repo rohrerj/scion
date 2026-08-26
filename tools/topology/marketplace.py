@@ -85,6 +85,16 @@ class MarketplaceError(Exception):
     """An error that aborts the marketplace setup with a message."""
 
 
+class AssetEvent:
+    """The event types of the Asset_Events table.
+
+    The values are the ones the marketplace writes, see AssetEventType in
+    marketplace/db/types.go.
+    """
+    PUBLISHED = 0
+    BOUGHT = 1
+
+
 # The config of the marketplace, as a template rather than a dict, so that
 # setup_marketplace.py can tell an unchanged file from a locally edited one.
 MARKETPLACE_TOML = """[general]
@@ -148,18 +158,19 @@ def marketplaceEntries(ia, endpoints: Endpoints):
     same mux as the TCP API, so both live on the API port.
     """
     website = "https://%s" % hostPort(endpoints.host, endpoints.api_port)
+    # The key is the one HummingbirdNoteEntry unmarshals, see marketplace_client/main.go.
     return [
         {
             "name": "Test Market",
             "protocol": "connectrpc/TLS/QUIC/SCION",
             "api": "[%s,%s]:%d" % (ISD_AS(str(ia)), endpoints.host, endpoints.scion_port),
-            "website": website,
+            "client_registration_website": website,
         },
         {
             "name": "Test Market",
             "protocol": "connectrpc/TLS/TCP",
             "api": website,
-            "website": website,
+            "client_registration_website": website,
         },
     ]
 
@@ -586,6 +597,7 @@ def insertAssets(db, assets):
     if assets is None:
         return
     rows = []
+    events = []
     for a in assets:
         isd_id, as_id = iaNumbers(a.get("ia"))
         rows.append((
@@ -594,6 +606,16 @@ def insertAssets(db, assets):
             a.get("time_max_duration"), a.get("starts_at"), a.get("stops_at"),
             a.get("ingress"), a.get("egress"), a.get("owner"),
         ))
+        # The statistics of an AS are computed from the events,
+        # not from the assets still on sale, so publishing one has to be recorded as well.
+        # An asset that already has an owner means it was bought, which is a second event.
+        events.append((AssetEvent.PUBLISHED, isd_id, as_id, a.get("ingress"),
+                       a.get("egress"), a.get("bandwidth"), a.get("starts_at"),
+                       a.get("stops_at"), a.get("price")))
+        if a.get("owner") is not None:
+            events.append((AssetEvent.BOUGHT, isd_id, as_id, a.get("ingress"),
+                           a.get("egress"), a.get("bandwidth"), a.get("starts_at"),
+                           a.get("stops_at"), a.get("price")))
     db.executemany(
         """
         INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price,
@@ -608,6 +630,14 @@ def insertAssets(db, assets):
         ))
         """,
         rows,
+    )
+    db.executemany(
+        """
+        INSERT INTO Asset_Events (event_type, isd_id, as_id, ingress, egress, bandwidth,
+                                  starts_at, stops_at, price)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        events,
     )
 
 
@@ -648,7 +678,7 @@ def insertDelegations(db, delegations):
             i.to_bytes(4, byteorder="little") for i in d.get("encodings")
         )
         rows.append((
-            isd_id, as_id, d.get("res_id_limit_low"), d.get("res_id_limit_high"), 
+            isd_id, as_id, d.get("res_id_limit_low"), d.get("res_id_limit_high"),
             d.get("expiration"), d.get("paid_until"), bytes.fromhex(d.get("key")), encodings,
         ))
     db.executemany(
