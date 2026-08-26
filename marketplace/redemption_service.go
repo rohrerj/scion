@@ -70,7 +70,7 @@ func NewRedemptionService(initState *RedemptionDelegationUpdate, r []*db.UsedRes
 
 func (r *RedemptionService) Redeem(req *hummingbird.RedeemAssetFromASRequest) *hummingbird.RedeemAssetFromASResponse {
 	now := time.Now()
-	resId, err := r.resIdStore.Next(now.Unix(), req.StartsAt.Seconds, req.StartsAt.Seconds)
+	resId, err := r.resIdStore.Next(now.Unix(), req.StartsAt.Seconds, req.StopsAt.Seconds)
 	if err != nil {
 		return &hummingbird.RedeemAssetFromASResponse{
 			Result: &hummingbird.RedeemAssetFromASResponse_Error{
