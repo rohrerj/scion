@@ -80,14 +80,13 @@ func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.Marke
 		for _, delegation := range d {
 			delegation.EncodingsToInts()
 			handler := s.FindRedemptionServerHandler(delegation.IA)
-			handler.delegationInChannel <- &RedemptionDelegationUpdate{
+			err = handler.ApplyDelegation(ctx, &RedemptionDelegationUpdate{
 				ExpirationTime: delegation.Expiration,
 				IdLimitLow:     delegation.ResIdLow,
 				IdLimitHigh:    delegation.ResIdHigh,
 				Key:            delegation.Key,
 				EncodingPoints: delegation.EncodingsToInts(),
-			}
-			err = <-handler.delegationOutChannel
+			})
 			if err != nil {
 				return nil, err
 			}

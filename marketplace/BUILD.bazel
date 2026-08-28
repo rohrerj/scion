@@ -43,12 +43,16 @@ go_test(
     srcs = [
         "export_test.go",
         "id_store_test.go",
+        "redeem_test.go",
         "redemption_service_test.go",
     ],
     embed = [":go_default_library"],
     deps = [
         "//marketplace/db:go_default_library",
+        "//pkg/addr:go_default_library",
         "//pkg/hummingbird/bwencoding:go_default_library",
+        "//pkg/proto/hummingbird:go_default_library",
         "@com_github_stretchr_testify//assert:go_default_library",
+        "@com_github_stretchr_testify//require:go_default_library",
     ],
 )

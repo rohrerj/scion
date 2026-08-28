@@ -16,6 +16,7 @@ package marketplace
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -29,147 +30,230 @@ import (
 
 const redemptionChannelSize = 128
 
+// RedemptionServerHandler routes the redemption requests of one AS,
+// either to a redemption delegation held by the marketplace,
+// or to the redemption server that the AS runs itself and connects over RedeemASAsset.
+//
+// Its state is guarded by mu.
+// Every operation is short-lived, and none of them blocks while holding the lock,
+// so a mutex serializes them just as a single owning goroutine would,
+// without needing a message for every interaction.
 type RedemptionServerHandler struct {
-	// variables of the redemption server handler
-	ia                     addr.IA
-	remoteCancelF          context.CancelFunc
-	store                  *storage.MarketplaceStorage
-	localRedemptionService *RedemptionService
+	ia    addr.IA
+	store *storage.MarketplaceStorage
 
-	// A channel to signal when a remote redemption server connects.
-	// It ensures that if another connection is still open, it gets closed.
-	// Whenever writing to this channel, the writer must immediately read
-	// from the remoteConnectionOpenResultChannel channel afterwards.
-	remoteConnectionOpenChannel       chan context.CancelFunc
-	remoteConnectionOpenResultChannel chan struct{}
-	// Channel used to signal the closure of a redemption server connection
-	// to the handler.
-	remoteConnectionCloseChannel chan struct{}
-
-	// channels responsible to receive and forward redemption requests
-	requestInChannel  chan RedemptionRequest
-	responseInChannel chan *hummingbird.RedeemAssetFromASResponse
-	requestOutChannel chan *hummingbird.RedeemAssetFromASRequest
-
-	// unbuffered channel
-	delegationInChannel chan *RedemptionDelegationUpdate
-	// unbuffered channel, must be read after sending a redemption delegation
-	// update to the delegationInChannel
-	delegationOutChannel chan error
+	mu sync.Mutex
+	// The redemption delegation of this AS, if it granted one.
+	// It may have expired, which is checked per request.
+	local *RedemptionService
+	// The connected redemption server of this AS, nil if none is connected.
+	remote *RemoteConn
+	// Requests handed to the remote redemption server and not answered yet,
+	// keyed by the request id that correlates the two.
+	pending   map[uint64]chan *hummingbird.RedeemAssetFromASResponse
+	nextReqID uint64
 }
 
-type RedemptionRequest struct {
-	Request      *hummingbird.RedeemAssetFromASRequest
-	ReplyChannel chan *hummingbird.RedeemAssetFromASResponse
+// RemoteConn is one connection of an AS redemption server.
+// Its queue belongs to the connection rather than to the handler,
+// so that it is never closed or replaced while another goroutine still holds it:
+// a connection's channels die with the connection.
+type RemoteConn struct {
+	// cancel stops the stream serving this connection.
+	cancel context.CancelFunc
+	// out carries the requests waiting to be sent to the redemption server.
+	out chan *hummingbird.RedeemAssetFromASRequest
+	// done is closed once the connection is no longer the active one.
+	done chan struct{}
+	once sync.Once // Used by close()
 }
 
-func NewRedemptionServerHandler(ia addr.IA, store *storage.MarketplaceStorage) *RedemptionServerHandler {
-	handler := &RedemptionServerHandler{
-		ia:                                ia,
-		remoteConnectionOpenChannel:       make(chan context.CancelFunc),
-		remoteConnectionOpenResultChannel: make(chan struct{}),
-		remoteConnectionCloseChannel:      make(chan struct{}),
-		requestInChannel:                  make(chan RedemptionRequest, redemptionChannelSize),
-		responseInChannel:                 make(chan *hummingbird.RedeemAssetFromASResponse, redemptionChannelSize),
-		delegationInChannel:               make(chan *RedemptionDelegationUpdate),
-		delegationOutChannel:              make(chan error),
-		requestOutChannel:                 make(chan *hummingbird.RedeemAssetFromASRequest, redemptionChannelSize),
-		store:                             store,
-	}
-	go handler.run(context.Background())
-	return handler
-}
-
-func (h *RedemptionServerHandler) QueueRedemptionRequest(req *hummingbird.RedeemAssetFromASRequest) <-chan *hummingbird.RedeemAssetFromASResponse {
-	replyChannel := make(chan *hummingbird.RedeemAssetFromASResponse, 1)
-	h.requestInChannel <- RedemptionRequest{
-		Request:      req,
-		ReplyChannel: replyChannel,
-	}
-	return replyChannel
-}
-
-func (h *RedemptionServerHandler) run(ctx context.Context) {
-	pending := make(map[uint64]chan *hummingbird.RedeemAssetFromASResponse)
-	currRequestID := uint64(0)
-	cancelAllPending := func() {
-		for _, replyChannel := range pending {
-			replyChannel <- &hummingbird.RedeemAssetFromASResponse{
-				Result: &hummingbird.RedeemAssetFromASResponse_Error{
-					Error: "Asset redemption currently not possible. Try again later.",
-				},
-			}
-			close(replyChannel)
+// close cancels the connection's stream and releases everyone waiting on it.
+// It is safe to call more than once.
+func (c *RemoteConn) close() {
+	c.once.Do(func() {
+		if c.cancel != nil {
+			c.cancel()
 		}
-		clear(pending)
-		close(h.requestOutChannel)
-		close(h.responseInChannel)
-		h.requestOutChannel = make(chan *hummingbird.RedeemAssetFromASRequest, redemptionChannelSize)
-		h.responseInChannel = make(chan *hummingbird.RedeemAssetFromASResponse, redemptionChannelSize)
-	}
-	log.Debug("run handler", "ia", h.ia)
-	for {
-		select {
-		case delegateRequest := <-h.delegationInChannel:
-			log.Debug("delegationInChannel")
-			err := h.applyRedemptionDelegationUpdate(ctx, delegateRequest)
-			if err != nil {
-				h.delegationOutChannel <- err
-			}
-			h.delegationOutChannel <- nil
-		case redemptionRequest := <-h.requestInChannel:
-			log.Debug("requestInChannel")
-			if h.localRedemptionService != nil && h.localRedemptionService.expiration.After(time.Now()) {
-				// we use redemption delegation
-				redemptionRequest.ReplyChannel <- h.localRedemptionService.Redeem(redemptionRequest.Request)
-			} else if h.remoteCancelF != nil {
-				// we use AS redemption server
-				currRequestID++
-				redemptionRequest.Request.RequestId = currRequestID
-				h.requestOutChannel <- redemptionRequest.Request
-				// the handler cannot resolve the request, we store it as pending and wait until the
-				// AS redemption server resolved it.
-				pending[currRequestID] = redemptionRequest.ReplyChannel
-			} else {
-				// no valid redemption delegation exists and no redemption service is connected
-				redemptionRequest.ReplyChannel <- &hummingbird.RedeemAssetFromASResponse{
-					Result: &hummingbird.RedeemAssetFromASResponse_Error{
-						Error: "Asset redemption currently not possible. Try again later.",
-					},
-				}
-				close(redemptionRequest.ReplyChannel)
-			}
-		case redemptionResponse := <-h.responseInChannel:
-			log.Debug("responseInChannel")
-			if ch, ok := pending[redemptionResponse.RequestId]; ok {
-				delete(pending, redemptionResponse.RequestId)
-				ch <- redemptionResponse
-				close(ch)
-			}
-		case cancelF := <-h.remoteConnectionOpenChannel:
-			log.Debug("remoteConnectionOpenChannel")
-			if h.remoteCancelF != nil {
-				// some other connection is alreay open for that AS.
-				// we first have to close the existing connection
-				h.remoteCancelF()
-				// now we just have to wait a moment until it reports closure
-				_ = <-h.remoteConnectionCloseChannel
-				cancelAllPending()
-			}
-			h.remoteCancelF = cancelF
-			h.remoteConnectionOpenResultChannel <- struct{}{}
-		case _ = <-h.remoteConnectionCloseChannel:
-			log.Debug("remoteConnectionCloseChannel")
-			if h.remoteCancelF != nil {
-				h.remoteCancelF()
-				h.remoteCancelF = nil
-			}
-			cancelAllPending()
-		}
+		close(c.done)
+	})
+}
+
+func NewRedemptionServerHandler(
+	ia addr.IA,
+	store *storage.MarketplaceStorage,
+) *RedemptionServerHandler {
+	return &RedemptionServerHandler{
+		ia:      ia,
+		store:   store,
+		pending: make(map[uint64]chan *hummingbird.RedeemAssetFromASResponse),
 	}
 }
 
-func (h *RedemptionServerHandler) applyRedemptionDelegationUpdate(ctx context.Context, state *RedemptionDelegationUpdate) error {
+func unavailableResponse() *hummingbird.RedeemAssetFromASResponse {
+	return &hummingbird.RedeemAssetFromASResponse{
+		Result: &hummingbird.RedeemAssetFromASResponse_Error{
+			Error: "Asset redemption currently not possible. Try again later.",
+		},
+	}
+}
+
+// QueueRedemptionRequest answers on the returned channel, which is buffered and
+// receives exactly one response, so that neither side of it can block.
+func (h *RedemptionServerHandler) QueueRedemptionRequest(
+	req *hummingbird.RedeemAssetFromASRequest,
+) <-chan *hummingbird.RedeemAssetFromASResponse {
+	replyCh := make(chan *hummingbird.RedeemAssetFromASResponse, 1)
+	answer := func(resp *hummingbird.RedeemAssetFromASResponse) {
+		replyCh <- resp
+		close(replyCh)
+	}
+
+	h.mu.Lock()
+	if h.local != nil && h.local.expiration.After(time.Now()) {
+		// The marketplace holds a delegation, so it redeems the asset itself.
+		// Redeem only touches memory, so the lock is held across it.
+		resp := h.local.Redeem(req)
+		h.mu.Unlock()
+		answer(resp)
+		return replyCh
+	}
+
+	// Using the AS redemption service.
+	conn := h.remote
+	if conn == nil {
+		h.mu.Unlock()
+		answer(unavailableResponse())
+		return replyCh
+	}
+
+	h.nextReqID++
+	id := h.nextReqID
+	req.RequestId = id
+	h.pending[id] = replyCh
+	h.mu.Unlock()
+
+	// The redemption server of the AS answers, which arrives through DeliverRedemptionResponse.
+	// Waiting on done means a connection that goes away while its queue is full,
+	// cannot block this caller forever.
+	select {
+	case conn.out <- req:
+	case <-conn.done:
+		h.failPending(id)
+	}
+	return replyCh
+}
+
+// DeliverRedemptionResponse hands a response of the AS redempt. srv. to whoever is waiting for it.
+// A response nobody waits for is dropped.
+func (h *RedemptionServerHandler) DeliverRedemptionResponse(
+	resp *hummingbird.RedeemAssetFromASResponse,
+) {
+	h.mu.Lock()
+	reply, found := h.pending[resp.RequestId]
+	delete(h.pending, resp.RequestId)
+	h.mu.Unlock()
+	if !found {
+		log.Debug("no request waiting for this redemption response",
+			"ia", h.ia, "request_id", resp.RequestId)
+		return
+	}
+	reply <- resp
+	close(reply)
+}
+
+func (h *RedemptionServerHandler) failPending(id uint64) {
+	h.mu.Lock()
+	reply, found := h.pending[id]
+	delete(h.pending, id)
+	h.mu.Unlock()
+	if found {
+		reply <- unavailableResponse()
+		close(reply)
+	}
+}
+
+// takePendingLocked empties the pending requests and returns them, so that they
+// can be answered without holding the lock.
+// The caller must hold mu.
+func (h *RedemptionServerHandler) takePendingLocked() (
+	stale map[uint64]chan *hummingbird.RedeemAssetFromASResponse,
+) {
+	if len(h.pending) == 0 {
+		return nil
+	}
+	stale = h.pending
+	h.pending = make(map[uint64]chan *hummingbird.RedeemAssetFromASResponse)
+	return stale
+}
+
+func failAll(pending map[uint64]chan *hummingbird.RedeemAssetFromASResponse) {
+	for _, reply := range pending {
+		reply <- unavailableResponse()
+		close(reply)
+	}
+}
+
+// AttachRemote makes a newly connected redemption server the one this handler routes to,
+// closing whichever connection was there before.
+// Cancelling the returned connection stops the stream that serves it.
+func (h *RedemptionServerHandler) AttachRemote(cancel context.CancelFunc) *RemoteConn {
+	conn := &RemoteConn{
+		cancel: cancel,
+		out:    make(chan *hummingbird.RedeemAssetFromASRequest, redemptionChannelSize),
+		done:   make(chan struct{}),
+	}
+	h.mu.Lock()
+	previous := h.remote
+	h.remote = conn
+	// The requests already handed to the previous connection will never be answered,
+	// because only that connection knows their request ids.
+	stale := h.takePendingLocked()
+	h.mu.Unlock()
+
+	if previous != nil {
+		log.Debug("replacing an open redemption server connection", "ia", h.ia)
+		previous.close()
+	}
+	failAll(stale)
+	return conn
+}
+
+// DetachRemote stops routing to conn, if it is still the connection this handler routes to.
+// A connection that has already been replaced leaves the newer one alone.
+func (h *RedemptionServerHandler) DetachRemote(conn *RemoteConn) {
+	h.mu.Lock()
+	var stale map[uint64]chan *hummingbird.RedeemAssetFromASResponse
+	if h.remote == conn {
+		h.remote = nil
+		stale = h.takePendingLocked()
+	}
+	h.mu.Unlock()
+	conn.close()
+	failAll(stale)
+}
+
+// CloseRedemptionServerConnection closes the connection of the redemption server of this AS,
+// if one is open. The stream serving it ends on its own once its context is cancelled.
+func (h *RedemptionServerHandler) CloseRedemptionServerConnection() {
+	h.mu.Lock()
+	conn := h.remote
+	h.remote = nil
+	stale := h.takePendingLocked()
+	h.mu.Unlock()
+	if conn != nil {
+		conn.close()
+	}
+	failAll(stale)
+}
+
+// ApplyDelegation stores a redemption delegation of this AS and starts using it.
+// The database work and the validation happen outside the lock, so that only
+// installing the result is serialized against the redemption requests.
+func (h *RedemptionServerHandler) ApplyDelegation(
+	ctx context.Context,
+	state *RedemptionDelegationUpdate,
+) error {
 	dbDelegation := &db.RedemptionDelegation{
 		IA:         h.ia,
 		Expiration: state.ExpirationTime,
@@ -194,15 +278,10 @@ func (h *RedemptionServerHandler) applyRedemptionDelegationUpdate(ctx context.Co
 	if err != nil {
 		return err
 	}
-	h.localRedemptionService = service
+	h.mu.Lock()
+	h.local = service
+	h.mu.Unlock()
 	return nil
-}
-
-// CloseRedemptionServerConnection tells the handler to tell the redemption server
-// to close the connection and waits for closure.
-func (h *RedemptionServerHandler) CloseRedemptionServerConnection() {
-	h.remoteConnectionOpenChannel <- nil
-	_ = <-h.remoteConnectionCloseChannel
 }
 
 func (s *Service) RedeemASAsset(
@@ -218,29 +297,21 @@ func (s *Service) RedeemASAsset(
 	cancelCtx, cancelF := context.WithCancel(ctx)
 	handler := s.FindRedemptionServerHandler(clientID)
 	log.Debug("AS redemption server connected", "ia", clientID)
-	handler.remoteConnectionOpenChannel <- cancelF
-	_ = <-handler.remoteConnectionOpenResultChannel
+	conn := handler.AttachRemote(cancelF)
 	defer func() {
-		// Stop the sender before waiting for the handler to acknowledge the
-		// closure, so that it cannot outlive this call.
-		cancelF()
 		log.Debug("AS redemption server disconnected", "ia", clientID)
-		handler.remoteConnectionCloseChannel <- struct{}{}
+		// Stops routing to this connection and releases the sender below.
+		handler.DetachRemote(conn)
 	}()
 
-	// One goroutine to send responses back to the AS.
-	// This goroutine can be stopped at any time with cancelCtx.
+	// One goroutine to send the requests to the AS. It only waits on channels,
+	// which is what cancelCtx can interrupt.
 	go func() {
 		for {
 			select {
 			case <-cancelCtx.Done():
 				return
-			case req := <-handler.requestOutChannel:
-				if req == nil {
-					// The handler stopped routing requests to this connection.
-					log.Debug("send channel closed", "ia", clientID)
-					return
-				}
+			case req := <-conn.out:
 				if err := stream.Send(req); err != nil {
 					// The connection is broken, so the receive below fails too,
 					// and tears the stream down.
@@ -260,28 +331,26 @@ func (s *Service) RedeemASAsset(
 			log.Debug("Receive error", "err", err)
 			return nil
 		}
-		select {
-		case handler.responseInChannel <- msg:
-		default:
-			log.Debug("response from redemption server dropped due to full queue.")
-		}
+		handler.DeliverRedemptionResponse(msg)
 	}
 }
 
-func (s *Service) DelegateRedemption(ctx context.Context, req *connect.Request[hummingbird.DelegateRedemptionRequest]) (*connect.Response[hummingbird.DelegateRedemptionResponse], error) {
+func (s *Service) DelegateRedemption(
+	ctx context.Context,
+	req *connect.Request[hummingbird.DelegateRedemptionRequest],
+) (*connect.Response[hummingbird.DelegateRedemptionResponse], error) {
 	clientID, ok := ctx.Value("user").(addr.IA)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
 	}
 	handler := s.FindRedemptionServerHandler(clientID)
-	handler.delegationInChannel <- &RedemptionDelegationUpdate{
+	err := handler.ApplyDelegation(ctx, &RedemptionDelegationUpdate{
 		ExpirationTime: req.Msg.ExpirationTime.AsTime(),
 		IdLimitLow:     req.Msg.ReservationIdLowerBound,
 		IdLimitHigh:    req.Msg.ReservationIdUpperBound,
 		Key:            req.Msg.Key,
 		EncodingPoints: req.Msg.EncodingPoints,
-	}
-	err := <-handler.delegationOutChannel
+	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
