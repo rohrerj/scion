@@ -29,3 +29,22 @@ func (s *RedemptionService) EncodeBandwidth(bw uint32) uint16 {
 func (c *RemoteConn) Out() <-chan *hummingbird.RedeemAssetFromASRequest {
 	return c.out
 }
+
+// QueueLen exposes how many requests are waiting in a connection's queue, so that a
+// test can wait until it is full and the next hand-over is certain to block.
+func (c *RemoteConn) QueueLen() int {
+	return len(c.out)
+}
+
+// QueueCap exposes the capacity of a connection's queue.
+func (c *RemoteConn) QueueCap() int {
+	return cap(c.out)
+}
+
+// PendingLen exposes how many requests are waiting for an answer, so that a test can
+// wait until a request has really been registered and is parked in the hand-over.
+func (h *RedemptionServerHandler) PendingLen() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.pending)
+}

@@ -30,6 +30,11 @@ import (
 
 const redemptionChannelSize = 128
 
+// redemptionTimeout bounds how long a client waits for the redemption service of
+// an AS to answer. It is a deadline on top of the request context, so a client
+// that disconnects earlier is noticed immediately.
+const redemptionTimeout = 30 * time.Second
+
 // RedemptionServerHandler routes the redemption requests of one AS,
 // either to a redemption delegation held by the marketplace,
 // or to the redemption server that the AS runs itself and connects over RedeemASAsset.
@@ -98,50 +103,62 @@ func unavailableResponse() *hummingbird.RedeemAssetFromASResponse {
 	}
 }
 
-// QueueRedemptionRequest answers on the returned channel, which is buffered and
-// receives exactly one response, so that neither side of it can block.
-func (h *RedemptionServerHandler) QueueRedemptionRequest(
+// Redeem asks the redemption service of this AS for a reservation and waits for
+// the answer. It returns ctx.Err() if the caller gives up before the answer arrives,
+// which also stops this request from occupying a slot in the pending requests.
+// Cancelling ctx abandons only this request: the stream to the redemption server is
+// shared by every request of this AS, and its lifetime belongs to RedeemASAsset.
+func (h *RedemptionServerHandler) Redeem(
+	ctx context.Context,
 	req *hummingbird.RedeemAssetFromASRequest,
-) <-chan *hummingbird.RedeemAssetFromASResponse {
-	replyCh := make(chan *hummingbird.RedeemAssetFromASResponse, 1)
-	answer := func(resp *hummingbird.RedeemAssetFromASResponse) {
-		replyCh <- resp
-		close(replyCh)
-	}
-
+) (*hummingbird.RedeemAssetFromASResponse, error) {
 	h.mu.Lock()
 	if h.local != nil && h.local.expiration.After(time.Now()) {
 		// The marketplace holds a delegation, so it redeems the asset itself.
 		// Redeem only touches memory, so the lock is held across it.
 		resp := h.local.Redeem(req)
 		h.mu.Unlock()
-		answer(resp)
-		return replyCh
+		return resp, nil
 	}
 
 	// Using the AS redemption service.
 	conn := h.remote
 	if conn == nil {
 		h.mu.Unlock()
-		answer(unavailableResponse())
-		return replyCh
+		return unavailableResponse(), nil
 	}
 
 	h.nextReqID++
 	id := h.nextReqID
 	req.RequestId = id
+	// Buffered, so that DeliverRedemptionResponse never blocks on a reply channel
+	// whose reader has given up in the meantime.
+	replyCh := make(chan *hummingbird.RedeemAssetFromASResponse, 1)
 	h.pending[id] = replyCh
 	h.mu.Unlock()
 
-	// The redemption server of the AS answers, which arrives through DeliverRedemptionResponse.
-	// Waiting on done means a connection that goes away while its queue is full,
-	// cannot block this caller forever.
+	// Hand the request over to the connection. Waiting on done means a connection
+	// that goes away while its queue is full cannot block this caller forever.
 	select {
 	case conn.out <- req:
 	case <-conn.done:
-		h.failPending(id)
+		h.dropPending(id)
+		return unavailableResponse(), nil
+	case <-ctx.Done():
+		h.dropPending(id)
+		return nil, ctx.Err()
 	}
-	return replyCh
+
+	// The redemption server of the AS answers, which arrives through
+	// DeliverRedemptionResponse. A connection that goes away answers the pending
+	// requests itself, through DetachRemote, so done needs no case of its own here.
+	select {
+	case resp := <-replyCh:
+		return resp, nil
+	case <-ctx.Done():
+		h.dropPending(id)
+		return nil, ctx.Err()
+	}
 }
 
 // DeliverRedemptionResponse hands a response of the AS redempt. srv. to whoever is waiting for it.
@@ -162,15 +179,11 @@ func (h *RedemptionServerHandler) DeliverRedemptionResponse(
 	close(reply)
 }
 
-func (h *RedemptionServerHandler) failPending(id uint64) {
+// dropPending forgets a request without answering it, for when its caller is gone.
+func (h *RedemptionServerHandler) dropPending(id uint64) {
 	h.mu.Lock()
-	reply, found := h.pending[id]
 	delete(h.pending, id)
 	h.mu.Unlock()
-	if found {
-		reply <- unavailableResponse()
-		close(reply)
-	}
 }
 
 // takePendingLocked empties the pending requests and returns them, so that they

@@ -15,6 +15,8 @@
 package marketplace_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -26,30 +28,32 @@ import (
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 )
 
-// TestQueueRedemptionRequestWithoutRedemptionServer checks that without a delegation
-// and without a connected redemption server, the request is refused.
-func TestQueueRedemptionRequestWithoutRedemptionServer(t *testing.T) {
+// TestRedeemWithoutRedemptionServer checks that without a delegation and without a
+// connected redemption server, the request is refused.
+func TestRedeemWithoutRedemptionServer(t *testing.T) {
 	h := newHandler()
-	resp := waitForResponse(t, h.QueueRedemptionRequest(&hummingbird.RedeemAssetFromASRequest{}))
+	resp, err := h.Redeem(context.Background(), &hummingbird.RedeemAssetFromASRequest{})
+	require.NoError(t, err)
 	assert.NotEmpty(t, resp.GetError())
 }
 
-// TestQueueRedemptionRequestReachesTheRedemptionServer checks that with a non-delegated,
-// AS redemption server connected to the service, a request is queued and stays unanswered
-// until that server replies with the matching request id.
-func TestQueueRedemptionRequestReachesTheRedemptionServer(t *testing.T) {
+// TestRedeemReachesTheRedemptionServer checks that with a non-delegated AS redemption
+// server connected, the request is queued and stays unanswered until that server
+// replies with the matching request id.
+func TestRedeemReachesTheRedemptionServer(t *testing.T) {
 	h := newHandler()
 	conn := h.AttachRemote(func() {})
 
-	reply := h.QueueRedemptionRequest(&hummingbird.RedeemAssetFromASRequest{Bandwidth: 100})
+	pending := redeemInBackground(t, h, context.Background(),
+		&hummingbird.RedeemAssetFromASRequest{Bandwidth: 100})
 	req := waitForRequest(t, conn)
 	assert.NotZero(t, req.RequestId, "the handler must assign a request id to correlate the reply")
 	assert.Equal(t, uint32(100), req.Bandwidth)
 
 	select {
-	case <-reply:
+	case <-pending:
 		t.Fatal("the request was answered before the redemption server replied")
-	default:
+	case <-time.After(50 * time.Millisecond):
 	}
 
 	h.DeliverRedemptionResponse(&hummingbird.RedeemAssetFromASResponse{
@@ -58,46 +62,108 @@ func TestQueueRedemptionRequestReachesTheRedemptionServer(t *testing.T) {
 			ResInfo: &hummingbird.ReservationInfo{ReservationId: 7},
 		},
 	})
-	resp := waitForResponse(t, reply)
+	resp, err := waitForResult(t, pending)
+	require.NoError(t, err)
 	assert.Equal(t, uint32(7), resp.GetResInfo().GetReservationId())
 }
 
-// TestDeliverUnknownRedemptionResponse checks that a response nobody is waiting for
-// is dropped rather than blocking the caller.
+// TestDeliverUnknownRedemptionResponse checks that a response nobody is waiting for is
+// dropped rather than blocking the caller.
 func TestDeliverUnknownRedemptionResponse(t *testing.T) {
 	h := newHandler()
 	h.DeliverRedemptionResponse(&hummingbird.RedeemAssetFromASResponse{RequestId: 42})
 }
 
-// TestDetachRemoteRefusesPendingRequests checks that when the AS redemption server disconnects,
-// the requests it didn't answered yet are refused.
+// TestRedeemCancelledWhileWaiting checks that a caller which gives up before the
+// redemption server answers gets its context error, and that the abandoned request no
+// longer occupies a slot: a later response for it is simply unknown.
+func TestRedeemCancelledWhileWaiting(t *testing.T) {
+	h := newHandler()
+	conn := h.AttachRemote(func() {})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	pending := redeemInBackground(t, h, ctx, &hummingbird.RedeemAssetFromASRequest{})
+	req := waitForRequest(t, conn)
+
+	cancel()
+	_, err := waitForResult(t, pending)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled), "expected the context error, got %v", err)
+
+	// The request was dropped, so its late answer belongs to nobody. Delivering it
+	// must not block or panic.
+	h.DeliverRedemptionResponse(&hummingbird.RedeemAssetFromASResponse{RequestId: req.RequestId})
+
+	// A cancelled request must not disturb the next one.
+	next := redeemInBackground(t, h, context.Background(), &hummingbird.RedeemAssetFromASRequest{})
+	nextReq := waitForRequest(t, conn)
+	assert.NotEqual(t, req.RequestId, nextReq.RequestId, "request ids must not be reused")
+	h.DeliverRedemptionResponse(&hummingbird.RedeemAssetFromASResponse{
+		RequestId: nextReq.RequestId,
+		Result: &hummingbird.RedeemAssetFromASResponse_ResInfo{
+			ResInfo: &hummingbird.ReservationInfo{ReservationId: 9},
+		},
+	})
+	resp, err := waitForResult(t, next)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(9), resp.GetResInfo().GetReservationId())
+}
+
+// TestRedeemWithAnAlreadyCancelledContext checks that a caller that has already given
+// up does not get its request handed to the redemption server.
+func TestRedeemWithAnAlreadyCancelledContext(t *testing.T) {
+	h := newHandler()
+	conn := h.AttachRemote(func() {})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := h.Redeem(ctx, &hummingbird.RedeemAssetFromASRequest{})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled), "expected the context error, got %v", err)
+
+	// Either the hand-over lost the race with the cancellation, or the request was
+	// queued and then abandoned. Either way nothing must be waiting for an answer.
+	select {
+	case <-conn.Out():
+	default:
+	}
+}
+
+// TestDetachRemoteRefusesPendingRequests checks that when the AS redemption server
+// disconnects, the requests it has not answered yet are refused.
 func TestDetachRemoteRefusesPendingRequests(t *testing.T) {
 	h := newHandler()
 	conn := h.AttachRemote(func() {})
-	reply := h.QueueRedemptionRequest(&hummingbird.RedeemAssetFromASRequest{})
+	pending := redeemInBackground(t, h, context.Background(),
+		&hummingbird.RedeemAssetFromASRequest{})
 	waitForRequest(t, conn)
 
 	h.DetachRemote(conn)
-	assert.NotEmpty(t, waitForResponse(t, reply).GetError())
+	resp, err := waitForResult(t, pending)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.GetError())
 
 	// With nothing connected any more, later requests are refused too.
-	assert.NotEmpty(t,
-		waitForResponse(t, h.QueueRedemptionRequest(&hummingbird.RedeemAssetFromASRequest{})).GetError())
+	resp, err = h.Redeem(context.Background(), &hummingbird.RedeemAssetFromASRequest{})
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.GetError())
 }
 
-// TestAttachRemoteReplacesTheOpenConnection checks that a reconnecting redemption server
-// replaces the open connection:
-// The requests of the old one are refused, and detaching the old stale connection afterwards
-// must leave the new one in place.
+// TestAttachRemoteReplacesTheOpenConnection checks that a reconnecting redemption
+// server replaces the open connection: the requests of the old one are refused, and
+// detaching that now stale connection afterwards leaves the new one in place.
 func TestAttachRemoteReplacesTheOpenConnection(t *testing.T) {
 	h := newHandler()
 	firstCancelled := make(chan struct{})
 	first := h.AttachRemote(func() { close(firstCancelled) })
-	reply := h.QueueRedemptionRequest(&hummingbird.RedeemAssetFromASRequest{})
+	pending := redeemInBackground(t, h, context.Background(),
+		&hummingbird.RedeemAssetFromASRequest{})
 	waitForRequest(t, first)
 
 	second := h.AttachRemote(func() {})
-	assert.NotEmpty(t, waitForResponse(t, reply).GetError(),
+	resp, err := waitForResult(t, pending)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.GetError(),
 		"a request handed to the replaced connection can never be answered")
 	select {
 	case <-firstCancelled:
@@ -107,17 +173,19 @@ func TestAttachRemoteReplacesTheOpenConnection(t *testing.T) {
 
 	// The stale connection must not detach the one that replaced it.
 	h.DetachRemote(first)
-	h.QueueRedemptionRequest(&hummingbird.RedeemAssetFromASRequest{})
+	redeemInBackground(t, h, context.Background(), &hummingbird.RedeemAssetFromASRequest{})
 	waitForRequest(t, second)
 }
 
-// TestCloseRedemptionServerConnection checks that CloseRedemptionServerConnection does not
-// deadlock against the handler. It must return, and cancel the stream serving the connection.
+// TestCloseRedemptionServerConnection checks that CloseRedemptionServerConnection does
+// not deadlock against the handler. It must return, and cancel the stream serving the
+// connection.
 func TestCloseRedemptionServerConnection(t *testing.T) {
 	h := newHandler()
 	cancelled := make(chan struct{})
 	conn := h.AttachRemote(func() { close(cancelled) })
-	reply := h.QueueRedemptionRequest(&hummingbird.RedeemAssetFromASRequest{})
+	pending := redeemInBackground(t, h, context.Background(),
+		&hummingbird.RedeemAssetFromASRequest{})
 	waitForRequest(t, conn)
 
 	returned := make(chan struct{})
@@ -136,43 +204,108 @@ func TestCloseRedemptionServerConnection(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the connection was not cancelled")
 	}
-	assert.NotEmpty(t, waitForResponse(t, reply).GetError())
+	resp, err := waitForResult(t, pending)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.GetError())
 
 	// Closing again, and detaching the closed connection, must both be harmless.
 	h.CloseRedemptionServerConnection()
 	h.DetachRemote(conn)
 }
 
-// TestQueueRedemptionRequestOnAFullQueueOfAClosingConnection checks that a request
-// handed over while the connection is going away, is refused once the queue is full.
-func TestQueueRedemptionRequestOnAFullQueueOfAClosingConnection(t *testing.T) {
+// TestRedeemOnAFullQueueOfAClosingConnection checks that a request waiting to be handed
+// over is released when the connection goes away, instead of blocking its caller.
+func TestRedeemOnAFullQueueOfAClosingConnection(t *testing.T) {
 	h := newHandler()
 	conn := h.AttachRemote(func() {})
-	// Fill the queue without draining it, so that the next hand-over blocks.
-	for i := 0; i < 128; i++ {
-		h.QueueRedemptionRequest(&hummingbird.RedeemAssetFromASRequest{})
-	}
-	blocked := make(chan *hummingbird.RedeemAssetFromASResponse, 1)
-	go func() {
-		blocked <- waitForResponse(t, h.QueueRedemptionRequest(
-			&hummingbird.RedeemAssetFromASRequest{}))
-	}()
+	fillQueue(t, h, conn)
+	blocked := redeemInBackground(t, h, context.Background(),
+		&hummingbird.RedeemAssetFromASRequest{})
+	waitForPending(t, h, conn.QueueCap()+1)
+
 	// Nothing drains the queue, so the hand-over is still waiting. Detaching the
 	// connection has to release it.
 	h.DetachRemote(conn)
-	select {
-	case resp := <-blocked:
-		assert.NotEmpty(t, resp.GetError())
-	case <-time.After(5 * time.Second):
-		t.Fatal("a request waiting on a full queue was not released by the detach")
+	resp, err := waitForResult(t, blocked)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.GetError())
+}
+
+// TestRedeemOnAFullQueueHonoursCancellation checks that the hand-over itself, not only
+// the wait for the answer, gives up with the caller.
+func TestRedeemOnAFullQueueHonoursCancellation(t *testing.T) {
+	h := newHandler()
+	conn := h.AttachRemote(func() {})
+	fillQueue(t, h, conn)
+	ctx, cancel := context.WithCancel(context.Background())
+	blocked := redeemInBackground(t, h, ctx, &hummingbird.RedeemAssetFromASRequest{})
+	// The queue is full, so this request is waiting in the hand-over select.
+	waitForPending(t, h, conn.QueueCap()+1)
+	cancel()
+	_, err := waitForResult(t, blocked)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled), "expected the context error, got %v", err)
+}
+
+// fillQueue leaves the queue of conn full, so that the next hand-over is certain to
+// block. Spawning the requests is not enough: their goroutines may not have run yet.
+func fillQueue(
+	t *testing.T,
+	h *marketplace.RedemptionServerHandler,
+	conn *marketplace.RemoteConn,
+) {
+	t.Helper()
+	for i := 0; i < conn.QueueCap(); i++ {
+		redeemInBackground(t, h, context.Background(), &hummingbird.RedeemAssetFromASRequest{})
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for conn.QueueLen() < conn.QueueCap() {
+		if time.Now().After(deadline) {
+			t.Fatalf("the queue never filled up: %d of %d", conn.QueueLen(), conn.QueueCap())
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
-// newHandler builds a handler without a store. Only ApplyDelegation reaches the
-// store, and these tests exercise the routing towards the redemption server of
-// the AS instead.
+// waitForPending waits until n requests are registered as waiting for an answer.
+func waitForPending(t *testing.T, h *marketplace.RedemptionServerHandler, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for h.PendingLen() < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d of %d requests were registered", h.PendingLen(), n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// newHandler builds a handler without a store. Only ApplyDelegation reaches the store,
+// and these tests exercise the routing towards the redemption server of the AS instead.
 func newHandler() *marketplace.RedemptionServerHandler {
 	return marketplace.NewRedemptionServerHandler(addr.MustParseIA("1-ff00:0:110"), nil)
+}
+
+// redemptionResult is what one Redeem call returned.
+type redemptionResult struct {
+	resp *hummingbird.RedeemAssetFromASResponse
+	err  error
+}
+
+// redeemInBackground calls Redeem, which blocks until the request is answered, from a
+// goroutine, so that the test can meanwhile act as the redemption server.
+func redeemInBackground(
+	t *testing.T,
+	h *marketplace.RedemptionServerHandler,
+	ctx context.Context,
+	req *hummingbird.RedeemAssetFromASRequest,
+) <-chan redemptionResult {
+	t.Helper()
+	done := make(chan redemptionResult, 1)
+	go func() {
+		resp, err := h.Redeem(ctx, req)
+		done <- redemptionResult{resp: resp, err: err}
+	}()
+	return done
 }
 
 // waitForRequest returns the request the handler routed to a connection.
@@ -191,17 +324,16 @@ func waitForRequest(
 	}
 }
 
-func waitForResponse(
+func waitForResult(
 	t *testing.T,
-	reply <-chan *hummingbird.RedeemAssetFromASResponse,
-) *hummingbird.RedeemAssetFromASResponse {
+	done <-chan redemptionResult,
+) (*hummingbird.RedeemAssetFromASResponse, error) {
 	t.Helper()
 	select {
-	case resp := <-reply:
-		require.NotNil(t, resp)
-		return resp
+	case res := <-done:
+		return res.resp, res.err
 	case <-time.After(5 * time.Second):
-		t.Fatal("the request was never answered")
-		return nil
+		t.Fatal("Redeem never returned")
+		return nil, nil
 	}
 }
