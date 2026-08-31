@@ -20,7 +20,6 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -39,7 +38,7 @@ import (
 	"github.com/scionproto/scion/pkg/daemon"
 	"github.com/scionproto/scion/pkg/daemon/types"
 	humm "github.com/scionproto/scion/pkg/hummingbird"
-	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/pkg/hummingbird/marketplace"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	hbirdv1 "github.com/scionproto/scion/pkg/proto/hbird/v1"
 	hbirdv1connect "github.com/scionproto/scion/pkg/proto/hbird/v1/hbirdconnect"
@@ -508,23 +507,8 @@ func FilterPathByHummingbirdSupport(p snet.Path) ([]path.BaseHop, error) {
 	return supportingASes, nil
 }
 
+// supportsHumm reports whether the AS that wrote this note sells reservations, which it
+// does by advertising at least one marketplace that can be reached.
 func supportsHumm(note string) bool {
-	// The received JSON will have at least these fields:
-	// "hummingbird-v0": {
-	//     "supported": true
-	// }
-	type hummPayload struct {
-		HummingbirdV0 *struct {
-			Supported *bool `json:"supported"`
-		} `json:"hummingbird-v0"`
-	}
-	var payload hummPayload
-	if err := json.Unmarshal([]byte(note), &payload); err != nil {
-		log.Debug("hummingbird Reservation: failed to parse hummingbird note",
-			"note", note, "err", err)
-		return false
-	}
-	return payload.HummingbirdV0 != nil &&
-		payload.HummingbirdV0.Supported != nil &&
-		*payload.HummingbirdV0.Supported
+	return len(marketplace.ParseNote(note).WithAPI()) > 0
 }

@@ -53,22 +53,62 @@ import (
 // TestSupportsHumm checks that the note parser recognizes the minimal
 // Hummingbird capability advertisement in the path metadata JSON blob.
 func TestSupportsHumm(t *testing.T) {
-	example := `
-	{
-			"hummingbird-v0": {
-					"supported": true,
-					"min-cost": 102,
-					"min-bw": 14,
-					"max-bw": 14,
-					"markets": {
-							"market1": "https://example.com/api/v0/info",
-							"market2": "https://www.example.net/info",
-							"brokerA": "https://example.org/api/v0/exchange"
+	testCases := map[string]struct {
+		note     string
+		expected bool
+	}{
+		"a marketplace over SCION": {
+			note: `{
+				"hummingbird": [
+					{
+						"name": "SCIONCreditCardMarketplace",
+						"api_protocol": "connectrpc/TLS/QUIC/SCION",
+						"api_address": "[1-ff00:0:110,192.0.2.1]:80",
+						"client_registration_website": "https://www.centralized.org"
 					}
-			}
-	}`
-	got := supportsHumm(example)
-	require.True(t, got)
+				]
+			}`,
+			expected: true,
+		},
+		"several marketplaces": {
+			note: `{
+				"hummingbird": [
+					{"api_protocol": "connectrpc/TLS/QUIC/SCION", "api_address": "[1-ff00:0:110,192.0.2.1]:80"},
+					{"api_protocol": "connectrpc/TLS/TCP", "api_address": "https://example.org:443"}
+				]
+			}`,
+			expected: true,
+		},
+		"an entry without an address is not reachable": {
+			note:     `{"hummingbird": [{"api_protocol": "connectrpc/TLS/TCP", "name": "no address"}]}`,
+			expected: false,
+		},
+		"an empty list advertises nothing": {
+			note:     `{"hummingbird": []}`,
+			expected: false,
+		},
+		"a note about something else": {
+			note:     `{"latency": {"inter": 100}}`,
+			expected: false,
+		},
+		"the superseded hummingbird-v0 capability flag": {
+			note:     `{"hummingbird-v0": {"supported": true}}`,
+			expected: false,
+		},
+		"an empty note": {
+			note:     "",
+			expected: false,
+		},
+		"a note that is not JSON": {
+			note:     "not json at all",
+			expected: false,
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tc.expected, supportsHumm(tc.note))
+		})
+	}
 }
 
 // TestRedeemHopWithPreviousRequestNoRequest checks the early-return case:

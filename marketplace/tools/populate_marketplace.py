@@ -12,7 +12,7 @@ are owned by the main account of that user.
 
 Example JSON file:
 {
-    "version": "390412f2780897af26f11debb387aed30a2e52eefcca33d9fc204b9f1217011b",
+    "version": "ed2a98d8b4293e3572981790d28037e7a6cdbd0a2ecde3398eec3ec4e521d502",
     "users": [
         {
             "name": "Alice",
@@ -44,6 +44,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 1
@@ -56,6 +57,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 2
@@ -68,6 +70,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "egress": 1
@@ -80,6 +83,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "egress": 2
@@ -92,6 +96,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 1,
@@ -105,6 +110,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 2,
@@ -118,6 +124,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 0,
@@ -131,6 +138,7 @@ Example JSON file:
             "price": 1,
             "time_granularity": 5,
             "time_min_duration": 5,
+            "time_max_duration": 3600,
             "starts_at": "2026-01-01T00:00:00Z",
             "stops_at": "2027-01-01T00:00:00Z",
             "ingress": 0,
@@ -154,7 +162,8 @@ Example JSON file:
     "delegations": [
         {
             "ia": "1-ff00:0:110",
-            "res_id_limit": 100000,
+            "res_id_limit_low": 0,
+            "res_id_limit_high": 100000,
             "expiration": "2027-01-01T00:00:00Z",
             "paid_until": "2027-01-01T00:00:00Z",
             "key": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",

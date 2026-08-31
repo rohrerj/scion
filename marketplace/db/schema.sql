@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS Assets(
     price INTEGER NOT NULL,
     time_granularity INTEGER NOT NULL,
     time_min_duration INTEGER NOT NULL,
+    time_max_duration INTEGER NOT NULL,
     starts_at TEXT NOT NULL,
     stops_at TEXT NOT NULL,
     ingress INTEGER,
@@ -67,7 +68,8 @@ CREATE TABLE IF NOT EXISTS Ases(
 CREATE TABLE IF NOT EXISTS Redemption_Delegations(
     isd_id INTEGER NOT NULL,
     as_id INTEGER NOT NULL,
-    res_id_limit INTEGER NOT NULL,
+    res_id_limit_low INTEGER NOT NULL DEFAULT 0,
+    res_id_limit_high INTEGER NOT NULL,
     expiration TEXT NOT NULL CHECK (expiration <= paid_until),
     paid_until TEXT NOT NULL,
     key BLOB NOT NULL,
@@ -75,3 +77,16 @@ CREATE TABLE IF NOT EXISTS Redemption_Delegations(
     PRIMARY KEY(isd_id, as_id)
 );
 CREATE INDEX IF NOT EXISTS idx_redemption_expiration ON Redemption_Delegations(expiration);
+CREATE TABLE IF NOT EXISTS Asset_Events(
+    isd_id INTEGER NOT NULL,
+    as_id INTEGER NOT NULL,
+    ingress INTEGER,
+    egress INTEGER,
+    bandwidth INTEGER NOT NULL,
+    starts_at TEXT NOT NULL,
+    stops_at TEXT NOT NULL,
+    price INTEGER NOT NULL,
+    event_type INTEGER NOT NULL,
+    event_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_asset_events ON Asset_Events(event_type, isd_id, as_id, stops_at, starts_at);

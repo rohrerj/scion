@@ -85,6 +85,16 @@ class MarketplaceError(Exception):
     """An error that aborts the marketplace setup with a message."""
 
 
+class AssetEvent:
+    """The event types of the Asset_Events table.
+
+    The values are the ones the marketplace writes, see AssetEventType in
+    marketplace/db/types.go.
+    """
+    PUBLISHED = 0
+    BOUGHT = 1
+
+
 # The config of the marketplace, as a template rather than a dict, so that
 # setup_marketplace.py can tell an unchanged file from a locally edited one.
 MARKETPLACE_TOML = """[general]
@@ -148,18 +158,21 @@ def marketplaceEntries(ia, endpoints: Endpoints):
     same mux as the TCP API, so both live on the API port.
     """
     website = "https://%s" % hostPort(endpoints.host, endpoints.api_port)
+    # The keys are the ones of the Hummingbird APIs document, see the marketplace
+    # address block of "Client <-> Marketplace".
     return [
         {
             "name": "Test Market",
-            "protocol": "connectrpc/TLS/QUIC/SCION",
-            "api": "[%s,%s]:%d" % (ISD_AS(str(ia)), endpoints.host, endpoints.scion_port),
-            "website": website,
+            "api_protocol": "connectrpc/TLS/QUIC/SCION",
+            "api_address": "[%s,%s]:%d" % (
+                ISD_AS(str(ia)), endpoints.host, endpoints.scion_port),
+            "client_registration_website": website,
         },
         {
             "name": "Test Market",
-            "protocol": "connectrpc/TLS/TCP",
-            "api": website,
-            "website": website,
+            "api_protocol": "connectrpc/TLS/TCP",
+            "api_address": website,
+            "client_registration_website": website,
         },
     ]
 
@@ -202,9 +215,9 @@ def mergeEntries(existing, entries):
     merged = [e for e in existing if isinstance(e, dict)]
     changed = len(merged) != len(existing)
     for entry in entries:
-        key = (entry["name"], entry["protocol"])
+        key = (entry["name"], entry["api_protocol"])
         for i, old in enumerate(merged):
-            if (old.get("name"), old.get("protocol")) == key:
+            if (old.get("name"), old.get("api_protocol")) == key:
                 if old != entry:
                     merged[i] = entry
                     changed = True
@@ -316,8 +329,10 @@ DEFAULT_ASSET_BANDWIDTH_MAX = 1000000
 DEFAULT_ASSET_PRICE = 1
 DEFAULT_ASSET_TIME_GRANULARITY = 10
 DEFAULT_ASSET_TIME_MIN_DURATION = 10
+DEFAULT_ASSET_TIME_MAX_DURATION = 60*60*24
 DEFAULT_ASSET_DURATION = timedelta(days=100)
-DEFAULT_DELEGATION_RES_ID_LIMIT = 1000
+DEFAULT_DELEGATION_RES_ID_LIMIT_LOW = 0
+DEFAULT_DELEGATION_RES_ID_LIMIT_HIGH = 1000
 
 # The flyover carries the bandwidth as a 10 bit codepoint into the points
 # published by the AS, so there is one point per codepoint. The values must be
@@ -432,6 +447,7 @@ def defaultEntries(gen_dir, now=None):
             "price": DEFAULT_ASSET_PRICE,
             "time_granularity": DEFAULT_ASSET_TIME_GRANULARITY,
             "time_min_duration": DEFAULT_ASSET_TIME_MIN_DURATION,
+            "time_max_duration": DEFAULT_ASSET_TIME_MAX_DURATION,
             "starts_at": startsAt,
             "stops_at": stopsAt,
             "ingress": ingress,
@@ -460,7 +476,8 @@ def defaultEntries(gen_dir, now=None):
         "delegations": [
             {
                 "ia": ia,
-                "res_id_limit": DEFAULT_DELEGATION_RES_ID_LIMIT,
+                "res_id_limit_low": DEFAULT_DELEGATION_RES_ID_LIMIT_LOW,
+                "res_id_limit_high": DEFAULT_DELEGATION_RES_ID_LIMIT_HIGH,
                 "expiration": stopsAt,
                 "paid_until": stopsAt,
                 "key": secretValue(as_dir).hex(),
@@ -582,20 +599,31 @@ def insertAssets(db, assets):
     if assets is None:
         return
     rows = []
+    events = []
     for a in assets:
         isd_id, as_id = iaNumbers(a.get("ia"))
         rows.append((
             isd_id, as_id, a.get("bandwidth"), a.get("bandwidth_min"), a.get("bandwidth_max"),
             a.get("price"), a.get("time_granularity"), a.get("time_min_duration"),
-            a.get("starts_at"), a.get("stops_at"), a.get("ingress"), a.get("egress"),
-            a.get("owner"),
+            a.get("time_max_duration"), a.get("starts_at"), a.get("stops_at"),
+            a.get("ingress"), a.get("egress"), a.get("owner"),
         ))
+        # The statistics of an AS are computed from the events,
+        # not from the assets still on sale, so publishing one has to be recorded as well.
+        # An asset that already has an owner means it was bought, which is a second event.
+        events.append((AssetEvent.PUBLISHED, isd_id, as_id, a.get("ingress"),
+                       a.get("egress"), a.get("bandwidth"), a.get("starts_at"),
+                       a.get("stops_at"), a.get("price")))
+        if a.get("owner") is not None:
+            events.append((AssetEvent.BOUGHT, isd_id, as_id, a.get("ingress"),
+                           a.get("egress"), a.get("bandwidth"), a.get("starts_at"),
+                           a.get("stops_at"), a.get("price")))
     db.executemany(
         """
         INSERT INTO Assets (isd_id, as_id, bandwidth, bandwidth_min, bandwidth_max, price,
-                            time_granularity, time_min_duration, starts_at, stops_at,
-                            ingress, egress, account_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
+                            time_granularity, time_min_duration, time_max_duration, starts_at,
+                            stops_at, ingress, egress, account_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
             SELECT a.id
             FROM Accounts a
             JOIN Users u ON u.ID = a.user_id
@@ -604,6 +632,14 @@ def insertAssets(db, assets):
         ))
         """,
         rows,
+    )
+    db.executemany(
+        """
+        INSERT INTO Asset_Events (event_type, isd_id, as_id, ingress, egress, bandwidth,
+                                  starts_at, stops_at, price)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        events,
     )
 
 
@@ -644,14 +680,14 @@ def insertDelegations(db, delegations):
             i.to_bytes(4, byteorder="little") for i in d.get("encodings")
         )
         rows.append((
-            isd_id, as_id, d.get("res_id_limit"), d.get("expiration"), d.get("paid_until"),
-            bytes.fromhex(d.get("key")), encodings,
+            isd_id, as_id, d.get("res_id_limit_low"), d.get("res_id_limit_high"),
+            d.get("expiration"), d.get("paid_until"), bytes.fromhex(d.get("key")), encodings,
         ))
     db.executemany(
         """
-        INSERT OR REPLACE INTO Redemption_Delegations (isd_id, as_id, res_id_limit, expiration,
-                                                       paid_until, key, encodings)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO Redemption_Delegations (isd_id, as_id, res_id_limit_low,
+            res_id_limit_high, expiration, paid_until, key, encodings)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
@@ -722,9 +758,9 @@ class MarketplaceGenerator(object):
     def generate(self):
         """Writes the config of the marketplace and fills its database.
 
-        The service or program running the marketplace is added by the backend
-        generator, so that it lands in the compose file or the supervisord config
-        along with the services of its AS.
+        The service or program running the marketplace is added by the backend generator,
+        so that it lands in the compose file or the supervisord config along
+        with the services of its AS.
         """
         topo_id = marketplace_topo_id(self.args)
         base = topo_id.base_dir(self.args.output_dir)
@@ -739,10 +775,15 @@ class MarketplaceGenerator(object):
         write_file(os.path.join(base, MARKETPLACE_CONFIG_NAME),
                    marketplaceToml(config_dir, endpoints, db_path))
 
-        # The control service copies this into the beacons it propagates, which is
-        # how the other ASes learn where to buy the assets of this one.
-        advertiseMarketplace(
-            os.path.join(base, STATIC_INFO_CONFIG_NAME), topo_id, endpoints)
+        # Every AS of the topology delegates its redemptions to this marketplace,
+        # so every AS must advertise it.
+        # The control service copies the note into the beacons it propagates,
+        # which is how the ASes of a path tell a client where to buy.
+        for as_topo_id in self.args.topo_dicts:
+            advertiseMarketplace(
+                os.path.join(as_topo_id.base_dir(self.args.output_dir),
+                             STATIC_INFO_CONFIG_NAME),
+                topo_id, endpoints)
 
         # The marketplace applies the schema itself, but it cannot invent the
         # entries: they are the ones a local topology is expected to start with.

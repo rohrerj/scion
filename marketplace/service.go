@@ -17,7 +17,7 @@ package marketplace
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"encoding/binary"
 	"sync"
 	"time"
 
@@ -34,12 +34,12 @@ import (
 )
 
 type Service struct {
-	redemptionServerPeers map[addr.IA]*RedemptionServerPeer
-	mtx                   sync.Mutex
-	info                  *MarketplaceInfo
-	store                 *storage.MarketplaceStorage
-	registrationService   *registration.Service
-	signer                *registration.Signer
+	redemptionServerHandlers map[addr.IA]*RedemptionServerHandler
+	mtx                      sync.RWMutex
+	info                     *MarketplaceInfo
+	store                    *storage.MarketplaceStorage
+	registrationService      *registration.Service
+	signer                   *registration.Signer
 }
 
 type MarketplaceInfo struct {
@@ -54,19 +54,23 @@ type MarketplaceInfo struct {
 	TransactionFeeAbsolute       uint64
 	SplitCombineFeeAbsolute      uint64
 	DelegationHourlyFee          uint64
+	MaxReturnedAssets            uint32
+	AssetValidityMax             uint32
 }
 
-func databaseAssetID(id uint64) (int64, error) {
-	return db.AssetID(id).Int64()
+func protoAssetID(assetId int64) []byte {
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, uint64(assetId))
+	return buf
 }
 
 func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.MarketplaceStorage, regService *registration.Service, signer *registration.Signer) (*Service, error) {
 	s := &Service{
-		redemptionServerPeers: make(map[addr.IA]*RedemptionServerPeer),
-		info:                  info,
-		store:                 store,
-		registrationService:   regService,
-		signer:                signer,
+		redemptionServerHandlers: make(map[addr.IA]*RedemptionServerHandler),
+		info:                     info,
+		store:                    store,
+		registrationService:      regService,
+		signer:                   signer,
 	}
 	if s.info.SupportsRedemptionDelegation {
 		d, err := store.FindRedemptionDelegations(ctx)
@@ -74,14 +78,19 @@ func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.Marke
 			return nil, err
 		}
 		for _, delegation := range d {
-			delegation.EncodingsToInts()
-			peer := s.newRedemptionServerPeer(delegation.IA)
-			err = s.startOrUpdateRedemptionDelegation(ctx, peer.ia, &RedemptionDelegationUpdate{
-				ExpirationTime:     delegation.Expiration,
-				ReservationIdLimit: delegation.ReservationIdLimit,
-				Key:                delegation.Key,
-				EncodingPoints:     delegation.EncodingsToInts(),
-			}, false)
+			encodingPoints, err := delegation.EncodingsToInts()
+			if err != nil {
+				return nil, serrors.Wrap("reading a stored redemption delegation", err,
+					"ia", delegation.IA)
+			}
+			handler := s.FindRedemptionServerHandler(delegation.IA)
+			err = handler.ApplyDelegation(ctx, &RedemptionDelegationUpdate{
+				ExpirationTime: delegation.Expiration,
+				IdLimitLow:     delegation.ResIdLow,
+				IdLimitHigh:    delegation.ResIdHigh,
+				Key:            delegation.Key,
+				EncodingPoints: encodingPoints,
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -90,29 +99,50 @@ func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.Marke
 	return s, nil
 }
 
+// FindRedemptionServerHandler returns an already register redemption server handler,
+// or if none is found, registers a new one.
+func (s *Service) FindRedemptionServerHandler(ia addr.IA) *RedemptionServerHandler {
+	s.mtx.RLock()
+	handler, found := s.redemptionServerHandlers[ia]
+	s.mtx.RUnlock()
+	if found {
+		return handler
+	}
+	// handler does not exist, acquire writer lock and create it if it was not created in the meantime
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	handler, found = s.redemptionServerHandlers[ia]
+	if found {
+		return handler
+	}
+	handler = NewRedemptionServerHandler(ia, s.store)
+	s.redemptionServerHandlers[ia] = handler
+	return handler
+}
+
 func (s *Service) CombineAssets(ctx context.Context, req *connect.Request[hummingbird.CombineAssetRequest]) (*connect.Response[hummingbird.CombineAssetResponse], error) {
 	user_id, ok := ctx.Value("user").(int64)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
 	}
-	assetId1, err := databaseAssetID(req.Msg.AssetId_1)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	if len(req.Msg.AssetIds) < 2 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("at least 2 asset IDs are required when combining assets"))
 	}
-	assetId2, err := databaseAssetID(req.Msg.AssetId_2)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	assetIds := make([]int64, 0, len(req.Msg.AssetIds))
+	for _, id := range req.Msg.AssetIds {
+		assetId, err := storage.DatabaseAssetID(id)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		assetIds = append(assetIds, assetId)
 	}
-	if assetId1 == assetId2 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("cannot combine asset with itself"))
-	}
-	combinedId, err := s.store.CombineAssets(ctx, user_id, assetId1, assetId2)
+	combinedId, err := s.store.CombineAssets(ctx, user_id, assetIds)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	return &connect.Response[hummingbird.CombineAssetResponse]{
 		Msg: &hummingbird.CombineAssetResponse{
-			AssetId: uint64(combinedId),
+			AssetId: protoAssetID(combinedId),
 		},
 	}, nil
 }
@@ -122,34 +152,40 @@ func (s *Service) SplitAsset(ctx context.Context, req *connect.Request[hummingbi
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
 	}
-	assetId, err := databaseAssetID(req.Msg.AssetId)
+	assetId, err := storage.DatabaseAssetID(req.Msg.AssetId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	var id1, id2 int64
+	var ids []int64
 	switch req.Msg.SplitOption.(type) {
 	case *hummingbird.SplitAssetRequest_BwSplit:
 		bwSplit := req.Msg.GetBwSplit()
-		id1, id2, err = s.store.SplitAsset(ctx, userId, assetId, &bwSplit, nil)
+		ids, err = s.store.SplitAsset(ctx, userId, assetId, bwSplit.Splits, nil)
 	case *hummingbird.SplitAssetRequest_TimeSplit:
-		timeSplit := req.Msg.GetTimeSplit().AsTime()
-		id1, id2, err = s.store.SplitAsset(ctx, userId, assetId, nil, &timeSplit)
+		splits := req.Msg.GetTimeSplit().Splits
+		times := make([]time.Time, 0, len(splits))
+		for _, split := range splits {
+			times = append(times, split.AsTime())
+		}
+		ids, err = s.store.SplitAsset(ctx, userId, assetId, nil, times)
 	default:
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid split request"))
 	}
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+	protoAssetIDs := make([][]byte, 0, len(ids))
+	for _, id := range ids {
+		protoAssetIDs = append(protoAssetIDs, protoAssetID(id))
+	}
 	return &connect.Response[hummingbird.SplitAssetResponse]{
 		Msg: &hummingbird.SplitAssetResponse{
-			AssetId_1: uint64(id1),
-			AssetId_2: uint64(id2),
+			AssetIds: protoAssetIDs,
 		},
 	}, nil
 }
 
 func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbird.BuyAssetsRequest]) (*connect.Response[hummingbird.BuyAssetsResponse], error) {
-	fmt.Println("BuyAssets")
 	user, ok := ctx.Value("user").(int64)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
@@ -161,7 +197,7 @@ func (s *Service) BuyAssets(ctx context.Context, req *connect.Request[hummingbir
 	boughtAssets := make([]*hummingbird.BoughtAsset, 0, len(boughtAssetIDs))
 	for _, a := range boughtAssetIDs {
 		boughtAssets = append(boughtAssets, &hummingbird.BoughtAsset{
-			AssetId: uint64(a),
+			AssetId: protoAssetID(a),
 		})
 	}
 	return &connect.Response[hummingbird.BuyAssetsResponse]{
@@ -226,7 +262,6 @@ func (s *Service) FetchReservations(ctx context.Context, req *connect.Request[hu
 }
 
 func (s *Service) Info(context.Context, *connect.Request[hummingbird.MarketplaceInfoRequest]) (*connect.Response[hummingbird.MarketplaceInfoResponse], error) {
-	fmt.Println("Info")
 	return &connect.Response[hummingbird.MarketplaceInfoResponse]{
 		Msg: &hummingbird.MarketplaceInfoResponse{
 			ApiMajorVersion:              s.info.ApiMajorVersion,
@@ -240,18 +275,18 @@ func (s *Service) Info(context.Context, *connect.Request[hummingbird.Marketplace
 			TransactionFeeAbsolute:       s.info.TransactionFeeAbsolute,
 			SplitCombineFeeAbsolute:      s.info.SplitCombineFeeAbsolute,
 			DelegationHourlyFee:          s.info.DelegationHourlyFee,
+			AssetValidityMax:             s.info.AssetValidityMax,
 		},
 	}, nil
 }
 
 func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[hummingbird.UpdateAssetsRequest]) (*connect.Response[hummingbird.UpdateAssetsResponse], error) {
-	fmt.Println("UpdateAssets")
 	ia, ok := ctx.Value("user").(addr.IA)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
 	}
-	handleAsset := func(update *hummingbird.AssetUpdate) (uint64, error) {
-		assetId, err := databaseAssetID(update.AssetId)
+	handleAsset := func(update *hummingbird.AssetUpdate) (int64, error) {
+		assetId, err := storage.DatabaseAssetID(update.AssetId)
 		if err != nil {
 			return 0, err
 		}
@@ -277,6 +312,10 @@ func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[humming
 				Price:           t.Update.Price,
 				TimeGranularity: t.Update.TimeGranularity,
 				TimeMinDuration: t.Update.TimeMinDuration,
+				TimeMaxDuration: t.Update.TimeMaxDuration,
+			}
+			if dbAsset.StopsAt.After(time.Now().Add(time.Duration(s.info.AssetValidityMax) * time.Second)) {
+				return 0, serrors.New("validity outside allowed range")
 			}
 			if t.Update.IfIdIngress != nil {
 				dbAsset.IfIdIngress = sql.NullInt32{
@@ -294,9 +333,9 @@ func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[humming
 			if err != nil {
 				return 0, err
 			}
-			return uint64(newId), nil
+			return newId, nil
 		default:
-			return 0, serrors.New("unkown update")
+			return 0, serrors.New("unknown update")
 		}
 	}
 	res := make([]*hummingbird.UpdateAssetResult, 0, len(req.Msg.Assets))
@@ -311,7 +350,7 @@ func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[humming
 		} else {
 			res = append(res, &hummingbird.UpdateAssetResult{
 				ResultType: &hummingbird.UpdateAssetResult_NewId{
-					NewId: newId,
+					NewId: protoAssetID(newId),
 				},
 			})
 		}
@@ -324,7 +363,6 @@ func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[humming
 }
 
 func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[hummingbird.PublishAssetRequest]) (*connect.Response[hummingbird.PublishAssetResponse], error) {
-	fmt.Println("PublishAsset")
 	ia, ok := ctx.Value("user").(addr.IA)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
@@ -339,8 +377,12 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 		Price:           req.Msg.Asset.Price,
 		TimeGranularity: req.Msg.Asset.TimeGranularity,
 		TimeMinDuration: req.Msg.Asset.TimeMinDuration,
+		TimeMaxDuration: req.Msg.Asset.TimeMaxDuration,
 		IfIdIngress:     sql.NullInt32{},
 		IfIdEgress:      sql.NullInt32{},
+	}
+	if dbAsset.StopsAt.After(time.Now().Add(time.Duration(s.info.AssetValidityMax) * time.Second)) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("validity outside allowed range"))
 	}
 	if !dbAsset.StopsAt.After(dbAsset.StartAt) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("stopsAt must come after startsAt"))
@@ -360,7 +402,7 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 
 	return &connect.Response[hummingbird.PublishAssetResponse]{
 		Msg: &hummingbird.PublishAssetResponse{
-			AssetId: uint64(assetID),
+			AssetId: protoAssetID(assetID),
 		},
 	}, nil
 }
@@ -369,7 +411,6 @@ func (s *Service) RedeemAsset(
 	ctx context.Context,
 	req *connect.Request[hummingbird.RedeemAssetRequest],
 ) (*connect.Response[hummingbird.RedeemAssetResponse], error) {
-	fmt.Println("RedeemAsset")
 	user, ok := ctx.Value("user").(int64)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
@@ -378,14 +419,29 @@ func (s *Service) RedeemAsset(
 	var err error
 	switch t := req.Msg.Interfaces.(type) {
 	case *hummingbird.RedeemAssetRequest_Pair:
-		assets, err = s.store.PrepareRedemption(ctx, user, &t.Pair.IngressAssetId, &t.Pair.EgressAssetId, nil)
+		ingressAssetId, err := storage.DatabaseAssetID(t.Pair.IngressAssetId)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
+		}
+		egressAssetId, err := storage.DatabaseAssetID(t.Pair.EgressAssetId)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
+		}
+		assets, err = s.store.PrepareRedemption(ctx, user, &ingressAssetId, &egressAssetId, nil)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
+		}
 	case *hummingbird.RedeemAssetRequest_IfPairAssetId:
-		assets, err = s.store.PrepareRedemption(ctx, user, nil, nil, &t.IfPairAssetId)
+		pairAssetId, err := storage.DatabaseAssetID(t.IfPairAssetId)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
+		}
+		assets, err = s.store.PrepareRedemption(ctx, user, nil, nil, &pairAssetId)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
+		}
 	default:
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid interface pair"))
-	}
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	var bw uint32
 	var ingressID uint32
@@ -428,9 +484,12 @@ func (s *Service) RedeemAsset(
 		// we cannot undo the redemption using the request's context.
 		switch t := req.Msg.Interfaces.(type) {
 		case *hummingbird.RedeemAssetRequest_Pair:
-			err = s.store.UndoRedemption(context.Background(), user, &t.Pair.IngressAssetId, &t.Pair.EgressAssetId, nil)
+			ingressAssetId, _ := storage.DatabaseAssetID(t.Pair.IngressAssetId)
+			egressAssetId, _ := storage.DatabaseAssetID(t.Pair.EgressAssetId)
+			err = s.store.UndoRedemption(context.Background(), user, &ingressAssetId, &egressAssetId, nil)
 		case *hummingbird.RedeemAssetRequest_IfPairAssetId:
-			err = s.store.UndoRedemption(context.Background(), user, nil, nil, &t.IfPairAssetId)
+			pairAssetId, _ := storage.DatabaseAssetID(t.IfPairAssetId)
+			err = s.store.UndoRedemption(context.Background(), user, nil, nil, &pairAssetId)
 		}
 		if err != nil {
 			log.Error("Error while undoing redemption", "err", err)
@@ -441,87 +500,106 @@ func (s *Service) RedeemAsset(
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			serrors.Join(serrors.New("stops at before starts at"), undoRedemption()))
 	}
-	peer, found := s.redemptionServerPeers[ia]
-	if !found {
-		return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not reachable"), undoRedemption()))
-	}
-	respCh := peer.Send(&hummingbird.RedeemAssetFromASRequest{
+	peer := s.FindRedemptionServerHandler(ia)
+	// The deadline is derived from the request context: a client who disconnects releases
+	// the asset instead of holding it until the timeout.
+	redeemCtx, cancelRedeem := context.WithTimeout(ctx, redemptionTimeout)
+	defer cancelRedeem()
+	resp, err := peer.Redeem(redeemCtx, &hummingbird.RedeemAssetFromASRequest{
 		Bandwidth: bw,
 		IngressId: ingressID,
 		EgressId:  egressID,
 		StartsAt:  timestamppb.New(startsAt),
 		StopsAt:   timestamppb.New(stopsAt),
 	})
-	select {
-	case resp := <-respCh:
-		if resp == nil {
-			return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
-		}
-		switch r := resp.Result.(type) {
-		case *hummingbird.RedeemAssetFromASResponse_Error:
-			return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New(r.Error), undoRedemption()))
-		case *hummingbird.RedeemAssetFromASResponse_ResInfo:
-			n, err := s.store.InsertReservation(ctx, &db.DBReservation{
-				ReservationID:    r.ResInfo.ReservationId,
-				IA:               ia,
-				Ingress:          ingressID,
-				Egress:           egressID,
-				Bandwidth:        r.ResInfo.BandwithRounded,
-				EncodedBandwidth: uint16(r.ResInfo.BwDataplaneEncoding),
-				StartsAt:         startsAt,
-				StopsAt:          stopsAt,
-				AccountId:        user,
-				Key:              r.ResInfo.AuthenticationKey,
-			})
-			if err != nil {
-				return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(err, undoRedemption()))
-			}
-			if n != 1 {
-				return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("reservation could not be stored"), undoRedemption()))
-			}
-			return &connect.Response[hummingbird.RedeemAssetResponse]{
-				Msg: &hummingbird.RedeemAssetResponse{
-					AuthenticationKey:   r.ResInfo.AuthenticationKey,
-					ReservationId:       r.ResInfo.ReservationId,
-					BandwidthRounded:    r.ResInfo.BandwithRounded,
-					BwDataplaneEncoding: r.ResInfo.BwDataplaneEncoding,
-				},
-			}, nil
-		}
-	case <-time.After(30 * time.Second):
-		return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable,
+			serrors.Join(serrors.New("Redemption service not available"), err, undoRedemption()))
 	}
-	return nil, connect.NewError(connect.CodeUnavailable, serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
+	switch r := resp.Result.(type) {
+	case *hummingbird.RedeemAssetFromASResponse_Error:
+		return nil, connect.NewError(connect.CodeUnavailable,
+			serrors.Join(serrors.New(r.Error), undoRedemption()))
+	case *hummingbird.RedeemAssetFromASResponse_ResInfo:
+		n, err := s.store.InsertReservation(ctx, &db.DBReservation{
+			ReservationID:    r.ResInfo.ReservationId,
+			IA:               ia,
+			Ingress:          ingressID,
+			Egress:           egressID,
+			Bandwidth:        r.ResInfo.BandwithRounded,
+			EncodedBandwidth: uint16(r.ResInfo.BwDataplaneEncoding),
+			StartsAt:         startsAt,
+			StopsAt:          stopsAt,
+			AccountId:        user,
+			Key:              r.ResInfo.AuthenticationKey,
+		})
+		if err != nil {
+			return nil, connect.NewError(connect.CodeUnavailable,
+				serrors.Join(err, undoRedemption()))
+		}
+		if n != 1 {
+			return nil, connect.NewError(connect.CodeUnavailable,
+				serrors.Join(serrors.New("reservation could not be stored"), undoRedemption()))
+		}
+		return &connect.Response[hummingbird.RedeemAssetResponse]{
+			Msg: &hummingbird.RedeemAssetResponse{
+				AuthenticationKey:   r.ResInfo.AuthenticationKey,
+				ReservationId:       r.ResInfo.ReservationId,
+				BandwidthRounded:    r.ResInfo.BandwithRounded,
+				BwDataplaneEncoding: r.ResInfo.BwDataplaneEncoding,
+			},
+		}, nil
+	}
+	return nil, connect.NewError(
+		connect.CodeUnavailable,
+		serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
 }
 
-func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error) {
-	fmt.Println("Statistics")
-	ia, ok := ctx.Value("user").(addr.IA)
-	if !ok {
-		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
+// statisticsWindow rounds a requested statistics window to the granularity of the
+// marketplace, and reports how many intervals of step it holds.
+//
+// A window given backwards is turned around rather than rejected, so that its length
+// is preserved. Without that, windowEnd.Sub(windowStart) is negative and the interval
+// count with it, which makes the slices of the caller panic.
+func statisticsWindow(
+	start, end time.Time,
+	step, granularity time.Duration,
+) (windowStart, windowEnd time.Time, numIntervals int) {
+	if end.Before(start) {
+		start, end = end, start
 	}
-	step := hbird.RoundUpDuration(time.Duration(req.Msg.Step)*time.Second, time.Duration(s.info.StatisticsTimeGranularity)*time.Second)
-	windowStart := req.Msg.Start.AsTime().UTC().Truncate(time.Duration(s.info.StatisticsTimeGranularity) * time.Second)
-	windowEnd := hbird.RoundUpTime(req.Msg.End.AsTime().UTC(), time.Duration(s.info.StatisticsTimeGranularity)*time.Second)
-	num_intervals := int(windowEnd.Sub(windowStart) / step)
-	fmt.Println(step, windowStart, windowEnd)
-	if num_intervals > 1024 {
-		return nil, connect.NewError(connect.CodeResourceExhausted, serrors.New("too many intervals"))
+	windowStart = start.UTC().Truncate(granularity)
+	windowEnd = hbird.RoundUpTime(end.UTC(), granularity)
+	if step <= 0 {
+		// Only reachable with a granularity of 0, which the config does not allow.
+		return windowStart, windowEnd, 0
 	}
-	income := make([]uint64, num_intervals)
-	bwBought := make([]uint64, num_intervals)
-	bwListed := make([]uint64, num_intervals)
-	assets, err := s.store.Statistics(ctx, &db.StatisticsQuery{
-		IA:          ia,
-		WindowStart: windowStart.Format(time.RFC3339),
-		WindowEnd:   windowEnd.Format(time.RFC3339),
-		Ingress:     req.Msg.IfIdIngress,
-		Egress:      req.Msg.IfIdEgress,
-	})
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
+	return windowStart, windowEnd, int(windowEnd.Sub(windowStart) / step)
+}
 
+// bandwidthUtilization is the share of the published bandwidth that was bought.
+//
+// An interval in which nothing was published has no utilization to report, and is
+// zero rather than the NaN that dividing by zero would give. A NaN would change the
+// type of the field on the wire, since protobuf JSON writes it as the string "NaN",
+// and it would poison every aggregation over the intervals.
+func bandwidthUtilization(bought, published uint64) float64 {
+	if published == 0 {
+		return 0
+	}
+	return float64(bought) / float64(published)
+}
+
+// bandwidthPerInterval spreads the bandwidth of every asset over the intervals of the
+// window it overlaps, in kbps seconds, along with the revenue that bandwidth stands for.
+func bandwidthPerInterval(
+	assets []*db.DBStat,
+	windowStart, windowEnd time.Time,
+	step time.Duration,
+	numIntervals int,
+) (bandwidth, income []uint64) {
+	bandwidth = make([]uint64, numIntervals)
+	income = make([]uint64, numIntervals)
 	for _, asset := range assets {
 		start := asset.StartsAt
 		stop := asset.StopsAt
@@ -532,15 +610,14 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 			stop = windowEnd
 		}
 		first := int(start.Sub(windowStart) / step)
-
 		last := int(stop.Sub(windowStart) / step)
-		if first < 0 || last > num_intervals {
+		if first < 0 || last > numIntervals {
 			continue
 		}
 		if stop.Equal(windowStart.Add(time.Duration(last) * step)) {
 			last--
 		}
-		for i := first; i <= last && i < num_intervals; i++ {
+		for i := first; i <= last && i < numIntervals; i++ {
 			intervalStart := windowStart.Add(time.Duration(i) * step)
 			intervalEnd := intervalStart.Add(step)
 			overlapStart := start
@@ -553,19 +630,49 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 			}
 			duration := uint64(overlapEnd.Sub(overlapStart).Seconds())
 			bwTimesDuration := uint64(asset.Bandwidth) * duration
-			if !asset.OwnerId.Valid {
-				bwListed[i] += bwTimesDuration
-			} else {
-				bwBought[i] += bwTimesDuration
-				income[i] += bwTimesDuration * uint64(asset.Price)
-			}
+			bandwidth[i] += bwTimesDuration
+			income[i] += bwTimesDuration * uint64(asset.Price)
 		}
 	}
-	respEntries := make([]*hummingbird.StatisticsResponseEntry, num_intervals)
-	for i := 0; i < num_intervals; i++ {
+	return bandwidth, income
+}
+
+func (s *Service) Statistics(
+	ctx context.Context,
+	req *connect.Request[hummingbird.StatisticsRequest],
+) (*connect.Response[hummingbird.StatisticsResponse], error) {
+	ia, ok := ctx.Value("user").(addr.IA)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
+	}
+	granularity := time.Duration(s.info.StatisticsTimeGranularity) * time.Second
+	step := hbird.RoundUpDuration(time.Duration(req.Msg.Step)*time.Second, granularity)
+	windowStart, windowEnd, numIntervals := statisticsWindow(
+		req.Msg.Start.AsTime(), req.Msg.End.AsTime(), step, granularity)
+	if numIntervals > 1024 {
+		return nil, connect.NewError(connect.CodeResourceExhausted,
+			serrors.New("too many intervals"))
+	}
+	publishedAssets, boughtAssets, err := s.store.Statistics(ctx, &db.StatisticsQuery{
+		IA:          ia,
+		WindowStart: windowStart.Format(time.RFC3339),
+		WindowEnd:   windowEnd.Format(time.RFC3339),
+		Ingress:     req.Msg.IfIdIngress,
+		Egress:      req.Msg.IfIdEgress,
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	bwPublished, _ := bandwidthPerInterval(
+		publishedAssets, windowStart, windowEnd, step, numIntervals)
+	bwBought, income := bandwidthPerInterval(
+		boughtAssets, windowStart, windowEnd, step, numIntervals)
+
+	respEntries := make([]*hummingbird.StatisticsResponseEntry, numIntervals)
+	for i := range numIntervals {
 		respEntries[i] = &hummingbird.StatisticsResponseEntry{
 			Revenue:              income[i],
-			BandwidthUtilization: float64(bwBought[i]) / float64(bwBought[i]+bwListed[i]),
+			BandwidthUtilization: bandwidthUtilization(bwBought[i], bwPublished[i]),
 		}
 	}
 	return &connect.Response[hummingbird.StatisticsResponse]{
@@ -576,7 +683,6 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 }
 
 func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[hummingbird.SearchAssetsRequest]) (*connect.Response[hummingbird.SearchAssetsResponse], error) {
-	fmt.Println("SearchAssets")
 	var owner_id *int64
 	switch user := ctx.Value("user").(type) {
 	case int64:
@@ -602,6 +708,14 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 		tmp := addr.IA(*req.Msg.Ia)
 		ia = &tmp
 	}
+	pageSize := s.info.MaxReturnedAssets
+	if pageSize == 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("page size cannot be 0"))
+	}
+	if req.Msg.MaxReturnedAssets != nil {
+		pageSize = min(pageSize, *req.Msg.MaxReturnedAssets)
+	}
+
 	assets, err := s.store.Search(ctx, &db.AssetQuery{
 		AccountId:            owner_id,
 		IA:                   ia,
@@ -611,6 +725,8 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 		Price:                req.Msg.Price,
 		StartsAt:             startsAt,
 		StopsAt:              stopsAt,
+		Page:                 req.Msg.Page,
+		PageSize:             pageSize,
 	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -618,12 +734,13 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 	repAssets := make([]*hummingbird.SearchAsset, 0, len(assets))
 	for _, asset := range assets {
 		a := &hummingbird.SearchAsset{
-			AssetId:         uint64(asset.ID),
+			AssetId:         protoAssetID(asset.ID),
 			Ia:              uint64(asset.IA),
 			Bandwidth:       asset.Bandwidth,
 			BandwidthMin:    asset.BandwidthMin,
 			BandwidthMax:    asset.BandwidthMax,
 			TimeMinDuration: asset.TimeMinDuration,
+			TimeMaxDuration: asset.TimeMaxDuration,
 			StartsAt:        timestamppb.New(asset.StartAt),
 			StopsAt:         timestamppb.New(asset.StopsAt),
 			TimeGranularity: asset.TimeGranularity,

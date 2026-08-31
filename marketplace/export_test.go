@@ -14,10 +14,65 @@
 
 package marketplace
 
+import (
+	"time"
+
+	"github.com/scionproto/scion/marketplace/db"
+	"github.com/scionproto/scion/pkg/proto/hummingbird"
+)
+
 func (s *RedemptionService) SetEncodingPoints(encodings []uint32) {
 	s.encodingPoints = encodings
 }
 
 func (s *RedemptionService) EncodeBandwidth(bw uint32) uint16 {
 	return (s.encodeBandwidth(bw))
+}
+
+// Out exposes the queue of a connection, so that a test can observe the requests
+// the handler routes to it.
+func (c *RemoteConn) Out() <-chan *hummingbird.RedeemAssetFromASRequest {
+	return c.out
+}
+
+// QueueLen exposes how many requests are waiting in a connection's queue, so that a
+// test can wait until it is full and the next hand-over is certain to block.
+func (c *RemoteConn) QueueLen() int {
+	return len(c.out)
+}
+
+// QueueCap exposes the capacity of a connection's queue.
+func (c *RemoteConn) QueueCap() int {
+	return cap(c.out)
+}
+
+// PendingLen exposes how many requests are waiting for an answer, so that a test can
+// wait until a request has really been registered and is parked in the hand-over.
+func (h *RedemptionServerHandler) PendingLen() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.pending)
+}
+
+// StatisticsWindow exposes the rounding of a requested statistics window.
+func StatisticsWindow(
+	start, end time.Time,
+	step, granularity time.Duration,
+) (time.Time, time.Time, int) {
+	return statisticsWindow(start, end, step, granularity)
+}
+
+// BandwidthUtilization exposes the share of the published bandwidth that was bought.
+func BandwidthUtilization(bought, published uint64) float64 {
+	return bandwidthUtilization(bought, published)
+}
+
+// BandwidthPerInterval exposes the spreading of assets over the statistics intervals.
+func BandwidthPerInterval(
+	assets []*db.DBStat,
+	windowStart, windowEnd time.Time,
+	step time.Duration,
+	numIntervals int,
+) (bandwidth, income []uint64) {
+	return bandwidthPerInterval(assets, windowStart, windowEnd, step, numIntervals)
 }
