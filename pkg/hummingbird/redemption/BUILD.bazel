@@ -15,7 +15,7 @@ go_library(
         "//pkg/daemon:go_default_library",
         "//pkg/daemon/types:go_default_library",
         "//pkg/hummingbird:go_default_library",
-        "//pkg/log:go_default_library",
+        "//pkg/hummingbird/marketplace:go_default_library",
         "//pkg/private/serrors:go_default_library",
         "//pkg/proto/hbird/v1:go_default_library",
         "//pkg/proto/hbird/v1/hbirdconnect:go_default_library",

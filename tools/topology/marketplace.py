@@ -158,18 +158,20 @@ def marketplaceEntries(ia, endpoints: Endpoints):
     same mux as the TCP API, so both live on the API port.
     """
     website = "https://%s" % hostPort(endpoints.host, endpoints.api_port)
-    # The key is the one HummingbirdNoteEntry unmarshals, see marketplace_client/main.go.
+    # The keys are the ones of the Hummingbird APIs document, see the marketplace
+    # address block of "Client <-> Marketplace".
     return [
         {
             "name": "Test Market",
-            "protocol": "connectrpc/TLS/QUIC/SCION",
-            "api": "[%s,%s]:%d" % (ISD_AS(str(ia)), endpoints.host, endpoints.scion_port),
+            "api_protocol": "connectrpc/TLS/QUIC/SCION",
+            "api_address": "[%s,%s]:%d" % (
+                ISD_AS(str(ia)), endpoints.host, endpoints.scion_port),
             "client_registration_website": website,
         },
         {
             "name": "Test Market",
-            "protocol": "connectrpc/TLS/TCP",
-            "api": website,
+            "api_protocol": "connectrpc/TLS/TCP",
+            "api_address": website,
             "client_registration_website": website,
         },
     ]
@@ -213,9 +215,9 @@ def mergeEntries(existing, entries):
     merged = [e for e in existing if isinstance(e, dict)]
     changed = len(merged) != len(existing)
     for entry in entries:
-        key = (entry["name"], entry["protocol"])
+        key = (entry["name"], entry["api_protocol"])
         for i, old in enumerate(merged):
-            if (old.get("name"), old.get("protocol")) == key:
+            if (old.get("name"), old.get("api_protocol")) == key:
                 if old != entry:
                     merged[i] = entry
                     changed = True

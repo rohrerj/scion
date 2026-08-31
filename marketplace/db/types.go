@@ -243,8 +243,9 @@ type DBASUser struct {
 }
 
 // EncodingsToInts decodes the stored encoding points. The blob holds one little
-// endian uint32 per point, so a length that is not a multiple of four is a corrupt
-// row rather than something the caller could have prevented.
+// endian uint32 per point. A length that is not a multiple of four can only come from a corrupt
+// row rather than from a delegation request, since the caller would have prevented it via a
+// check to the delegation parameters.
 func (r *RedemptionDelegation) EncodingsToInts() ([]uint32, error) {
 	if len(r.Encodings)%4 != 0 {
 		return nil, serrors.New("corrupt encoding points in the redemption delegation",

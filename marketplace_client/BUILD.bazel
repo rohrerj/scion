@@ -14,7 +14,6 @@ go_library(
         "//pkg/hummingbird/registration:go_default_library",
         "//pkg/private/serrors:go_default_library",
         "//pkg/proto/hummingbird:go_default_library",
-        "//pkg/snet:go_default_library",
         "@com_connectrpc_connect//:go_default_library",
         "@com_github_golang_jwt_jwt//:go_default_library",
         "@com_github_scionproto_scion//pkg/proto/hummingbird/v1/hummingbirdconnect:go_default_library",
