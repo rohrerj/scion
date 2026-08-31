@@ -14,7 +14,12 @@
 
 package marketplace
 
-import "github.com/scionproto/scion/pkg/proto/hummingbird"
+import (
+	"time"
+
+	"github.com/scionproto/scion/marketplace/db"
+	"github.com/scionproto/scion/pkg/proto/hummingbird"
+)
 
 func (s *RedemptionService) SetEncodingPoints(encodings []uint32) {
 	s.encodingPoints = encodings
@@ -47,4 +52,27 @@ func (h *RedemptionServerHandler) PendingLen() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.pending)
+}
+
+// StatisticsWindow exposes the rounding of a requested statistics window.
+func StatisticsWindow(
+	start, end time.Time,
+	step, granularity time.Duration,
+) (time.Time, time.Time, int) {
+	return statisticsWindow(start, end, step, granularity)
+}
+
+// BandwidthUtilization exposes the share of the published bandwidth that was bought.
+func BandwidthUtilization(bought, published uint64) float64 {
+	return bandwidthUtilization(bought, published)
+}
+
+// BandwidthPerInterval exposes the spreading of assets over the statistics intervals.
+func BandwidthPerInterval(
+	assets []*db.DBStat,
+	windowStart, windowEnd time.Time,
+	step time.Duration,
+	numIntervals int,
+) (bandwidth, income []uint64) {
+	return bandwidthPerInterval(assets, windowStart, windowEnd, step, numIntervals)
 }

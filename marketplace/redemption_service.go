@@ -22,18 +22,24 @@ import (
 	"time"
 
 	"github.com/scionproto/scion/marketplace/db"
+	"github.com/scionproto/scion/pkg/hummingbird/bwencoding"
+	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	hbird "github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 )
 
 const (
-	AkBufferSize = 16
+	AkBufferSize = hbird.AkBufferSize
 )
+
+// aesKeySizes are the key lengths in bytes that aes.NewCipher accepts, i.e. the ones
+// that NewRedemptionService accepts.
+var aesKeySizes = []int{16, 24, 32}
 
 type RedemptionService struct {
 	encodingPoints []uint32
 	cipher         cipher.Block
-	resIdStore     ReservationIdStore
+	resIdStore     *UsedIDStore
 	expiration     time.Time
 }
 type RedemptionDelegationUpdate struct {
@@ -43,13 +49,34 @@ type RedemptionDelegationUpdate struct {
 	Key            []byte
 	EncodingPoints []uint32
 }
-type ReservationIdStore interface {
-	Init(limit_low uint32, limit_high uint32, r []*db.UsedReservation) error
-	Next(now int64, start int64, end int64) (uint32, error)
-	Close() error
+
+// validateDelegationParams checks the parameters of a redemption delegation that the marketplace
+// cannot work around, so that a delegation it could not serve is refused before it is stored.
+//
+// - The encoding table has to be complete, one bandwidth per codepoint of the flyover
+// bandwidth field. A shorter one makes encodeBandwidth index out of range, and even
+// where it does not, the border router decodes the codepoint of a flyover with its own
+// complete table, so a partial table would report a bw_rounded that the router does not enforce.
+//
+// - The key has to be of a length AES accepts, since NewRedemptionService derives every
+// reservation key from it. Only the length is checked here, which couples this to the
+// aes.NewCipher call there.
+func validateDelegationParams(state *RedemptionDelegationUpdate) error {
+	if len(state.EncodingPoints) != bwencoding.Codepoints {
+		return serrors.New("wrong number of encoding points in the redemption delegation",
+			"expected", bwencoding.Codepoints, "actual", len(state.EncodingPoints))
+	}
+	if !slices.Contains(aesKeySizes, len(state.Key)) {
+		return serrors.New("unusable key length in the redemption delegation",
+			"expected", aesKeySizes, "actual", len(state.Key))
+	}
+	return nil
 }
 
 func NewRedemptionService(initState *RedemptionDelegationUpdate, r []*db.UsedReservation) (*RedemptionService, error) {
+	if err := validateDelegationParams(initState); err != nil {
+		return nil, err
+	}
 	slices.Sort(initState.EncodingPoints)
 	blockCipher, err := aes.NewCipher(initState.Key)
 	if err != nil {
@@ -68,7 +95,9 @@ func NewRedemptionService(initState *RedemptionDelegationUpdate, r []*db.UsedRes
 	}, nil
 }
 
-func (r *RedemptionService) Redeem(req *hummingbird.RedeemAssetFromASRequest) *hummingbird.RedeemAssetFromASResponse {
+func (r *RedemptionService) Redeem(
+	req *hummingbird.RedeemAssetFromASRequest,
+) *hummingbird.RedeemAssetFromASResponse {
 	now := time.Now()
 	resId, err := r.resIdStore.Next(now.Unix(), req.StartsAt.Seconds, req.StopsAt.Seconds)
 	if err != nil {

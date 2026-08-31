@@ -242,15 +242,19 @@ type DBASUser struct {
 	Balance int64
 }
 
-func (r *RedemptionDelegation) EncodingsToInts() []uint32 {
+// EncodingsToInts decodes the stored encoding points. The blob holds one little
+// endian uint32 per point, so a length that is not a multiple of four is a corrupt
+// row rather than something the caller could have prevented.
+func (r *RedemptionDelegation) EncodingsToInts() ([]uint32, error) {
 	if len(r.Encodings)%4 != 0 {
-		panic("invalid data length")
+		return nil, serrors.New("corrupt encoding points in the redemption delegation",
+			"length", len(r.Encodings))
 	}
 	nums := make([]uint32, len(r.Encodings)/4)
 	for i := range nums {
 		nums[i] = binary.LittleEndian.Uint32(r.Encodings[i*4:])
 	}
-	return nums
+	return nums, nil
 }
 
 func (r *RedemptionDelegation) EncodeInts(nums []uint32) {

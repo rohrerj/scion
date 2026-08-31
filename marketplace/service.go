@@ -78,14 +78,18 @@ func NewService(ctx context.Context, info *MarketplaceInfo, store *storage.Marke
 			return nil, err
 		}
 		for _, delegation := range d {
-			delegation.EncodingsToInts()
+			encodingPoints, err := delegation.EncodingsToInts()
+			if err != nil {
+				return nil, serrors.Wrap("reading a stored redemption delegation", err,
+					"ia", delegation.IA)
+			}
 			handler := s.FindRedemptionServerHandler(delegation.IA)
 			err = handler.ApplyDelegation(ctx, &RedemptionDelegationUpdate{
 				ExpirationTime: delegation.Expiration,
 				IdLimitLow:     delegation.ResIdLow,
 				IdLimitHigh:    delegation.ResIdHigh,
 				Key:            delegation.Key,
-				EncodingPoints: delegation.EncodingsToInts(),
+				EncodingPoints: encodingPoints,
 			})
 			if err != nil {
 				return nil, err
@@ -551,22 +555,104 @@ func (s *Service) RedeemAsset(
 		serrors.Join(serrors.New("Redemption service not available"), undoRedemption()))
 }
 
-func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbird.StatisticsRequest]) (*connect.Response[hummingbird.StatisticsResponse], error) {
+// statisticsWindow rounds a requested statistics window to the granularity of the
+// marketplace, and reports how many intervals of step it holds.
+//
+// A window given backwards is turned around rather than rejected, so that its length
+// is preserved. Without that, windowEnd.Sub(windowStart) is negative and the interval
+// count with it, which makes the slices of the caller panic.
+func statisticsWindow(
+	start, end time.Time,
+	step, granularity time.Duration,
+) (windowStart, windowEnd time.Time, numIntervals int) {
+	if end.Before(start) {
+		start, end = end, start
+	}
+	windowStart = start.UTC().Truncate(granularity)
+	windowEnd = hbird.RoundUpTime(end.UTC(), granularity)
+	if step <= 0 {
+		// Only reachable with a granularity of 0, which the config does not allow.
+		return windowStart, windowEnd, 0
+	}
+	return windowStart, windowEnd, int(windowEnd.Sub(windowStart) / step)
+}
+
+// bandwidthUtilization is the share of the published bandwidth that was bought.
+//
+// An interval in which nothing was published has no utilization to report, and is
+// zero rather than the NaN that dividing by zero would give. A NaN would change the
+// type of the field on the wire, since protobuf JSON writes it as the string "NaN",
+// and it would poison every aggregation over the intervals.
+func bandwidthUtilization(bought, published uint64) float64 {
+	if published == 0 {
+		return 0
+	}
+	return float64(bought) / float64(published)
+}
+
+// bandwidthPerInterval spreads the bandwidth of every asset over the intervals of the
+// window it overlaps, in kbps seconds, along with the revenue that bandwidth stands for.
+func bandwidthPerInterval(
+	assets []*db.DBStat,
+	windowStart, windowEnd time.Time,
+	step time.Duration,
+	numIntervals int,
+) (bandwidth, income []uint64) {
+	bandwidth = make([]uint64, numIntervals)
+	income = make([]uint64, numIntervals)
+	for _, asset := range assets {
+		start := asset.StartsAt
+		stop := asset.StopsAt
+		if asset.StartsAt.Before(windowStart) {
+			start = windowStart
+		}
+		if asset.StopsAt.After(windowEnd) {
+			stop = windowEnd
+		}
+		first := int(start.Sub(windowStart) / step)
+		last := int(stop.Sub(windowStart) / step)
+		if first < 0 || last > numIntervals {
+			continue
+		}
+		if stop.Equal(windowStart.Add(time.Duration(last) * step)) {
+			last--
+		}
+		for i := first; i <= last && i < numIntervals; i++ {
+			intervalStart := windowStart.Add(time.Duration(i) * step)
+			intervalEnd := intervalStart.Add(step)
+			overlapStart := start
+			overlapEnd := stop
+			if asset.StartsAt.Before(intervalStart) {
+				overlapStart = intervalStart
+			}
+			if asset.StopsAt.After(intervalEnd) {
+				overlapEnd = intervalEnd
+			}
+			duration := uint64(overlapEnd.Sub(overlapStart).Seconds())
+			bwTimesDuration := uint64(asset.Bandwidth) * duration
+			bandwidth[i] += bwTimesDuration
+			income[i] += bwTimesDuration * uint64(asset.Price)
+		}
+	}
+	return bandwidth, income
+}
+
+func (s *Service) Statistics(
+	ctx context.Context,
+	req *connect.Request[hummingbird.StatisticsRequest],
+) (*connect.Response[hummingbird.StatisticsResponse], error) {
 	ia, ok := ctx.Value("user").(addr.IA)
 	if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
 	}
-	var step time.Duration
-	step = hbird.RoundUpDuration(time.Duration(req.Msg.Step)*time.Second, time.Duration(s.info.StatisticsTimeGranularity)*time.Second)
-	windowStart := req.Msg.Start.AsTime().UTC().Truncate(time.Duration(s.info.StatisticsTimeGranularity) * time.Second)
-	windowEnd := hbird.RoundUpTime(req.Msg.End.AsTime().UTC(), time.Duration(s.info.StatisticsTimeGranularity)*time.Second)
-	num_intervals := int(windowEnd.Sub(windowStart) / step)
-	if num_intervals > 1024 {
-		return nil, connect.NewError(connect.CodeResourceExhausted, serrors.New("too many intervals"))
+	granularity := time.Duration(s.info.StatisticsTimeGranularity) * time.Second
+	step := hbird.RoundUpDuration(time.Duration(req.Msg.Step)*time.Second, granularity)
+	windowStart, windowEnd, numIntervals := statisticsWindow(
+		req.Msg.Start.AsTime(), req.Msg.End.AsTime(), step, granularity)
+	if numIntervals > 1024 {
+		return nil, connect.NewError(connect.CodeResourceExhausted,
+			serrors.New("too many intervals"))
 	}
-	income := make([]uint64, num_intervals)
-	bwBought := make([]uint64, num_intervals)
-	bwPublished := make([]uint64, num_intervals)
 	publishedAssets, boughtAssets, err := s.store.Statistics(ctx, &db.StatisticsQuery{
 		IA:          ia,
 		WindowStart: windowStart.Format(time.RFC3339),
@@ -577,81 +663,16 @@ func (s *Service) Statistics(ctx context.Context, req *connect.Request[hummingbi
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	for _, asset := range publishedAssets {
-		start := asset.StartsAt
-		stop := asset.StopsAt
-		if asset.StartsAt.Before(windowStart) {
-			start = windowStart
-		}
-		if asset.StopsAt.After(windowEnd) {
-			stop = windowEnd
-		}
-		first := int(start.Sub(windowStart) / step)
+	bwPublished, _ := bandwidthPerInterval(
+		publishedAssets, windowStart, windowEnd, step, numIntervals)
+	bwBought, income := bandwidthPerInterval(
+		boughtAssets, windowStart, windowEnd, step, numIntervals)
 
-		last := int(stop.Sub(windowStart) / step)
-		if first < 0 || last > num_intervals {
-			continue
-		}
-		if stop.Equal(windowStart.Add(time.Duration(last) * step)) {
-			last--
-		}
-		for i := first; i <= last && i < num_intervals; i++ {
-			intervalStart := windowStart.Add(time.Duration(i) * step)
-			intervalEnd := intervalStart.Add(step)
-			overlapStart := start
-			overlapEnd := stop
-			if asset.StartsAt.Before(intervalStart) {
-				overlapStart = intervalStart
-			}
-			if asset.StopsAt.After(intervalEnd) {
-				overlapEnd = intervalEnd
-			}
-			duration := uint64(overlapEnd.Sub(overlapStart).Seconds())
-			bwTimesDuration := uint64(asset.Bandwidth) * duration
-			bwPublished[i] += bwTimesDuration
-		}
-	}
-
-	for _, asset := range boughtAssets {
-		start := asset.StartsAt
-		stop := asset.StopsAt
-		if asset.StartsAt.Before(windowStart) {
-			start = windowStart
-		}
-		if asset.StopsAt.After(windowEnd) {
-			stop = windowEnd
-		}
-		first := int(start.Sub(windowStart) / step)
-
-		last := int(stop.Sub(windowStart) / step)
-		if first < 0 || last > num_intervals {
-			continue
-		}
-		if stop.Equal(windowStart.Add(time.Duration(last) * step)) {
-			last--
-		}
-		for i := first; i <= last && i < num_intervals; i++ {
-			intervalStart := windowStart.Add(time.Duration(i) * step)
-			intervalEnd := intervalStart.Add(step)
-			overlapStart := start
-			overlapEnd := stop
-			if asset.StartsAt.Before(intervalStart) {
-				overlapStart = intervalStart
-			}
-			if asset.StopsAt.After(intervalEnd) {
-				overlapEnd = intervalEnd
-			}
-			duration := uint64(overlapEnd.Sub(overlapStart).Seconds())
-			bwTimesDuration := uint64(asset.Bandwidth) * duration
-			bwBought[i] += bwTimesDuration
-			income[i] += bwTimesDuration * uint64(asset.Price)
-		}
-	}
-	respEntries := make([]*hummingbird.StatisticsResponseEntry, num_intervals)
-	for i := 0; i < num_intervals; i++ {
+	respEntries := make([]*hummingbird.StatisticsResponseEntry, numIntervals)
+	for i := range numIntervals {
 		respEntries[i] = &hummingbird.StatisticsResponseEntry{
 			Revenue:              income[i],
-			BandwidthUtilization: float64(bwBought[i]) / float64(bwPublished[i]),
+			BandwidthUtilization: bandwidthUtilization(bwBought[i], bwPublished[i]),
 		}
 	}
 	return &connect.Response[hummingbird.StatisticsResponse]{

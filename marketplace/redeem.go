@@ -267,6 +267,12 @@ func (h *RedemptionServerHandler) ApplyDelegation(
 	ctx context.Context,
 	state *RedemptionDelegationUpdate,
 ) error {
+	// Validated before anything is stored, so that a delegation the marketplace
+	// cannot use never reaches the database. A stored one would be replayed by
+	// NewService on every start, and would keep the marketplace from starting.
+	if err := validateDelegationParams(state); err != nil {
+		return err
+	}
 	dbDelegation := &db.RedemptionDelegation{
 		IA:         h.ia,
 		Expiration: state.ExpirationTime,

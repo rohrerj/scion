@@ -17,6 +17,7 @@ package marketplace_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 
 	"github.com/scionproto/scion/marketplace"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/hummingbird/bwencoding"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 )
 
@@ -277,6 +279,96 @@ func waitForPending(t *testing.T, h *marketplace.RedemptionServerHandler, n int)
 		}
 		time.Sleep(time.Millisecond)
 	}
+}
+
+// completeEncodingPoints is an encoding table of the size a delegation must carry.
+func completeEncodingPoints() []uint32 {
+	points := make([]uint32, bwencoding.Codepoints)
+	for i := range points {
+		points[i] = uint32(i + 1)
+	}
+	return points
+}
+
+// TestApplyDelegationRejectsBadParams checks that a delegation the marketplace could
+// not serve is refused, both for an incomplete encoding table and for a key that AES
+// does not accept.
+//
+// The handler has a nil store, so the test also pins the ordering: if the validation
+// did not come first, ApplyDelegation would reach the store and panic instead.
+func TestApplyDelegationRejectsBadParams(t *testing.T) {
+	testCases := map[string]struct {
+		points []uint32
+		key    []byte
+		reason string
+	}{
+		"nil points":         {points: nil, key: make([]byte, 16), reason: "encoding points"},
+		"empty points":       {points: []uint32{}, key: make([]byte, 16), reason: "encoding points"},
+		"one point":          {points: []uint32{100}, key: make([]byte, 16), reason: "encoding points"},
+		"one point short":    {points: make([]uint32, bwencoding.Codepoints-1), key: make([]byte, 16), reason: "encoding points"},
+		"one point too many": {points: make([]uint32, bwencoding.Codepoints+1), key: make([]byte, 16), reason: "encoding points"},
+		"nil key":            {points: completeEncodingPoints(), key: nil, reason: "key"},
+		"empty key":          {points: completeEncodingPoints(), key: []byte{}, reason: "key"},
+		"key of 7 bytes":     {points: completeEncodingPoints(), key: make([]byte, 7), reason: "key"},
+		"key of 15 bytes":    {points: completeEncodingPoints(), key: make([]byte, 15), reason: "key"},
+		"key of 33 bytes":    {points: completeEncodingPoints(), key: make([]byte, 33), reason: "key"},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			h := newHandler()
+			err := h.ApplyDelegation(context.Background(), &marketplace.RedemptionDelegationUpdate{
+				ExpirationTime: time.Now().Add(time.Hour),
+				IdLimitHigh:    1000,
+				Key:            tc.key,
+				EncodingPoints: tc.points,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.reason)
+		})
+	}
+}
+
+// TestApplyDelegationAcceptsEveryAESKeySize checks that the key check rejects only what
+// AES rejects, so the three legal sizes must pass validation. The nil store means the
+// call still fails, but at the store rather than at the validation.
+func TestApplyDelegationAcceptsEveryAESKeySize(t *testing.T) {
+	for _, size := range []int{16, 24, 32} {
+		t.Run(fmt.Sprintf("%d bytes", size), func(t *testing.T) {
+			_, err := marketplace.NewRedemptionService(&marketplace.RedemptionDelegationUpdate{
+				ExpirationTime: time.Now().Add(time.Hour),
+				IdLimitHigh:    1000,
+				Key:            make([]byte, size),
+				EncodingPoints: completeEncodingPoints(),
+			}, nil)
+			require.NoError(t, err)
+		})
+	}
+}
+
+// TestNewRedemptionServiceRejectsIncompleteEncodingPoints checks that the invariant
+// belongs to the type, not only to the callers that happen to validate.
+func TestNewRedemptionServiceRejectsIncompleteEncodingPoints(t *testing.T) {
+	_, err := marketplace.NewRedemptionService(&marketplace.RedemptionDelegationUpdate{
+		ExpirationTime: time.Now().Add(time.Hour),
+		IdLimitHigh:    1000,
+		Key:            make([]byte, 16),
+		EncodingPoints: []uint32{100, 200},
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "encoding points")
+}
+
+// TestNewRedemptionServiceAcceptsACompleteTable is the positive case,
+// so the checks above cannot pass merely by rejecting everything.
+func TestNewRedemptionServiceAcceptsACompleteTable(t *testing.T) {
+	s, err := marketplace.NewRedemptionService(&marketplace.RedemptionDelegationUpdate{
+		ExpirationTime: time.Now().Add(time.Hour),
+		IdLimitHigh:    1000,
+		Key:            make([]byte, 16),
+		EncodingPoints: completeEncodingPoints(),
+	}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, s)
 }
 
 // newHandler builds a handler without a store. Only ApplyDelegation reaches the store,
