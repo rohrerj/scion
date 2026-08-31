@@ -134,8 +134,8 @@ func addFlags() {
 			"(e.g. '100kbps,20s' or '100kbps,20s,1mbps')")
 	flag.StringVar(&hummKeysDir, "hummKeysDir", "",
 		"Root directory containing AS*/keys/master0.key files for Hummingbird. "+
-			"Without it, the reservations are bought from the marketplace configured "+
-			"in "+envMarketplaceURL+" and "+envMarketplaceJWT)
+			"Without it, the reservations are bought from the marketplace the ASes of "+
+			"the path advertise, using the token in "+envMarketplaceJWT)
 }
 
 func validateFlags() {
@@ -177,7 +177,7 @@ func validateFlags() {
 		}
 	}
 	log.Info("Flags", "timeout", timeout, "epic", epic, "hummingbird", hummingbird,
-		"humm_keys_dir", hummKeysDir, "marketplace_url", marketParams.URL, "remote", remote)
+		"humm_keys_dir", hummKeysDir, "remote", remote)
 }
 
 type server struct{}
@@ -298,7 +298,6 @@ type client struct {
 	// Specific to Hummingbird without secret values, i.e. buying the flyovers:
 	topo         snet.Topology
 	marketParams marketplaceParameters
-	marketClient *marketclient.MarketplaceClient
 }
 
 func (c *client) run() int {
@@ -511,7 +510,7 @@ func (c *client) buildReservationWithMarketplace(
 	if !ok {
 		return nil, serrors.New("provided path must be of type scion")
 	}
-	market, err := c.marketplaceClient(ctx)
+	market, err := c.marketplacesOnPath(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -520,14 +519,14 @@ func (c *client) buildReservationWithMarketplace(
 	// timestamps it was asked for.
 	startsAt := now.Add(hummStartOffset).Truncate(time.Second)
 	stopsAt := startsAt.Add(time.Duration(c.hummParams.Duration) * time.Second)
-	log.Debug("Buying Hummingbird reservation from marketplace",
-		"url", c.marketParams.URL,
+	log.Debug("Buying Hummingbird reservations from the marketplaces of the path",
 		"bandwidth_kbps", c.hummParams.Bw,
+		"reverse_bandwidth_kbps", c.hummParams.ReverseBw,
 		"starts_at", startsAt,
 		"stops_at", stopsAt)
 
-	flyovers, err := market.ObtainReservationsFullPath(ctx, path, c.hummParams.Bw,
-		startsAt, stopsAt, marketplaceMaxPrice, marketplaceBuyMode,
+	flyovers, reverseFlyovers, err := market.AcquireReservations(ctx, c.hummParams.Bw,
+		c.hummParams.ReverseBw, startsAt, stopsAt, marketplaceMaxPrice, marketplaceBuyMode,
 		marketplaceFetchReservations, marketplaceCombineAssets, marketplaceRetries)
 	if err != nil {
 		return nil, serrors.Wrap("obtaining reservations from marketplace", err)
@@ -544,16 +543,7 @@ func (c *client) buildReservationWithMarketplace(
 		return reservation, err
 	}
 
-	reversePairs := reverseInterfacePairs(path.Metadata().Interfaces)
-	log.Debug("Buying reverse Hummingbird reservation from marketplace",
-		"bandwidth_kbps", c.hummParams.ReverseBw)
-	reverseFlyovers, err := market.ObtainReservationsForInterfacePairs(ctx, reversePairs,
-		c.hummParams.ReverseBw, startsAt, stopsAt, marketplaceMaxPrice, marketplaceBuyMode,
-		marketplaceFetchReservations, marketplaceCombineAssets, marketplaceRetries)
-	if err != nil {
-		return nil, serrors.Wrap("obtaining reverse reservations from marketplace", err)
-	}
-	if err := checkFlyovers(reverseFlyovers, len(reversePairs)); err != nil {
+	if err := checkFlyovers(reverseFlyovers, expected); err != nil {
 		return nil, serrors.Wrap("checking bought reverse reservations", err)
 	}
 	extn, err := redemption.BuildReverseReservationExtn(scionPath, path.Source(), reverseFlyovers)
@@ -583,20 +573,36 @@ func checkFlyovers(hops []*snetpath.Hop, expected int) error {
 	return nil
 }
 
-// marketplaceClient returns the marketplace client, creating it on first use.
-func (c *client) marketplaceClient(ctx context.Context) (*marketclient.MarketplaceClient, error) {
-	if c.marketClient != nil {
-		return c.marketClient, nil
+// marketplacesOnPath discovers the marketplaces the ASes of the path advertise, and
+// connects to the one selling the assets of all of them.
+// This test only holds a token for a single marketplace, so a path that no single
+// marketplace covers cannot be reserved here, even though the discovered set could buy
+// each AS from a different one.
+func (c *client) marketplacesOnPath(
+	ctx context.Context,
+	path snet.Path,
+) (*marketclient.PathMarketplaces, error) {
+	market, err := marketclient.NewPathMarketplaces(path)
+	if err != nil {
+		return nil, serrors.Wrap("discovering the marketplaces of the path", err)
 	}
+	count, coverage := market.FullCoverageCount()
+	if count != 1 {
+		return nil, serrors.New("the path is not covered by a single marketplace",
+			"marketplaces", count, "ases", len(market.PathASes))
+	}
+	log.Debug("Discovered the marketplace of the path",
+		"name", coverage[0].Name,
+		"api_protocol", coverage[0].APIProtocol,
+		"api_address", coverage[0].APIAddress)
 	// The querier and the topology are only used for marketplaces reached over
 	// SCION, but they are always available here.
 	querier := daemon.Querier{Connector: c.sdConn, IA: c.topo.LocalIA}
-	market, err := marketclient.NewMarketplaceClient(ctx, c.marketParams.URL, c.marketParams.JWT,
-		querier, c.topo, marketplaceInsecure)
+	err = market.Connect(ctx, coverage[0].APIAddress, c.marketParams.JWT, querier, c.topo,
+		marketplaceInsecure)
 	if err != nil {
-		return nil, serrors.Wrap("creating marketplace client", err, "url", c.marketParams.URL)
+		return nil, serrors.Wrap("connecting to the marketplace of the path", err)
 	}
-	c.marketClient = market
 	return market, nil
 }
 
@@ -794,12 +800,10 @@ func parseHummingbirdFlag(raw string, withUnits bool) (hummingbirdParameters, er
 	return params, nil
 }
 
-// Environment variables configuring the marketplace used by the -hummingbird
-// mode when no -hummKeysDir is given. Both are mandatory.
-const (
-	envMarketplaceURL = "SCION_MARKETPLACE_URL"
-	envMarketplaceJWT = "SCION_MARKETPLACE_JWT"
-)
+// The environment variable configuring the marketplace used by the -hummingbird mode
+// when no -hummKeysDir is given. It is mandatory; where the marketplace lives is not
+// configured, but discovered from the notes the ASes of the path advertise.
+const envMarketplaceJWT = "SCION_MARKETPLACE_JWT"
 
 // How the reservations are bought. These are the only values this test needs, so
 // they are not configurable.
@@ -828,17 +832,12 @@ const (
 )
 
 type marketplaceParameters struct {
-	URL string
 	JWT string
 }
 
 func marketplaceParametersFromEnv() (marketplaceParameters, error) {
 	params := marketplaceParameters{
-		URL: os.Getenv(envMarketplaceURL),
 		JWT: os.Getenv(envMarketplaceJWT),
-	}
-	if params.URL == "" {
-		return params, serrors.New("missing marketplace url", "env", envMarketplaceURL)
 	}
 	if params.JWT == "" {
 		return params, serrors.New("missing marketplace token", "env", envMarketplaceJWT)
@@ -923,21 +922,6 @@ func (c *client) deriveFlyoversFromSecretValues(
 		})
 	}
 	return flyovers, nil
-}
-
-// reverseInterfacePairs returns the interface pairs of the reverse direction of
-// a path, which is what the reverse reservation must be bought for.
-func reverseInterfacePairs(ifaces []snet.PathInterface) []marketclient.InterfacePair {
-	hops := reverseBaseHops(snetpath.InterfacesToBaseHops(ifaces))
-	pairs := make([]marketclient.InterfacePair, 0, len(hops))
-	for _, hop := range hops {
-		pairs = append(pairs, marketclient.InterfacePair{
-			IA:      uint64(hop.IA),
-			Ingress: uint32(hop.Ingress),
-			Egress:  uint32(hop.Egress),
-		})
-	}
-	return pairs
 }
 
 func reverseBaseHops(hops []snetpath.BaseHop) []snetpath.BaseHop {

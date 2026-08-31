@@ -21,9 +21,9 @@ import (
 	"github.com/scionproto/scion/pkg/snet"
 )
 
-// ASesMetadata is a collection of several ASes' Hummingbird metadata in their PCBs.
-type ASesMetadata struct {
-	Marketplaces []NoteEntry `json:"hummingbird,omitempty"`
+// ASNotes is the set of one AS marketplace notes, taken from the metadata in the PCB.
+type ASNotes struct {
+	Notes []NoteEntry `json:"hummingbird,omitempty"`
 }
 
 // NoteEntry is one marketplace that sells the reservations of the AS which advertised it.
@@ -42,28 +42,45 @@ type NoteEntry struct {
 
 // ParseNote reads the Hummingbird part of one PCB note.
 // A note unrelated to Hummingbird, or not JSON at all, is no marketplace metadata.
-func ParseNote(note string) ASesMetadata {
+func ParseNote(note string) ASNotes {
 	if note == "" {
-		return ASesMetadata{}
+		return ASNotes{}
 	}
-	var parsed ASesMetadata
+	var parsed ASNotes
 	if err := json.Unmarshal([]byte(note), &parsed); err != nil {
 		log.Debug("hummingbird: failed to parse a PCB note", "note", note, "err", err)
-		return ASesMetadata{}
+		return ASNotes{}
 	}
 	return parsed
 }
 
 // WithAPI returns the advertised marketplaces that carry an address to reach them at.
 // An entry without one cannot be used, whatever else it says.
-func (m ASesMetadata) WithAPI() []NoteEntry {
-	reachable := make([]NoteEntry, 0, len(m.Marketplaces))
-	for _, entry := range m.Marketplaces {
+func (m ASNotes) WithAPI() []NoteEntry {
+	reachable := make([]NoteEntry, 0, len(m.Notes))
+	for _, entry := range m.Notes {
 		if entry.APIAddress != "" {
 			reachable = append(reachable, entry)
 		}
 	}
 	return reachable
+}
+
+// UniqueAPIsOnly returns the advertised marketplaces with at most one entry per API address,
+// keeping the first entry of every address in the order the AS advertised them.
+// An AS commonly advertises the same marketplace once per protocol stack it speaks, and a
+// client needs only one way of reaching it.
+func (m ASNotes) UniqueAPIsOnly() ASNotes {
+	seen := make(map[string]struct{}, len(m.Notes))
+	unique := make([]NoteEntry, 0, len(m.Notes))
+	for _, entry := range m.Notes {
+		if _, ok := seen[entry.APIAddress]; ok {
+			continue
+		}
+		seen[entry.APIAddress] = struct{}{}
+		unique = append(unique, entry)
+	}
+	return ASNotes{Notes: unique}
 }
 
 // MarketplacesFromPaths returns the marketplaces that the ASes of the given paths advertise,
