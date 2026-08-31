@@ -758,9 +758,9 @@ class MarketplaceGenerator(object):
     def generate(self):
         """Writes the config of the marketplace and fills its database.
 
-        The service or program running the marketplace is added by the backend
-        generator, so that it lands in the compose file or the supervisord config
-        along with the services of its AS.
+        The service or program running the marketplace is added by the backend generator,
+        so that it lands in the compose file or the supervisord config along
+        with the services of its AS.
         """
         topo_id = marketplace_topo_id(self.args)
         base = topo_id.base_dir(self.args.output_dir)
@@ -775,10 +775,15 @@ class MarketplaceGenerator(object):
         write_file(os.path.join(base, MARKETPLACE_CONFIG_NAME),
                    marketplaceToml(config_dir, endpoints, db_path))
 
-        # The control service copies this into the beacons it propagates, which is
-        # how the other ASes learn where to buy the assets of this one.
-        advertiseMarketplace(
-            os.path.join(base, STATIC_INFO_CONFIG_NAME), topo_id, endpoints)
+        # Every AS of the topology delegates its redemptions to this marketplace,
+        # so every AS must advertise it.
+        # The control service copies the note into the beacons it propagates,
+        # which is how the ASes of a path tell a client where to buy.
+        for as_topo_id in self.args.topo_dicts:
+            advertiseMarketplace(
+                os.path.join(as_topo_id.base_dir(self.args.output_dir),
+                             STATIC_INFO_CONFIG_NAME),
+                topo_id, endpoints)
 
         # The marketplace applies the schema itself, but it cannot invent the
         # entries: they are the ones a local topology is expected to start with.
