@@ -21,10 +21,13 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net/netip"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/gopacket/gopacket"
+	"github.com/prometheus/client_golang/prometheus"
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -40,6 +43,77 @@ import (
 var (
 	testKey = []byte("testkey_xxxxxxxx")
 )
+
+func TestReceiveOverflowRecorder(t *testing.T) {
+	metric := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "test_router_underlay_receive_overflow_pkts_total",
+	}, []string{"local", "remote"})
+	metrics := &router.Metrics{UnderlayReceiveOverflowPackets: metric}
+	local := netip.MustParseAddrPort("127.0.0.1:10000")
+
+	record := newReceiveOverflowRecorder(metrics, local, netip.AddrPort{})
+	require.NotNil(t, record)
+	record(7)
+
+	require.Equal(t, float64(7),
+		promtest.ToFloat64(metric.WithLabelValues(local.String(), "unconnected")))
+}
+
+type classifiedWriteError struct {
+	temporary bool
+	timeout   bool
+}
+
+func (e classifiedWriteError) Error() string   { return "write error" }
+func (e classifiedWriteError) Temporary() bool { return e.temporary }
+func (e classifiedWriteError) Timeout() bool   { return e.timeout }
+
+func TestRetryableWriteError(t *testing.T) {
+	testCases := map[string]struct {
+		err               error
+		expectedRetryable bool
+		expectedDelay     time.Duration
+	}{
+		"no error": {
+			expectedRetryable: true,
+		},
+		"interrupted": {
+			err:               syscall.EINTR,
+			expectedRetryable: true,
+		},
+		"would block": {
+			err:               fmt.Errorf("wrapped: %w", syscall.EAGAIN),
+			expectedRetryable: true,
+			expectedDelay:     temporaryWriteErrorDelay,
+		},
+		"no buffer space": {
+			err:               syscall.ENOBUFS,
+			expectedRetryable: true,
+			expectedDelay:     temporaryWriteErrorDelay,
+		},
+		"no memory": {
+			err:               syscall.ENOMEM,
+			expectedRetryable: true,
+			expectedDelay:     temporaryWriteErrorDelay,
+		},
+		"temporary": {
+			err: classifiedWriteError{temporary: true},
+		},
+		"timeout": {
+			err: classifiedWriteError{temporary: true, timeout: true},
+		},
+		"permanent": {
+			err: fmt.Errorf("permanent write error"),
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			retryable, delay := retryableWriteError(tc.err)
+			assert.Equal(t, tc.expectedRetryable, retryable)
+			assert.Equal(t, tc.expectedDelay, delay)
+		})
+	}
+}
 
 func computeMAC(t *testing.T, key []byte, info path.InfoField, hf path.HopField) [path.MacLen]byte {
 	mac, err := scrypto.InitMac(key)

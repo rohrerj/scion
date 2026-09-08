@@ -97,7 +97,7 @@ type BatchConn interface {
 var underlayProviders map[string]NewProviderFn
 
 // AddUnderlay registers the named factory function.
-func AddUnderlay(name string, newProvider func(int, int, int) UnderlayProvider) {
+func AddUnderlay(name string, newProvider NewProviderFn) {
 	if underlayProviders == nil {
 		underlayProviders = make(map[string]NewProviderFn)
 	}
@@ -364,13 +364,10 @@ func makeDataPlane(runConfig RunConfig, authSCMP bool) dataPlane {
 	// than in AddInternalInterface. Currently there can be no dataplane without the udpip provider,
 	// therefore not having a registered factory for it is a panicable offsense. We have no plan B.
 
+	runConfig.initDefaults()
 	return dataPlane{
 		underlays: map[string]UnderlayProvider{
-			"udpip": underlayProviders["udpip"](
-				runConfig.BatchSize,
-				runConfig.SendBufferSize,
-				runConfig.ReceiveBufferSize,
-			),
+			"udpip": underlayProviders["udpip"](runConfig.underlayConfig(metrics)),
 		},
 		Metrics:                        metrics,
 		ExperimentalSCMPAuthentication: authSCMP,
@@ -482,7 +479,7 @@ func (d *dataPlane) AddInternalInterface(localHost addr.Host, provider, localAdd
 	qMetrics := NewQueueDepthMetrics(d.Metrics, labels)
 	lk, err := internalUnderlay.NewInternalLink(
 		localAddr,
-		d.RunConfig.BatchSize,
+		d.RunConfig.EgressQueueSize,
 		iMetrics,
 		qMetrics,
 	)
@@ -525,11 +522,7 @@ func (d *dataPlane) AddExternalInterface(
 		if !exists {
 			panic(fmt.Sprintf("no provider for underlay: %q", link.Provider))
 		}
-		underlay = underlayProvider(
-			d.RunConfig.BatchSize,
-			d.RunConfig.SendBufferSize,
-			d.RunConfig.ReceiveBufferSize,
-		)
+		underlay = underlayProvider(d.RunConfig.underlayConfig(d.Metrics))
 		d.underlays[link.Provider] = underlay
 	}
 	d.linkTypes[ifID] = link.LinkTo
@@ -538,7 +531,7 @@ func (d *dataPlane) AddExternalInterface(
 	iMetrics := newInterfaceMetrics(d.Metrics, ifID, d.localIA, "", d.neighborIAs[ifID])
 	qMetrics := NewQueueDepthMetrics(d.Metrics, labels)
 	lk, err := underlay.NewExternalLink(
-		d.RunConfig.BatchSize,
+		d.RunConfig.EgressQueueSize,
 		bfd,
 		link.Local.Addr,
 		link.Remote.Addr,
@@ -674,11 +667,7 @@ func (d *dataPlane) AddNextHop(
 		if !exists {
 			panic(fmt.Sprintf("no provider for underlay: %q", link.Provider))
 		}
-		underlay = underlayProvider(
-			d.RunConfig.BatchSize,
-			d.RunConfig.SendBufferSize,
-			d.RunConfig.ReceiveBufferSize,
-		)
+		underlay = underlayProvider(d.RunConfig.underlayConfig(d.Metrics))
 		d.underlays[link.Provider] = underlay
 	}
 	d.linkTypes[ifID] = link.LinkTo
@@ -691,7 +680,7 @@ func (d *dataPlane) AddNextHop(
 		d.Metrics, ifID, d.localIA, link.Remote.Addr, d.neighborIAs[ifID])
 	qMetrics := NewQueueDepthMetrics(d.Metrics, labels)
 	lk, err := underlay.NewSiblingLink(
-		d.RunConfig.BatchSize,
+		d.RunConfig.EgressQueueSize,
 		bfd,
 		link.Local.Addr,
 		link.Remote.Addr,
@@ -743,9 +732,44 @@ func max(a int, b int) int {
 type RunConfig struct {
 	NumProcessors         int
 	NumSlowPathProcessors int
-	BatchSize             int
+	IngressBatchSize      int
+	ProcessorQueueSize    int
+	EgressBatchSize       int
+	EgressQueueSize       int
 	ReceiveBufferSize     int
 	SendBufferSize        int
+}
+
+func (c *RunConfig) initDefaults() {
+	if c.IngressBatchSize == 0 {
+		c.IngressBatchSize = 256
+	}
+	if c.EgressBatchSize == 0 {
+		c.EgressBatchSize = 256
+	}
+	if c.EgressQueueSize == 0 {
+		c.EgressQueueSize = 256
+	}
+}
+
+func (c RunConfig) underlayConfig(metrics *Metrics) UnderlayConfig {
+	return UnderlayConfig{
+		IngressBatchSize:  c.IngressBatchSize,
+		EgressBatchSize:   c.EgressBatchSize,
+		ReceiveBufferSize: c.ReceiveBufferSize,
+		SendBufferSize:    c.SendBufferSize,
+		Metrics:           metrics,
+	}
+}
+
+func (c RunConfig) processorQueueSize(numConnections int) int {
+	if c.ProcessorQueueSize > 0 {
+		return c.ProcessorQueueSize
+	}
+	return max(
+		numConnections*c.IngressBatchSize/c.NumProcessors,
+		c.IngressBatchSize,
+	)
 }
 
 func (d *dataPlane) Run(ctx context.Context) error {
@@ -768,10 +792,7 @@ func (d *dataPlane) Run(ctx context.Context) error {
 	for _, u := range d.underlays {
 		numConnections += u.NumConnections()
 	}
-	processorQueueSize := max(
-		numConnections*d.RunConfig.BatchSize/d.RunConfig.NumProcessors,
-		d.RunConfig.BatchSize,
-	)
+	processorQueueSize := d.RunConfig.processorQueueSize(numConnections)
 	d.initPacketPool(processorQueueSize)
 	procQs, slowQs := d.initQueues(processorQueueSize)
 	d.setRunning()
@@ -800,9 +821,20 @@ func (d *dataPlane) Run(ctx context.Context) error {
 // current dataplane settings and allocates all the buffers
 func (d *dataPlane) initPacketPool(processorQueueSize int) {
 	// collect pool size and headroom reqs
-	poolSize := d.numInterfaces*d.RunConfig.BatchSize +
+	numConnections := 0
+	for _, u := range d.underlays {
+		numConnections += u.NumConnections()
+	}
+	// Packets can be owned concurrently by every stage of the forwarding pipeline, so the pool
+	// must cover all of their capacities. Each connection can hold one ingress batch while reading;
+	// each fast- and slow-path processor can fill its queue and hold one packet while processing;
+	// each interface has independently sized priority and best-effort egress queues; and each
+	// connection's sender can remove and retain one egress batch while WriteBatch is in progress or
+	// retrying unwritten packets.
+	poolSize := numConnections*d.RunConfig.IngressBatchSize +
 		(d.RunConfig.NumProcessors+d.RunConfig.NumSlowPathProcessors)*(processorQueueSize+1) +
-		d.numInterfaces*2*d.RunConfig.BatchSize
+		d.numInterfaces*2*d.RunConfig.EgressQueueSize +
+		numConnections*d.RunConfig.EgressBatchSize
 	headroom := 0
 	for _, u := range d.underlays {
 		h := u.Headroom()
@@ -886,9 +918,18 @@ func (d *dataPlane) runProcessor(id int, q <-chan *Packet, slowQ chan<- *Packet)
 			continue
 		}
 		if !fwLink.Send(p) {
+			recordBusyForwarderDrop(p, fwLink)
 			d.packetPool.Put(p)
-			metrics[sc].DroppedPacketsBusyForwarder.Inc()
 		}
+	}
+}
+
+func recordBusyForwarderDrop(p *Packet, egressLink Link) {
+	sc := ClassOfSize(len(p.RawPacket))
+	metrics := egressLink.Metrics()
+	metrics[sc].DroppedPacketsBusyForwarder.Inc()
+	if p.PriorityLabel == pr.WithPriority {
+		metrics[sc].DroppedPriorityPacketsBusyForwarder.Inc()
 	}
 }
 
@@ -919,8 +960,7 @@ func (d *dataPlane) runSlowPathProcessor(id int, q <-chan *Packet) {
 			continue
 		}
 		if !egressLink.Send(p) {
-			sc := ClassOfSize(len(p.RawPacket))
-			p.Link.Metrics()[sc].DroppedPacketsBusyForwarder.Inc()
+			recordBusyForwarderDrop(p, egressLink)
 			d.packetPool.Put(p)
 		}
 	}
@@ -2270,8 +2310,7 @@ func (b *bfdSend) Send(bfd *layers.BFD) error {
 	p.PriorityLabel = pr.WithPriority
 
 	if !fwLink.Send(p) {
-		sc := ClassOfSize(len(p.RawPacket))
-		fwLink.Metrics()[sc].DroppedPacketsBusyForwarder.Inc()
+		recordBusyForwarderDrop(p, fwLink)
 		// We do not care if some BFD packets get bounced under high load. If it becomes a problem,
 		// the solution is do use BFD's demand-mode. To be considered in a future refactoring.
 		b.dataPlane.packetPool.Put(p)

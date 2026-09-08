@@ -25,6 +25,8 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/scionproto/scion/pkg/addr"
@@ -45,6 +47,8 @@ var (
 	errInvalidServiceAddress = errors.New("invalid service address")
 	errDuplicateRemote       = errors.New("duplicate remote address")
 )
+
+const temporaryWriteErrorDelay = 50 * time.Microsecond
 
 // An interface to enable unit testing.
 type ConnOpener interface {
@@ -76,7 +80,8 @@ func (uo) UDPCanReuseLocal() bool {
 // is to enable other implementations.
 type provider struct {
 	mu                 sync.Mutex // Prevents race between adding connections and Start/Stop.
-	batchSize          int
+	ingressBatchSize   int
+	egressBatchSize    int
 	allLinks           map[netip.AddrPort]udpLink
 	allConnections     []*udpConnection
 	connOpener         ConnOpener // uo{}, except for unit tests
@@ -85,9 +90,12 @@ type provider struct {
 	internalHashSeed   uint32         // ...in which case, this too is shared.
 	receiveBufferSize  int
 	sendBufferSize     int
-	dispatchStart      uint16
-	dispatchEnd        uint16
-	dispatchRedirect   uint16
+	// metrics is the main dataplane metric registry. Sharing it lets socket-level underlay
+	// observations appear on the BR's normal Prometheus endpoint.
+	metrics          *router.Metrics
+	dispatchStart    uint16
+	dispatchEnd      uint16
+	dispatchRedirect uint16
 }
 
 type udpLink interface {
@@ -106,14 +114,16 @@ func init() {
 
 // New instantiates a new instance of the provider for exclusive use by the caller.
 // TODO(multi_underlay): batchSize should be an underlay-specific config.
-func newProvider(batchSize int, receiveBufferSize int, sendBufferSize int) router.UnderlayProvider {
+func newProvider(config router.UnderlayConfig) router.UnderlayProvider {
 	return &provider{
-		batchSize:         batchSize,
+		ingressBatchSize:  config.IngressBatchSize,
+		egressBatchSize:   config.EgressBatchSize,
 		allLinks:          make(map[netip.AddrPort]udpLink),
 		connOpener:        uo{},
 		svc:               router.NewServices[netip.AddrPort](),
-		receiveBufferSize: receiveBufferSize,
-		sendBufferSize:    sendBufferSize,
+		receiveBufferSize: config.ReceiveBufferSize,
+		sendBufferSize:    config.SendBufferSize,
+		metrics:           config.Metrics,
 	}
 }
 
@@ -182,7 +192,7 @@ func (u *provider) Start(
 		l.start(ctx, procQs, pool)
 	}
 	for _, c := range connSnapshot {
-		c.start(u.batchSize, pool)
+		c.start(u.ingressBatchSize, u.egressBatchSize, pool)
 	}
 }
 
@@ -205,21 +215,25 @@ func (u *provider) Stop() {
 // example, only linux allows UDP connected sockets to share the same local address, which is needed
 // if sibling links are to have distinct connections).
 type udpConnection struct {
-	conn         router.BatchConn
-	name         string                             // for logs. It's more informative than ifID.
-	link         udpLink                            // Link with exclusive use of the connection.
-	links        map[netip.AddrPort]udpLink         // Links that share this connection
-	queues       [pr.QueueCount]chan *router.Packet // Packets to be sent, with priorities.
-	metrics      *router.InterfaceMetrics
-	receiverDone chan struct{}
-	senderDone   chan struct{}
-	running      atomic.Bool
-	connected    bool // If true, the underlying UDP socket is connected
+	conn       router.BatchConn
+	name       string                             // for logs. It's more informative than ifID.
+	link       udpLink                            // Link with exclusive use of the connection.
+	links      map[netip.AddrPort]udpLink         // Links that share this connection
+	queues     [pr.QueueCount]chan *router.Packet // Packets to be sent, with priorities.
+	queueDepth [pr.QueueCount]*router.QueueDepthObserver
+	metrics    *router.InterfaceMetrics
+	// recordReceiveOverflow adds a newly observed kernel drop delta to this socket's metric series.
+	// It is nil when the provider was constructed without router metrics.
+	recordReceiveOverflow func(uint64)
+	receiverDone          chan struct{}
+	senderDone            chan struct{}
+	running               atomic.Bool
+	connected             bool // If true, the underlying UDP socket is connected
 }
 
 // start puts the connection in the running state. In that state, the connection can deliver
 // incoming packets and ignores packets present on its input channel.
-func (u *udpConnection) start(batchSize int, pool router.PacketPool) {
+func (u *udpConnection) start(ingressBatchSize, egressBatchSize int, pool router.PacketPool) {
 	wasRunning := u.running.Swap(true)
 	if wasRunning {
 		return
@@ -228,14 +242,14 @@ func (u *udpConnection) start(batchSize int, pool router.PacketPool) {
 	// Receiver task
 	go func() {
 		defer log.HandlePanic()
-		u.receive(batchSize, pool)
+		u.receive(ingressBatchSize, pool)
 		close(u.receiverDone)
 	}()
 
 	// Forwarder task
 	go func() {
 		defer log.HandlePanic()
-		u.send(batchSize, pool)
+		u.send(egressBatchSize, pool)
 		close(u.senderDone)
 	}()
 }
@@ -272,6 +286,10 @@ func (u *udpConnection) receive(batchSize int, pool router.PacketPool) {
 	// The packet owns the buffer that we set in the matching msg, plus the metadata that we'll add.
 	packets := make([]*router.Packet, batchSize)
 	numReusable := 0 // unused buffers from previous loop
+	overflowReader, _ := u.conn.(interface {
+		ReceiveOverflow() (uint64, bool)
+	})
+	var lastReceiveOverflow uint64
 
 	for u.running.Load() {
 		// collect packets.
@@ -286,8 +304,16 @@ func (u *udpConnection) receive(batchSize int, pool router.PacketPool) {
 		// Fill the packets
 		numReusable = len(msgs)
 		numPkts, err := u.conn.ReadBatch(msgs)
+		if overflowReader != nil && u.recordReceiveOverflow != nil {
+			// Record the socket's receive overflow (Linux's socket SO_RXQ_OVFL).
+			current, supported := overflowReader.ReceiveOverflow()
+			if supported && current >= lastReceiveOverflow {
+				u.recordReceiveOverflow(current - lastReceiveOverflow)
+				lastReceiveOverflow = current
+			}
+		}
 		if err != nil {
-			log.Debug("Error while reading batch", "connection", u.name, "err", err)
+			log.Info("Error while reading batch", "connection", u.name, "err", err)
 			continue
 		}
 		numReusable -= numPkts
@@ -325,11 +351,9 @@ func (u *udpConnection) receive(batchSize int, pool router.PacketPool) {
 
 func readUpTo(
 	pktIter sslices.Iter[**router.Packet], // Where to write the packet pointer.
-	queues [pr.QueueCount]chan *router.Packet, // Packet pointer source.
+	inQueues [pr.QueueCount]<-chan *router.Packet, // Packet pointer source.
 	needsBlocking bool,
 ) int {
-	inQueues := typeCastIngressQueues(queues)
-
 	// This is the reading function pointer.
 	var read func(**router.Packet) bool
 
@@ -375,12 +399,7 @@ func readUpTo(
 func (u *udpConnection) send(batchSize int, pool router.PacketPool) {
 	log.Debug("Send", "connection", u.name)
 
-	// Ring buffer storing the packets.
-	// Using circular (modular) iterators to access this buffer.
-	// Depiction of the ring buffer:
-	//	 |x|x| | | | |x|x|
-	// With x meaning packet to be sent on that index.
-	// The buffer above has batchSize = 8, currentIdx = 6, toWrite = 4.
+	// Ring buffer storing the packets pending to be sent.
 	pkts := make([]*router.Packet, batchSize)
 
 	// We use this as a temporary buffer, but allocate it just once
@@ -390,10 +409,19 @@ func (u *udpConnection) send(batchSize int, pool router.PacketPool) {
 		msgs[i].Buffers = make([][]byte, 1)
 	}
 
+	inQueues := typeCastIngressQueues(u.queues)
 	currentIdx := 0 // Index of the first packet pending to be sent.
-	toWrite := 0    // Amount of packets pending to be sent.
-	for u.running.Load() {
+	pending := 0
+	defer func() {
+		for _, p := range sslices.CircularIterator(pkts, currentIdx, pending) {
+			pool.Put(p)
+		}
+		pr.VisitEach(inQueues, func(p *router.Packet) {
+			pool.Put(p)
+		})
+	}()
 
+	for u.running.Load() {
 		// XXX(juagargi): open question: if the priority input queue is empty, how many best-effort
 		// packets should we read and then send? Two answers (to show my hesitation):
 		// 1. If too many, then while we are sending them new priority packets could arrive, and we
@@ -405,20 +433,24 @@ func (u *udpConnection) send(batchSize int, pool router.PacketPool) {
 		// system is well configured, we don't have a higher rate of priority packets reception
 		// than emission; we assume this even taking into account the tolerable token buckets burst.
 		// In that case, unless batchSize was configured extremely high, we will not enqueue
-		// enough priority packets (without sending) them that would cause a bottleneck enough to
+		// enough priority packets (without sending them) to cause a bottleneck large enough to
 		// stall the packet processors.
 
-		// Top-up our batch. Write onto the ring buffer, starting from the first free "bucket" and
-		// no more than the count of free buckets.
-		newBatchPktCount := readUpTo(
-			sslices.CDIterator(pkts, currentIdx+toWrite, batchSize-toWrite),
-			u.queues,
-			toWrite == 0)
+		// Top up our batch with no more packets than the free space in the buffer.
+		if pending < batchSize {
+			pending += readUpTo(
+				sslices.CDIterator(pkts, currentIdx+pending, batchSize-pending),
+				inQueues,
+				pending == 0,
+			)
+		}
+		if pending == 0 {
+			continue
+		}
 
 		// Turn the packets into underlay messages that WriteBatch can send.
-		// Only packets stored from currentIdx+toWrite and onwards are new, copy only the new ones.
 		i := 0
-		for _, p := range sslices.CircularIterator(pkts, currentIdx, toWrite+newBatchPktCount) {
+		for _, p := range sslices.CircularIterator(pkts, currentIdx, pending) {
 			msgs[i].Buffers[0] = p.RawPacket
 			if u.connected {
 				// If we're using a connected socket we must not specify the address. It might cause
@@ -431,15 +463,16 @@ func (u *udpConnection) send(batchSize int, pool router.PacketPool) {
 			i++
 		}
 
-		// Attempt to write the remaining packets from previous batches and this new one.
-		written, _ := u.conn.WriteBatch(msgs[:toWrite+newBatchPktCount], 0)
-		if written < 0 {
-			// WriteBatch returns -1 on error, we just consider this as
-			// 0 packets written.
-			written = 0
+		// Attempt to write the packets remaining from previous batches and the newly read ones.
+		written, err := u.conn.WriteBatch(msgs[:pending], 0)
+		if written < 0 || written > pending {
+			// The regular IPv4 and IPv6 WriteBatch calls always return 0..N
+			panic(fmt.Sprintf("WriteBatch returned %d, expected 0..%d", written, pending))
 		}
+		retryable, retryDelay := retryableWriteError(err)
 		iterator := sslices.ToValueIterator(
-			sslices.CircularIterator(pkts, currentIdx, written))
+			sslices.CircularIterator(pkts, currentIdx, written),
+		)
 		router.UpdateOutputMetrics(u.metrics, iterator)
 		// Return storage for all the written packets.
 		for p := range iterator {
@@ -451,24 +484,47 @@ func (u *udpConnection) send(batchSize int, pool router.PacketPool) {
 		}
 		// The next packet to write is now the first one not written.
 		currentIdx = (currentIdx + written) % batchSize
+		pending -= written
 
-		// Compute the number of packets to still write for next iteration.
-		toWrite += newBatchPktCount
-		if written != toWrite {
-			// The batch was not completely written. We assume that the failure was caused by
-			// the first packet not being sent, i.e. with index = currentIdx.
-			taintedPktIndex := currentIdx
-			sc := router.ClassOfSize(len(pkts[taintedPktIndex].RawPacket))
+		if !retryable && pending > 0 {
+			// The batch was not completely written because of a non-retryable error. Assume the
+			// failure was caused by the first packet not sent, drop it, and retry the rest.
+			pkt := pkts[currentIdx]
+			sc := router.ClassOfSize(len(pkt.RawPacket))
 			u.metrics[sc].DroppedPacketsInvalid.Inc()
+			log.Info("non-temporary error for packet",
+				"error", err.Error(),
+				"priority", pkt.PriorityLabel,
+			)
 			// Return storage for this bad packet.
-			pool.Put(pkts[taintedPktIndex])
-			// We drop the packet and try again with the rest.
-			currentIdx++
-			toWrite -= (written + 1)
-		} else {
-			toWrite = 0
+			pool.Put(pkt)
+			currentIdx = (currentIdx + 1) % batchSize
+			pending--
+		}
+		if written == 0 && retryDelay > 0 {
+			// Avoid spinning while the socket is temporarily unable to make progress.
+			time.Sleep(retryDelay)
 		}
 	}
+}
+
+func retryableWriteError(err error) (retryable bool, retryDelay time.Duration) {
+	// No error and interrupted system calls can be retried immediately.
+	if err == nil || errors.Is(err, syscall.EINTR) {
+		return true, 0
+	}
+	for _, target := range []error{
+		syscall.EAGAIN,
+		syscall.EWOULDBLOCK,
+		syscall.ENOBUFS,
+		syscall.ENOMEM,
+	} {
+		if errors.Is(err, target) {
+			return true, temporaryWriteErrorDelay
+		}
+	}
+	// Unknown errors, including timeouts, are not safe to retry indefinitely.
+	return false, 0
 }
 
 // makeHashSeed creates a new random number to serve as hash seed.
@@ -494,6 +550,7 @@ type connectedLink struct {
 	procQs     []chan *router.Packet
 	name       string // For logs
 	egressQs   [pr.QueueCount]chan<- *router.Packet
+	queueDepth [pr.QueueCount]*router.QueueDepthObserver
 	metrics    *router.InterfaceMetrics
 	pool       router.PacketPool
 	bfdSession *bfd.Session
@@ -559,10 +616,11 @@ func (u *provider) newConnectedLink(
 		return nil, err
 	}
 	queues := createQueues(qSize)
-	registerQueueDepthMetrics(queueMetrics, queues)
+	queueDepth := registerQueueDepthMetrics(queueMetrics, queues)
 	el := &connectedLink{
 		name:       remoteAddr.String(),
 		egressQs:   typeCastEgressQueues(queues),
+		queueDepth: queueDepth,
 		metrics:    metrics,
 		bfdSession: bfd,
 		seed:       makeHashSeed(),
@@ -575,8 +633,12 @@ func (u *provider) newConnectedLink(
 		name: el.name,
 		link: el,
 		// links: nil; no demux lookup ever for this connection
-		queues:       queues,
-		metrics:      metrics, // send() needs them :-(
+		queues:     queues,
+		queueDepth: queueDepth,
+		metrics:    metrics, // send() needs them :-(
+		recordReceiveOverflow: newReceiveOverflowRecorder(
+			u.metrics, localAddr, remoteAddr,
+		),
 		receiverDone: make(chan struct{}),
 		senderDone:   make(chan struct{}),
 		connected:    true,
@@ -594,19 +656,41 @@ func createQueues(qSize int) [pr.QueueCount]chan *router.Packet {
 	return queues
 }
 
+// newReceiveOverflowRecorder binds one underlay socket to its Prometheus counter. An unconnected
+// internal socket has no remote endpoint, so it uses the stable "unconnected" label value.
+func newReceiveOverflowRecorder(
+	metrics *router.Metrics,
+	local, remote netip.AddrPort,
+) func(uint64) {
+	if metrics == nil || metrics.UnderlayReceiveOverflowPackets == nil {
+		return nil
+	}
+	remoteLabel := remote.String()
+	if !remote.IsValid() {
+		remoteLabel = "unconnected"
+	}
+	counter := metrics.UnderlayReceiveOverflowPackets.WithLabelValues(local.String(), remoteLabel)
+	counter.Add(0)
+	return func(delta uint64) {
+		counter.Add(float64(delta))
+	}
+}
+
 func registerQueueDepthMetrics(
 	queueMetrics *router.QueueDepthMetrics,
 	queues [pr.QueueCount]chan *router.Packet,
-) {
+) [pr.QueueCount]*router.QueueDepthObserver {
+	var observers [pr.QueueCount]*router.QueueDepthObserver
 	if queueMetrics == nil {
-		return
+		return observers
 	}
-	queueMetrics.Register("priority", func() float64 {
-		return float64(len(queues[pr.WithPriority]))
+	observers[pr.WithPriority] = queueMetrics.Register("priority", func() int {
+		return len(queues[pr.WithPriority])
 	})
-	queueMetrics.Register("best_effort", func() float64 {
-		return float64(len(queues[pr.WithBestEffort]))
+	observers[pr.WithBestEffort] = queueMetrics.Register("best_effort", func() int {
+		return len(queues[pr.WithBestEffort])
 	})
+	return observers
 }
 
 func typeCastEgressQueues(queues [pr.QueueCount]chan *router.Packet) [pr.QueueCount]chan<- *router.Packet {
@@ -678,9 +762,14 @@ func (l *connectedLink) Resolve(p *router.Packet, host addr.Host, port uint16) e
 }
 
 func (l *connectedLink) Send(p *router.Packet) bool {
+	queue := l.egressQs[p.PriorityLabel]
 	select {
-	case l.egressQs[p.PriorityLabel] <- p:
+	case queue <- p:
+		l.queueDepth[p.PriorityLabel].Observe(len(queue))
 	default:
+		// Queue is at capacity. Don't use len(queue) right now, as another goroutine might race
+		// to dequeue a packet right before we call len(). Instead, report the capacity.
+		l.queueDepth[p.PriorityLabel].Observe(cap(queue))
 		return false
 	}
 	return true
@@ -688,7 +777,9 @@ func (l *connectedLink) Send(p *router.Packet) bool {
 
 func (l *connectedLink) SendBlocking(p *router.Packet) {
 	// We use a bound and connected socket so we don't need to specify the destination.
-	l.egressQs[p.PriorityLabel] <- p
+	queue := l.egressQs[p.PriorityLabel]
+	queue <- p
+	l.queueDepth[p.PriorityLabel].Observe(len(queue))
 }
 
 func (l *connectedLink) receive(size int, srcAddr *net.UDPAddr, p *router.Packet) {
@@ -722,6 +813,7 @@ type detachedLink struct {
 	procQs     []chan *router.Packet
 	name       string // For logs
 	egressQs   [pr.QueueCount]chan<- *router.Packet
+	queueDepth [pr.QueueCount]*router.QueueDepthObserver
 	metrics    *router.InterfaceMetrics
 	pool       router.PacketPool
 	bfdSession *bfd.Session
@@ -794,6 +886,7 @@ func (u *provider) newDetachedLink(
 	sl := &detachedLink{
 		name:       remoteAddr.String(),
 		egressQs:   typeCastEgressQueues(c.queues),
+		queueDepth: c.queueDepth,
 		metrics:    metrics,
 		bfdSession: bfd,
 		remote:     net.UDPAddrFromAddrPort(remoteAddr),
@@ -862,9 +955,13 @@ func (l *detachedLink) Send(p *router.Packet) bool {
 	// is pointless: if we loan l.remote we avoid a copy and still discard at most one address. This
 	// is safe because we treat p.RemoteAddr as immutable and the router main code doesn't touch it.
 	p.RemoteAddr = unsafe.Pointer(l.remote)
+	queue := l.egressQs[p.PriorityLabel]
 	select {
-	case l.egressQs[p.PriorityLabel] <- p:
+	case queue <- p:
+		l.queueDepth[p.PriorityLabel].Observe(len(queue))
 	default:
+		// Queue is at capacity. Avoid races by not calling len() but cap().
+		l.queueDepth[p.PriorityLabel].Observe(cap(queue))
 		return false
 	}
 	return true
@@ -873,7 +970,9 @@ func (l *detachedLink) Send(p *router.Packet) bool {
 func (l *detachedLink) SendBlocking(p *router.Packet) {
 	// Same as Send(). We must supply the destination address.
 	p.RemoteAddr = unsafe.Pointer(l.remote)
-	l.egressQs[p.PriorityLabel] <- p
+	queue := l.egressQs[p.PriorityLabel]
+	queue <- p
+	l.queueDepth[p.PriorityLabel].Observe(len(queue))
 }
 
 func (l *detachedLink) receive(size int, srcAddr *net.UDPAddr, p *router.Packet) {
@@ -906,6 +1005,7 @@ type internalLink struct {
 	procStop         chan struct{}
 	procDone         chan struct{}
 	egressQs         [pr.QueueCount]chan<- *router.Packet
+	queueDepth       [pr.QueueCount]*router.QueueDepthObserver
 	metrics          *router.InterfaceMetrics
 	pool             router.PacketPool
 	svc              *router.Services[netip.AddrPort]
@@ -944,9 +1044,10 @@ func (u *provider) NewInternalLink(
 	}
 	u.internalHashSeed = makeHashSeed()
 	queues := createQueues(qSize)
-	registerQueueDepthMetrics(queueMetrics, queues)
+	queueDepth := registerQueueDepthMetrics(queueMetrics, queues)
 	il := &internalLink{
 		egressQs:         typeCastEgressQueues(queues),
+		queueDepth:       queueDepth,
 		metrics:          metrics,
 		svc:              u.svc,
 		seed:             u.internalHashSeed,
@@ -959,8 +1060,12 @@ func (u *provider) NewInternalLink(
 		name: "internal",
 		link: il,
 		// links: see below.
-		queues:       queues,
-		metrics:      metrics, // send() needs them :-(
+		queues:     queues,
+		queueDepth: queueDepth,
+		metrics:    metrics, // send() needs them :-(
+		recordReceiveOverflow: newReceiveOverflowRecorder(
+			u.metrics, localAddr, netip.AddrPort{},
+		),
 		receiverDone: make(chan struct{}),
 		senderDone:   make(chan struct{}),
 		connected:    false, // Might be exclusive to internal links, but still not connected.
@@ -1132,9 +1237,13 @@ func (l *internalLink) Resolve(p *router.Packet, dst addr.Host, port uint16) err
 
 // The packet's destination is already in the packet's meta-data.
 func (l *internalLink) Send(p *router.Packet) bool {
+	queue := l.egressQs[p.PriorityLabel]
 	select {
-	case l.egressQs[p.PriorityLabel] <- p:
+	case queue <- p:
+		l.queueDepth[p.PriorityLabel].Observe(len(queue))
 	default:
+		// Queue is at capacity. Avoid races by not calling len() but cap().
+		l.queueDepth[p.PriorityLabel].Observe(cap(queue))
 		return false
 	}
 	return true
@@ -1142,7 +1251,9 @@ func (l *internalLink) Send(p *router.Packet) bool {
 
 // The packet's destination is already in the packet's meta-data.
 func (l *internalLink) SendBlocking(p *router.Packet) {
-	l.egressQs[p.PriorityLabel] <- p
+	queue := l.egressQs[p.PriorityLabel]
+	queue <- p
+	l.queueDepth[p.PriorityLabel].Observe(len(queue))
 }
 
 func (l *internalLink) receive(size int, srcAddr *net.UDPAddr, p *router.Packet) {

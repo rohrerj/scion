@@ -156,5 +156,15 @@ type UnderlayProvider interface {
 	) (Link, error)
 }
 
+// UnderlayConfig contains the router-wide sizing options needed to construct an underlay.
+type UnderlayConfig struct {
+	IngressBatchSize  int
+	EgressBatchSize   int
+	ReceiveBufferSize int
+	SendBufferSize    int
+	// Metrics is the main dataplane metric registry shared with the underlay provider.
+	Metrics *Metrics
+}
+
 // NewProviderFn is a function that instantiates an underlay provider.
-type NewProviderFn func(batchSize, receiveBufferSize, sendBufferSize int) UnderlayProvider
+type NewProviderFn func(UnderlayConfig) UnderlayProvider

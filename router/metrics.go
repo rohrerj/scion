@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -31,28 +32,32 @@ import (
 
 // Metrics defines the data-plane metrics for the BR.
 type Metrics struct {
-	InputBytesTotal            *prometheus.CounterVec
-	OutputBytesTotal           *prometheus.CounterVec
-	InputPacketsTotal          *prometheus.CounterVec
-	OutputPacketsTotal         *prometheus.CounterVec
-	ProcessedPackets           *prometheus.CounterVec
-	PriorityForwardedPackets   *prometheus.CounterVec
-	DroppedPacketsTotal        *prometheus.CounterVec
-	HummProcessedPackets       *prometheus.CounterVec
-	HummFlyoverPackets         *prometheus.CounterVec
-	HummDemotedFreshnessPkts   *prometheus.CounterVec
-	HummDemotedExpiredPkts     *prometheus.CounterVec
-	HummDemotedTokenBucketPkts *prometheus.CounterVec
-	InterfaceUp                *prometheus.GaugeVec
-	BFDInterfaceStateChanges   *prometheus.CounterVec
-	BFDPacketsSent             *prometheus.CounterVec
-	BFDPacketsReceived         *prometheus.CounterVec
-	ServiceInstanceCount       *prometheus.GaugeVec
-	ServiceInstanceChanges     *prometheus.CounterVec
-	SiblingReachable           *prometheus.GaugeVec
-	SiblingBFDPacketsSent      *prometheus.CounterVec
-	SiblingBFDPacketsReceived  *prometheus.CounterVec
-	SiblingBFDStateChanges     *prometheus.CounterVec
+	InputBytesTotal             *prometheus.CounterVec
+	OutputBytesTotal            *prometheus.CounterVec
+	InputPacketsTotal           *prometheus.CounterVec
+	OutputPacketsTotal          *prometheus.CounterVec
+	ProcessedPackets            *prometheus.CounterVec
+	PriorityForwardedPackets    *prometheus.CounterVec
+	DroppedPacketsTotal         *prometheus.CounterVec
+	DroppedPriorityPacketsTotal *prometheus.CounterVec
+	// UnderlayReceiveOverflowPackets counts kernel drops before packet parsing or interface
+	// classification, so its series are labeled by socket endpoints rather than router interfaces.
+	UnderlayReceiveOverflowPackets *prometheus.CounterVec
+	HummProcessedPackets           *prometheus.CounterVec
+	HummFlyoverPackets             *prometheus.CounterVec
+	HummDemotedFreshnessPkts       *prometheus.CounterVec
+	HummDemotedExpiredPkts         *prometheus.CounterVec
+	HummDemotedTokenBucketPkts     *prometheus.CounterVec
+	InterfaceUp                    *prometheus.GaugeVec
+	BFDInterfaceStateChanges       *prometheus.CounterVec
+	BFDPacketsSent                 *prometheus.CounterVec
+	BFDPacketsReceived             *prometheus.CounterVec
+	ServiceInstanceCount           *prometheus.GaugeVec
+	ServiceInstanceChanges         *prometheus.CounterVec
+	SiblingReachable               *prometheus.GaugeVec
+	SiblingBFDPacketsSent          *prometheus.CounterVec
+	SiblingBFDPacketsReceived      *prometheus.CounterVec
+	SiblingBFDStateChanges         *prometheus.CounterVec
 	// QueueDepth is a scrape-time collector over egress queue occupancy. Unlike InterfaceMetrics,
 	// these metrics are tied to queue-owning underlay connections rather than to traffic size
 	// classes, because detached sibling links can share the same underlying queues.
@@ -95,61 +100,110 @@ func NewQueueDepthMetrics(metrics *Metrics, labels MetricLabels) *QueueDepthMetr
 	}
 }
 
-// Register registers one queue depth callback under the connection's labels.
-// The callback is invoked only when Prometheus scrapes, which keeps queue metrics off the packet
-// enqueue/dequeue hot path.
-func (m *QueueDepthMetrics) Register(queue string, readDepth func() float64) {
+// Register registers one queue depth callback under the connection's labels and returns the
+// observer used to retain egress queue high-occupancy between Prometheus scrapes.
+func (m *QueueDepthMetrics) Register(queue string, readDepth func() int) *QueueDepthObserver {
 	if m == nil {
+		return nil
+	}
+	return m.collector.Register(m.labels, queue, readDepth)
+}
+
+// QueueDepthObserver retains the largest queue depth observed between Prometheus scrapes.
+type QueueDepthObserver struct {
+	highWatermark atomic.Uint64 // Keeps the max depth between observations.
+}
+
+// Observe includes depth in the current scrape interval's high-watermark.
+func (o *QueueDepthObserver) Observe(depth int) {
+	if o == nil || depth < 0 {
 		return
 	}
-	m.collector.Register(m.labels, queue, readDepth)
+	want := uint64(depth)
+	for {
+		current := o.highWatermark.Load()
+		if want <= current || o.highWatermark.CompareAndSwap(current, want) {
+			return
+		}
+	}
 }
 
-// queueDepthCollector is a custom collector because queue depth is naturally sampled on demand:
-// the underlay can expose a callback that reads len(queue) at scrape time, instead of updating a
-// mutable gauge on every push/pop or on a timer.
+func (o *QueueDepthObserver) collect(current int) uint64 {
+	currentDepth := uint64(current)
+	highWatermark := o.highWatermark.Swap(currentDepth)
+	if highWatermark > currentDepth {
+		return highWatermark
+	}
+	return currentDepth
+}
+
+// queueDepthCollector samples current depth on demand and combines it with the high-watermark
+// retained by QueueDepthObserver during enqueue activity.
 type queueDepthCollector struct {
-	desc *prometheus.Desc
-	mu   sync.RWMutex
-	fns  map[string]queueDepthFunc
+	depthDesc         *prometheus.Desc
+	highWatermarkDesc *prometheus.Desc
+	mu                sync.RWMutex
+	// registrations contains one depth reader and high-watermark observer per labeled queue.
+	// The map key is the NUL-separated (interface, ISD-AS, neighbor ISD-AS, queue) tuple.
+	registrations map[string]queueDepthFunc
 }
 
+// queueDepthFunc holds everything needed to collect both queue-depth metrics for one queue.
 type queueDepthFunc struct {
 	labels [4]string
-	read   func() float64
+	// read returns the queue's current occupancy, normally by calling len on its packet channel.
+	read func() int
+	// observer retains depths seen by enqueue operations between scrapes.
+	observer *QueueDepthObserver
 }
 
 func newQueueDepthCollector() *queueDepthCollector {
 	return &queueDepthCollector{
-		desc: prometheus.NewDesc(
+		depthDesc: prometheus.NewDesc(
 			"router_queue_depth",
 			"Current number of packets in a router egress queue.",
 			[]string{"interface", "isd_as", "neighbor_isd_as", "queue"},
 			nil,
 		),
-		fns: make(map[string]queueDepthFunc),
+		highWatermarkDesc: prometheus.NewDesc(
+			"router_queue_depth_high_watermark",
+			"Maximum number of packets observed in a router egress queue since the previous scrape.",
+			[]string{"interface", "isd_as", "neighbor_isd_as", "queue"},
+			nil,
+		),
+		registrations: make(map[string]queueDepthFunc),
 	}
 }
 
 func (c *queueDepthCollector) Describe(ch chan<- *prometheus.Desc) {
-	ch <- c.desc
+	ch <- c.depthDesc
+	ch <- c.highWatermarkDesc
 }
 
-// Collect snapshots the registered callbacks and emits one gauge per
-// (interface, isd_as, neighbor_isd_as, queue) label tuple.
+// Collect is called by the Prometheus registry during a scrape. It sends the current-depth and
+// high-watermark gauges for each (interface, isd_as, neighbor_isd_as, queue) tuple to ch.
 func (c *queueDepthCollector) Collect(ch chan<- prometheus.Metric) {
 	c.mu.RLock()
-	snapshot := make([]queueDepthFunc, 0, len(c.fns))
-	for _, fn := range c.fns {
+	snapshot := make([]queueDepthFunc, 0, len(c.registrations))
+	for _, fn := range c.registrations {
 		snapshot = append(snapshot, fn)
 	}
 	c.mu.RUnlock()
 
+	// Do not hold c.mu while invoking callbacks or sending metrics to the registry-owned channel.
 	for _, fn := range snapshot {
+		current := fn.read()
+		highWatermark := fn.observer.collect(current)
 		ch <- prometheus.MustNewConstMetric(
-			c.desc,
+			c.depthDesc,
 			prometheus.GaugeValue,
-			fn.read(),
+			float64(current),
+			fn.labels[:]...,
+		)
+		ch <- prometheus.MustNewConstMetric(
+			c.highWatermarkDesc,
+			prometheus.GaugeValue,
+			float64(highWatermark),
 			fn.labels[:]...,
 		)
 	}
@@ -159,8 +213,8 @@ func (c *queueDepthCollector) Collect(ch chan<- prometheus.Metric) {
 func (c *queueDepthCollector) Register(
 	labels MetricLabels,
 	queue string,
-	readDepth func() float64,
-) {
+	readDepth func() int,
+) *QueueDepthObserver {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -170,15 +224,19 @@ func (c *queueDepthCollector) Register(
 		labels.NeighborISDAS,
 		queue,
 	}, "\x00")
-	c.fns[key] = queueDepthFunc{
+	observer := &QueueDepthObserver{}
+	observer.Observe(readDepth())
+	c.registrations[key] = queueDepthFunc{
 		labels: [4]string{
 			labels.Interface,
 			labels.ISDAS,
 			labels.NeighborISDAS,
 			queue,
 		},
-		read: readDepth,
+		read:     readDepth,
+		observer: observer,
 	}
+	return observer
 }
 
 // NewMetrics initializes the metrics for the Border Router, and registers them with the default
@@ -237,6 +295,20 @@ func NewMetrics() *Metrics {
 				Help: "Total number of packets dropped by the router.",
 			},
 			[]string{"interface", "isd_as", "neighbor_isd_as", "sizeclass", "reason"},
+		),
+		DroppedPriorityPacketsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "router_dropped_priority_pkts_total",
+				Help: "Total number of priority packets dropped by the router.",
+			},
+			[]string{"interface", "isd_as", "neighbor_isd_as", "sizeclass", "reason"},
+		),
+		UnderlayReceiveOverflowPackets: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "router_underlay_receive_overflow_pkts_total",
+				Help: "Total packets dropped from a border-router underlay socket receive queue.",
+			},
+			[]string{"local", "remote"},
 		),
 		HummProcessedPackets: promauto.NewCounterVec(
 			prometheus.CounterOpts{
@@ -443,20 +515,21 @@ type InterfaceMetrics [maxSizeClass]trafficMetrics
 // trafficMetrics groups all the metrics instances that all share the same interface AND
 // sizeClass label values (but have different names - i.e. they count different things).
 type trafficMetrics struct {
-	InputBytesTotal             prometheus.Counter
-	InputPacketsTotal           prometheus.Counter
-	DroppedPacketsInvalid       prometheus.Counter
-	DroppedPacketsBusyProcessor prometheus.Counter
-	DroppedPacketsBusyForwarder prometheus.Counter
-	DroppedPacketsBusySlowPath  prometheus.Counter
-	ProcessedPackets            prometheus.Counter
-	PriorityForwardedPackets    prometheus.Counter
-	HummProcessedPackets        prometheus.Counter
-	HummFlyoverPackets          prometheus.Counter
-	HummDemotedFreshnessPkts    prometheus.Counter
-	HummDemotedExpiredPkts      prometheus.Counter
-	HummDemotedTokenBucketPkts  prometheus.Counter
-	Output                      [ttMax]outputMetrics
+	InputBytesTotal                     prometheus.Counter
+	InputPacketsTotal                   prometheus.Counter
+	DroppedPacketsInvalid               prometheus.Counter
+	DroppedPacketsBusyProcessor         prometheus.Counter
+	DroppedPacketsBusyForwarder         prometheus.Counter
+	DroppedPriorityPacketsBusyForwarder prometheus.Counter
+	DroppedPacketsBusySlowPath          prometheus.Counter
+	ProcessedPackets                    prometheus.Counter
+	PriorityForwardedPackets            prometheus.Counter
+	HummProcessedPackets                prometheus.Counter
+	HummFlyoverPackets                  prometheus.Counter
+	HummDemotedFreshnessPkts            prometheus.Counter
+	HummDemotedExpiredPkts              prometheus.Counter
+	HummDemotedTokenBucketPkts          prometheus.Counter
+	Output                              [ttMax]outputMetrics
 }
 
 // outputMetrics groups all the metrics about traffic that has reached the output stage. Metrics
@@ -526,6 +599,8 @@ func newTrafficMetrics(
 	reasonMap["reason"] = "busy_forwarder"
 	c.DroppedPacketsBusyForwarder =
 		metrics.DroppedPacketsTotal.MustCurryWith(ifLabels).MustCurryWith(scLabels).With(reasonMap)
+	c.DroppedPriorityPacketsBusyForwarder = metrics.DroppedPriorityPacketsTotal.
+		MustCurryWith(ifLabels).MustCurryWith(scLabels).With(reasonMap)
 
 	reasonMap["reason"] = "busy_slow_path"
 	c.DroppedPacketsBusySlowPath =
@@ -536,6 +611,7 @@ func newTrafficMetrics(
 	c.DroppedPacketsInvalid.Add(0)
 	c.DroppedPacketsBusyProcessor.Add(0)
 	c.DroppedPacketsBusyForwarder.Add(0)
+	c.DroppedPriorityPacketsBusyForwarder.Add(0)
 	c.DroppedPacketsBusySlowPath.Add(0)
 	c.ProcessedPackets.Add(0)
 	c.PriorityForwardedPackets.Add(0)
