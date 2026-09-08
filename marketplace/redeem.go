@@ -20,6 +20,9 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/scionproto/scion/marketplace/db"
 	"github.com/scionproto/scion/marketplace/storage"
 	"github.com/scionproto/scion/pkg/addr"
@@ -57,6 +60,9 @@ type RedemptionServerHandler struct {
 	// keyed by the request id that correlates the two.
 	pending   map[uint64]chan *hummingbird.RedeemAssetFromASResponse
 	nextReqID uint64
+	// reprovisionMux ensures only a single reprovision request is processed
+	// at a time
+	reprovisionMux sync.Mutex
 }
 
 // RemoteConn is one connection of an AS redemption server.
@@ -303,6 +309,71 @@ func (h *RedemptionServerHandler) ApplyDelegation(
 	return nil
 }
 
+func (h *RedemptionServerHandler) ReprovisionReservations(
+	ctx context.Context,
+) error {
+	if !h.reprovisionMux.TryLock() {
+		return serrors.New("reprovision already in progress")
+	}
+	defer h.reprovisionMux.Unlock()
+
+	earliestStop := time.Now().Format(time.RFC3339)
+	reservations, err := h.store.FetchReservations(ctx, &db.ReservationQuery{
+		IA:      &h.ia,
+		StopsAt: &earliestStop,
+	})
+	log.Debug("reprovision", "ia", h.ia, "loaded reservations", len(reservations))
+	if err != nil {
+		return err
+	}
+	handleResponse := func(dbID int64, resp *hummingbird.RedeemAssetFromASResponse) error {
+		switch result := resp.Result.(type) {
+		case *hummingbird.RedeemAssetFromASResponse_ResInfo:
+			n, err := h.store.UpdateReservation(ctx, dbID, &db.DBReservation{
+				ID:               dbID,
+				ReservationID:    result.ResInfo.ReservationId,
+				Bandwidth:        result.ResInfo.BandwithRounded,
+				EncodedBandwidth: uint16(result.ResInfo.BwDataplaneEncoding),
+				Key:              result.ResInfo.AuthenticationKey,
+			})
+			if err != nil {
+				return err
+			}
+			if n != 1 {
+				return serrors.New("invalid number of rows modified")
+			}
+		case *hummingbird.RedeemAssetFromASResponse_Error:
+			return serrors.New(result.Error)
+		}
+		return nil
+	}
+	g := errgroup.Group{}
+	g.SetLimit(redemptionChannelSize)
+	for _, reservation := range reservations {
+		g.Go(func() error {
+			resp, err := h.Redeem(ctx, &hummingbird.RedeemAssetFromASRequest{
+				IngressId: reservation.Ingress,
+				EgressId:  reservation.Egress,
+				Bandwidth: reservation.Bandwidth,
+				StartsAt:  timestamppb.New(reservation.StartsAt),
+				StopsAt:   timestamppb.New(reservation.StopsAt),
+			})
+			if err != nil {
+				log.Debug("error while reprovisioning reservation", "err", err)
+				return err
+			}
+			if err = handleResponse(reservation.ID, resp); err != nil {
+				log.Debug("error while reprovisioning reservation", "err", err)
+				return err
+			}
+			return nil
+		})
+	}
+	err = g.Wait()
+	log.Debug("reprovision completed", "ia", h.ia)
+	return err
+}
+
 func (s *Service) RedeemASAsset(
 	ctx context.Context,
 	stream *connect.BidiStream[
@@ -379,4 +450,22 @@ func (s *Service) DelegateRedemption(
 		},
 	}, nil
 
+}
+
+func (s *Service) ReprovisionReservations(
+	ctx context.Context,
+	req *connect.Request[hummingbird.ReprovisionReservationRequest],
+) (*connect.Response[hummingbird.ReprovisionReservationResponse], error) {
+	clientID, ok := ctx.Value("user").(addr.IA)
+	if !ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("ia not provided"))
+	}
+	handler := s.FindRedemptionServerHandler(clientID)
+	err := handler.ReprovisionReservations(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, err)
+	}
+	return &connect.Response[hummingbird.ReprovisionReservationResponse]{
+		Msg: &hummingbird.ReprovisionReservationResponse{},
+	}, nil
 }

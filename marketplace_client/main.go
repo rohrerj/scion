@@ -69,6 +69,7 @@ func printOptions(t jwtType) {
 		fmt.Println("-> password")
 	case RedemptionService:
 		fmt.Println("-> delegate")
+		fmt.Println("-> reprovision")
 	}
 	fmt.Println("-> reset")
 	fmt.Println("-> exit")
@@ -288,6 +289,8 @@ func userInteraction() {
 			if success := handleResetJwt(ctx, reader, accountClient, t); success {
 				return
 			}
+		case option == "reprovision":
+			handleReprovision(ctx, reader, redemptionClient)
 		case option == "exit":
 			return
 		}
@@ -335,6 +338,25 @@ func handleResetJwt(
 	}
 	fmt.Println("token reseted")
 	return true
+}
+
+func handleReprovision(
+	ctx context.Context,
+	reader *bufio.Reader,
+	c hummingbirdconnect.RedemptionServiceClient,
+) {
+	fmt.Println("Warning! Starting the reprovision will replace all not yet expired reservations!")
+	if !readConfirm(reader, nil) {
+		return
+	}
+	_, err := c.ReprovisionReservations(ctx, &connect.Request[hummingbird.ReprovisionReservationRequest]{
+		Msg: &hummingbird.ReprovisionReservationRequest{},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("Reservation reprovision succeeded")
 }
 
 func handleDelegate(

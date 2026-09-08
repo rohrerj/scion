@@ -384,6 +384,78 @@ func (x *ReservationInfo) GetAuthenticationKey() []byte {
 	return nil
 }
 
+type ReprovisionReservationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReprovisionReservationRequest) Reset() {
+	*x = ReprovisionReservationRequest{}
+	mi := &file_proto_hummingbird_v1_redemption_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReprovisionReservationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReprovisionReservationRequest) ProtoMessage() {}
+
+func (x *ReprovisionReservationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_hummingbird_v1_redemption_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReprovisionReservationRequest.ProtoReflect.Descriptor instead.
+func (*ReprovisionReservationRequest) Descriptor() ([]byte, []int) {
+	return file_proto_hummingbird_v1_redemption_proto_rawDescGZIP(), []int{5}
+}
+
+type ReprovisionReservationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReprovisionReservationResponse) Reset() {
+	*x = ReprovisionReservationResponse{}
+	mi := &file_proto_hummingbird_v1_redemption_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReprovisionReservationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReprovisionReservationResponse) ProtoMessage() {}
+
+func (x *ReprovisionReservationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_hummingbird_v1_redemption_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReprovisionReservationResponse.ProtoReflect.Descriptor instead.
+func (*ReprovisionReservationResponse) Descriptor() ([]byte, []int) {
+	return file_proto_hummingbird_v1_redemption_proto_rawDescGZIP(), []int{6}
+}
+
 var File_proto_hummingbird_v1_redemption_proto protoreflect.FileDescriptor
 
 const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
@@ -416,10 +488,13 @@ const file_proto_hummingbird_v1_redemption_proto_rawDesc = "" +
 	"\x0ereservation_id\x18\x01 \x01(\rR\rreservationId\x12)\n" +
 	"\x10bandwith_rounded\x18\x02 \x01(\rR\x0fbandwithRounded\x122\n" +
 	"\x15bw_dataplane_encoding\x18\x03 \x01(\rR\x13bwDataplaneEncoding\x12-\n" +
-	"\x12authentication_key\x18\x04 \x01(\fR\x11authenticationKey2\x86\x02\n" +
+	"\x12authentication_key\x18\x04 \x01(\fR\x11authenticationKey\"\x1f\n" +
+	"\x1dReprovisionReservationRequest\" \n" +
+	"\x1eReprovisionReservationResponse2\x8f\x03\n" +
 	"\x11RedemptionService\x12v\n" +
 	"\rRedeemASAsset\x12/.proto.hummingbird.v1.RedeemAssetFromASResponse\x1a..proto.hummingbird.v1.RedeemAssetFromASRequest\"\x00(\x010\x01\x12y\n" +
-	"\x12DelegateRedemption\x12/.proto.hummingbird.v1.DelegateRedemptionRequest\x1a0.proto.hummingbird.v1.DelegateRedemptionResponse\"\x00B3Z1github.com/scionproto/scion/pkg/proto/hummingbirdb\x06proto3"
+	"\x12DelegateRedemption\x12/.proto.hummingbird.v1.DelegateRedemptionRequest\x1a0.proto.hummingbird.v1.DelegateRedemptionResponse\"\x00\x12\x86\x01\n" +
+	"\x17ReprovisionReservations\x123.proto.hummingbird.v1.ReprovisionReservationRequest\x1a4.proto.hummingbird.v1.ReprovisionReservationResponse\"\x00B3Z1github.com/scionproto/scion/pkg/proto/hummingbirdb\x06proto3"
 
 var (
 	file_proto_hummingbird_v1_redemption_proto_rawDescOnce sync.Once
@@ -433,27 +508,31 @@ func file_proto_hummingbird_v1_redemption_proto_rawDescGZIP() []byte {
 	return file_proto_hummingbird_v1_redemption_proto_rawDescData
 }
 
-var file_proto_hummingbird_v1_redemption_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_proto_hummingbird_v1_redemption_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_proto_hummingbird_v1_redemption_proto_goTypes = []any{
-	(*DelegateRedemptionRequest)(nil),  // 0: proto.hummingbird.v1.DelegateRedemptionRequest
-	(*DelegateRedemptionResponse)(nil), // 1: proto.hummingbird.v1.DelegateRedemptionResponse
-	(*RedeemAssetFromASRequest)(nil),   // 2: proto.hummingbird.v1.RedeemAssetFromASRequest
-	(*RedeemAssetFromASResponse)(nil),  // 3: proto.hummingbird.v1.RedeemAssetFromASResponse
-	(*ReservationInfo)(nil),            // 4: proto.hummingbird.v1.ReservationInfo
-	(*timestamppb.Timestamp)(nil),      // 5: google.protobuf.Timestamp
+	(*DelegateRedemptionRequest)(nil),      // 0: proto.hummingbird.v1.DelegateRedemptionRequest
+	(*DelegateRedemptionResponse)(nil),     // 1: proto.hummingbird.v1.DelegateRedemptionResponse
+	(*RedeemAssetFromASRequest)(nil),       // 2: proto.hummingbird.v1.RedeemAssetFromASRequest
+	(*RedeemAssetFromASResponse)(nil),      // 3: proto.hummingbird.v1.RedeemAssetFromASResponse
+	(*ReservationInfo)(nil),                // 4: proto.hummingbird.v1.ReservationInfo
+	(*ReprovisionReservationRequest)(nil),  // 5: proto.hummingbird.v1.ReprovisionReservationRequest
+	(*ReprovisionReservationResponse)(nil), // 6: proto.hummingbird.v1.ReprovisionReservationResponse
+	(*timestamppb.Timestamp)(nil),          // 7: google.protobuf.Timestamp
 }
 var file_proto_hummingbird_v1_redemption_proto_depIdxs = []int32{
-	5, // 0: proto.hummingbird.v1.DelegateRedemptionRequest.expiration_time:type_name -> google.protobuf.Timestamp
-	5, // 1: proto.hummingbird.v1.DelegateRedemptionResponse.expiration_time:type_name -> google.protobuf.Timestamp
-	5, // 2: proto.hummingbird.v1.RedeemAssetFromASRequest.starts_at:type_name -> google.protobuf.Timestamp
-	5, // 3: proto.hummingbird.v1.RedeemAssetFromASRequest.stops_at:type_name -> google.protobuf.Timestamp
+	7, // 0: proto.hummingbird.v1.DelegateRedemptionRequest.expiration_time:type_name -> google.protobuf.Timestamp
+	7, // 1: proto.hummingbird.v1.DelegateRedemptionResponse.expiration_time:type_name -> google.protobuf.Timestamp
+	7, // 2: proto.hummingbird.v1.RedeemAssetFromASRequest.starts_at:type_name -> google.protobuf.Timestamp
+	7, // 3: proto.hummingbird.v1.RedeemAssetFromASRequest.stops_at:type_name -> google.protobuf.Timestamp
 	4, // 4: proto.hummingbird.v1.RedeemAssetFromASResponse.res_info:type_name -> proto.hummingbird.v1.ReservationInfo
 	3, // 5: proto.hummingbird.v1.RedemptionService.RedeemASAsset:input_type -> proto.hummingbird.v1.RedeemAssetFromASResponse
 	0, // 6: proto.hummingbird.v1.RedemptionService.DelegateRedemption:input_type -> proto.hummingbird.v1.DelegateRedemptionRequest
-	2, // 7: proto.hummingbird.v1.RedemptionService.RedeemASAsset:output_type -> proto.hummingbird.v1.RedeemAssetFromASRequest
-	1, // 8: proto.hummingbird.v1.RedemptionService.DelegateRedemption:output_type -> proto.hummingbird.v1.DelegateRedemptionResponse
-	7, // [7:9] is the sub-list for method output_type
-	5, // [5:7] is the sub-list for method input_type
+	5, // 7: proto.hummingbird.v1.RedemptionService.ReprovisionReservations:input_type -> proto.hummingbird.v1.ReprovisionReservationRequest
+	2, // 8: proto.hummingbird.v1.RedemptionService.RedeemASAsset:output_type -> proto.hummingbird.v1.RedeemAssetFromASRequest
+	1, // 9: proto.hummingbird.v1.RedemptionService.DelegateRedemption:output_type -> proto.hummingbird.v1.DelegateRedemptionResponse
+	6, // 10: proto.hummingbird.v1.RedemptionService.ReprovisionReservations:output_type -> proto.hummingbird.v1.ReprovisionReservationResponse
+	8, // [8:11] is the sub-list for method output_type
+	5, // [5:8] is the sub-list for method input_type
 	5, // [5:5] is the sub-list for extension type_name
 	5, // [5:5] is the sub-list for extension extendee
 	0, // [0:5] is the sub-list for field type_name
@@ -474,7 +553,7 @@ func file_proto_hummingbird_v1_redemption_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_hummingbird_v1_redemption_proto_rawDesc), len(file_proto_hummingbird_v1_redemption_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
