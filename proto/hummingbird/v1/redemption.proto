@@ -23,6 +23,7 @@ import "google/protobuf/timestamp.proto";
 service RedemptionService {
     rpc RedeemASAsset(stream RedeemAssetFromASResponse) returns (stream RedeemAssetFromASRequest) {}
     rpc DelegateRedemption(DelegateRedemptionRequest) returns (DelegateRedemptionResponse) {}
+    rpc ReprovisionReservations(ReprovisionReservationRequest) returns (ReprovisionReservationResponse) {}
 }
 
 message DelegateRedemptionRequest {
@@ -66,3 +67,7 @@ message ReservationInfo {
     uint32 bw_dataplane_encoding = 3;
     bytes authentication_key = 4;
 }
+
+message ReprovisionReservationRequest {}
+
+message ReprovisionReservationResponse {}
