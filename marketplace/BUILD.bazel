@@ -7,7 +7,6 @@ go_library(
         "account.go",
         "auth.go",
         "config.go",
-        "id_store.go",
         "redeem.go",
         "redemption_service.go",
         "service.go",
@@ -21,6 +20,7 @@ go_library(
         "//pkg/addr:go_default_library",
         "//pkg/hummingbird:go_default_library",
         "//pkg/hummingbird/bwencoding:go_default_library",
+        "//pkg/hummingbird/id_stores:go_default_library",
         "//pkg/hummingbird/registration:go_default_library",
         "//pkg/log:go_default_library",
         "//pkg/private/serrors:go_default_library",
@@ -44,7 +44,6 @@ go_test(
     name = "go_default_test",
     srcs = [
         "export_test.go",
-        "id_store_test.go",
         "redeem_test.go",
         "redemption_service_test.go",
         "statistics_test.go",

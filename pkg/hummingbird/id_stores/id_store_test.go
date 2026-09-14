@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package marketplace_test
+package id_stores_test
 
 import (
 	"testing"
 	"time"
 
-	"github.com/scionproto/scion/marketplace"
-	"github.com/scionproto/scion/marketplace/db"
+	"github.com/scionproto/scion/pkg/hummingbird/id_stores"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -27,12 +26,12 @@ func TestIDStoreNext(t *testing.T) {
 	base, err := time.Parse(time.RFC3339, "2026-07-16T00:00:00Z")
 	b := base.Unix()
 	assert.NoError(t, err)
-	store := marketplace.UsedIDStore{}
-	err = store.Init(0, 3, []*db.UsedReservation{
+	store := id_stores.UsedIDStore{}
+	err = store.Init(0, 3, []id_stores.Reservation{
 		{
 			Id:       0,
-			StartsAt: base,
-			StopsAt:  base.Add(time.Second * 3),
+			StartsAt: base.Unix(),
+			StopsAt:  base.Add(time.Second * 3).Unix(),
 		},
 	})
 	assert.NoError(t, err)

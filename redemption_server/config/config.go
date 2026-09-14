@@ -16,11 +16,12 @@
 package config
 
 import (
-	"github.com/scionproto/scion/pkg/private/util"
 	"io"
 	"time"
 
 	"github.com/scionproto/scion/pkg/log"
+	"github.com/scionproto/scion/pkg/private/serrors"
+	"github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	"github.com/scionproto/scion/private/config"
 	"github.com/scionproto/scion/private/env"
 )
@@ -48,6 +49,7 @@ func (cfg *Config) InitDefaults() {
 		&cfg.Features,
 		&cfg.Logging,
 		&cfg.Metrics,
+		&cfg.HB,
 	)
 }
 
@@ -77,23 +79,45 @@ var _ config.Config = (*HBConfig)(nil)
 
 // HBConfig holds the configuration specific to the hummingbird service.
 type HBConfig struct {
-	// DefaultReservationDuration is the duration of a hummingbird reservation.
-	ReservationDuration util.DurWrap `toml:"reservation_duration,omitempty"`
-	// TrustDBPath is the path to the trust sqlite DB used by the service.
-	TrustDBPath string `toml:"trust_db_path,omitempty"`
-	MinBandwidth        int          `toml:"min_bandwidth,omitempty"`
-	MaxBandwidth        int          `toml:"max_bandwidth,omitempty"`
-	MinCost             int          `toml:"min_cost,omitempty"`
+	Marketplaces []*MarketplaceConfig `toml:"marketplaces,omitempty"`
+}
+
+type MarketplaceConfig struct {
+	Address        string `toml:"address,omitempty"`
+	KeySalt        string `toml:"salt,omitempty"`
+	ResIdLimitLow  uint32 `toml:"res_id_limit_low,omitempty"`
+	ResIdLimitHigh uint32 `toml:"res_id_limit_high,omitempty"`
+}
+
+func (cfg *MarketplaceConfig) Validate() error {
+	if cfg.Address == "" {
+		return serrors.New("marketplace url not configured")
+	}
+	if cfg.ResIdLimitHigh <= cfg.ResIdLimitLow {
+		return serrors.New("reservation ID limits not configured correctly")
+	}
+	return nil
+}
+
+func (cfg *MarketplaceConfig) InitDefaults() {
+	if cfg.KeySalt == "" {
+		cfg.KeySalt = hummingbird.SecretValueDerivationSalt
+	}
 }
 
 // InitDefaults the default values for the durations that are equal to zero.
 func (cfg *HBConfig) InitDefaults() {
+	for _, marketplace := range cfg.Marketplaces {
+		marketplace.InitDefaults()
+	}
 }
 
 // Validate validates that all durations are set.
 func (cfg *HBConfig) Validate() error {
-	if cfg.ReservationDuration.Duration == 0 {
-		initDurWrap(&cfg.ReservationDuration, DefaultReservationDuration)
+	for _, marketpalce := range cfg.Marketplaces {
+		if err := marketpalce.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -106,10 +130,4 @@ func (cfg *HBConfig) Sample(dst io.Writer, path config.Path, ctx config.CtxMap) 
 // ConfigName is the toml key for the beacon server specific configuration.
 func (cfg *HBConfig) ConfigName() string {
 	return "hummingbird"
-}
-
-func initDurWrap(w *util.DurWrap, def time.Duration) {
-	if w.Duration == 0 {
-		w.Duration = def
-	}
 }

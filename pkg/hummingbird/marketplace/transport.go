@@ -82,7 +82,7 @@ func NewClientSet(
 	if err != nil {
 		return nil, err
 	}
-	interceptor := connect.WithInterceptors(authInterceptor(token))
+	interceptor := connect.WithInterceptors(NewAuthInterceptor(token))
 	if !isSCIONAddress(api) {
 		httpClient := http.DefaultClient
 		if options.Insecure {
@@ -206,13 +206,35 @@ func newSCIONHTTPClient(
 	return libconnect.HTTPClient{RoundTripper: roundTripper}, libconnect.BaseUrl(remote), nil
 }
 
-func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			req.Header().Set("Authorization", "Bearer "+jwtToken)
-			return next(ctx, req)
-		}
+type AuthInterceptor struct {
+	token string
+}
+
+func NewAuthInterceptor(token string) *AuthInterceptor {
+	return &AuthInterceptor{token: token}
+}
+
+func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		req.Header().Set("Authorization", "Bearer "+a.token)
+		return next(ctx, req)
 	}
+}
+
+func (a *AuthInterceptor) WrapStreamingClient(
+	next connect.StreamingClientFunc,
+) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		conn := next(ctx, spec)
+		conn.RequestHeader().Set("Authorization", "Bearer "+a.token)
+		return conn
+	}
+}
+
+func (a *AuthInterceptor) WrapStreamingHandler(
+	next connect.StreamingHandlerFunc,
+) connect.StreamingHandlerFunc {
+	return next
 }
 
 func endpointAddress(rawURL string) (string, error) {
