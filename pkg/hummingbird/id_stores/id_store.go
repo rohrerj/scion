@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package marketplace
+package id_stores
 
 import (
 	"container/heap"
 
-	"github.com/scionproto/scion/marketplace/db"
 	"github.com/scionproto/scion/pkg/private/serrors"
 )
 
@@ -62,7 +61,13 @@ type UsedIDStore struct {
 	base        uint32
 }
 
-func (s *UsedIDStore) Init(limit_low uint32, limit_high uint32, r []*db.UsedReservation) error {
+type Reservation struct {
+	Id       uint32
+	StartsAt int64
+	StopsAt  int64
+}
+
+func (s *UsedIDStore) Init(limit_low uint32, limit_high uint32, r []Reservation) error {
 	s.usedIds = make(map[uint32]struct{})
 	s.base = limit_low
 	s.limit = limit_high
@@ -71,7 +76,7 @@ func (s *UsedIDStore) Init(limit_low uint32, limit_high uint32, r []*db.UsedRese
 		s.usedIds[res.Id] = struct{}{}
 		s.expirations = append(s.expirations, &entry{
 			id:         res.Id,
-			expiration: res.StopsAt.Unix(),
+			expiration: res.StopsAt,
 		})
 	}
 	heap.Init(&s.expirations)

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/hummingbird/id_stores"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/private/storage/db"
 )
@@ -44,7 +45,7 @@ type Repository interface {
 	UpdateAccountMoney(ctx context.Context, id int64, amount int64) (int64, error)
 	UpdateASMoney(ctx context.Context, ia addr.IA, amount int64) (int64, error)
 	SearchAssetsForStatistics(ctx context.Context, params *StatisticsQuery) ([]*DBStat, []*DBStat, error)
-	FindUsedReservations(ctx context.Context, params *UsedReservationsQuery) ([]*UsedReservation, error)
+	FindUsedReservations(ctx context.Context, params *UsedReservationsQuery) ([]id_stores.Reservation, error)
 	CreateOrUpdateRedemptionDelegations(ctx context.Context, r *RedemptionDelegation) (int64, error)
 	FindRedemptionDelegations(ctx context.Context) ([]*RedemptionDelegation, error)
 	IncrementASJWTVersion(ctx context.Context, ia addr.IA, current int64) (int64, error)
@@ -506,7 +507,7 @@ func (e *executor) CreateOrUpdateRedemptionDelegations(
 func (e *executor) FindUsedReservations(
 	ctx context.Context,
 	params *UsedReservationsQuery,
-) ([]*UsedReservation, error) {
+) ([]id_stores.Reservation, error) {
 	if e.read == nil {
 		return nil, serrors.New("No database open")
 	}
@@ -516,23 +517,25 @@ func (e *executor) FindUsedReservations(
 		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
 	}
 	defer rows.Close()
-	var res []*UsedReservation
+	var res []id_stores.Reservation
 	for rows.Next() {
-		a := &UsedReservation{}
+		a := id_stores.Reservation{}
 		var startsAtString string
 		var stopsAtString string
 		err = rows.Scan(&a.Id, &startsAtString, &stopsAtString)
 		if err != nil {
 			return nil, serrors.Wrap("Error reading DB response", err)
 		}
-		a.StartsAt, err = time.Parse(time.RFC3339, startsAtString)
+		startsAt, err := time.Parse(time.RFC3339, startsAtString)
 		if err != nil {
 			return nil, err
 		}
-		a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
+		a.StartsAt = startsAt.Unix()
+		stopsAt, err := time.Parse(time.RFC3339, stopsAtString)
 		if err != nil {
 			return nil, err
 		}
+		a.StopsAt = stopsAt.Unix()
 		res = append(res, a)
 	}
 	return res, nil
