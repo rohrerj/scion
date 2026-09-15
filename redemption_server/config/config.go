@@ -24,6 +24,7 @@ import (
 	"github.com/scionproto/scion/pkg/slayers/path/hummingbird"
 	"github.com/scionproto/scion/private/config"
 	"github.com/scionproto/scion/private/env"
+	"github.com/scionproto/scion/redemption_server/storage"
 )
 
 const (
@@ -80,6 +81,7 @@ var _ config.Config = (*HBConfig)(nil)
 // HBConfig holds the configuration specific to the hummingbird service.
 type HBConfig struct {
 	Marketplaces []*MarketplaceConfig `toml:"marketplaces,omitempty"`
+	RedemptionDB storage.DBConfig     `toml:"redemption_db,omitempty"`
 }
 
 type MarketplaceConfig struct {

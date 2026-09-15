@@ -14,5 +14,6 @@ go_library(
         "//pkg/slayers/path/hummingbird:go_default_library",
         "//private/config:go_default_library",
         "//private/env:go_default_library",
+        "//redemption_server/storage:go_default_library",
     ],
 )

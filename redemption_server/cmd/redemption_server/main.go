@@ -36,6 +36,7 @@ import (
 	"github.com/scionproto/scion/private/topology"
 	"github.com/scionproto/scion/redemption_server/config"
 	"github.com/scionproto/scion/redemption_server/connector"
+	"github.com/scionproto/scion/redemption_server/storage"
 )
 
 var globalCfg config.Config
@@ -99,6 +100,10 @@ func realMain(ctx context.Context) error {
 	}
 
 	masterKey := loadHBMasterSecret(filepath.Join(globalCfg.General.ConfigDir, "keys"))
+	store, err := storage.NewStorage(globalCfg.HB.RedemptionDB)
+	if err != nil {
+		return err
+	}
 	for _, cfg := range globalCfg.HB.Marketplaces {
 		g.Go(func() error {
 			var clients *marketplace.ClientSet
@@ -129,7 +134,7 @@ func realMain(ctx context.Context) error {
 				return nil
 			}
 			runConnector := func() error {
-				c, err := connector.NewConnector(errCtx, masterKey[:], cfg, clients.Redemption)
+				c, err := connector.NewConnector(errCtx, masterKey[:], cfg, clients.Redemption, store)
 				if err != nil {
 					return err
 				}
