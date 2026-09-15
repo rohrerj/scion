@@ -20,6 +20,7 @@ go_library(
         "//private/topology:go_default_library",
         "//redemption_server/config:go_default_library",
         "//redemption_server/connector:go_default_library",
+        "//redemption_server/storage:go_default_library",
         "@org_golang_x_sync//errgroup:go_default_library",
     ],
 )
