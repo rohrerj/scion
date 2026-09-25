@@ -302,7 +302,7 @@ func TestCombine(t *testing.T) {
 			},
 		},
 	}
-	c := &MarketplaceClient{}
+	c := &ClientSet{}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			assert.NotEqual(t, 0, tc.bw)

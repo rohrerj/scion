@@ -28,45 +28,10 @@ import (
 	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
-	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"github.com/scionproto/scion/pkg/snet"
 	snetpath "github.com/scionproto/scion/pkg/snet/path"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-type MarketplaceClient struct {
-	client hummingbirdconnect.MarketplaceServiceClient
-}
-
-// Creates a new marketplace client.
-// Valid URL forms:
-// https://127.0.0.1:31888
-// https://my-marketplace.local:31888
-// [1-ff00:0:111,127.0.0.1]:31888
-// [1-ff00:0:111,my-marketplace.local]:31888
-// If a SCION url is provided, the client will connect over the SCION network,
-// otherwise over the public internet.
-// If a dns name is provided, dns resolution will be done using local dns resolver.
-// If insecure = true, server certificate validation will be disabled.
-// path querier and local topology is only required for scion connections
-func NewMarketplaceClient(
-	ctx context.Context,
-	url string,
-	token string,
-	querier snet.PathQuerier,
-	topo snet.Topology,
-	insecure bool,
-) (*MarketplaceClient, error) {
-	clients, err := NewClientSet(ctx, url, token, ClientOptions{
-		Querier:  querier,
-		Topology: topo,
-		Insecure: insecure,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &MarketplaceClient{client: clients.Marketplace}, nil
-}
 
 type BuyMode int
 
@@ -94,7 +59,7 @@ func interfacePairsFromInterfaces(ifaces []snet.PathInterface) []InterfacePair {
 	return pairs
 }
 
-func (c *MarketplaceClient) findExistingReservations(
+func (c *ClientSet) findExistingReservations(
 	ctx context.Context,
 	pairs []InterfacePair,
 	bwInKbps uint32,
@@ -106,7 +71,7 @@ func (c *MarketplaceClient) findExistingReservations(
 		StartsAt:  timestamppb.New(startsAt),
 		StopsAt:   timestamppb.New(stopsAt),
 	}
-	res, err := c.client.FetchReservations(
+	res, err := c.Marketplace.FetchReservations(
 		ctx, &connect.Request[hummingbird.FetchReservationsRequest]{
 			Msg: req,
 		})
@@ -187,7 +152,7 @@ func activeAt(
 }
 
 // recursiveSelect
-func (c *MarketplaceClient) recursiveSelectStart(
+func (c *ClientSet) recursiveSelectStart(
 	assets []*hummingbird.SearchAsset,
 	bwInKbps uint32,
 	startsAt time.Time,
@@ -319,7 +284,7 @@ type chain struct {
 	stopsAt         time.Time
 }
 
-func (c *MarketplaceClient) recursiveSelect(
+func (c *ClientSet) recursiveSelect(
 	currentAsset *hummingbird.SearchAsset,
 	otherAssets []*hummingbird.SearchAsset,
 	previousBw uint32,
@@ -386,13 +351,13 @@ func (c *MarketplaceClient) recursiveSelect(
 
 }
 
-func (c *MarketplaceClient) searchAllAssets(ctx context.Context, owned bool, ia *uint64, ingress *uint32, egress *uint32,
+func (c *ClientSet) searchAllAssets(ctx context.Context, owned bool, ia *uint64, ingress *uint32, egress *uint32,
 	minBW uint32, startsAtLatest time.Time, stopsAtLatest time.Time) ([]*hummingbird.SearchAsset, error) {
 	// TODO: this is a temporary fix for pagination. We just fetch all pages
 	// To properly implement pagination, especially for the combine assets case, the recursive select algorithm would have to be changed.
 	var assets []*hummingbird.SearchAsset
 	for i := uint32(0); ; i++ {
-		resp, err := c.client.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+		resp, err := c.Marketplace.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
 			Msg: &hummingbird.SearchAssetsRequest{
 				Owned:           owned,
 				Ia:              ia,
@@ -418,7 +383,7 @@ func (c *MarketplaceClient) searchAllAssets(ctx context.Context, owned bool, ia 
 }
 
 // checkoutAssetForInterfacePairWithCombine tries to find assets that can be combined on the time axis. It does not check for combinations on the bandwidth axis.
-func (c *MarketplaceClient) checkoutAssetForInterfacePairWithCombine(ctx context.Context, pair InterfacePair, bwInKbps uint32,
+func (c *ClientSet) checkoutAssetForInterfacePairWithCombine(ctx context.Context, pair InterfacePair, bwInKbps uint32,
 	startsAt time.Time, stopsAt time.Time, combineCost uint64) ([]*hummingbird.BuyAsset, error) {
 
 	ingressAndEgressSuccess := false
@@ -475,7 +440,7 @@ func (c *MarketplaceClient) checkoutAssetForInterfacePairWithCombine(ctx context
 // further splits or combines necessary.
 // The function does not combine assets. If no single (ingress-asset, egress-asset) tuple
 // or interface-pair asset can satisfy the request, no buy order is returned.
-func (c *MarketplaceClient) checkoutAssetForInterfacePair(
+func (c *ClientSet) checkoutAssetForInterfacePair(
 	ctx context.Context,
 	pair InterfacePair,
 	bwInKbps uint32,
@@ -580,7 +545,7 @@ type assetInfo struct {
 	stopsAt  time.Time
 }
 
-func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(
+func (c *ClientSet) ObtainReservationsForInterfacePairs(
 	ctx context.Context,
 	pairs []InterfacePair,
 	bwInKbps uint32,
@@ -592,7 +557,7 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(
 	combineAssets bool,
 	num_retries int,
 ) ([]*snetpath.Hop, error) {
-	infoRep, err := c.client.Info(ctx, &connect.Request[hummingbird.MarketplaceInfoRequest]{})
+	infoRep, err := c.Marketplace.Info(ctx, &connect.Request[hummingbird.MarketplaceInfoRequest]{})
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +609,7 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(
 		} else {
 			log.FromCtx(ctx).Debug("Purchase", "assets", orders)
 			boughtAssetsResponse, err :=
-				c.client.BuyAssets(ctx, &connect.Request[hummingbird.BuyAssetsRequest]{
+				c.Marketplace.BuyAssets(ctx, &connect.Request[hummingbird.BuyAssetsRequest]{
 					Msg: &hummingbird.BuyAssetsRequest{
 						Assets:   orders,
 						MaxPrice: maxPrice,
@@ -714,7 +679,7 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(
 				})
 				currAssetId := pairAssets[0].AssetId
 				for i := 0; i < len(pairAssets)-1; i++ {
-					combineResp, err := c.client.CombineAssets(
+					combineResp, err := c.Marketplace.CombineAssets(
 						ctx, &connect.Request[hummingbird.CombineAssetRequest]{
 							Msg: &hummingbird.CombineAssetRequest{
 								AssetIds: [][]byte{
@@ -739,7 +704,7 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(
 				})
 				currIngressAssetId := ingressAssets[0].AssetId
 				for i := 0; i < len(ingressAssets)-1; i++ {
-					combineResp, err := c.client.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
+					combineResp, err := c.Marketplace.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
 						Msg: &hummingbird.CombineAssetRequest{
 							AssetIds: [][]byte{
 								currIngressAssetId,
@@ -757,7 +722,7 @@ func (c *MarketplaceClient) ObtainReservationsForInterfacePairs(
 				})
 				currEgressAssetId := egressAssets[0].AssetId
 				for i := 0; i < len(egressAssets)-1; i++ {
-					combineResp, err := c.client.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
+					combineResp, err := c.Marketplace.CombineAssets(ctx, &connect.Request[hummingbird.CombineAssetRequest]{
 						Msg: &hummingbird.CombineAssetRequest{
 							AssetIds: [][]byte{
 								currEgressAssetId,
@@ -827,7 +792,7 @@ func earlier(a time.Time, b time.Time) time.Time {
 	return b
 }
 
-func (c *MarketplaceClient) redeemHopsConcurrently(
+func (c *ClientSet) redeemHopsConcurrently(
 	ctx context.Context,
 	pairs []InterfacePair,
 	iaAssets map[uint64][]assetInfo,
@@ -880,7 +845,7 @@ func (c *MarketplaceClient) redeemHopsConcurrently(
 			if requests[i] == nil {
 				return
 			}
-			rep, err := c.client.RedeemAsset(
+			rep, err := c.Marketplace.RedeemAsset(
 				ctx, &connect.Request[hummingbird.RedeemAssetRequest]{Msg: requests[i].request})
 			if err != nil {
 				errors[i] = err
@@ -941,7 +906,7 @@ func (c *MarketplaceClient) redeemHopsConcurrently(
 // It could happen that an asset gets bought by some other user between
 // searching and buying the asset ourselves.
 // With `num_retries` we can repeat the search and buy step if this happens.
-func (c *MarketplaceClient) ObtainReservationsFullPath(
+func (c *ClientSet) ObtainReservationsFullPath(
 	ctx context.Context,
 	path snet.Path,
 	bwInKbps uint32,

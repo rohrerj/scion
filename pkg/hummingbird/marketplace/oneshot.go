@@ -69,6 +69,7 @@ func OneShotReservation(
 	if err := market.Connect(ctx, coverage[0].APIAddress, jwt, querier, topo, insecure); err != nil {
 		return nil, serrors.Wrap("connecting to the marketplace of the path", err)
 	}
+	defer market.Close()
 
 	forward, reverse, err := market.AcquireReservations(ctx, bwInKbps, reverseBwInKbps,
 		startsAt, stopsAt, maxPrice, buyMode, fetchReservations, combineAssets, numRetries)

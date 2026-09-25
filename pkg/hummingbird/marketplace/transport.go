@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/pkg/addr"
 	libconnect "github.com/scionproto/scion/pkg/connect"
@@ -33,8 +34,6 @@ import (
 	snetpath "github.com/scionproto/scion/pkg/snet/path"
 	"github.com/scionproto/scion/pkg/snet/squic"
 	"github.com/scionproto/scion/private/app/appnet"
-	"github.com/scionproto/scion/private/storage"
-	"github.com/scionproto/scion/private/trust"
 )
 
 // ClientOptions configures the transport used by NewClientSet.
@@ -52,6 +51,7 @@ type ClientSet struct {
 	Account     hummingbirdconnect.AccountServiceClient
 	Authority   string
 	SCION       bool
+	scionConn   *snet.Conn
 }
 
 // IsSCIONURL reports whether rawURL contains a SCION address.
@@ -61,6 +61,15 @@ func IsSCIONURL(rawURL string) bool {
 		return false
 	}
 	return isSCIONAddress(api)
+}
+
+func (s *ClientSet) Close() error {
+	var err error
+	if s.scionConn != nil {
+		err = s.scionConn.Close()
+		s.scionConn = nil
+	}
+	return err
 }
 
 // NewClientSet creates marketplace, redemption, and account clients that share
@@ -82,7 +91,7 @@ func NewClientSet(
 	if err != nil {
 		return nil, err
 	}
-	interceptor := connect.WithInterceptors(authInterceptor(token))
+	interceptor := connect.WithInterceptors(NewAuthInterceptor(token))
 	if !isSCIONAddress(api) {
 		httpClient := http.DefaultClient
 		if options.Insecure {
@@ -106,12 +115,14 @@ func NewClientSet(
 		IA:   scionAddr.IA,
 		Host: net.UDPAddrFromAddrPort(netip.AddrPortFrom(scionAddr.Host.IP(), port)),
 	}
-	httpClient, baseURL, err := newSCIONHTTPClient(ctx, remote, serverName, options)
+	httpClient, conn, baseURL, err := newSCIONHTTPClient(ctx, remote, serverName, options)
 	if err != nil {
 		return nil, err
 	}
 	authority := strings.TrimPrefix(baseURL, "https://")
-	return newClientSet(httpClient, baseURL, authority, true, interceptor), nil
+	set := newClientSet(httpClient, baseURL, authority, true, interceptor)
+	set.scionConn = conn
+	return set, nil
 }
 
 func newClientSet(
@@ -138,81 +149,98 @@ func newSCIONHTTPClient(
 	remote *snet.UDPAddr,
 	serverName string,
 	options ClientOptions,
-) (connect.HTTPClient, string, error) {
+) (connect.HTTPClient, *snet.Conn, string, error) {
 	if remote.IA == options.Topology.LocalIA {
 		remote.Path = snetpath.Empty{}
 		remote.NextHop = remote.Host
 	} else {
 		paths, err := options.Querier.Query(ctx, remote.IA)
 		if err != nil {
-			return nil, "", err
+			return nil, nil, "", err
 		}
 		if len(paths) == 0 {
-			return nil, "", serrors.New("no paths found to marketplace")
+			return nil, nil, "", serrors.New("no paths found to marketplace")
 		}
 		remote.Path = paths[0].Dataplane()
 		remote.NextHop = paths[0].UnderlayNextHop()
 	}
-
-	trustDB, err := storage.NewInMemoryTrustStorage()
-	if err != nil {
-		return nil, "", err
-	}
 	conn, err := net.Dial("udp", remote.NextHop.String())
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	localPublic, ok := conn.LocalAddr().(*net.UDPAddr)
 	if closeErr := conn.Close(); closeErr != nil {
-		return nil, "", closeErr
+		return nil, nil, "", closeErr
 	}
 	if !ok {
-		return nil, "", serrors.New("localAddr not UDP addr")
+		return nil, nil, "", serrors.New("localAddr not UDP addr")
 	}
-
-	nc := appnet.NetworkConfig{
-		Topology: options.Topology,
-		IA:       options.Topology.LocalIA,
-		QUIC: appnet.QUIC{
-			TLSVerifier: trust.NewTLSCryptoVerifier(trustDB),
-		},
-		MTU: 1400,
-		Public: &net.UDPAddr{
-			IP:   localPublic.IP,
-			Port: 0,
-			Zone: localPublic.Zone,
-		},
+	sn := snet.SCIONNetwork{
+		Topology:    options.Topology,
+		SCMPHandler: snet.DefaultSCMPHandler{},
 	}
-	quicStack, err := nc.QUICStack(ctx)
+	localAddr := &net.UDPAddr{
+		IP:   localPublic.IP,
+		Port: 0,
+		Zone: localPublic.Zone,
+	}
+	client, err := sn.Listen(ctx, "udp", localAddr)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
-
-	tlsConfig := &tls.Config{
-		NextProtos: []string{"h3", "SCION"},
-		ServerName: serverName,
+	clientTransport := &quic.Transport{
+		Conn: client,
 	}
-	if options.Insecure {
-		tlsConfig.InsecureSkipVerify = true
-	}
-	dialer := (&squic.EarlyDialerFactory{
-		Transport: quicStack.Dialer.Transport,
-		TLSConfig: tlsConfig,
-		Rewriter: &appnet.AddressRewriter{
-			Router: &snet.BaseRouter{Querier: options.Querier},
+	dialerFunc := (&squic.EarlyDialerFactory{
+		Transport: clientTransport,
+		TLSConfig: &tls.Config{
+			NextProtos:         []string{"h3", "SCION"},
+			ServerName:         serverName,
+			InsecureSkipVerify: options.Insecure,
 		},
-	}).NewDialer(remote)
+		Rewriter: &appnet.AddressRewriter{
+			Router: &snet.BaseRouter{
+				Querier: options.Querier,
+			},
+		},
+		QUICConfig: &quic.Config{
+			InitialPacketSize: 1200,
+		},
+	}).NewDialer
+	dialer := dialerFunc(remote)
 	roundTripper := &http3.Transport{Dial: dialer.DialEarly}
-	return libconnect.HTTPClient{RoundTripper: roundTripper}, libconnect.BaseUrl(remote), nil
+	return libconnect.HTTPClient{RoundTripper: roundTripper}, client, libconnect.BaseUrl(remote), nil
 }
 
-func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			req.Header().Set("Authorization", "Bearer "+jwtToken)
-			return next(ctx, req)
-		}
+type AuthInterceptor struct {
+	token string
+}
+
+func NewAuthInterceptor(token string) *AuthInterceptor {
+	return &AuthInterceptor{token: token}
+}
+
+func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		req.Header().Set("Authorization", "Bearer "+a.token)
+		return next(ctx, req)
 	}
+}
+
+func (a *AuthInterceptor) WrapStreamingClient(
+	next connect.StreamingClientFunc,
+) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		conn := next(ctx, spec)
+		conn.RequestHeader().Set("Authorization", "Bearer "+a.token)
+		return conn
+	}
+}
+
+func (a *AuthInterceptor) WrapStreamingHandler(
+	next connect.StreamingHandlerFunc,
+) connect.StreamingHandlerFunc {
+	return next
 }
 
 func endpointAddress(rawURL string) (string, error) {
