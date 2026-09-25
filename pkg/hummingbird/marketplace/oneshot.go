@@ -19,6 +19,7 @@ import (
 	"time"
 
 	humm "github.com/scionproto/scion/pkg/hummingbird"
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/snet"
 	snetpath "github.com/scionproto/scion/pkg/snet/path"
@@ -69,7 +70,11 @@ func OneShotReservation(
 	if err := market.Connect(ctx, coverage[0].APIAddress, jwt, querier, topo, insecure); err != nil {
 		return nil, serrors.Wrap("connecting to the marketplace of the path", err)
 	}
-	defer market.Close()
+	defer func() {
+		if err := market.Close(); err != nil {
+			log.Error("error closing the marketplace clients", "err", err)
+		}
+	}()
 
 	forward, reverse, err := market.AcquireReservations(ctx, bwInKbps, reverseBwInKbps,
 		startsAt, stopsAt, maxPrice, buyMode, fetchReservations, combineAssets, numRetries)
