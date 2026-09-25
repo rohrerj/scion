@@ -56,6 +56,10 @@ type ClientSet struct {
 
 	// scion is the transport to a marketplace reached over SCION, nil for one reached over TCP.
 	scion *scionTransport
+	// tcp is the transport to a marketplace reached over TCP, but only when this set owns it.
+	// It is nil for a SCION marketplace, and also for a TCP one left on http.DefaultTransport,
+	// which is shared process-wide and must not be torn down here.
+	tcp *http.Transport
 }
 
 // scionTransport are the layers a SCION marketplace connection is built from, outermost first.
@@ -96,6 +100,11 @@ func IsSCIONURL(rawURL string) bool {
 // Close releases the transport shared by the clients of the set,
 // which must not be used afterwards. Calling it more than once is a no-op.
 func (s *ClientSet) Close() error {
+	if s.tcp != nil {
+		// Only the idle connections are closed; no request of ours is still holding one.
+		s.tcp.CloseIdleConnections()
+		s.tcp = nil
+	}
 	if s.scion == nil {
 		return nil
 	}
@@ -126,12 +135,15 @@ func NewClientSet(
 	interceptor := connect.WithInterceptors(NewAuthInterceptor(token))
 	if !isSCIONAddress(api) {
 		httpClient := http.DefaultClient
+		var transport *http.Transport
 		if options.Insecure {
-			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport = http.DefaultTransport.(*http.Transport).Clone()
 			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 			httpClient = &http.Client{Transport: transport}
 		}
-		return newClientSet(httpClient, rawURL, api, false, interceptor), nil
+		set := newClientSet(httpClient, rawURL, api, false, interceptor)
+		set.tcp = transport
+		return set, nil
 	}
 	scionAddr, port, serverName, err := parseSCIONAddress(api)
 	if err != nil {

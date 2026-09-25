@@ -16,6 +16,7 @@ package marketplace
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"time"
 
@@ -41,18 +42,27 @@ type PathMarketplaces struct {
 	clients map[NoteEntry]*ClientSet
 }
 
+// Close closes all cached client instances accessing the marketplaces.
+// They must be recreated with Connect before using them again.
 func (m *PathMarketplaces) Close() error {
-	var err error
-	for _, c := range m.clients {
+	// Get the unique clients.
+	clients := make(map[*ClientSet]struct{})
+	for k, c := range m.clients {
 		if c == nil {
 			continue
 		}
-		innerErr := c.Close()
-		if innerErr != nil {
-			err = innerErr
+		clients[c] = struct{}{}
+		m.clients[k] = nil
+	}
+
+	// Close all unique clients, report all errors.
+	var errs []error
+	for c := range clients {
+		if err := c.Close(); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return err
+	return errors.Join(errs...)
 }
 
 // NewPathMarketplaces discovers the marketplaces advertised by the ASes of the given path.
