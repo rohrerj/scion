@@ -16,6 +16,7 @@ package marketplace
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"time"
 
@@ -38,7 +39,30 @@ type PathMarketplaces struct {
 	// clients is the client talking to each advertised marketplace.
 	// Every marketplace of Metadata is a key.
 	// Entries are nil until `Connect` dials them.
-	clients map[NoteEntry]*MarketplaceClient
+	clients map[NoteEntry]*Client
+}
+
+// Close closes all cached client instances accessing the marketplaces.
+// They must be recreated with Connect before using them again.
+func (m *PathMarketplaces) Close() error {
+	// Get the unique clients.
+	clients := make(map[*Client]struct{})
+	for k, c := range m.clients {
+		if c == nil {
+			continue
+		}
+		clients[c] = struct{}{}
+		m.clients[k] = nil
+	}
+
+	// Close all unique clients, report all errors.
+	var errs []error
+	for c := range clients {
+		if err := c.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // NewPathMarketplaces discovers the marketplaces advertised by the ASes of the given path.
@@ -56,7 +80,7 @@ func NewPathMarketplaces(p snet.Path) (*PathMarketplaces, error) {
 			"notes", len(notes), "ases", len(hops))
 	}
 	metadata := make([]ASNotes, len(notes))
-	clients := make(map[NoteEntry]*MarketplaceClient)
+	clients := make(map[NoteEntry]*Client)
 	for i, note := range notes {
 		metadata[i] = ASNotes{
 			Notes: ParseNote(note).UniqueAPIsOnly().WithAPI(),
@@ -182,7 +206,8 @@ func (m *PathMarketplaces) Connect(
 		return serrors.New("no AS of the path advertises this marketplace",
 			"api_address", apiAddress)
 	}
-	client, err := NewMarketplaceClient(ctx, apiAddress, jwt, querier, topo, insecure)
+	client, err := NewClient(ctx, apiAddress, jwt,
+		ClientOptions{Querier: querier, Topology: topo, Insecure: insecure})
 	if err != nil {
 		return serrors.Wrap("connecting to marketplace", err, "api_address", apiAddress)
 	}
@@ -242,7 +267,7 @@ func (m *PathMarketplaces) AcquireReservations(
 	}
 	// The reverse direction visits the same ASes in the opposite order, so the client of
 	// its hop j is the one of the AS at the mirrored index.
-	reverseClients := make([]*MarketplaceClient, len(clients))
+	reverseClients := make([]*Client, len(clients))
 	for i, client := range clients {
 		reverseClients[len(clients)-1-i] = client
 	}
@@ -257,9 +282,9 @@ func (m *PathMarketplaces) AcquireReservations(
 
 // clientPerAS returns the marketplace to buy each AS of the path from,
 // which is the first one it advertised that has been connected to.
-func (m *PathMarketplaces) clientPerAS() ([]*MarketplaceClient, error) {
+func (m *PathMarketplaces) clientPerAS() ([]*Client, error) {
 	hops := snetpath.InterfacesToBaseHops(m.Path.Metadata().Interfaces)
-	clients := make([]*MarketplaceClient, len(m.PathASes))
+	clients := make([]*Client, len(m.PathASes))
 	for i, meta := range m.PathASes {
 		for _, entry := range meta.Notes {
 			if client := m.clients[entry]; client != nil {
@@ -281,7 +306,7 @@ func (m *PathMarketplaces) clientPerAS() ([]*MarketplaceClient, error) {
 func buyPerMarketplace(
 	ctx context.Context,
 	pairs []InterfacePair,
-	clients []*MarketplaceClient,
+	clients []*Client,
 	bwInKbps uint32,
 	startsAt time.Time,
 	stopsAt time.Time,
@@ -292,8 +317,8 @@ func buyPerMarketplace(
 	numRetries int,
 ) ([]*snetpath.Hop, error) {
 	// In the order of the path, so that the same path always buys in the same order.
-	order := []*MarketplaceClient{}
-	grouped := map[*MarketplaceClient][]int{}
+	order := []*Client{}
+	grouped := map[*Client][]int{}
 	for i, client := range clients {
 		if _, ok := grouped[client]; !ok {
 			order = append(order, client)

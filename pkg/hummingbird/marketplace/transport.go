@@ -17,6 +17,7 @@ package marketplace
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -24,17 +25,17 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/pkg/addr"
 	libconnect "github.com/scionproto/scion/pkg/connect"
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"github.com/scionproto/scion/pkg/snet"
 	snetpath "github.com/scionproto/scion/pkg/snet/path"
 	"github.com/scionproto/scion/pkg/snet/squic"
 	"github.com/scionproto/scion/private/app/appnet"
-	"github.com/scionproto/scion/private/storage"
-	"github.com/scionproto/scion/private/trust"
 )
 
 // ClientOptions configures the transport used by NewClientSet.
@@ -45,13 +46,47 @@ type ClientOptions struct {
 	Insecure bool
 }
 
-// ClientSet contains all marketplace API clients backed by one shared transport.
-type ClientSet struct {
+// Client contains all marketplace API clients backed by one shared transport.
+// Close releases that transport, and must be called once the set is no longer used.
+type Client struct {
 	Marketplace hummingbirdconnect.MarketplaceServiceClient
 	Redemption  hummingbirdconnect.RedemptionServiceClient
 	Account     hummingbirdconnect.AccountServiceClient
 	Authority   string
 	SCION       bool
+
+	// scion is the transport to a marketplace reached over SCION, nil for one reached over TCP.
+	scion *scionTransport
+	// tcp is the transport to a marketplace reached over TCP, but only when this set owns it.
+	// It is nil for a SCION marketplace, and also for a TCP one left on http.DefaultTransport,
+	// which is shared process-wide and must not be torn down here.
+	tcp *http.Transport
+}
+
+// scionTransport are the layers a SCION marketplace connection is built from, outermost first.
+// They are kept together because closing them is only correct in this order, see close.
+type scionTransport struct {
+	h3   *http3.Transport
+	quic *quic.Transport
+	conn *snet.Conn
+}
+
+// close tears the layers down from the outside in.
+// http3 closes the HTTP/3 connections gracefully, so the marketplace learns of the shutdown;
+// otherwise it holds its side of every connection until the idle timeout expires.
+// Then QUIC is stopped. And finally the SCION socket is closed.
+func (t *scionTransport) close() error {
+	var errs []error
+	if err := t.h3.Close(); err != nil {
+		errs = append(errs, serrors.Wrap("closing the HTTP/3 transport", err))
+	}
+	if err := t.quic.Close(); err != nil {
+		errs = append(errs, serrors.Wrap("closing the QUIC transport", err))
+	}
+	if err := t.conn.Close(); err != nil {
+		errs = append(errs, serrors.Wrap("closing the SCION connection", err))
+	}
+	return errors.Join(errs...)
 }
 
 // IsSCIONURL reports whether rawURL contains a SCION address.
@@ -63,7 +98,23 @@ func IsSCIONURL(rawURL string) bool {
 	return isSCIONAddress(api)
 }
 
-// NewClientSet creates marketplace, redemption, and account clients that share
+// Close releases the transport shared by the clients of the set,
+// which must not be used afterwards. Calling it more than once is a no-op.
+func (s *Client) Close() error {
+	if s.tcp != nil {
+		// Only the idle connections are closed; no request of ours is still holding one.
+		s.tcp.CloseIdleConnections()
+		s.tcp = nil
+	}
+	if s.scion == nil {
+		return nil
+	}
+	transport := s.scion
+	s.scion = nil
+	return transport.close()
+}
+
+// NewClient creates marketplace, redemption, and account clients that share
 // the same TCP or SCION transport.
 //
 // Valid URL forms include:
@@ -72,25 +123,28 @@ func IsSCIONURL(rawURL string) bool {
 //	https://my-marketplace.local:31888
 //	[1-ff00:0:111,127.0.0.1]:31888
 //	[1-ff00:0:111,my-marketplace.local]:31888
-func NewClientSet(
+func NewClient(
 	ctx context.Context,
 	rawURL string,
 	token string,
 	options ClientOptions,
-) (*ClientSet, error) {
+) (*Client, error) {
 	api, err := endpointAddress(rawURL)
 	if err != nil {
 		return nil, err
 	}
-	interceptor := connect.WithInterceptors(authInterceptor(token))
+	interceptor := connect.WithInterceptors(NewAuthInterceptor(token))
 	if !isSCIONAddress(api) {
 		httpClient := http.DefaultClient
+		var transport *http.Transport
 		if options.Insecure {
-			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport = http.DefaultTransport.(*http.Transport).Clone()
 			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 			httpClient = &http.Client{Transport: transport}
 		}
-		return newClientSet(httpClient, rawURL, api, false, interceptor), nil
+		set := newClient(httpClient, rawURL, api, false, interceptor)
+		set.tcp = transport
+		return set, nil
 	}
 	scionAddr, port, serverName, err := parseSCIONAddress(api)
 	if err != nil {
@@ -106,22 +160,24 @@ func NewClientSet(
 		IA:   scionAddr.IA,
 		Host: net.UDPAddrFromAddrPort(netip.AddrPortFrom(scionAddr.Host.IP(), port)),
 	}
-	httpClient, baseURL, err := newSCIONHTTPClient(ctx, remote, serverName, options)
+	httpClient, transport, baseURL, err := newSCIONHTTPClient(ctx, remote, serverName, options)
 	if err != nil {
 		return nil, err
 	}
 	authority := strings.TrimPrefix(baseURL, "https://")
-	return newClientSet(httpClient, baseURL, authority, true, interceptor), nil
+	set := newClient(httpClient, baseURL, authority, true, interceptor)
+	set.scion = transport
+	return set, nil
 }
 
-func newClientSet(
+func newClient(
 	httpClient connect.HTTPClient,
 	baseURL string,
 	authority string,
 	scion bool,
 	options ...connect.ClientOption,
-) *ClientSet {
-	return &ClientSet{
+) *Client {
+	return &Client{
 		Marketplace: hummingbirdconnect.NewMarketplaceServiceClient(
 			httpClient, baseURL, options...),
 		Redemption: hummingbirdconnect.NewRedemptionServiceClient(
@@ -138,81 +194,111 @@ func newSCIONHTTPClient(
 	remote *snet.UDPAddr,
 	serverName string,
 	options ClientOptions,
-) (connect.HTTPClient, string, error) {
+) (connect.HTTPClient, *scionTransport, string, error) {
 	if remote.IA == options.Topology.LocalIA {
 		remote.Path = snetpath.Empty{}
 		remote.NextHop = remote.Host
 	} else {
 		paths, err := options.Querier.Query(ctx, remote.IA)
 		if err != nil {
-			return nil, "", err
+			return nil, nil, "", err
 		}
 		if len(paths) == 0 {
-			return nil, "", serrors.New("no paths found to marketplace")
+			return nil, nil, "", serrors.New("no paths found to marketplace")
 		}
 		remote.Path = paths[0].Dataplane()
 		remote.NextHop = paths[0].UnderlayNextHop()
 	}
-
-	trustDB, err := storage.NewInMemoryTrustStorage()
-	if err != nil {
-		return nil, "", err
-	}
 	conn, err := net.Dial("udp", remote.NextHop.String())
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	localPublic, ok := conn.LocalAddr().(*net.UDPAddr)
 	if closeErr := conn.Close(); closeErr != nil {
-		return nil, "", closeErr
+		return nil, nil, "", closeErr
 	}
 	if !ok {
-		return nil, "", serrors.New("localAddr not UDP addr")
+		return nil, nil, "", serrors.New("localAddr not UDP addr")
 	}
-
-	nc := appnet.NetworkConfig{
+	sn := snet.SCIONNetwork{
 		Topology: options.Topology,
-		IA:       options.Topology.LocalIA,
-		QUIC: appnet.QUIC{
-			TLSVerifier: trust.NewTLSCryptoVerifier(trustDB),
-		},
-		MTU: 1400,
-		Public: &net.UDPAddr{
-			IP:   localPublic.IP,
-			Port: 0,
-			Zone: localPublic.Zone,
+		// The QUIC client turns any error coming out of a read into a dead connection.
+		// The SCMP handler returns an error for every SCMP error it understands,
+		// even if temporary.
+		// SCMP errors are handled and logged, but not propagated:
+		// a temporary error on the path to the marketplace must not tear down the connection.
+		SCMPHandler: snet.SCMPPropagationStopper{
+			Handler: snet.DefaultSCMPHandler{},
+			Log:     log.Debug,
 		},
 	}
-	quicStack, err := nc.QUICStack(ctx)
+	localAddr := &net.UDPAddr{
+		IP:   localPublic.IP,
+		Port: 0,
+		Zone: localPublic.Zone,
+	}
+	client, err := sn.Listen(ctx, "udp", localAddr)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
-
-	tlsConfig := &tls.Config{
-		NextProtos: []string{"h3", "SCION"},
-		ServerName: serverName,
-	}
-	if options.Insecure {
-		tlsConfig.InsecureSkipVerify = true
+	clientTransport := &quic.Transport{
+		Conn: client,
 	}
 	dialer := (&squic.EarlyDialerFactory{
-		Transport: quicStack.Dialer.Transport,
-		TLSConfig: tlsConfig,
+		Transport: clientTransport,
+		TLSConfig: &tls.Config{
+			NextProtos:         []string{"h3", "SCION"},
+			ServerName:         serverName,
+			InsecureSkipVerify: options.Insecure,
+		},
 		Rewriter: &appnet.AddressRewriter{
-			Router: &snet.BaseRouter{Querier: options.Querier},
+			Router: &snet.BaseRouter{
+				Querier: options.Querier,
+			},
+		},
+		QUICConfig: &quic.Config{
+			InitialPacketSize: 1200, // Default is 1280, but with SCION we have less payload.
 		},
 	}).NewDialer(remote)
 	roundTripper := &http3.Transport{Dial: dialer.DialEarly}
-	return libconnect.HTTPClient{RoundTripper: roundTripper}, libconnect.BaseUrl(remote), nil
+	transport := &scionTransport{
+		h3:   roundTripper,
+		quic: clientTransport,
+		conn: client,
+	}
+	return libconnect.HTTPClient{RoundTripper: roundTripper}, transport,
+		libconnect.BaseUrl(remote), nil
 }
 
-func authInterceptor(jwtToken string) connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			req.Header().Set("Authorization", "Bearer "+jwtToken)
-			return next(ctx, req)
-		}
+type AuthInterceptor struct {
+	token string
+}
+
+func NewAuthInterceptor(token string) *AuthInterceptor {
+	return &AuthInterceptor{token: token}
+}
+
+func (a *AuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		req.Header().Set("Authorization", "Bearer "+a.token)
+		return next(ctx, req)
 	}
+}
+
+func (a *AuthInterceptor) WrapStreamingClient(
+	next connect.StreamingClientFunc,
+) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		conn := next(ctx, spec)
+		conn.RequestHeader().Set("Authorization", "Bearer "+a.token)
+		return conn
+	}
+}
+
+func (a *AuthInterceptor) WrapStreamingHandler(
+	next connect.StreamingHandlerFunc,
+) connect.StreamingHandlerFunc {
+	return next
 }
 
 func endpointAddress(rawURL string) (string, error) {
