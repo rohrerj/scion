@@ -17,6 +17,7 @@ package marketplace
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -45,13 +46,42 @@ type ClientOptions struct {
 }
 
 // ClientSet contains all marketplace API clients backed by one shared transport.
+// Close releases that transport, and must be called once the set is no longer used.
 type ClientSet struct {
 	Marketplace hummingbirdconnect.MarketplaceServiceClient
 	Redemption  hummingbirdconnect.RedemptionServiceClient
 	Account     hummingbirdconnect.AccountServiceClient
 	Authority   string
 	SCION       bool
-	scionConn   *snet.Conn
+
+	// scion is the transport to a marketplace reached over SCION, nil for one reached over TCP.
+	scion *scionTransport
+}
+
+// scionTransport are the layers a SCION marketplace connection is built from, outermost first.
+// They are kept together because closing them is only correct in this order, see close.
+type scionTransport struct {
+	h3   *http3.Transport
+	quic *quic.Transport
+	conn *snet.Conn
+}
+
+// close tears the layers down from the outside in.
+// http3 closes the HTTP/3 connections gracefully, so the marketplace learns of the shutdown;
+// otherwise it holds its side of every connection until the idle timeout expires.
+// Then QUIC is stopped. And finally the SCION socket is closed.
+func (t *scionTransport) close() error {
+	var errs []error
+	if err := t.h3.Close(); err != nil {
+		errs = append(errs, serrors.Wrap("closing the HTTP/3 transport", err))
+	}
+	if err := t.quic.Close(); err != nil {
+		errs = append(errs, serrors.Wrap("closing the QUIC transport", err))
+	}
+	if err := t.conn.Close(); err != nil {
+		errs = append(errs, serrors.Wrap("closing the SCION connection", err))
+	}
+	return errors.Join(errs...)
 }
 
 // IsSCIONURL reports whether rawURL contains a SCION address.
@@ -63,13 +93,15 @@ func IsSCIONURL(rawURL string) bool {
 	return isSCIONAddress(api)
 }
 
+// Close releases the transport shared by the clients of the set,
+// which must not be used afterwards. Calling it more than once is a no-op.
 func (s *ClientSet) Close() error {
-	var err error
-	if s.scionConn != nil {
-		err = s.scionConn.Close()
-		s.scionConn = nil
+	if s.scion == nil {
+		return nil
 	}
-	return err
+	transport := s.scion
+	s.scion = nil
+	return transport.close()
 }
 
 // NewClientSet creates marketplace, redemption, and account clients that share
@@ -115,13 +147,13 @@ func NewClientSet(
 		IA:   scionAddr.IA,
 		Host: net.UDPAddrFromAddrPort(netip.AddrPortFrom(scionAddr.Host.IP(), port)),
 	}
-	httpClient, conn, baseURL, err := newSCIONHTTPClient(ctx, remote, serverName, options)
+	httpClient, transport, baseURL, err := newSCIONHTTPClient(ctx, remote, serverName, options)
 	if err != nil {
 		return nil, err
 	}
 	authority := strings.TrimPrefix(baseURL, "https://")
 	set := newClientSet(httpClient, baseURL, authority, true, interceptor)
-	set.scionConn = conn
+	set.scion = transport
 	return set, nil
 }
 
@@ -149,7 +181,7 @@ func newSCIONHTTPClient(
 	remote *snet.UDPAddr,
 	serverName string,
 	options ClientOptions,
-) (connect.HTTPClient, *snet.Conn, string, error) {
+) (connect.HTTPClient, *scionTransport, string, error) {
 	if remote.IA == options.Topology.LocalIA {
 		remote.Path = snetpath.Empty{}
 		remote.NextHop = remote.Host
@@ -209,7 +241,13 @@ func newSCIONHTTPClient(
 	}).NewDialer
 	dialer := dialerFunc(remote)
 	roundTripper := &http3.Transport{Dial: dialer.DialEarly}
-	return libconnect.HTTPClient{RoundTripper: roundTripper}, client, libconnect.BaseUrl(remote), nil
+	transport := &scionTransport{
+		h3:   roundTripper,
+		quic: clientTransport,
+		conn: client,
+	}
+	return libconnect.HTTPClient{RoundTripper: roundTripper}, transport,
+		libconnect.BaseUrl(remote), nil
 }
 
 type AuthInterceptor struct {
