@@ -235,7 +235,7 @@ func newSCIONHTTPClient(
 	clientTransport := &quic.Transport{
 		Conn: client,
 	}
-	dialerFunc := (&squic.EarlyDialerFactory{
+	dialer := (&squic.EarlyDialerFactory{
 		Transport: clientTransport,
 		TLSConfig: &tls.Config{
 			NextProtos:         []string{"h3", "SCION"},
@@ -248,10 +248,9 @@ func newSCIONHTTPClient(
 			},
 		},
 		QUICConfig: &quic.Config{
-			InitialPacketSize: 1200,
+			InitialPacketSize: 1200, // Default is 1280, but with SCION we have less payload.
 		},
-	}).NewDialer
-	dialer := dialerFunc(remote)
+	}).NewDialer(remote)
 	roundTripper := &http3.Transport{Dial: dialer.DialEarly}
 	transport := &scionTransport{
 		h3:   roundTripper,
