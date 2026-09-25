@@ -218,7 +218,7 @@ func userInteraction() {
 		clientOptions.Topology = topo
 		clientOptions.Querier = daemon.Querier{Connector: connector, IA: topo.LocalIA}
 	}
-	clients, err := marketclient.NewClientSet(ctx, url, token, clientOptions)
+	clients, err := marketclient.NewClient(ctx, url, token, clientOptions)
 	if err != nil {
 		fmt.Println(err)
 		return

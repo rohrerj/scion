@@ -45,9 +45,9 @@ type ClientOptions struct {
 	Insecure bool
 }
 
-// ClientSet contains all marketplace API clients backed by one shared transport.
+// Client contains all marketplace API clients backed by one shared transport.
 // Close releases that transport, and must be called once the set is no longer used.
-type ClientSet struct {
+type Client struct {
 	Marketplace hummingbirdconnect.MarketplaceServiceClient
 	Redemption  hummingbirdconnect.RedemptionServiceClient
 	Account     hummingbirdconnect.AccountServiceClient
@@ -99,7 +99,7 @@ func IsSCIONURL(rawURL string) bool {
 
 // Close releases the transport shared by the clients of the set,
 // which must not be used afterwards. Calling it more than once is a no-op.
-func (s *ClientSet) Close() error {
+func (s *Client) Close() error {
 	if s.tcp != nil {
 		// Only the idle connections are closed; no request of ours is still holding one.
 		s.tcp.CloseIdleConnections()
@@ -113,7 +113,7 @@ func (s *ClientSet) Close() error {
 	return transport.close()
 }
 
-// NewClientSet creates marketplace, redemption, and account clients that share
+// NewClient creates marketplace, redemption, and account clients that share
 // the same TCP or SCION transport.
 //
 // Valid URL forms include:
@@ -122,12 +122,12 @@ func (s *ClientSet) Close() error {
 //	https://my-marketplace.local:31888
 //	[1-ff00:0:111,127.0.0.1]:31888
 //	[1-ff00:0:111,my-marketplace.local]:31888
-func NewClientSet(
+func NewClient(
 	ctx context.Context,
 	rawURL string,
 	token string,
 	options ClientOptions,
-) (*ClientSet, error) {
+) (*Client, error) {
 	api, err := endpointAddress(rawURL)
 	if err != nil {
 		return nil, err
@@ -141,7 +141,7 @@ func NewClientSet(
 			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 			httpClient = &http.Client{Transport: transport}
 		}
-		set := newClientSet(httpClient, rawURL, api, false, interceptor)
+		set := newClient(httpClient, rawURL, api, false, interceptor)
 		set.tcp = transport
 		return set, nil
 	}
@@ -164,19 +164,19 @@ func NewClientSet(
 		return nil, err
 	}
 	authority := strings.TrimPrefix(baseURL, "https://")
-	set := newClientSet(httpClient, baseURL, authority, true, interceptor)
+	set := newClient(httpClient, baseURL, authority, true, interceptor)
 	set.scion = transport
 	return set, nil
 }
 
-func newClientSet(
+func newClient(
 	httpClient connect.HTTPClient,
 	baseURL string,
 	authority string,
 	scion bool,
 	options ...connect.ClientOption,
-) *ClientSet {
-	return &ClientSet{
+) *Client {
+	return &Client{
 		Marketplace: hummingbirdconnect.NewMarketplaceServiceClient(
 			httpClient, baseURL, options...),
 		Redemption: hummingbirdconnect.NewRedemptionServiceClient(

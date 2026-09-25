@@ -177,7 +177,7 @@ func TestClientPerASNeedsAConnection(t *testing.T) {
 	// Add one client, but only covers the first AS.
 	for entry := range discovered.clients {
 		if entry.APIAddress == "a" {
-			discovered.clients[entry] = &ClientSet{}
+			discovered.clients[entry] = &Client{}
 		}
 	}
 	_, err = discovered.clientPerAS()
@@ -186,7 +186,7 @@ func TestClientPerASNeedsAConnection(t *testing.T) {
 	// Add a second client. Now all ASes should be covered.
 	for entry := range discovered.clients {
 		if entry.APIAddress == "b" {
-			discovered.clients[entry] = &ClientSet{}
+			discovered.clients[entry] = &Client{}
 		}
 	}
 	clients, err := discovered.clientPerAS()

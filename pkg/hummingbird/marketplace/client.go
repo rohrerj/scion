@@ -59,7 +59,7 @@ func interfacePairsFromInterfaces(ifaces []snet.PathInterface) []InterfacePair {
 	return pairs
 }
 
-func (c *ClientSet) findExistingReservations(
+func (c *Client) findExistingReservations(
 	ctx context.Context,
 	pairs []InterfacePair,
 	bwInKbps uint32,
@@ -152,7 +152,7 @@ func activeAt(
 }
 
 // recursiveSelect
-func (c *ClientSet) recursiveSelectStart(
+func (c *Client) recursiveSelectStart(
 	assets []*hummingbird.SearchAsset,
 	bwInKbps uint32,
 	startsAt time.Time,
@@ -284,7 +284,7 @@ type chain struct {
 	stopsAt         time.Time
 }
 
-func (c *ClientSet) recursiveSelect(
+func (c *Client) recursiveSelect(
 	currentAsset *hummingbird.SearchAsset,
 	otherAssets []*hummingbird.SearchAsset,
 	previousBw uint32,
@@ -351,7 +351,7 @@ func (c *ClientSet) recursiveSelect(
 
 }
 
-func (c *ClientSet) searchAllAssets(ctx context.Context, owned bool, ia *uint64, ingress *uint32, egress *uint32,
+func (c *Client) searchAllAssets(ctx context.Context, owned bool, ia *uint64, ingress *uint32, egress *uint32,
 	minBW uint32, startsAtLatest time.Time, stopsAtLatest time.Time) ([]*hummingbird.SearchAsset, error) {
 	// TODO: this is a temporary fix for pagination. We just fetch all pages
 	// To properly implement pagination, especially for the combine assets case, the recursive select algorithm would have to be changed.
@@ -383,7 +383,7 @@ func (c *ClientSet) searchAllAssets(ctx context.Context, owned bool, ia *uint64,
 }
 
 // checkoutAssetForInterfacePairWithCombine tries to find assets that can be combined on the time axis. It does not check for combinations on the bandwidth axis.
-func (c *ClientSet) checkoutAssetForInterfacePairWithCombine(ctx context.Context, pair InterfacePair, bwInKbps uint32,
+func (c *Client) checkoutAssetForInterfacePairWithCombine(ctx context.Context, pair InterfacePair, bwInKbps uint32,
 	startsAt time.Time, stopsAt time.Time, combineCost uint64) ([]*hummingbird.BuyAsset, error) {
 
 	ingressAndEgressSuccess := false
@@ -440,7 +440,7 @@ func (c *ClientSet) checkoutAssetForInterfacePairWithCombine(ctx context.Context
 // further splits or combines necessary.
 // The function does not combine assets. If no single (ingress-asset, egress-asset) tuple
 // or interface-pair asset can satisfy the request, no buy order is returned.
-func (c *ClientSet) checkoutAssetForInterfacePair(
+func (c *Client) checkoutAssetForInterfacePair(
 	ctx context.Context,
 	pair InterfacePair,
 	bwInKbps uint32,
@@ -545,7 +545,7 @@ type assetInfo struct {
 	stopsAt  time.Time
 }
 
-func (c *ClientSet) ObtainReservationsForInterfacePairs(
+func (c *Client) ObtainReservationsForInterfacePairs(
 	ctx context.Context,
 	pairs []InterfacePair,
 	bwInKbps uint32,
@@ -792,7 +792,7 @@ func earlier(a time.Time, b time.Time) time.Time {
 	return b
 }
 
-func (c *ClientSet) redeemHopsConcurrently(
+func (c *Client) redeemHopsConcurrently(
 	ctx context.Context,
 	pairs []InterfacePair,
 	iaAssets map[uint64][]assetInfo,
@@ -906,7 +906,7 @@ func (c *ClientSet) redeemHopsConcurrently(
 // It could happen that an asset gets bought by some other user between
 // searching and buying the asset ourselves.
 // With `num_retries` we can repeat the search and buy step if this happens.
-func (c *ClientSet) ObtainReservationsFullPath(
+func (c *Client) ObtainReservationsFullPath(
 	ctx context.Context,
 	path snet.Path,
 	bwInKbps uint32,
