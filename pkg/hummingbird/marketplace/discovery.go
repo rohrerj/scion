@@ -196,7 +196,8 @@ func (m *PathMarketplaces) Connect(
 		return serrors.New("no AS of the path advertises this marketplace",
 			"api_address", apiAddress)
 	}
-	client, err := NewClientSet(ctx, apiAddress, jwt, ClientOptions{Querier: querier, Topology: topo, Insecure: insecure})
+	client, err := NewClientSet(ctx, apiAddress, jwt,
+		ClientOptions{Querier: querier, Topology: topo, Insecure: insecure})
 	if err != nil {
 		return serrors.Wrap("connecting to marketplace", err, "api_address", apiAddress)
 	}
