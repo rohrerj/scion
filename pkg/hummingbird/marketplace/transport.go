@@ -29,6 +29,7 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	"github.com/scionproto/scion/pkg/addr"
 	libconnect "github.com/scionproto/scion/pkg/connect"
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
 	"github.com/scionproto/scion/pkg/snet"
@@ -220,8 +221,16 @@ func newSCIONHTTPClient(
 		return nil, nil, "", serrors.New("localAddr not UDP addr")
 	}
 	sn := snet.SCIONNetwork{
-		Topology:    options.Topology,
-		SCMPHandler: snet.DefaultSCMPHandler{},
+		Topology: options.Topology,
+		// The QUIC client turns any error coming out of a read into a dead connection.
+		// The SCMP handler returns an error for every SCMP error it understands,
+		// even if temporary.
+		// SCMP errors are handled and logged, but not propagated:
+		// a temporary error on the path to the marketplace must not tear down the connection.
+		SCMPHandler: snet.SCMPPropagationStopper{
+			Handler: snet.DefaultSCMPHandler{},
+			Log:     log.Debug,
+		},
 	}
 	localAddr := &net.UDPAddr{
 		IP:   localPublic.IP,
