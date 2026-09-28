@@ -16,34 +16,104 @@ package id_stores_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/scionproto/scion/pkg/hummingbird/id_stores"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIDStoreNext(t *testing.T) {
-	base, err := time.Parse(time.RFC3339, "2026-07-16T00:00:00Z")
-	b := base.Unix()
-	assert.NoError(t, err)
+func TestIDStoreNextAllocatesWithinConfiguredRange(t *testing.T) {
 	store := id_stores.UsedIDStore{}
-	err = store.Init(0, 3, []id_stores.Reservation{
-		{
-			Id:       0,
-			StartsAt: base.Unix(),
-			StopsAt:  base.Add(time.Second * 3).Unix(),
-		},
-	})
+	assert.NoError(t, store.Init(10, 13, nil))
+
+	id, err := store.Next(0, 0, 1)
 	assert.NoError(t, err)
-	nextId, err := store.Next(b, b, b+1)
+	assert.Equal(t, uint32(10), id)
+	id, err = store.Next(0, 0, 1)
 	assert.NoError(t, err)
-	assert.Equal(t, uint32(1), nextId)
-	nextId, err = store.Next(b, b, b+2)
+	assert.Equal(t, uint32(11), id)
+	id, err = store.Next(0, 0, 1)
 	assert.NoError(t, err)
-	assert.Equal(t, uint32(2), nextId)
-	nextId, err = store.Next(b+1, b+1, b+2)
+	assert.Equal(t, uint32(12), id)
+	_, err = store.Next(0, 0, 1)
+	assert.Error(t, err)
+}
+
+func TestIDStoreNextSkipsReservations(t *testing.T) {
+	store := id_stores.UsedIDStore{}
+	assert.NoError(t, store.Init(0, 4, []id_stores.Reservation{
+		{Id: 0, StopsAt: 100},
+		{Id: 2, StopsAt: 100},
+	}))
+
+	id, err := store.Next(0, 0, 1)
 	assert.NoError(t, err)
-	assert.Equal(t, uint32(1), nextId)
-	nextId, err = store.Next(b+1, b+1, b+2)
+	assert.Equal(t, uint32(1), id)
+	id, err = store.Next(0, 0, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(3), id)
+}
+
+func TestIDStoreNextReservationReuseBoundaries(t *testing.T) {
+	store := id_stores.UsedIDStore{}
+	assert.NoError(t, store.Init(0, 1, []id_stores.Reservation{
+		{Id: 0, StopsAt: 10},
+	}))
+
+	_, err := store.Next(10, 14, 20)
+	assert.Error(t, err)
+
+	id, err := store.Next(10, 15, 20)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(0), id)
+
+	_, err = store.Next(20, 24, 30)
+	assert.Error(t, err)
+	id, err = store.Next(20, 25, 30)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(0), id)
+}
+
+func TestIDStoreNextReusesReservationsInExpirationOrder(t *testing.T) {
+	store := id_stores.UsedIDStore{}
+	assert.NoError(t, store.Init(0, 2, []id_stores.Reservation{
+		{Id: 0, StopsAt: 20},
+		{Id: 1, StopsAt: 10},
+	}))
+
+	id, err := store.Next(10, 15, 30)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(1), id)
+	id, err = store.Next(20, 25, 40)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(0), id)
+
+	_, err = store.Next(29, 34, 50)
+	assert.Error(t, err)
+	id, err = store.Next(30, 35, 50)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(1), id)
+}
+
+func TestIDStoreInitResetsStore(t *testing.T) {
+	store := id_stores.UsedIDStore{}
+	assert.NoError(t, store.Init(0, 3, []id_stores.Reservation{
+		{Id: 0, StopsAt: 10},
+	}))
+
+	id, err := store.Next(0, 0, 20)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(1), id)
+
+	assert.NoError(t, store.Init(10, 13, []id_stores.Reservation{
+		{Id: 11, StopsAt: 100},
+	}))
+
+	id, err = store.Next(0, 0, 20)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(10), id)
+	id, err = store.Next(0, 0, 20)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(12), id)
+	_, err = store.Next(0, 0, 20)
 	assert.Error(t, err)
 }

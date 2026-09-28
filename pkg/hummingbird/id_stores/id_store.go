@@ -20,6 +20,10 @@ import (
 	"github.com/scionproto/scion/pkg/private/serrors"
 )
 
+// Defines the minimum duration in seconds between two intervals
+// sharing the same reservation ID.
+const MinIntervalGap int64 = 5
+
 type entry struct {
 	id         uint32
 	expiration int64
@@ -72,6 +76,7 @@ func (s *UsedIDStore) Init(limit_low uint32, limit_high uint32, r []Reservation)
 	s.base = limit_low
 	s.limit = limit_high
 	s.next = s.base
+	s.expirations = nil
 	for _, res := range r {
 		s.usedIds[res.Id] = struct{}{}
 		s.expirations = append(s.expirations, &entry{
@@ -84,7 +89,10 @@ func (s *UsedIDStore) Init(limit_low uint32, limit_high uint32, r []Reservation)
 }
 
 func (s *UsedIDStore) Next(now int64, start int64, end int64) (uint32, error) {
-	if len(s.expirations) != 0 && s.expirations[0].expiration <= now {
+	if len(s.expirations) != 0 &&
+		s.expirations[0].expiration <= now &&
+		s.expirations[0].expiration+MinIntervalGap <= start {
+
 		e := heap.Pop(&s.expirations).(*entry)
 		heap.Push(&s.expirations, &entry{
 			id:         e.id,
@@ -109,8 +117,10 @@ func (s *UsedIDStore) Next(now int64, start int64, end int64) (uint32, error) {
 }
 
 func (s *UsedIDStore) Close() error {
-	clear(s.usedIds)
-	clear(s.expirations)
+	s.usedIds = nil
 	s.expirations = nil
+	s.next = 0
+	s.limit = 0
+	s.base = 0
 	return nil
 }
