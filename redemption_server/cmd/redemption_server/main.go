@@ -106,35 +106,44 @@ func realMain(ctx context.Context) error {
 	}
 	for _, cfg := range globalCfg.HB.Marketplaces {
 		g.Go(func() error {
-			var clients *marketplace.ClientSet
-			var err error
-			initClients := func() error {
-				clients, err = marketplace.NewClientSet(ctx, cfg.Address, "", marketplace.ClientOptions{
+			//var client *marketplace.Client
+			//var err error
+			initClients := func() (*marketplace.Client, error) {
+				// First we initialize a client without a JWT token. This client is used to perform the
+				// registration steps to obtain the JWT tokens.
+				client, err := marketplace.NewClient(ctx, cfg.Address, "", marketplace.ClientOptions{
 					Querier:  daemon.Querier{Connector: sd},
 					Topology: topo,
-					Insecure: true,
+					Insecure: cfg.Insecure,
 				})
 				if err != nil {
-					return err
+					return nil, err
 				}
-				regClient := registration.NewClient(clients.Account, clients.Authority)
+				// Now we perform the registration steps
+				regClient := registration.NewClient(client.Account, client.Authority)
 				_, token, err := regClient.RegisterWithNewSigner(errCtx, topo.LocalIA, path.Join(globalCfg.General.ConfigDir, "certs"),
 					path.Join(globalCfg.General.ConfigDir, "crypto/as"), path.Join(globalCfg.General.ConfigDir, "crypto/as"))
 				if err != nil {
-					return err
+					return nil, err
 				}
-				clients, err = marketplace.NewClientSet(ctx, cfg.Address, token, marketplace.ClientOptions{
+				// Here we close the previous client and re-initialize the client but now with the
+				// redemption server JWT token.
+				err = client.Close()
+				if err != nil {
+					return nil, err
+				}
+				client, err = marketplace.NewClient(ctx, cfg.Address, token, marketplace.ClientOptions{
 					Querier:  daemon.Querier{Connector: sd},
 					Topology: topo,
-					Insecure: true,
+					Insecure: cfg.Insecure,
 				})
 				if err != nil {
-					return err
+					return nil, err
 				}
-				return nil
+				return client, nil
 			}
-			runConnector := func() error {
-				c, err := connector.NewConnector(errCtx, masterKey[:], cfg, clients.Redemption, store)
+			runConnector := func(client *marketplace.Client) error {
+				c, err := connector.NewConnector(errCtx, masterKey[:], cfg, client.Redemption, store)
 				if err != nil {
 					return err
 				}
@@ -150,14 +159,18 @@ func realMain(ctx context.Context) error {
 					return nil
 				case <-time.After(time.Second * 10):
 				}
-				err := initClients()
+				client, err := initClients()
 				if err != nil {
-					log.Debug("error initializing client set", "err", err)
+					log.Debug("error initializing client", "err", err)
 					continue
 				}
-				err = runConnector()
+				err = runConnector(client)
 				if err != nil {
 					log.Debug("error running connector", "err", err)
+				}
+				err = client.Close()
+				if err != nil {
+					log.Debug("error closing client", "err", err)
 				}
 			}
 		})

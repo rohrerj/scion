@@ -89,6 +89,7 @@ type MarketplaceConfig struct {
 	KeySalt        string `toml:"salt,omitempty"`
 	ResIdLimitLow  uint32 `toml:"res_id_limit_low,omitempty"`
 	ResIdLimitHigh uint32 `toml:"res_id_limit_high,omitempty"`
+	Insecure       bool   `toml:"insecure,omitempty"`
 }
 
 func (cfg *MarketplaceConfig) Validate() error {
