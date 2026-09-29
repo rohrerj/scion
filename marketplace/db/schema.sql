@@ -3,24 +3,54 @@ CREATE TABLE IF NOT EXISTS Assets(
     account_id INTEGER,
     isd_id INTEGER NOT NULL,
     as_id INTEGER NOT NULL,
-    bandwidth INTEGER NOT NULL,
+    bandwidth INTEGER NOT NULL CHECK (bandwidth > 0),
     bandwidth_min INTEGER NOT NULL,
     bandwidth_max INTEGER NOT NULL CHECK (bandwidth_max >= bandwidth_min),
     price INTEGER NOT NULL,
     time_granularity INTEGER NOT NULL,
     time_min_duration INTEGER NOT NULL,
     time_max_duration INTEGER NOT NULL,
-    starts_at TEXT NOT NULL,
-    stops_at TEXT NOT NULL,
+    starts_at INTEGER NOT NULL,
+    stops_at INTEGER NOT NULL,
     ingress INTEGER,
     egress INTEGER,
     state INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (account_id) REFERENCES Accounts(id)
 );
-CREATE INDEX IF NOT EXISTS idx_asset_owner ON Assets(account_id);
-CREATE INDEX IF NOT EXISTS idx_asset_validity ON Assets(starts_at, stops_at);
-CREATE INDEX IF NOT EXISTS idx_assets_ia_validity_start ON Assets(isd_id, as_id, starts_at, stops_at);
-CREATE INDEX IF NOT EXISTS idx_assets_ia_validity_end ON Assets(isd_id, as_id, stops_at, starts_at);
+CREATE INDEX IF NOT EXISTS idx_asset_owner ON Assets(account_id, isd_id, as_id);
+CREATE INDEX IF NOT EXISTS idx_assets_validity ON Assets(isd_id, as_id, stops_at);
+
+CREATE TABLE IF NOT EXISTS Asset_Segment(
+    asset_id INTEGER NOT NULL,
+    starts_at INTEGER NOT NULL,
+    stops_at INTEGER NOT NULL,
+    available INTEGER NOT NULL CHECK (available >= 0),
+    PRIMARY KEY (asset_id, starts_at),
+    CHECK (starts_at < stops_at),
+    FOREIGN KEY(asset_id) REFERENCES Assets(id) ON DELETE CASCADE
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS Purchase_Order(
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    FOREIGN KEY(buyer_id) REFERENCES Accounts(id)
+);
+
+CREATE TABLE IF NOT EXISTS Purchase(
+    id INTEGER PRIMARY KEY,
+    order_id INTEGER NOT NULL,
+    asset_id INTEGER NOT NULL,
+    bandwidth INTEGER NOT NULL CHECK (bandwidth > 0),
+    starts_at INTEGER NOT NULL,
+    stops_at INTEGER NOT NULL,
+    FOREIGN KEY(order_id) REFERENCES Purchase_Order(id),
+    FOREIGN KEY(asset_id) REFERENCES Assets(id),
+    CHECK (starts_at < stops_at)
+);
+
+CREATE INDEX idx_purchase_asset ON Purchase(asset_id);
+
 CREATE TABLE IF NOT EXISTS Reservations(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     reservation_id INTEGER NOT NULL,

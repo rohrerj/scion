@@ -98,7 +98,11 @@ func (s *MarketplaceStorage) PublishAsset(
 		if err != nil {
 			return err
 		}
-		_, err := tx.RegisterAssetEvent(ctx, a, marketplacedb.AssetPublished)
+		_, err = tx.InsertAssetSegment(ctx, assetId, a.StartAt.Unix(), a.StopsAt.Unix(), a.Bandwidth)
+		if err != nil {
+			return err
+		}
+		_, err = tx.RegisterAssetEvent(ctx, a, marketplacedb.AssetPublished)
 		if err != nil {
 			return err
 		}
@@ -598,6 +602,44 @@ func DatabaseAssetID(id []byte) (int64, error) {
 }
 
 func (s *MarketplaceStorage) BuyAssets(
+	ctx context.Context,
+	accountID int64,
+	assets []*hummingbird.BuyAsset,
+	maxPrice uint64,
+) ([]int64, int64, error) {
+	if len(assets) == 0 {
+		return nil, 0, serrors.New("no assets specified")
+	}
+	for _, asset := range assets {
+		if asset.BandwidthExact <= 0 || asset.StartsAtExactly.Seconds >= asset.StopsAtExactly.Seconds {
+			return nil, 0, serrors.New("invalid asset")
+		}
+	}
+	err := s.db.WithTx(ctx, func(tx marketplacedb.Repository) error {
+		orderId, err := tx.NewOrder(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		for _, asset := range assets {
+			assetId, err := DatabaseAssetID(asset.AssetId)
+			if err != nil {
+				return err
+			}
+			price, err := tx.BuyAsset(ctx, assetId, asset.StartsAtExactly.Seconds, asset.StopsAtExactly.Seconds,
+				asset.BandwidthExact, accountID, orderId)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return nil, 0, nil
+}
+
+func (s *MarketplaceStorage) BuyAssetsOld(
 	ctx context.Context,
 	accountID int64,
 	assets []*hummingbird.BuyAsset,

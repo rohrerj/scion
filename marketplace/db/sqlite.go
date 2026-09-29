@@ -64,6 +64,9 @@ type Repository interface {
 	RemoveAsset(ctx context.Context, assetID int64) error
 	RegisterAssetEvent(ctx context.Context, a *DBAsset, eventType AssetEventType) (int64, error)
 	TransitionAsset(ctx context.Context, assetID int64, accountID *int64, from AssetState, to AssetState) (*DBAsset, error)
+	InsertAssetSegment(ctx context.Context, asset_id int64, from int64, to int64, bw uint32) (int64, error)
+	NewOrder(ctx context.Context, accountId int64) (int64, error)
+	BuyAsset(ctx context.Context, assetId int64, startsAt int64, stopsAt int64, bw uint32, accountId int64, orderId int64) (int64, error)
 }
 
 type MarketplaceDB interface {
@@ -1146,4 +1149,141 @@ func (e *executor) AssignReservation(
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (e *executor) InsertAssetSegment(ctx context.Context, asset_id int64, from int64, to int64, bw uint32) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `INSERT INTO Asset_Segment(asset_id, starts_at, stops_at, available) VALUES (?,?,?,?)`
+	res, err := e.write.ExecContext(ctx, inst, asset_id, from, to, bw)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (e *executor) NewOrder(
+	ctx context.Context,
+	accountId int64,
+) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `INSERT INTO purchase_order (account_id) VALUES (?) RETURNING id`
+	var orderId int64
+	err := e.write.QueryRowContext(ctx, inst, accountId).Scan(&orderId)
+	if err != nil {
+		return 0, err
+	}
+	return orderId, nil
+}
+
+// Buys a single asset. Must be called as part of a transaction
+func (e *executor) BuyAsset(
+	ctx context.Context,
+	assetId int64,
+	startsAt int64,
+	stopsAt int64,
+	bw uint32,
+	accountId int64,
+	orderId int64,
+) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	splitAt := func(point int64) error {
+		insertInst := `
+		INSERT INTO Asset_segment (asset_id, starts_at, stops_at, available)
+		SELECT asset_id, ?, stops_at, available
+		FROM Asset_segment
+		WHERE asset_id = ? AND starts_at < ? AND stops_at > ?`
+		_, err := e.write.ExecContext(ctx, insertInst, point, assetId, point, point)
+		if err != nil {
+			return err
+		}
+		updateInst := `
+		UPDATE Asset_segment
+		SET stops_at = ?
+		WHERE asset_id = ? AND starts_at < ? AND stops_at > ?
+		`
+		_, err = e.write.ExecContext(ctx, updateInst, point, assetId, point, point)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	mergeAt := func(point int64) error {
+		updateInst := `
+		UPDATE Asset_Segment AS l
+		SET stops_at = r.stops_at
+		FROM Asset_Segment AS r
+		WHERE l.asset_id = ? AND l.stops_at = ?
+		  AND r.asset_id = ? AND r.starts_at = ?
+		  AND r.available = l.available
+		`
+		res, err := e.write.ExecContext(ctx, updateInst, assetId, point, assetId, point)
+		if err != nil {
+			return fmt.Errorf("merge at %d (update): %w", point, err)
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			deleteInst := `DELETE FROM Asset_Segment WHERE asset_id = ? AND starts_at = ?`
+			if _, err := e.write.ExecContext(ctx, deleteInst, assetId, point); err != nil {
+				return fmt.Errorf("merge at %d (delete): %w", point, err)
+			}
+		}
+		return nil
+	}
+	var id int64
+	inst := `
+	SELECT a.id
+	FROM Assets a
+	WHERE a.id = ?
+	AND a.starts_at <= ? AND a.stops_at >= ?
+	AND NOT EXISTS (
+		SELECT 1 FROM Asset_Segment g
+		WHERE g.asset_id = a.id
+		AND g.starts_at < ? AND g.stops_at > ?
+		AND g.available < ?);
+	`
+	err := e.write.QueryRowContext(ctx, inst, assetId, startsAt, stopsAt, stopsAt, startsAt).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+
+	err = splitAt(startsAt)
+	if err != nil {
+		return 0, err
+	}
+	err = splitAt(stopsAt)
+	if err != nil {
+		return 0, err
+	}
+	decreaseAvailabilityInst := `
+	UPDATE asset_segment
+	SET available = available - ?
+	WHERE asset_id = ? AND starts_at >= ? AND stops_at <= ?`
+	_, err = e.write.ExecContext(ctx, decreaseAvailabilityInst, bw, assetId, startsAt, stopsAt)
+	if err != nil {
+		return 0, err
+	}
+	// TODO: we still need a new asset ID for the now user-owned asset. Maybe include it here?
+	recordPurchaseInst := `
+	INSERT INTO purchase (order_id, asset_id, bandwidth, starts_at, stops_at)
+	VALUES (?, ?, ?, ?, ?)
+	`
+	_, err = e.write.ExecContext(ctx, recordPurchaseInst, orderId, assetId, bw, startsAt, stopsAt)
+	if err != nil {
+		return 0, err
+	}
+	err = mergeAt(startsAt)
+	if err != nil {
+		return 0, err
+	}
+	err = mergeAt(stopsAt)
+	if err != nil {
+		return 0, err
+	}
+	// TODO return price
+	return 0, nil
 }
