@@ -342,6 +342,33 @@ func addInt64(
 	return a + b, true
 }
 
+func multiplyInts(xs ...int64) (int64, bool) {
+	result := int64(1)
+
+	for _, x := range xs {
+		if x == 0 {
+			return 0, true
+		}
+		if result > 0 {
+			if x > 0 && result > math.MaxInt64/x {
+				return 0, false
+			}
+			if x < 0 && x < math.MinInt64/result {
+				return 0, false
+			}
+		} else {
+			if x > 0 && result < math.MinInt64/x {
+				return 0, false
+			}
+			if x < 0 && result < math.MaxInt64/x {
+				return 0, false
+			}
+		}
+		result *= x
+	}
+	return result, true
+}
+
 func (s *MarketplaceStorage) IncrementASJWTVersion(
 	ctx context.Context,
 	ia addr.IA,
@@ -615,28 +642,50 @@ func (s *MarketplaceStorage) BuyAssets(
 			return nil, 0, serrors.New("invalid asset")
 		}
 	}
+	boughtIDs := []int64{}
+	costAcc := int64(0)
 	err := s.db.WithTx(ctx, func(tx marketplacedb.Repository) error {
-		orderId, err := tx.NewOrder(ctx, accountID)
-		if err != nil {
-			return err
+		calcCost := func(a *marketplacedb.DBAsset) (int64, bool) {
+			totalAssetPrice, ok := multiplyInts(int64(a.StopsAt.Sub(a.StartAt).Seconds()),
+				int64(a.Bandwidth), int64(a.Price))
+			if !ok {
+				return 0, false
+			}
+			fee := int64(float64(totalAssetPrice)*float64(s.transactionFeeRelative)) +
+				int64(s.transactionFeeAbsolute)
+			return addInt64(int64(totalAssetPrice), fee)
 		}
 		for _, asset := range assets {
 			assetId, err := DatabaseAssetID(asset.AssetId)
 			if err != nil {
 				return err
 			}
-			price, err := tx.BuyAsset(ctx, assetId, asset.StartsAtExactly.Seconds, asset.StopsAtExactly.Seconds,
-				asset.BandwidthExact, accountID, orderId)
+			newAsset, err := tx.BuyAsset(ctx, assetId, asset.StartsAtExactly.Seconds, asset.StopsAtExactly.Seconds,
+				asset.BandwidthExact, accountID)
 			if err != nil {
 				return err
 			}
+			cost, ok := calcCost(newAsset)
+			if !ok {
+				return serrors.New("asset parameters would lead to integer overflow")
+			}
+			costAcc, ok = addInt64(costAcc, cost)
+			if !ok {
+				return serrors.New("asset parameters would lead to integer overflow")
+			}
+
+			boughtIDs = append(boughtIDs, newAsset.ID)
+		}
+		_, err := tx.UpdateAccountMoney(ctx, accountID, -costAcc)
+		if err != nil {
+			return err
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, 0, err
 	}
-	return nil, 0, nil
+	return boughtIDs, costAcc, nil
 }
 
 func (s *MarketplaceStorage) BuyAssetsOld(

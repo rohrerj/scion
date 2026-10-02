@@ -30,27 +30,6 @@ CREATE TABLE IF NOT EXISTS Asset_Segment(
     FOREIGN KEY(asset_id) REFERENCES Assets(id) ON DELETE CASCADE
 ) WITHOUT ROWID;
 
-CREATE TABLE IF NOT EXISTS Purchase_Order(
-    id INTEGER PRIMARY KEY,
-    account_id INTEGER NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    FOREIGN KEY(buyer_id) REFERENCES Accounts(id)
-);
-
-CREATE TABLE IF NOT EXISTS Purchase(
-    id INTEGER PRIMARY KEY,
-    order_id INTEGER NOT NULL,
-    asset_id INTEGER NOT NULL,
-    bandwidth INTEGER NOT NULL CHECK (bandwidth > 0),
-    starts_at INTEGER NOT NULL,
-    stops_at INTEGER NOT NULL,
-    FOREIGN KEY(order_id) REFERENCES Purchase_Order(id),
-    FOREIGN KEY(asset_id) REFERENCES Assets(id),
-    CHECK (starts_at < stops_at)
-);
-
-CREATE INDEX idx_purchase_asset ON Purchase(asset_id);
-
 CREATE TABLE IF NOT EXISTS Reservations(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     reservation_id INTEGER NOT NULL,

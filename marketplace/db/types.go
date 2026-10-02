@@ -68,9 +68,9 @@ type AssetQuery struct {
 	// the minimal required bandwidth of the asset
 	MinRequiredBandwidth *uint32
 	// asset starts at latest in RFC3339 format
-	StartsAt *string
+	StartsAt *int64
 	// reservation stops at earliest in RFC3339 format
-	StopsAt *string
+	StopsAt *int64
 	// the price in kbps per second
 	Price *uint32
 	// the page number

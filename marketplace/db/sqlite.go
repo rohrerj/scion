@@ -65,8 +65,7 @@ type Repository interface {
 	RegisterAssetEvent(ctx context.Context, a *DBAsset, eventType AssetEventType) (int64, error)
 	TransitionAsset(ctx context.Context, assetID int64, accountID *int64, from AssetState, to AssetState) (*DBAsset, error)
 	InsertAssetSegment(ctx context.Context, asset_id int64, from int64, to int64, bw uint32) (int64, error)
-	NewOrder(ctx context.Context, accountId int64) (int64, error)
-	BuyAsset(ctx context.Context, assetId int64, startsAt int64, stopsAt int64, bw uint32, accountId int64, orderId int64) (int64, error)
+	BuyAsset(ctx context.Context, assetId int64, startsAt int64, stopsAt int64, bw uint32, accountId int64) (*DBAsset, error)
 }
 
 type MarketplaceDB interface {
@@ -157,8 +156,8 @@ type rowScanner interface {
 
 func scanAsset(row rowScanner) (*DBAsset, error) {
 	asset := &DBAsset{}
-	var startsAt string
-	var stopsAt string
+	var startsAt int64
+	var stopsAt int64
 	var isd uint16
 	var as uint64
 	if err := row.Scan(
@@ -185,14 +184,8 @@ func scanAsset(row rowScanner) (*DBAsset, error) {
 	if err != nil {
 		return nil, err
 	}
-	asset.StartAt, err = time.Parse(time.RFC3339, startsAt)
-	if err != nil {
-		return nil, err
-	}
-	asset.StopsAt, err = time.Parse(time.RFC3339, stopsAt)
-	if err != nil {
-		return nil, err
-	}
+	asset.StartAt = time.Unix(startsAt, 0)
+	asset.StopsAt = time.Unix(stopsAt, 0)
 	return asset, nil
 }
 
@@ -800,8 +793,8 @@ func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
 			a.TimeGranularity,
 			a.TimeMinDuration,
 			a.TimeMaxDuration,
-			a.StartAt.UTC().Format(time.RFC3339),
-			a.StopsAt.UTC().Format(time.RFC3339),
+			a.StartAt.Unix(),
+			a.StopsAt.Unix(),
 			a.IfIdIngress,
 			a.IfIdEgress,
 			a.AccountId)
@@ -818,8 +811,8 @@ func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
 			a.TimeGranularity,
 			a.TimeMinDuration,
 			a.TimeMaxDuration,
-			a.StartAt.UTC().Format(time.RFC3339),
-			a.StopsAt.UTC().Format(time.RFC3339),
+			a.StartAt.Unix(),
+			a.StopsAt.Unix(),
 			a.IfIdIngress,
 			a.IfIdEgress)
 	}
@@ -1163,22 +1156,6 @@ func (e *executor) InsertAssetSegment(ctx context.Context, asset_id int64, from 
 	return res.LastInsertId()
 }
 
-func (e *executor) NewOrder(
-	ctx context.Context,
-	accountId int64,
-) (int64, error) {
-	if e.write == nil {
-		return 0, serrors.New("No database open")
-	}
-	inst := `INSERT INTO purchase_order (account_id) VALUES (?) RETURNING id`
-	var orderId int64
-	err := e.write.QueryRowContext(ctx, inst, accountId).Scan(&orderId)
-	if err != nil {
-		return 0, err
-	}
-	return orderId, nil
-}
-
 // Buys a single asset. Must be called as part of a transaction
 func (e *executor) BuyAsset(
 	ctx context.Context,
@@ -1187,10 +1164,9 @@ func (e *executor) BuyAsset(
 	stopsAt int64,
 	bw uint32,
 	accountId int64,
-	orderId int64,
-) (int64, error) {
+) (*DBAsset, error) {
 	if e.write == nil {
-		return 0, serrors.New("No database open")
+		return nil, serrors.New("No database open")
 	}
 	splitAt := func(point int64) error {
 		insertInst := `
@@ -1234,11 +1210,11 @@ func (e *executor) BuyAsset(
 		}
 		return nil
 	}
-	var id int64
 	inst := `
-	SELECT a.id
-	FROM Assets a
+	SELECT ` + assetColumnsWithAlias + ` FROM Assets a
 	WHERE a.id = ?
+	AND a.account_ID IS NULL
+	AND a.state = ?
 	AND a.starts_at <= ? AND a.stops_at >= ?
 	AND NOT EXISTS (
 		SELECT 1 FROM Asset_Segment g
@@ -1246,18 +1222,27 @@ func (e *executor) BuyAsset(
 		AND g.starts_at < ? AND g.stops_at > ?
 		AND g.available < ?);
 	`
-	err := e.write.QueryRowContext(ctx, inst, assetId, startsAt, stopsAt, stopsAt, startsAt).Scan(&id)
+	fmt.Println(inst)
+	fmt.Println(assetId, AssetStateAvailable, startsAt, stopsAt, stopsAt, startsAt, bw)
+	rows, err := e.write.QueryContext(ctx, inst, assetId, AssetStateAvailable, startsAt, stopsAt, stopsAt, startsAt, bw)
 	if err != nil {
-		return 0, err
+		return nil, err
+	}
+	if !rows.Next() {
+		return nil, serrors.New("asset not found")
+	}
+	asset, err := scanAsset(rows)
+	if err != nil {
+		return nil, err
 	}
 
 	err = splitAt(startsAt)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	err = splitAt(stopsAt)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	decreaseAvailabilityInst := `
 	UPDATE asset_segment
@@ -1265,25 +1250,47 @@ func (e *executor) BuyAsset(
 	WHERE asset_id = ? AND starts_at >= ? AND stops_at <= ?`
 	_, err = e.write.ExecContext(ctx, decreaseAvailabilityInst, bw, assetId, startsAt, stopsAt)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
+	userAsset := &DBAsset{
+		AccountId: sql.NullInt64{
+			Int64: accountId,
+			Valid: true,
+		},
+		IA:              asset.IA,
+		Bandwidth:       bw,
+		StartAt:         time.Unix(startsAt, 0),
+		StopsAt:         time.Unix(stopsAt, 0),
+		BandwidthMin:    asset.BandwidthMin,
+		BandwidthMax:    asset.BandwidthMax,
+		Price:           asset.Price,
+		TimeGranularity: asset.TimeGranularity,
+		TimeMinDuration: asset.TimeMinDuration,
+		TimeMaxDuration: asset.TimeMaxDuration,
+		IfIdIngress:     asset.IfIdIngress,
+		IfIdEgress:      asset.IfIdEgress,
+	}
+	newId, err := e.InsertAsset(ctx, userAsset)
+	if err != nil {
+		return nil, err
+	}
+	userAsset.ID = newId
 	// TODO: we still need a new asset ID for the now user-owned asset. Maybe include it here?
-	recordPurchaseInst := `
+	/*recordPurchaseInst := `
 	INSERT INTO purchase (order_id, asset_id, bandwidth, starts_at, stops_at)
 	VALUES (?, ?, ?, ?, ?)
 	`
 	_, err = e.write.ExecContext(ctx, recordPurchaseInst, orderId, assetId, bw, startsAt, stopsAt)
 	if err != nil {
 		return 0, err
-	}
+	}*/
 	err = mergeAt(startsAt)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	err = mergeAt(stopsAt)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	// TODO return price
-	return 0, nil
+	return userAsset, nil
 }

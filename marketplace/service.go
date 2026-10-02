@@ -693,15 +693,13 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 	default:
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
 	}
-	var startsAt *string
-	var stopsAt *string
+	var startsAt *int64
+	var stopsAt *int64
 	if req.Msg.StartsAtLatest != nil {
-		start := req.Msg.StartsAtLatest.AsTime().UTC().Format(time.RFC3339)
-		startsAt = &start
+		startsAt = &req.Msg.StartsAtLatest.Seconds
 	}
 	if req.Msg.StopsAtEarliest != nil {
-		stop := req.Msg.StopsAtEarliest.AsTime().UTC().Format(time.RFC3339)
-		stopsAt = &stop
+		stopsAt = &req.Msg.StartsAtLatest.Seconds
 	}
 	var ia *addr.IA
 	if req.Msg.Ia != nil {

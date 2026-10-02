@@ -214,8 +214,8 @@ func TestSearchOwnedAssets(t *testing.T) {
 	require.Equal(t, ownedID, assets[0].ID)
 
 	// The validity filters still apply to the assets of the account.
-	startsAt := owned.StartAt.UTC().Format(time.RFC3339)
-	stopsAt := owned.StopsAt.UTC().Format(time.RFC3339)
+	startsAt := owned.StartAt.Unix()
+	stopsAt := owned.StopsAt.Unix()
 	assets, err = backend.Search(ctx, &AssetQuery{
 		AccountId: &alicesAccountID,
 		StartsAt:  &startsAt,
@@ -225,7 +225,7 @@ func TestSearchOwnedAssets(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, assets, 1)
 
-	tooLate := owned.StopsAt.Add(time.Hour).UTC().Format(time.RFC3339)
+	tooLate := owned.StopsAt.Add(time.Hour).Unix()
 	assets, err = backend.Search(ctx, &AssetQuery{
 		AccountId: &alicesAccountID,
 		StartsAt:  &startsAt,
