@@ -35,6 +35,13 @@ const (
 	AssetStateCombinePending
 )
 
+type ValidityMode int
+
+const (
+	FullOverlap    ValidityMode = 0
+	PartialOverlap              = 1
+)
+
 type AssetEventType int
 
 const (
@@ -55,8 +62,25 @@ func (id AssetID) Int64() (int64, error) {
 	return int64(id), nil
 }
 
-// Defines the query parameters for search assets
-type AssetQuery struct {
+type ListedAssetQuery struct {
+	// ISD-AS of the asset
+	IA addr.IA
+	// ingress ID of the asset
+	Ingress *uint32
+	// egress ID of the asset
+	Egress *uint32
+	// the minimal required bandwidth of the asset
+	MinRequiredBandwidth uint32
+	// starts at in unix seconds
+	StartsAt int64
+	// stops at in unix seconds
+	StopsAt int64
+	// the maximum price in kbps per second
+	Price        *uint32
+	ValidityMode ValidityMode
+}
+
+type OwnedAssetQuery struct {
 	// the account ID of the owner
 	AccountId *int64
 	// ISD-AS of the asset
@@ -67,16 +91,13 @@ type AssetQuery struct {
 	Egress *uint32
 	// the minimal required bandwidth of the asset
 	MinRequiredBandwidth *uint32
-	// asset starts at latest in RFC3339 format
+	// starts at in unix seconds
 	StartsAt *int64
-	// reservation stops at earliest in RFC3339 format
+	// stops at in unix seconds
 	StopsAt *int64
-	// the price in kbps per second
-	Price *uint32
-	// the page number
-	Page uint32
-	// maximum number of returned elements
-	PageSize uint32
+	// the maximum price in kbps per second
+	Price        *uint32
+	ValidityMode ValidityMode
 }
 
 type UsedReservationsQuery struct {

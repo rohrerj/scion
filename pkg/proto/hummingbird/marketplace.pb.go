@@ -68,6 +68,52 @@ func (PricingStrategy) EnumDescriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{0}
 }
 
+type ValidityMode int32
+
+const (
+	ValidityMode_full_overlap    ValidityMode = 0
+	ValidityMode_partial_overlap ValidityMode = 1
+)
+
+// Enum value maps for ValidityMode.
+var (
+	ValidityMode_name = map[int32]string{
+		0: "full_overlap",
+		1: "partial_overlap",
+	}
+	ValidityMode_value = map[string]int32{
+		"full_overlap":    0,
+		"partial_overlap": 1,
+	}
+)
+
+func (x ValidityMode) Enum() *ValidityMode {
+	p := new(ValidityMode)
+	*p = x
+	return p
+}
+
+func (x ValidityMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ValidityMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_proto_hummingbird_v1_marketplace_proto_enumTypes[1].Descriptor()
+}
+
+func (ValidityMode) Type() protoreflect.EnumType {
+	return &file_proto_hummingbird_v1_marketplace_proto_enumTypes[1]
+}
+
+func (x ValidityMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ValidityMode.Descriptor instead.
+func (ValidityMode) EnumDescriptor() ([]byte, []int) {
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{1}
+}
+
 type UpdateAssetsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Assets        []*AssetUpdate         `protobuf:"bytes,1,rep,name=assets,proto3" json:"assets,omitempty"`
@@ -1227,19 +1273,15 @@ func (x *PublisherAsset) GetPrice() uint32 {
 }
 
 type SearchAssetsRequest struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Owned             bool                   `protobuf:"varint,1,opt,name=owned,proto3" json:"owned,omitempty"`
-	Ia                *uint64                `protobuf:"varint,2,opt,name=ia,proto3,oneof" json:"ia,omitempty"`
-	IfIdIngress       *uint32                `protobuf:"varint,3,opt,name=if_id_ingress,json=ifIdIngress,proto3,oneof" json:"if_id_ingress,omitempty"`
-	IfIdEgress        *uint32                `protobuf:"varint,4,opt,name=if_id_egress,json=ifIdEgress,proto3,oneof" json:"if_id_egress,omitempty"`
-	MinRequiredBw     *uint32                `protobuf:"varint,5,opt,name=min_required_bw,json=minRequiredBw,proto3,oneof" json:"min_required_bw,omitempty"`
-	StartsAtLatest    *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=starts_at_latest,json=startsAtLatest,proto3,oneof" json:"starts_at_latest,omitempty"`
-	StopsAtEarliest   *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=stops_at_earliest,json=stopsAtEarliest,proto3,oneof" json:"stops_at_earliest,omitempty"`
-	Price             *uint32                `protobuf:"varint,8,opt,name=price,proto3,oneof" json:"price,omitempty"`
-	Page              uint32                 `protobuf:"varint,9,opt,name=page,proto3" json:"page,omitempty"`
-	MaxReturnedAssets *uint32                `protobuf:"varint,10,opt,name=max_returned_assets,json=maxReturnedAssets,proto3,oneof" json:"max_returned_assets,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Request:
+	//
+	//	*SearchAssetsRequest_Owned
+	//	*SearchAssetsRequest_Listed
+	Request       isSearchAssetsRequest_Request `protobuf_oneof:"request"`
+	ValidityMode  ValidityMode                  `protobuf:"varint,3,opt,name=validity_mode,json=validityMode,proto3,enum=proto.hummingbird.v1.ValidityMode" json:"validity_mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SearchAssetsRequest) Reset() {
@@ -1272,72 +1314,234 @@ func (*SearchAssetsRequest) Descriptor() ([]byte, []int) {
 	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *SearchAssetsRequest) GetOwned() bool {
+func (x *SearchAssetsRequest) GetRequest() isSearchAssetsRequest_Request {
 	if x != nil {
-		return x.Owned
+		return x.Request
 	}
-	return false
+	return nil
 }
 
-func (x *SearchAssetsRequest) GetIa() uint64 {
+func (x *SearchAssetsRequest) GetOwned() *SearchOwnedAssetsRequest {
+	if x != nil {
+		if x, ok := x.Request.(*SearchAssetsRequest_Owned); ok {
+			return x.Owned
+		}
+	}
+	return nil
+}
+
+func (x *SearchAssetsRequest) GetListed() *SearchListedAssetsRequest {
+	if x != nil {
+		if x, ok := x.Request.(*SearchAssetsRequest_Listed); ok {
+			return x.Listed
+		}
+	}
+	return nil
+}
+
+func (x *SearchAssetsRequest) GetValidityMode() ValidityMode {
+	if x != nil {
+		return x.ValidityMode
+	}
+	return ValidityMode_full_overlap
+}
+
+type isSearchAssetsRequest_Request interface {
+	isSearchAssetsRequest_Request()
+}
+
+type SearchAssetsRequest_Owned struct {
+	Owned *SearchOwnedAssetsRequest `protobuf:"bytes,1,opt,name=owned,proto3,oneof"`
+}
+
+type SearchAssetsRequest_Listed struct {
+	Listed *SearchListedAssetsRequest `protobuf:"bytes,2,opt,name=listed,proto3,oneof"`
+}
+
+func (*SearchAssetsRequest_Owned) isSearchAssetsRequest_Request() {}
+
+func (*SearchAssetsRequest_Listed) isSearchAssetsRequest_Request() {}
+
+type SearchOwnedAssetsRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Ia              *uint64                `protobuf:"varint,1,opt,name=ia,proto3,oneof" json:"ia,omitempty"`
+	IfIdIngress     *uint32                `protobuf:"varint,2,opt,name=if_id_ingress,json=ifIdIngress,proto3,oneof" json:"if_id_ingress,omitempty"`
+	IfIdEgress      *uint32                `protobuf:"varint,3,opt,name=if_id_egress,json=ifIdEgress,proto3,oneof" json:"if_id_egress,omitempty"`
+	MinRequiredBw   *uint32                `protobuf:"varint,4,opt,name=min_required_bw,json=minRequiredBw,proto3,oneof" json:"min_required_bw,omitempty"`
+	StartsAtLatest  *int64                 `protobuf:"varint,5,opt,name=starts_at_latest,json=startsAtLatest,proto3,oneof" json:"starts_at_latest,omitempty"`
+	StopsAtEarliest *int64                 `protobuf:"varint,6,opt,name=stops_at_earliest,json=stopsAtEarliest,proto3,oneof" json:"stops_at_earliest,omitempty"`
+	Price           *uint32                `protobuf:"varint,7,opt,name=price,proto3,oneof" json:"price,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *SearchOwnedAssetsRequest) Reset() {
+	*x = SearchOwnedAssetsRequest{}
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchOwnedAssetsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchOwnedAssetsRequest) ProtoMessage() {}
+
+func (x *SearchOwnedAssetsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchOwnedAssetsRequest.ProtoReflect.Descriptor instead.
+func (*SearchOwnedAssetsRequest) Descriptor() ([]byte, []int) {
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *SearchOwnedAssetsRequest) GetIa() uint64 {
 	if x != nil && x.Ia != nil {
 		return *x.Ia
 	}
 	return 0
 }
 
-func (x *SearchAssetsRequest) GetIfIdIngress() uint32 {
+func (x *SearchOwnedAssetsRequest) GetIfIdIngress() uint32 {
 	if x != nil && x.IfIdIngress != nil {
 		return *x.IfIdIngress
 	}
 	return 0
 }
 
-func (x *SearchAssetsRequest) GetIfIdEgress() uint32 {
+func (x *SearchOwnedAssetsRequest) GetIfIdEgress() uint32 {
 	if x != nil && x.IfIdEgress != nil {
 		return *x.IfIdEgress
 	}
 	return 0
 }
 
-func (x *SearchAssetsRequest) GetMinRequiredBw() uint32 {
+func (x *SearchOwnedAssetsRequest) GetMinRequiredBw() uint32 {
 	if x != nil && x.MinRequiredBw != nil {
 		return *x.MinRequiredBw
 	}
 	return 0
 }
 
-func (x *SearchAssetsRequest) GetStartsAtLatest() *timestamppb.Timestamp {
-	if x != nil {
-		return x.StartsAtLatest
+func (x *SearchOwnedAssetsRequest) GetStartsAtLatest() int64 {
+	if x != nil && x.StartsAtLatest != nil {
+		return *x.StartsAtLatest
 	}
-	return nil
+	return 0
 }
 
-func (x *SearchAssetsRequest) GetStopsAtEarliest() *timestamppb.Timestamp {
-	if x != nil {
-		return x.StopsAtEarliest
+func (x *SearchOwnedAssetsRequest) GetStopsAtEarliest() int64 {
+	if x != nil && x.StopsAtEarliest != nil {
+		return *x.StopsAtEarliest
 	}
-	return nil
+	return 0
 }
 
-func (x *SearchAssetsRequest) GetPrice() uint32 {
+func (x *SearchOwnedAssetsRequest) GetPrice() uint32 {
 	if x != nil && x.Price != nil {
 		return *x.Price
 	}
 	return 0
 }
 
-func (x *SearchAssetsRequest) GetPage() uint32 {
+type SearchListedAssetsRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Ia              uint64                 `protobuf:"varint,2,opt,name=ia,proto3" json:"ia,omitempty"`
+	IfIdIngress     *uint32                `protobuf:"varint,3,opt,name=if_id_ingress,json=ifIdIngress,proto3,oneof" json:"if_id_ingress,omitempty"`
+	IfIdEgress      *uint32                `protobuf:"varint,4,opt,name=if_id_egress,json=ifIdEgress,proto3,oneof" json:"if_id_egress,omitempty"`
+	MinRequiredBw   uint32                 `protobuf:"varint,5,opt,name=min_required_bw,json=minRequiredBw,proto3" json:"min_required_bw,omitempty"`
+	StartsAtLatest  int64                  `protobuf:"varint,6,opt,name=starts_at_latest,json=startsAtLatest,proto3" json:"starts_at_latest,omitempty"`
+	StopsAtEarliest int64                  `protobuf:"varint,7,opt,name=stops_at_earliest,json=stopsAtEarliest,proto3" json:"stops_at_earliest,omitempty"`
+	Price           *uint32                `protobuf:"varint,8,opt,name=price,proto3,oneof" json:"price,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *SearchListedAssetsRequest) Reset() {
+	*x = SearchListedAssetsRequest{}
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchListedAssetsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchListedAssetsRequest) ProtoMessage() {}
+
+func (x *SearchListedAssetsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[21]
 	if x != nil {
-		return x.Page
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchListedAssetsRequest.ProtoReflect.Descriptor instead.
+func (*SearchListedAssetsRequest) Descriptor() ([]byte, []int) {
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *SearchListedAssetsRequest) GetIa() uint64 {
+	if x != nil {
+		return x.Ia
 	}
 	return 0
 }
 
-func (x *SearchAssetsRequest) GetMaxReturnedAssets() uint32 {
-	if x != nil && x.MaxReturnedAssets != nil {
-		return *x.MaxReturnedAssets
+func (x *SearchListedAssetsRequest) GetIfIdIngress() uint32 {
+	if x != nil && x.IfIdIngress != nil {
+		return *x.IfIdIngress
+	}
+	return 0
+}
+
+func (x *SearchListedAssetsRequest) GetIfIdEgress() uint32 {
+	if x != nil && x.IfIdEgress != nil {
+		return *x.IfIdEgress
+	}
+	return 0
+}
+
+func (x *SearchListedAssetsRequest) GetMinRequiredBw() uint32 {
+	if x != nil {
+		return x.MinRequiredBw
+	}
+	return 0
+}
+
+func (x *SearchListedAssetsRequest) GetStartsAtLatest() int64 {
+	if x != nil {
+		return x.StartsAtLatest
+	}
+	return 0
+}
+
+func (x *SearchListedAssetsRequest) GetStopsAtEarliest() int64 {
+	if x != nil {
+		return x.StopsAtEarliest
+	}
+	return 0
+}
+
+func (x *SearchListedAssetsRequest) GetPrice() uint32 {
+	if x != nil && x.Price != nil {
+		return *x.Price
 	}
 	return 0
 }
@@ -1351,7 +1555,7 @@ type SearchAssetsResponse struct {
 
 func (x *SearchAssetsResponse) Reset() {
 	*x = SearchAssetsResponse{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[20]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1363,7 +1567,7 @@ func (x *SearchAssetsResponse) String() string {
 func (*SearchAssetsResponse) ProtoMessage() {}
 
 func (x *SearchAssetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[20]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1376,7 +1580,7 @@ func (x *SearchAssetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchAssetsResponse.ProtoReflect.Descriptor instead.
 func (*SearchAssetsResponse) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{20}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SearchAssetsResponse) GetAssets() []*SearchAsset {
@@ -1407,7 +1611,7 @@ type SearchAsset struct {
 
 func (x *SearchAsset) Reset() {
 	*x = SearchAsset{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[21]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1419,7 +1623,7 @@ func (x *SearchAsset) String() string {
 func (*SearchAsset) ProtoMessage() {}
 
 func (x *SearchAsset) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[21]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1432,7 +1636,7 @@ func (x *SearchAsset) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchAsset.ProtoReflect.Descriptor instead.
 func (*SearchAsset) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{21}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *SearchAsset) GetAssetId() []byte {
@@ -1536,7 +1740,7 @@ type BuyAssetsRequest struct {
 
 func (x *BuyAssetsRequest) Reset() {
 	*x = BuyAssetsRequest{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[22]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1548,7 +1752,7 @@ func (x *BuyAssetsRequest) String() string {
 func (*BuyAssetsRequest) ProtoMessage() {}
 
 func (x *BuyAssetsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[22]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1561,7 +1765,7 @@ func (x *BuyAssetsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuyAssetsRequest.ProtoReflect.Descriptor instead.
 func (*BuyAssetsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{22}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *BuyAssetsRequest) GetAssets() []*BuyAsset {
@@ -1590,7 +1794,7 @@ type BuyAsset struct {
 
 func (x *BuyAsset) Reset() {
 	*x = BuyAsset{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[23]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1602,7 +1806,7 @@ func (x *BuyAsset) String() string {
 func (*BuyAsset) ProtoMessage() {}
 
 func (x *BuyAsset) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[23]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1615,7 +1819,7 @@ func (x *BuyAsset) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuyAsset.ProtoReflect.Descriptor instead.
 func (*BuyAsset) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{23}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *BuyAsset) GetAssetId() []byte {
@@ -1656,7 +1860,7 @@ type BuyAssetsResponse struct {
 
 func (x *BuyAssetsResponse) Reset() {
 	*x = BuyAssetsResponse{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[24]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1668,7 +1872,7 @@ func (x *BuyAssetsResponse) String() string {
 func (*BuyAssetsResponse) ProtoMessage() {}
 
 func (x *BuyAssetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[24]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1681,7 +1885,7 @@ func (x *BuyAssetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuyAssetsResponse.ProtoReflect.Descriptor instead.
 func (*BuyAssetsResponse) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{24}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *BuyAssetsResponse) GetAssets() []*BoughtAsset {
@@ -1707,7 +1911,7 @@ type BoughtAsset struct {
 
 func (x *BoughtAsset) Reset() {
 	*x = BoughtAsset{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[25]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1719,7 +1923,7 @@ func (x *BoughtAsset) String() string {
 func (*BoughtAsset) ProtoMessage() {}
 
 func (x *BoughtAsset) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[25]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1732,7 +1936,7 @@ func (x *BoughtAsset) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BoughtAsset.ProtoReflect.Descriptor instead.
 func (*BoughtAsset) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{25}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *BoughtAsset) GetAssetId() []byte {
@@ -1755,7 +1959,7 @@ type RedeemAssetRequest struct {
 
 func (x *RedeemAssetRequest) Reset() {
 	*x = RedeemAssetRequest{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[26]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1767,7 +1971,7 @@ func (x *RedeemAssetRequest) String() string {
 func (*RedeemAssetRequest) ProtoMessage() {}
 
 func (x *RedeemAssetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[26]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1780,7 +1984,7 @@ func (x *RedeemAssetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedeemAssetRequest.ProtoReflect.Descriptor instead.
 func (*RedeemAssetRequest) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{26}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *RedeemAssetRequest) GetInterfaces() isRedeemAssetRequest_Interfaces {
@@ -1817,7 +2021,7 @@ type RedeemAssetRequest_Pair struct {
 }
 
 type RedeemAssetRequest_IfPairAssetId struct {
-	IfPairAssetId []byte `protobuf:"bytes,3,opt,name=if_pair_asset_id,json=ifPairAssetId,proto3,oneof"`
+	IfPairAssetId []byte `protobuf:"bytes,2,opt,name=if_pair_asset_id,json=ifPairAssetId,proto3,oneof"`
 }
 
 func (*RedeemAssetRequest_Pair) isRedeemAssetRequest_Interfaces() {}
@@ -1834,7 +2038,7 @@ type IngressEgressPair struct {
 
 func (x *IngressEgressPair) Reset() {
 	*x = IngressEgressPair{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[27]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1846,7 +2050,7 @@ func (x *IngressEgressPair) String() string {
 func (*IngressEgressPair) ProtoMessage() {}
 
 func (x *IngressEgressPair) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[27]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1859,7 +2063,7 @@ func (x *IngressEgressPair) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngressEgressPair.ProtoReflect.Descriptor instead.
 func (*IngressEgressPair) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{27}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *IngressEgressPair) GetIngressAssetId() []byte {
@@ -1888,7 +2092,7 @@ type RedeemAssetResponse struct {
 
 func (x *RedeemAssetResponse) Reset() {
 	*x = RedeemAssetResponse{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[28]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1900,7 +2104,7 @@ func (x *RedeemAssetResponse) String() string {
 func (*RedeemAssetResponse) ProtoMessage() {}
 
 func (x *RedeemAssetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[28]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1913,7 +2117,7 @@ func (x *RedeemAssetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedeemAssetResponse.ProtoReflect.Descriptor instead.
 func (*RedeemAssetResponse) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{28}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *RedeemAssetResponse) GetAuthenticationKey() []byte {
@@ -1958,7 +2162,7 @@ type FetchReservationsRequest struct {
 
 func (x *FetchReservationsRequest) Reset() {
 	*x = FetchReservationsRequest{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[29]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1970,7 +2174,7 @@ func (x *FetchReservationsRequest) String() string {
 func (*FetchReservationsRequest) ProtoMessage() {}
 
 func (x *FetchReservationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[29]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1983,7 +2187,7 @@ func (x *FetchReservationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FetchReservationsRequest.ProtoReflect.Descriptor instead.
 func (*FetchReservationsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{29}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *FetchReservationsRequest) GetIa() uint64 {
@@ -2037,7 +2241,7 @@ type FetchReservationsResponse struct {
 
 func (x *FetchReservationsResponse) Reset() {
 	*x = FetchReservationsResponse{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[30]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2049,7 +2253,7 @@ func (x *FetchReservationsResponse) String() string {
 func (*FetchReservationsResponse) ProtoMessage() {}
 
 func (x *FetchReservationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[30]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2062,7 +2266,7 @@ func (x *FetchReservationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FetchReservationsResponse.ProtoReflect.Descriptor instead.
 func (*FetchReservationsResponse) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{30}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *FetchReservationsResponse) GetReservations() []*Reservation {
@@ -2089,7 +2293,7 @@ type Reservation struct {
 
 func (x *Reservation) Reset() {
 	*x = Reservation{}
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[31]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2101,7 +2305,7 @@ func (x *Reservation) String() string {
 func (*Reservation) ProtoMessage() {}
 
 func (x *Reservation) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[31]
+	mi := &file_proto_hummingbird_v1_marketplace_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2114,7 +2318,7 @@ func (x *Reservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reservation.ProtoReflect.Descriptor instead.
 func (*Reservation) Descriptor() ([]byte, []int) {
-	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{31}
+	return file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *Reservation) GetReservationId() uint32 {
@@ -2265,28 +2469,40 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	" \x01(\rR\x0ftimeMaxDuration\x12\x14\n" +
 	"\x05price\x18\v \x01(\rR\x05priceB\x10\n" +
 	"\x0e_if_id_ingressB\x0f\n" +
-	"\r_if_id_egress\"\xc4\x04\n" +
-	"\x13SearchAssetsRequest\x12\x14\n" +
-	"\x05owned\x18\x01 \x01(\bR\x05owned\x12\x13\n" +
-	"\x02ia\x18\x02 \x01(\x04H\x00R\x02ia\x88\x01\x01\x12'\n" +
-	"\rif_id_ingress\x18\x03 \x01(\rH\x01R\vifIdIngress\x88\x01\x01\x12%\n" +
-	"\fif_id_egress\x18\x04 \x01(\rH\x02R\n" +
+	"\r_if_id_egress\"\xfc\x01\n" +
+	"\x13SearchAssetsRequest\x12F\n" +
+	"\x05owned\x18\x01 \x01(\v2..proto.hummingbird.v1.SearchOwnedAssetsRequestH\x00R\x05owned\x12I\n" +
+	"\x06listed\x18\x02 \x01(\v2/.proto.hummingbird.v1.SearchListedAssetsRequestH\x00R\x06listed\x12G\n" +
+	"\rvalidity_mode\x18\x03 \x01(\x0e2\".proto.hummingbird.v1.ValidityModeR\fvalidityModeB\t\n" +
+	"\arequest\"\x9a\x03\n" +
+	"\x18SearchOwnedAssetsRequest\x12\x13\n" +
+	"\x02ia\x18\x01 \x01(\x04H\x00R\x02ia\x88\x01\x01\x12'\n" +
+	"\rif_id_ingress\x18\x02 \x01(\rH\x01R\vifIdIngress\x88\x01\x01\x12%\n" +
+	"\fif_id_egress\x18\x03 \x01(\rH\x02R\n" +
 	"ifIdEgress\x88\x01\x01\x12+\n" +
-	"\x0fmin_required_bw\x18\x05 \x01(\rH\x03R\rminRequiredBw\x88\x01\x01\x12I\n" +
-	"\x10starts_at_latest\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampH\x04R\x0estartsAtLatest\x88\x01\x01\x12K\n" +
-	"\x11stops_at_earliest\x18\a \x01(\v2\x1a.google.protobuf.TimestampH\x05R\x0fstopsAtEarliest\x88\x01\x01\x12\x19\n" +
-	"\x05price\x18\b \x01(\rH\x06R\x05price\x88\x01\x01\x12\x12\n" +
-	"\x04page\x18\t \x01(\rR\x04page\x123\n" +
-	"\x13max_returned_assets\x18\n" +
-	" \x01(\rH\aR\x11maxReturnedAssets\x88\x01\x01B\x05\n" +
+	"\x0fmin_required_bw\x18\x04 \x01(\rH\x03R\rminRequiredBw\x88\x01\x01\x12-\n" +
+	"\x10starts_at_latest\x18\x05 \x01(\x03H\x04R\x0estartsAtLatest\x88\x01\x01\x12/\n" +
+	"\x11stops_at_earliest\x18\x06 \x01(\x03H\x05R\x0fstopsAtEarliest\x88\x01\x01\x12\x19\n" +
+	"\x05price\x18\a \x01(\rH\x06R\x05price\x88\x01\x01B\x05\n" +
 	"\x03_iaB\x10\n" +
 	"\x0e_if_id_ingressB\x0f\n" +
 	"\r_if_id_egressB\x12\n" +
 	"\x10_min_required_bwB\x13\n" +
 	"\x11_starts_at_latestB\x14\n" +
 	"\x12_stops_at_earliestB\b\n" +
-	"\x06_priceB\x16\n" +
-	"\x14_max_returned_assets\"Q\n" +
+	"\x06_price\"\xc1\x02\n" +
+	"\x19SearchListedAssetsRequest\x12\x0e\n" +
+	"\x02ia\x18\x02 \x01(\x04R\x02ia\x12'\n" +
+	"\rif_id_ingress\x18\x03 \x01(\rH\x00R\vifIdIngress\x88\x01\x01\x12%\n" +
+	"\fif_id_egress\x18\x04 \x01(\rH\x01R\n" +
+	"ifIdEgress\x88\x01\x01\x12&\n" +
+	"\x0fmin_required_bw\x18\x05 \x01(\rR\rminRequiredBw\x12(\n" +
+	"\x10starts_at_latest\x18\x06 \x01(\x03R\x0estartsAtLatest\x12*\n" +
+	"\x11stops_at_earliest\x18\a \x01(\x03R\x0fstopsAtEarliest\x12\x19\n" +
+	"\x05price\x18\b \x01(\rH\x02R\x05price\x88\x01\x01B\x10\n" +
+	"\x0e_if_id_ingressB\x0f\n" +
+	"\r_if_id_egressB\b\n" +
+	"\x06_price\"Q\n" +
 	"\x14SearchAssetsResponse\x129\n" +
 	"\x06assets\x18\x01 \x03(\v2!.proto.hummingbird.v1.SearchAssetR\x06assets\"\x9c\x04\n" +
 	"\vSearchAsset\x12\x19\n" +
@@ -2322,7 +2538,7 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\basset_id\x18\x01 \x01(\fR\aassetId\"\x8c\x01\n" +
 	"\x12RedeemAssetRequest\x12=\n" +
 	"\x04pair\x18\x01 \x01(\v2'.proto.hummingbird.v1.IngressEgressPairH\x00R\x04pair\x12)\n" +
-	"\x10if_pair_asset_id\x18\x03 \x01(\fH\x00R\rifPairAssetIdB\f\n" +
+	"\x10if_pair_asset_id\x18\x02 \x01(\fH\x00R\rifPairAssetIdB\f\n" +
 	"\n" +
 	"interfaces\"e\n" +
 	"\x11IngressEgressPair\x12(\n" +
@@ -2365,7 +2581,10 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\x12authentication_key\x18\t \x01(\fR\x11authenticationKey*:\n" +
 	"\x0fPricingStrategy\x12\x12\n" +
 	"\x0estatic_pricing\x10\x00\x12\x13\n" +
-	"\x0fdynamic_pricing\x10\x012\xa4\b\n" +
+	"\x0fdynamic_pricing\x10\x01*5\n" +
+	"\fValidityMode\x12\x10\n" +
+	"\ffull_overlap\x10\x00\x12\x13\n" +
+	"\x0fpartial_overlap\x10\x012\xa4\b\n" +
 	"\x12MarketplaceService\x12e\n" +
 	"\x04Info\x12,.proto.hummingbird.v1.MarketplaceInfoRequest\x1a-.proto.hummingbird.v1.MarketplaceInfoResponse\"\x00\x12g\n" +
 	"\fPublishAsset\x12).proto.hummingbird.v1.PublishAssetRequest\x1a*.proto.hummingbird.v1.PublishAssetResponse\"\x00\x12g\n" +
@@ -2392,99 +2611,103 @@ func file_proto_hummingbird_v1_marketplace_proto_rawDescGZIP() []byte {
 	return file_proto_hummingbird_v1_marketplace_proto_rawDescData
 }
 
-var file_proto_hummingbird_v1_marketplace_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_hummingbird_v1_marketplace_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_proto_hummingbird_v1_marketplace_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_proto_hummingbird_v1_marketplace_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
 var file_proto_hummingbird_v1_marketplace_proto_goTypes = []any{
 	(PricingStrategy)(0),              // 0: proto.hummingbird.v1.PricingStrategy
-	(*UpdateAssetsRequest)(nil),       // 1: proto.hummingbird.v1.UpdateAssetsRequest
-	(*AssetUpdate)(nil),               // 2: proto.hummingbird.v1.AssetUpdate
-	(*Remove)(nil),                    // 3: proto.hummingbird.v1.Remove
-	(*UpdateAssetsResponse)(nil),      // 4: proto.hummingbird.v1.UpdateAssetsResponse
-	(*UpdateAssetResult)(nil),         // 5: proto.hummingbird.v1.UpdateAssetResult
-	(*StatisticsRequest)(nil),         // 6: proto.hummingbird.v1.StatisticsRequest
-	(*StatisticsResponse)(nil),        // 7: proto.hummingbird.v1.StatisticsResponse
-	(*StatisticsResponseEntry)(nil),   // 8: proto.hummingbird.v1.StatisticsResponseEntry
-	(*SplitAssetRequest)(nil),         // 9: proto.hummingbird.v1.SplitAssetRequest
-	(*SplitBwOption)(nil),             // 10: proto.hummingbird.v1.SplitBwOption
-	(*SplitTimeOption)(nil),           // 11: proto.hummingbird.v1.SplitTimeOption
-	(*SplitAssetResponse)(nil),        // 12: proto.hummingbird.v1.SplitAssetResponse
-	(*CombineAssetRequest)(nil),       // 13: proto.hummingbird.v1.CombineAssetRequest
-	(*CombineAssetResponse)(nil),      // 14: proto.hummingbird.v1.CombineAssetResponse
-	(*MarketplaceInfoRequest)(nil),    // 15: proto.hummingbird.v1.MarketplaceInfoRequest
-	(*MarketplaceInfoResponse)(nil),   // 16: proto.hummingbird.v1.MarketplaceInfoResponse
-	(*PublishAssetRequest)(nil),       // 17: proto.hummingbird.v1.PublishAssetRequest
-	(*PublishAssetResponse)(nil),      // 18: proto.hummingbird.v1.PublishAssetResponse
-	(*PublisherAsset)(nil),            // 19: proto.hummingbird.v1.PublisherAsset
-	(*SearchAssetsRequest)(nil),       // 20: proto.hummingbird.v1.SearchAssetsRequest
-	(*SearchAssetsResponse)(nil),      // 21: proto.hummingbird.v1.SearchAssetsResponse
-	(*SearchAsset)(nil),               // 22: proto.hummingbird.v1.SearchAsset
-	(*BuyAssetsRequest)(nil),          // 23: proto.hummingbird.v1.BuyAssetsRequest
-	(*BuyAsset)(nil),                  // 24: proto.hummingbird.v1.BuyAsset
-	(*BuyAssetsResponse)(nil),         // 25: proto.hummingbird.v1.BuyAssetsResponse
-	(*BoughtAsset)(nil),               // 26: proto.hummingbird.v1.BoughtAsset
-	(*RedeemAssetRequest)(nil),        // 27: proto.hummingbird.v1.RedeemAssetRequest
-	(*IngressEgressPair)(nil),         // 28: proto.hummingbird.v1.IngressEgressPair
-	(*RedeemAssetResponse)(nil),       // 29: proto.hummingbird.v1.RedeemAssetResponse
-	(*FetchReservationsRequest)(nil),  // 30: proto.hummingbird.v1.FetchReservationsRequest
-	(*FetchReservationsResponse)(nil), // 31: proto.hummingbird.v1.FetchReservationsResponse
-	(*Reservation)(nil),               // 32: proto.hummingbird.v1.Reservation
-	(*timestamppb.Timestamp)(nil),     // 33: google.protobuf.Timestamp
+	(ValidityMode)(0),                 // 1: proto.hummingbird.v1.ValidityMode
+	(*UpdateAssetsRequest)(nil),       // 2: proto.hummingbird.v1.UpdateAssetsRequest
+	(*AssetUpdate)(nil),               // 3: proto.hummingbird.v1.AssetUpdate
+	(*Remove)(nil),                    // 4: proto.hummingbird.v1.Remove
+	(*UpdateAssetsResponse)(nil),      // 5: proto.hummingbird.v1.UpdateAssetsResponse
+	(*UpdateAssetResult)(nil),         // 6: proto.hummingbird.v1.UpdateAssetResult
+	(*StatisticsRequest)(nil),         // 7: proto.hummingbird.v1.StatisticsRequest
+	(*StatisticsResponse)(nil),        // 8: proto.hummingbird.v1.StatisticsResponse
+	(*StatisticsResponseEntry)(nil),   // 9: proto.hummingbird.v1.StatisticsResponseEntry
+	(*SplitAssetRequest)(nil),         // 10: proto.hummingbird.v1.SplitAssetRequest
+	(*SplitBwOption)(nil),             // 11: proto.hummingbird.v1.SplitBwOption
+	(*SplitTimeOption)(nil),           // 12: proto.hummingbird.v1.SplitTimeOption
+	(*SplitAssetResponse)(nil),        // 13: proto.hummingbird.v1.SplitAssetResponse
+	(*CombineAssetRequest)(nil),       // 14: proto.hummingbird.v1.CombineAssetRequest
+	(*CombineAssetResponse)(nil),      // 15: proto.hummingbird.v1.CombineAssetResponse
+	(*MarketplaceInfoRequest)(nil),    // 16: proto.hummingbird.v1.MarketplaceInfoRequest
+	(*MarketplaceInfoResponse)(nil),   // 17: proto.hummingbird.v1.MarketplaceInfoResponse
+	(*PublishAssetRequest)(nil),       // 18: proto.hummingbird.v1.PublishAssetRequest
+	(*PublishAssetResponse)(nil),      // 19: proto.hummingbird.v1.PublishAssetResponse
+	(*PublisherAsset)(nil),            // 20: proto.hummingbird.v1.PublisherAsset
+	(*SearchAssetsRequest)(nil),       // 21: proto.hummingbird.v1.SearchAssetsRequest
+	(*SearchOwnedAssetsRequest)(nil),  // 22: proto.hummingbird.v1.SearchOwnedAssetsRequest
+	(*SearchListedAssetsRequest)(nil), // 23: proto.hummingbird.v1.SearchListedAssetsRequest
+	(*SearchAssetsResponse)(nil),      // 24: proto.hummingbird.v1.SearchAssetsResponse
+	(*SearchAsset)(nil),               // 25: proto.hummingbird.v1.SearchAsset
+	(*BuyAssetsRequest)(nil),          // 26: proto.hummingbird.v1.BuyAssetsRequest
+	(*BuyAsset)(nil),                  // 27: proto.hummingbird.v1.BuyAsset
+	(*BuyAssetsResponse)(nil),         // 28: proto.hummingbird.v1.BuyAssetsResponse
+	(*BoughtAsset)(nil),               // 29: proto.hummingbird.v1.BoughtAsset
+	(*RedeemAssetRequest)(nil),        // 30: proto.hummingbird.v1.RedeemAssetRequest
+	(*IngressEgressPair)(nil),         // 31: proto.hummingbird.v1.IngressEgressPair
+	(*RedeemAssetResponse)(nil),       // 32: proto.hummingbird.v1.RedeemAssetResponse
+	(*FetchReservationsRequest)(nil),  // 33: proto.hummingbird.v1.FetchReservationsRequest
+	(*FetchReservationsResponse)(nil), // 34: proto.hummingbird.v1.FetchReservationsResponse
+	(*Reservation)(nil),               // 35: proto.hummingbird.v1.Reservation
+	(*timestamppb.Timestamp)(nil),     // 36: google.protobuf.Timestamp
 }
 var file_proto_hummingbird_v1_marketplace_proto_depIdxs = []int32{
-	2,  // 0: proto.hummingbird.v1.UpdateAssetsRequest.assets:type_name -> proto.hummingbird.v1.AssetUpdate
-	19, // 1: proto.hummingbird.v1.AssetUpdate.update:type_name -> proto.hummingbird.v1.PublisherAsset
-	3,  // 2: proto.hummingbird.v1.AssetUpdate.remove:type_name -> proto.hummingbird.v1.Remove
-	5,  // 3: proto.hummingbird.v1.UpdateAssetsResponse.result:type_name -> proto.hummingbird.v1.UpdateAssetResult
-	33, // 4: proto.hummingbird.v1.StatisticsRequest.start:type_name -> google.protobuf.Timestamp
-	33, // 5: proto.hummingbird.v1.StatisticsRequest.end:type_name -> google.protobuf.Timestamp
-	8,  // 6: proto.hummingbird.v1.StatisticsResponse.statistics:type_name -> proto.hummingbird.v1.StatisticsResponseEntry
-	10, // 7: proto.hummingbird.v1.SplitAssetRequest.bw_split:type_name -> proto.hummingbird.v1.SplitBwOption
-	11, // 8: proto.hummingbird.v1.SplitAssetRequest.time_split:type_name -> proto.hummingbird.v1.SplitTimeOption
-	33, // 9: proto.hummingbird.v1.SplitTimeOption.splits:type_name -> google.protobuf.Timestamp
+	3,  // 0: proto.hummingbird.v1.UpdateAssetsRequest.assets:type_name -> proto.hummingbird.v1.AssetUpdate
+	20, // 1: proto.hummingbird.v1.AssetUpdate.update:type_name -> proto.hummingbird.v1.PublisherAsset
+	4,  // 2: proto.hummingbird.v1.AssetUpdate.remove:type_name -> proto.hummingbird.v1.Remove
+	6,  // 3: proto.hummingbird.v1.UpdateAssetsResponse.result:type_name -> proto.hummingbird.v1.UpdateAssetResult
+	36, // 4: proto.hummingbird.v1.StatisticsRequest.start:type_name -> google.protobuf.Timestamp
+	36, // 5: proto.hummingbird.v1.StatisticsRequest.end:type_name -> google.protobuf.Timestamp
+	9,  // 6: proto.hummingbird.v1.StatisticsResponse.statistics:type_name -> proto.hummingbird.v1.StatisticsResponseEntry
+	11, // 7: proto.hummingbird.v1.SplitAssetRequest.bw_split:type_name -> proto.hummingbird.v1.SplitBwOption
+	12, // 8: proto.hummingbird.v1.SplitAssetRequest.time_split:type_name -> proto.hummingbird.v1.SplitTimeOption
+	36, // 9: proto.hummingbird.v1.SplitTimeOption.splits:type_name -> google.protobuf.Timestamp
 	0,  // 10: proto.hummingbird.v1.MarketplaceInfoResponse.pricing_strategy:type_name -> proto.hummingbird.v1.PricingStrategy
-	19, // 11: proto.hummingbird.v1.PublishAssetRequest.asset:type_name -> proto.hummingbird.v1.PublisherAsset
-	33, // 12: proto.hummingbird.v1.PublisherAsset.starts_at:type_name -> google.protobuf.Timestamp
-	33, // 13: proto.hummingbird.v1.PublisherAsset.stops_at:type_name -> google.protobuf.Timestamp
-	33, // 14: proto.hummingbird.v1.SearchAssetsRequest.starts_at_latest:type_name -> google.protobuf.Timestamp
-	33, // 15: proto.hummingbird.v1.SearchAssetsRequest.stops_at_earliest:type_name -> google.protobuf.Timestamp
-	22, // 16: proto.hummingbird.v1.SearchAssetsResponse.assets:type_name -> proto.hummingbird.v1.SearchAsset
-	33, // 17: proto.hummingbird.v1.SearchAsset.starts_at:type_name -> google.protobuf.Timestamp
-	33, // 18: proto.hummingbird.v1.SearchAsset.stops_at:type_name -> google.protobuf.Timestamp
-	24, // 19: proto.hummingbird.v1.BuyAssetsRequest.assets:type_name -> proto.hummingbird.v1.BuyAsset
-	33, // 20: proto.hummingbird.v1.BuyAsset.starts_at_exactly:type_name -> google.protobuf.Timestamp
-	33, // 21: proto.hummingbird.v1.BuyAsset.stops_at_exactly:type_name -> google.protobuf.Timestamp
-	26, // 22: proto.hummingbird.v1.BuyAssetsResponse.assets:type_name -> proto.hummingbird.v1.BoughtAsset
-	28, // 23: proto.hummingbird.v1.RedeemAssetRequest.pair:type_name -> proto.hummingbird.v1.IngressEgressPair
-	33, // 24: proto.hummingbird.v1.FetchReservationsRequest.starts_at:type_name -> google.protobuf.Timestamp
-	33, // 25: proto.hummingbird.v1.FetchReservationsRequest.stops_at:type_name -> google.protobuf.Timestamp
-	32, // 26: proto.hummingbird.v1.FetchReservationsResponse.reservations:type_name -> proto.hummingbird.v1.Reservation
-	33, // 27: proto.hummingbird.v1.Reservation.starts_at:type_name -> google.protobuf.Timestamp
-	33, // 28: proto.hummingbird.v1.Reservation.stops_at:type_name -> google.protobuf.Timestamp
-	15, // 29: proto.hummingbird.v1.MarketplaceService.Info:input_type -> proto.hummingbird.v1.MarketplaceInfoRequest
-	17, // 30: proto.hummingbird.v1.MarketplaceService.PublishAsset:input_type -> proto.hummingbird.v1.PublishAssetRequest
-	20, // 31: proto.hummingbird.v1.MarketplaceService.SearchAssets:input_type -> proto.hummingbird.v1.SearchAssetsRequest
-	23, // 32: proto.hummingbird.v1.MarketplaceService.BuyAssets:input_type -> proto.hummingbird.v1.BuyAssetsRequest
-	27, // 33: proto.hummingbird.v1.MarketplaceService.RedeemAsset:input_type -> proto.hummingbird.v1.RedeemAssetRequest
-	30, // 34: proto.hummingbird.v1.MarketplaceService.FetchReservations:input_type -> proto.hummingbird.v1.FetchReservationsRequest
-	9,  // 35: proto.hummingbird.v1.MarketplaceService.SplitAsset:input_type -> proto.hummingbird.v1.SplitAssetRequest
-	13, // 36: proto.hummingbird.v1.MarketplaceService.CombineAssets:input_type -> proto.hummingbird.v1.CombineAssetRequest
-	6,  // 37: proto.hummingbird.v1.MarketplaceService.Statistics:input_type -> proto.hummingbird.v1.StatisticsRequest
-	1,  // 38: proto.hummingbird.v1.MarketplaceService.UpdateAssets:input_type -> proto.hummingbird.v1.UpdateAssetsRequest
-	16, // 39: proto.hummingbird.v1.MarketplaceService.Info:output_type -> proto.hummingbird.v1.MarketplaceInfoResponse
-	18, // 40: proto.hummingbird.v1.MarketplaceService.PublishAsset:output_type -> proto.hummingbird.v1.PublishAssetResponse
-	21, // 41: proto.hummingbird.v1.MarketplaceService.SearchAssets:output_type -> proto.hummingbird.v1.SearchAssetsResponse
-	25, // 42: proto.hummingbird.v1.MarketplaceService.BuyAssets:output_type -> proto.hummingbird.v1.BuyAssetsResponse
-	29, // 43: proto.hummingbird.v1.MarketplaceService.RedeemAsset:output_type -> proto.hummingbird.v1.RedeemAssetResponse
-	31, // 44: proto.hummingbird.v1.MarketplaceService.FetchReservations:output_type -> proto.hummingbird.v1.FetchReservationsResponse
-	12, // 45: proto.hummingbird.v1.MarketplaceService.SplitAsset:output_type -> proto.hummingbird.v1.SplitAssetResponse
-	14, // 46: proto.hummingbird.v1.MarketplaceService.CombineAssets:output_type -> proto.hummingbird.v1.CombineAssetResponse
-	7,  // 47: proto.hummingbird.v1.MarketplaceService.Statistics:output_type -> proto.hummingbird.v1.StatisticsResponse
-	4,  // 48: proto.hummingbird.v1.MarketplaceService.UpdateAssets:output_type -> proto.hummingbird.v1.UpdateAssetsResponse
-	39, // [39:49] is the sub-list for method output_type
-	29, // [29:39] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	20, // 11: proto.hummingbird.v1.PublishAssetRequest.asset:type_name -> proto.hummingbird.v1.PublisherAsset
+	36, // 12: proto.hummingbird.v1.PublisherAsset.starts_at:type_name -> google.protobuf.Timestamp
+	36, // 13: proto.hummingbird.v1.PublisherAsset.stops_at:type_name -> google.protobuf.Timestamp
+	22, // 14: proto.hummingbird.v1.SearchAssetsRequest.owned:type_name -> proto.hummingbird.v1.SearchOwnedAssetsRequest
+	23, // 15: proto.hummingbird.v1.SearchAssetsRequest.listed:type_name -> proto.hummingbird.v1.SearchListedAssetsRequest
+	1,  // 16: proto.hummingbird.v1.SearchAssetsRequest.validity_mode:type_name -> proto.hummingbird.v1.ValidityMode
+	25, // 17: proto.hummingbird.v1.SearchAssetsResponse.assets:type_name -> proto.hummingbird.v1.SearchAsset
+	36, // 18: proto.hummingbird.v1.SearchAsset.starts_at:type_name -> google.protobuf.Timestamp
+	36, // 19: proto.hummingbird.v1.SearchAsset.stops_at:type_name -> google.protobuf.Timestamp
+	27, // 20: proto.hummingbird.v1.BuyAssetsRequest.assets:type_name -> proto.hummingbird.v1.BuyAsset
+	36, // 21: proto.hummingbird.v1.BuyAsset.starts_at_exactly:type_name -> google.protobuf.Timestamp
+	36, // 22: proto.hummingbird.v1.BuyAsset.stops_at_exactly:type_name -> google.protobuf.Timestamp
+	29, // 23: proto.hummingbird.v1.BuyAssetsResponse.assets:type_name -> proto.hummingbird.v1.BoughtAsset
+	31, // 24: proto.hummingbird.v1.RedeemAssetRequest.pair:type_name -> proto.hummingbird.v1.IngressEgressPair
+	36, // 25: proto.hummingbird.v1.FetchReservationsRequest.starts_at:type_name -> google.protobuf.Timestamp
+	36, // 26: proto.hummingbird.v1.FetchReservationsRequest.stops_at:type_name -> google.protobuf.Timestamp
+	35, // 27: proto.hummingbird.v1.FetchReservationsResponse.reservations:type_name -> proto.hummingbird.v1.Reservation
+	36, // 28: proto.hummingbird.v1.Reservation.starts_at:type_name -> google.protobuf.Timestamp
+	36, // 29: proto.hummingbird.v1.Reservation.stops_at:type_name -> google.protobuf.Timestamp
+	16, // 30: proto.hummingbird.v1.MarketplaceService.Info:input_type -> proto.hummingbird.v1.MarketplaceInfoRequest
+	18, // 31: proto.hummingbird.v1.MarketplaceService.PublishAsset:input_type -> proto.hummingbird.v1.PublishAssetRequest
+	21, // 32: proto.hummingbird.v1.MarketplaceService.SearchAssets:input_type -> proto.hummingbird.v1.SearchAssetsRequest
+	26, // 33: proto.hummingbird.v1.MarketplaceService.BuyAssets:input_type -> proto.hummingbird.v1.BuyAssetsRequest
+	30, // 34: proto.hummingbird.v1.MarketplaceService.RedeemAsset:input_type -> proto.hummingbird.v1.RedeemAssetRequest
+	33, // 35: proto.hummingbird.v1.MarketplaceService.FetchReservations:input_type -> proto.hummingbird.v1.FetchReservationsRequest
+	10, // 36: proto.hummingbird.v1.MarketplaceService.SplitAsset:input_type -> proto.hummingbird.v1.SplitAssetRequest
+	14, // 37: proto.hummingbird.v1.MarketplaceService.CombineAssets:input_type -> proto.hummingbird.v1.CombineAssetRequest
+	7,  // 38: proto.hummingbird.v1.MarketplaceService.Statistics:input_type -> proto.hummingbird.v1.StatisticsRequest
+	2,  // 39: proto.hummingbird.v1.MarketplaceService.UpdateAssets:input_type -> proto.hummingbird.v1.UpdateAssetsRequest
+	17, // 40: proto.hummingbird.v1.MarketplaceService.Info:output_type -> proto.hummingbird.v1.MarketplaceInfoResponse
+	19, // 41: proto.hummingbird.v1.MarketplaceService.PublishAsset:output_type -> proto.hummingbird.v1.PublishAssetResponse
+	24, // 42: proto.hummingbird.v1.MarketplaceService.SearchAssets:output_type -> proto.hummingbird.v1.SearchAssetsResponse
+	28, // 43: proto.hummingbird.v1.MarketplaceService.BuyAssets:output_type -> proto.hummingbird.v1.BuyAssetsResponse
+	32, // 44: proto.hummingbird.v1.MarketplaceService.RedeemAsset:output_type -> proto.hummingbird.v1.RedeemAssetResponse
+	34, // 45: proto.hummingbird.v1.MarketplaceService.FetchReservations:output_type -> proto.hummingbird.v1.FetchReservationsResponse
+	13, // 46: proto.hummingbird.v1.MarketplaceService.SplitAsset:output_type -> proto.hummingbird.v1.SplitAssetResponse
+	15, // 47: proto.hummingbird.v1.MarketplaceService.CombineAssets:output_type -> proto.hummingbird.v1.CombineAssetResponse
+	8,  // 48: proto.hummingbird.v1.MarketplaceService.Statistics:output_type -> proto.hummingbird.v1.StatisticsResponse
+	5,  // 49: proto.hummingbird.v1.MarketplaceService.UpdateAssets:output_type -> proto.hummingbird.v1.UpdateAssetsResponse
+	40, // [40:50] is the sub-list for method output_type
+	30, // [30:40] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_proto_hummingbird_v1_marketplace_proto_init() }
@@ -2506,20 +2729,25 @@ func file_proto_hummingbird_v1_marketplace_proto_init() {
 		(*SplitAssetRequest_TimeSplit)(nil),
 	}
 	file_proto_hummingbird_v1_marketplace_proto_msgTypes[18].OneofWrappers = []any{}
-	file_proto_hummingbird_v1_marketplace_proto_msgTypes[19].OneofWrappers = []any{}
+	file_proto_hummingbird_v1_marketplace_proto_msgTypes[19].OneofWrappers = []any{
+		(*SearchAssetsRequest_Owned)(nil),
+		(*SearchAssetsRequest_Listed)(nil),
+	}
+	file_proto_hummingbird_v1_marketplace_proto_msgTypes[20].OneofWrappers = []any{}
 	file_proto_hummingbird_v1_marketplace_proto_msgTypes[21].OneofWrappers = []any{}
-	file_proto_hummingbird_v1_marketplace_proto_msgTypes[26].OneofWrappers = []any{
+	file_proto_hummingbird_v1_marketplace_proto_msgTypes[23].OneofWrappers = []any{}
+	file_proto_hummingbird_v1_marketplace_proto_msgTypes[28].OneofWrappers = []any{
 		(*RedeemAssetRequest_Pair)(nil),
 		(*RedeemAssetRequest_IfPairAssetId)(nil),
 	}
-	file_proto_hummingbird_v1_marketplace_proto_msgTypes[29].OneofWrappers = []any{}
+	file_proto_hummingbird_v1_marketplace_proto_msgTypes[31].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_hummingbird_v1_marketplace_proto_rawDesc), len(file_proto_hummingbird_v1_marketplace_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   32,
+			NumEnums:      2,
+			NumMessages:   34,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

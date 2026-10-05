@@ -146,18 +146,37 @@ message PublisherAsset {
     uint32 price = 11;
 }
 
+enum ValidityMode {
+    full_overlap = 0;
+    partial_overlap = 1;
+}
+
 message SearchAssetsRequest {
-    bool owned = 1;
-    optional uint64 ia = 2;
+    oneof request {
+        SearchOwnedAssetsRequest owned = 1;
+        SearchListedAssetsRequest listed = 2;
+    }
+    ValidityMode validity_mode = 3;
+}
+
+message SearchOwnedAssetsRequest {
+    optional uint64 ia = 1;
+    optional uint32 if_id_ingress = 2;
+    optional uint32 if_id_egress = 3;
+    optional uint32 min_required_bw = 4;
+    optional int64 starts_at_latest = 5;
+    optional int64 stops_at_earliest = 6;
+    optional uint32 price = 7;
+}
+
+message SearchListedAssetsRequest {
+    uint64 ia = 2;
     optional uint32 if_id_ingress = 3;
     optional uint32 if_id_egress = 4;
-    optional uint32 min_required_bw = 5;
-    optional google.protobuf.Timestamp starts_at_latest = 6;
-    optional google.protobuf.Timestamp stops_at_earliest = 7;
+    uint32 min_required_bw = 5;
+    int64 starts_at_latest = 6;
+    int64 stops_at_earliest = 7;
     optional uint32 price = 8;
-    uint32 page = 9;
-    // The marketplace may return less assets per page than requested.
-    optional uint32 max_returned_assets = 10;
 }
 
 message SearchAssetsResponse {
@@ -203,7 +222,7 @@ message BoughtAsset {
 message RedeemAssetRequest {
     oneof interfaces {
         IngressEgressPair pair = 1;
-        bytes if_pair_asset_id = 3;
+        bytes if_pair_asset_id = 2;
     }
 }
 message IngressEgressPair {

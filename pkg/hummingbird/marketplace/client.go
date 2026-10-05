@@ -352,34 +352,49 @@ func (c *Client) recursiveSelect(
 }
 
 func (c *Client) searchAllAssets(ctx context.Context, owned bool, ia *uint64, ingress *uint32, egress *uint32,
-	minBW uint32, startsAtLatest time.Time, stopsAtLatest time.Time) ([]*hummingbird.SearchAsset, error) {
-	// TODO: this is a temporary fix for pagination. We just fetch all pages
-	// To properly implement pagination, especially for the combine assets case, the recursive select algorithm would have to be changed.
-	var assets []*hummingbird.SearchAsset
-	for i := uint32(0); ; i++ {
-		resp, err := c.Marketplace.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+	minBW uint32, startsAtLatest time.Time, stopsAtLatest time.Time, partialOverlap bool) ([]*hummingbird.SearchAsset, error) {
+	startsAtUnix := startsAtLatest.Unix()
+	stopsAtUnix := stopsAtLatest.Unix()
+	validityMode := hummingbird.ValidityMode_full_overlap
+	if partialOverlap {
+		validityMode = hummingbird.ValidityMode_partial_overlap
+	}
+	var resp *connect.Response[hummingbird.SearchAssetsResponse]
+	var err error
+	if owned {
+		resp, err = c.Marketplace.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
 			Msg: &hummingbird.SearchAssetsRequest{
-				Owned:           owned,
-				Ia:              ia,
-				IfIdIngress:     ingress,
-				IfIdEgress:      egress,
-				MinRequiredBw:   &minBW,
-				StartsAtLatest:  timestamppb.New(startsAtLatest),
-				StopsAtEarliest: timestamppb.New(stopsAtLatest),
-				Page:            i,
+				Request: &hummingbird.SearchAssetsRequest_Owned{
+					Owned: &hummingbird.SearchOwnedAssetsRequest{
+						Ia:              ia,
+						IfIdIngress:     ingress,
+						IfIdEgress:      egress,
+						MinRequiredBw:   &minBW,
+						StartsAtLatest:  &startsAtUnix,
+						StopsAtEarliest: &stopsAtUnix,
+					},
+				},
+				ValidityMode: validityMode,
 			},
 		})
-		if err != nil {
-			return nil, err
-		}
-		if len(resp.Msg.Assets) == 0 {
-			break
-		}
-		for _, asset := range resp.Msg.Assets {
-			assets = append(assets, asset)
-		}
+	} else {
+		resp, err = c.Marketplace.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+			Msg: &hummingbird.SearchAssetsRequest{
+				Request: &hummingbird.SearchAssetsRequest_Listed{
+					Listed: &hummingbird.SearchListedAssetsRequest{
+						Ia:              *ia,
+						IfIdIngress:     ingress,
+						IfIdEgress:      egress,
+						MinRequiredBw:   minBW,
+						StartsAtLatest:  startsAtUnix,
+						StopsAtEarliest: stopsAtUnix,
+					},
+				},
+				ValidityMode: validityMode,
+			},
+		})
 	}
-	return assets, nil
+	return resp.Msg.Assets, err
 }
 
 // checkoutAssetForInterfacePairWithCombine tries to find assets that can be combined on the time axis. It does not check for combinations on the bandwidth axis.
@@ -390,7 +405,7 @@ func (c *Client) checkoutAssetForInterfacePairWithCombine(ctx context.Context, p
 	var ingressBuyAssets, egressBuyAssets, pairBuyAssets []*hummingbird.BuyAsset
 	var ingressAssetPrice, egressAssetPrice, pairAssetPrice uint64
 	var ok bool
-	ingressAssetsResponse, err := c.searchAllAssets(ctx, false, &pair.IA, &pair.Ingress, nil, bwInKbps, stopsAt, startsAt)
+	ingressAssetsResponse, err := c.searchAllAssets(ctx, false, &pair.IA, &pair.Ingress, nil, bwInKbps, startsAt, stopsAt, true)
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +414,7 @@ func (c *Client) checkoutAssetForInterfacePairWithCombine(ctx context.Context, p
 	})
 	ingressBuyAssets, ingressAssetPrice, ok = c.recursiveSelectStart(ingressSearchAssets, bwInKbps, startsAt, stopsAt, combineCost)
 	if ok {
-		egressAssetsResponse, err := c.searchAllAssets(ctx, false, &pair.IA, nil, &pair.Egress, bwInKbps, stopsAt, startsAt)
+		egressAssetsResponse, err := c.searchAllAssets(ctx, false, &pair.IA, nil, &pair.Egress, bwInKbps, startsAt, stopsAt, true)
 		if err != nil {
 			return nil, err
 		}
@@ -411,7 +426,7 @@ func (c *Client) checkoutAssetForInterfacePairWithCombine(ctx context.Context, p
 			ingressAndEgressSuccess = true
 		}
 	}
-	pairAssetsResponse, err := c.searchAllAssets(ctx, false, &pair.IA, &pair.Ingress, &pair.Egress, bwInKbps, stopsAt, startsAt)
+	pairAssetsResponse, err := c.searchAllAssets(ctx, false, &pair.IA, &pair.Ingress, &pair.Egress, bwInKbps, startsAt, stopsAt, true)
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +463,7 @@ func (c *Client) checkoutAssetForInterfacePair(
 	stopsAt time.Time,
 ) ([]*hummingbird.BuyAsset, error) {
 	var ingressSearchAssets, egressSearchAssets, pairSearchAssets []*hummingbird.SearchAsset
-	ingressAssetsResponse, err := c.searchAllAssets(ctx, false, &pair.IA, &pair.Ingress, nil, bwInKbps, startsAt, stopsAt)
+	ingressAssetsResponse, err := c.searchAllAssets(ctx, false, &pair.IA, &pair.Ingress, nil, bwInKbps, startsAt, stopsAt, false)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +471,7 @@ func (c *Client) checkoutAssetForInterfacePair(
 		return a.IfIdEgress == nil
 	})
 	if len(ingressSearchAssets) != 0 {
-		egressAssetsResponse, err := c.searchAllAssets(ctx, false, &pair.IA, nil, &pair.Ingress, bwInKbps, startsAt, stopsAt)
+		egressAssetsResponse, err := c.searchAllAssets(ctx, false, &pair.IA, nil, &pair.Ingress, bwInKbps, startsAt, stopsAt, false)
 		if err != nil {
 			return nil, err
 		}
@@ -464,7 +479,7 @@ func (c *Client) checkoutAssetForInterfacePair(
 			return a.IfIdIngress == nil
 		})
 	}
-	pairSearchAssets, err = c.searchAllAssets(ctx, false, &pair.IA, &pair.Ingress, &pair.Egress, bwInKbps, startsAt, stopsAt)
+	pairSearchAssets, err = c.searchAllAssets(ctx, false, &pair.IA, &pair.Ingress, &pair.Egress, bwInKbps, startsAt, stopsAt, false)
 	if err != nil {
 		return nil, err
 	}
@@ -630,17 +645,9 @@ func (c *Client) ObtainReservationsForInterfacePairs(
 	// Look up the assets that were just bought, to learn where and when they apply.
 	// If combineAssets == True, we need to find assets that "touch" the time window.
 	// If not, we need to find assets which each one of them covers the time window.
-	var foundAssets []*hummingbird.SearchAsset
-	if combineAssets {
-		foundAssets, err = c.searchAllAssets(ctx, true, nil, nil, nil, bwInKbps, stopsAt, startsAt)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		foundAssets, err = c.searchAllAssets(ctx, true, nil, nil, nil, bwInKbps, startsAt, stopsAt)
-		if err != nil {
-			return nil, err
-		}
+	foundAssets, err := c.searchAllAssets(ctx, true, nil, nil, nil, bwInKbps, startsAt, stopsAt, combineAssets)
+	if err != nil {
+		return nil, err
 	}
 
 	foundAssetsMap := make(map[uint64][]*hummingbird.SearchAsset)

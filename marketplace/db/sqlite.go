@@ -33,7 +33,8 @@ import (
 type Repository interface {
 	InsertAsset(ctx context.Context, a *DBAsset) (int64, error)
 	InsertReservation(ctx context.Context, r *DBReservation) (int64, error)
-	Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, error)
+	SearchOwnedAssets(ctx context.Context, params *OwnedAssetQuery) ([]*DBAsset, error)
+	SearchListedAssets(ctx context.Context, params *ListedAssetQuery) ([]*DBAsset, error)
 	FetchReservations(ctx context.Context, params *ReservationQuery) ([]*DBReservation, error)
 	GetUser(ctx context.Context, id int64) (*DBUser, error)
 	GetUserByName(ctx context.Context, name string) (*DBUser, error)
@@ -152,6 +153,44 @@ const (
 
 type rowScanner interface {
 	Scan(dest ...any) error
+}
+
+func scanAssetWithAvailableBandwidth(row rowScanner) (*DBAsset, error) {
+	asset := &DBAsset{}
+	var startsAt int64
+	var stopsAt int64
+	var isd uint16
+	var as uint64
+	var availableBW uint32
+	if err := row.Scan(
+		&asset.ID,
+		&asset.AccountId,
+		&isd,
+		&as,
+		&asset.Bandwidth,
+		&asset.BandwidthMin,
+		&asset.BandwidthMax,
+		&asset.Price,
+		&asset.TimeGranularity,
+		&asset.TimeMinDuration,
+		&asset.TimeMaxDuration,
+		&startsAt,
+		&stopsAt,
+		&asset.IfIdIngress,
+		&asset.IfIdEgress,
+		&availableBW,
+	); err != nil {
+		return nil, serrors.Wrap("Error reading DB response", err)
+	}
+	var err error
+	asset.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
+	if err != nil {
+		return nil, err
+	}
+	asset.StartAt = time.Unix(startsAt, 0)
+	asset.StopsAt = time.Unix(stopsAt, 0)
+	asset.Bandwidth = availableBW
+	return asset, nil
 }
 
 func scanAsset(row rowScanner) (*DBAsset, error) {
@@ -637,11 +676,19 @@ func (e *executor) RegisterAssetEvent(ctx context.Context, a *DBAsset, eventType
 	return res.LastInsertId()
 }
 
-func (e *executor) Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, error) {
+func (e *executor) SearchOwnedAssets(ctx context.Context, params *OwnedAssetQuery) ([]*DBAsset, error) {
 	if e.read == nil {
 		return nil, serrors.New("No database open")
 	}
-	stmt, args := e.buildSearchQuery(params)
+	var stmt string
+	var args []any
+	if params.ValidityMode == FullOverlap {
+		stmt, args = e.buildSearchOwnedAssetsFullOverlapQuery(params)
+	} else if params.ValidityMode == PartialOverlap {
+		stmt, args = e.buildSearchOwnedAssetsPartialOverlapQuery(params)
+	} else {
+		return nil, serrors.New("invalid validity mode")
+	}
 	rows, err := e.read.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
@@ -658,23 +705,138 @@ func (e *executor) Search(ctx context.Context, params *AssetQuery) ([]*DBAsset, 
 	return res, nil
 }
 
-func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
+func (e *executor) SearchListedAssets(ctx context.Context, params *ListedAssetQuery) ([]*DBAsset, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	var stmt string
+	var args []any
+	if params.ValidityMode == FullOverlap {
+		stmt, args = e.buildSearchListedAssetsFullOverlapQuery(params)
+		fmt.Println(stmt, args)
+	} else if params.ValidityMode == PartialOverlap {
+		stmt, args = e.buildSearchListedAssetsPartialOverlapQuery(params)
+	} else {
+		return nil, serrors.New("invalid validity mode")
+	}
+	rows, err := e.read.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
+	}
+	defer rows.Close()
+	var res []*DBAsset
+	for rows.Next() {
+		a, err := scanAssetWithAvailableBandwidth(rows)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, a)
+	}
+	return res, nil
+}
+
+func (e *executor) buildSearchListedAssetsPartialOverlapQuery(params *ListedAssetQuery) (string, []any) {
+	return "", nil
+}
+
+func (e *executor) buildSearchListedAssetsFullOverlapQuery(params *ListedAssetQuery) (string, []any) {
+	var args []any
+	where := []string{}
+	queryStart := []string{`
+	
+	SELECT ` + assetColumnsWithAlias + `, MIN(g.available) AS max_buyable_bandwidth
+	FROM Assets a
+	JOIN Asset_Segment g
+	ON g.asset_id = a.id AND g.starts_at < ? AND g.stops_at > ?
+	WHERE a.isd_id = ? AND a.as_id = ?
+	AND a.starts_at <= ? AND a.stops_at >= ?
+	AND a.account_id IS NULL
+	AND a.bandwidth >= ?
+	`,
+	}
+	queryEnd := `
+	GROUP BY a.id
+	HAVING MIN(g.available) >= ?
+	ORDER BY a.id
+	`
+	args = append(args, params.StopsAt, params.StartsAt, params.IA.ISD(), params.IA.AS(), params.StartsAt,
+		params.StopsAt, params.MinRequiredBandwidth)
+
+	where = append(where, "(a.state = ?)")
+	args = append(args, AssetStateAvailable)
+	if params.Price != nil {
+		where = append(where, "(a.price<=?)")
+		args = append(args, *params.Price)
+	}
+	if params.Ingress != nil {
+		where = append(where, "(a.ingress=?)")
+		args = append(args, *params.Ingress)
+	}
+	if params.Egress != nil {
+		where = append(where, "(a.egress=?)")
+		args = append(args, *params.Egress)
+	}
+	args = append(args, params.MinRequiredBandwidth)
+	query := append(queryStart, fmt.Sprintf("AND %s", strings.Join(where, "AND\n")), queryEnd)
+	return strings.Join(query, "\n"), args
+}
+
+func (e *executor) buildSearchOwnedAssetsPartialOverlapQuery(params *OwnedAssetQuery) (string, []any) {
 	var args []any
 	where := []string{}
 	query := []string{
 		"SELECT " + assetColumnsWithAlias + " FROM Assets a",
 	}
-	if params.AccountId == nil {
-		where = append(where, "(a.account_id IS NULL)")
-	} else {
-		// The JOIN clause will be the first parametrized entry. Fill up the arguments for it.
-		query = append(query, "JOIN Accounts owner ON a.account_id = owner.id JOIN "+
-			"Accounts current ON current.id = ?")
-		args = append(args, *params.AccountId)
-		// Parenthesized as a whole: AND to all where[i] binds tighter than OR.
-		where = append(where, "( (current.scope = '' AND owner.user_id = current.user_id) OR "+
-			"(current.scope != '' AND owner.id = current.id) )")
+	query = append(query, "JOIN Accounts owner ON a.account_id = owner.id JOIN "+
+		"Accounts current ON current.id = ?")
+	args = append(args, *params.AccountId)
+	where = append(where, "((current.scope = '' AND owner.user_id = current.user_id) OR "+
+		"(current.scope != '' AND owner.id = current.id))")
+	where = append(where, "(a.state = ?)")
+	args = append(args, AssetStateAvailable)
+	if params.IA != nil {
+		where = append(where, "(a.isd_id=?) AND (a.as_id=?)")
+		args = append(args, int64(params.IA.ISD()), int64(params.IA.AS()))
 	}
+	if params.StartsAt != nil {
+		where = append(where, "(a.starts_at>=?)")
+		args = append(args, *params.StartsAt)
+	}
+	if params.StopsAt != nil {
+		where = append(where, "(a.stops_at<=?)")
+		args = append(args, *params.StopsAt)
+	}
+	if params.Price != nil {
+		where = append(where, "(a.price<=?)")
+		args = append(args, *params.Price)
+	}
+	if params.MinRequiredBandwidth != nil {
+		where = append(where, "(a.bandwidth>=?)")
+		args = append(args, *params.MinRequiredBandwidth)
+	}
+	if params.Ingress != nil {
+		where = append(where, "(a.ingress=?)")
+		args = append(args, *params.Ingress)
+	}
+	if params.Egress != nil {
+		where = append(where, "(a.egress=?)")
+		args = append(args, *params.Egress)
+	}
+	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
+	return strings.Join(query, "\n"), args
+}
+
+func (e *executor) buildSearchOwnedAssetsFullOverlapQuery(params *OwnedAssetQuery) (string, []any) {
+	var args []any
+	where := []string{}
+	query := []string{
+		"SELECT " + assetColumnsWithAlias + " FROM Assets a",
+	}
+	query = append(query, "JOIN Accounts owner ON a.account_id = owner.id JOIN "+
+		"Accounts current ON current.id = ?")
+	args = append(args, *params.AccountId)
+	where = append(where, "((current.scope = '' AND owner.user_id = current.user_id) OR "+
+		"(current.scope != '' AND owner.id = current.id))")
 	where = append(where, "(a.state = ?)")
 	args = append(args, AssetStateAvailable)
 	if params.IA != nil {
@@ -706,9 +868,6 @@ func (e *executor) buildSearchQuery(params *AssetQuery) (string, []any) {
 		args = append(args, *params.Egress)
 	}
 	query = append(query, fmt.Sprintf("WHERE %s", strings.Join(where, "AND\n")))
-	query = append(query, "ORDER BY LENGTH(a.id) ASC, a.id ASC")
-	query = append(query, "LIMIT ? OFFSET ?")
-	args = append(args, params.PageSize, params.Page*params.PageSize)
 	return strings.Join(query, "\n"), args
 }
 

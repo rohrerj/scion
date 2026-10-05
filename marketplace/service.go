@@ -686,46 +686,40 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 	var owner_id *int64
 	switch user := ctx.Value("user").(type) {
 	case int64:
-		if req.Msg.Owned {
-			owner_id = &user
-		}
+		owner_id = &user
 	case addr.IA:
 	default:
 		return nil, connect.NewError(connect.CodePermissionDenied, serrors.New("user_id not provided"))
 	}
-	var startsAt *int64
-	var stopsAt *int64
-	if req.Msg.StartsAtLatest != nil {
-		startsAt = &req.Msg.StartsAtLatest.Seconds
+	var assets []*db.DBAsset
+	var err error
+	switch t := req.Msg.Request.(type) {
+	case *hummingbird.SearchAssetsRequest_Listed:
+		assets, err = s.store.SearchListedAssets(ctx, &db.ListedAssetQuery{
+			IA:                   addr.IA(t.Listed.Ia),
+			Ingress:              t.Listed.IfIdIngress,
+			Egress:               t.Listed.IfIdEgress,
+			MinRequiredBandwidth: t.Listed.MinRequiredBw,
+			Price:                t.Listed.Price,
+			StartsAt:             t.Listed.StartsAtLatest,
+			StopsAt:              t.Listed.StopsAtEarliest,
+			ValidityMode:         db.ValidityMode(req.Msg.ValidityMode),
+		})
+	case *hummingbird.SearchAssetsRequest_Owned:
+		assets, err = s.store.SearchOwnedAssets(ctx, &db.OwnedAssetQuery{
+			AccountId:            owner_id,
+			IA:                   (*addr.IA)(t.Owned.Ia),
+			Ingress:              t.Owned.IfIdIngress,
+			Egress:               t.Owned.IfIdEgress,
+			MinRequiredBandwidth: t.Owned.MinRequiredBw,
+			Price:                t.Owned.Price,
+			StartsAt:             t.Owned.StartsAtLatest,
+			StopsAt:              t.Owned.StopsAtEarliest,
+			ValidityMode:         db.ValidityMode(req.Msg.ValidityMode),
+		})
+	default:
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid request"))
 	}
-	if req.Msg.StopsAtEarliest != nil {
-		stopsAt = &req.Msg.StartsAtLatest.Seconds
-	}
-	var ia *addr.IA
-	if req.Msg.Ia != nil {
-		tmp := addr.IA(*req.Msg.Ia)
-		ia = &tmp
-	}
-	pageSize := s.info.MaxReturnedAssets
-	if pageSize == 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("page size cannot be 0"))
-	}
-	if req.Msg.MaxReturnedAssets != nil {
-		pageSize = min(pageSize, *req.Msg.MaxReturnedAssets)
-	}
-
-	assets, err := s.store.Search(ctx, &db.AssetQuery{
-		AccountId:            owner_id,
-		IA:                   ia,
-		Ingress:              req.Msg.IfIdIngress,
-		Egress:               req.Msg.IfIdEgress,
-		MinRequiredBandwidth: req.Msg.MinRequiredBw,
-		Price:                req.Msg.Price,
-		StartsAt:             startsAt,
-		StopsAt:              stopsAt,
-		Page:                 req.Msg.Page,
-		PageSize:             pageSize,
-	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}

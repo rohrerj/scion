@@ -939,7 +939,7 @@ func handleSearch(
 	reader *bufio.Reader,
 	c hummingbirdconnect.MarketplaceServiceClient,
 ) {
-	var owned *bool
+	var owned bool
 	var ia *uint64
 	var ingress *uint32
 	var egress *uint32
@@ -947,6 +947,8 @@ func handleSearch(
 	var price *uint32
 	var startsAtLatest *time.Time
 	var stopsAtEarliest *time.Time
+	var startsAtLatestUnix, stopsAtEarliestUnix *int64
+	var validityPartial bool
 	fmt.Println("Search Query. Owned is mandatory, other filters are ignored if empty.")
 
 	owned = readOptionalBool(reader, "Owned (true,false): ")
@@ -956,63 +958,98 @@ func handleSearch(
 	minReqBw = readOptionalUint32(reader, "Min Required BW: ")
 	price = readOptionalUint32(reader, "Price: ")
 	startsAtLatest = readOptionalTime(reader, "Starts At Latest (2006-01-02T15:04:05Z): ")
-	stopsAtEarliest = readOptionalTime(reader, "Stops At Earliest (2006-01-02T15:04:05Z): ")
-	if owned == nil {
-		tmp := false
-		owned = &tmp
-	}
-	msg := &hummingbird.SearchAssetsRequest{
-		Owned:         *owned,
-		Ia:            ia,
-		IfIdIngress:   ingress,
-		IfIdEgress:    egress,
-		MinRequiredBw: minReqBw,
-		Price:         price,
-	}
 	if startsAtLatest != nil {
-		msg.StartsAtLatest = timestamppb.New(*startsAtLatest)
+		tmp := startsAtLatest.Unix()
+		startsAtLatestUnix = &tmp
 	}
+	stopsAtEarliest = readOptionalTime(reader, "Stops At Earliest (2006-01-02T15:04:05Z): ")
 	if stopsAtEarliest != nil {
-		msg.StopsAtEarliest = timestamppb.New(*stopsAtEarliest)
+		tmp := stopsAtEarliest.Unix()
+		stopsAtEarliestUnix = &tmp
 	}
-	for page := uint32(0); ; page++ {
-		msg.Page = page
-		rep, err := c.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
-			Msg: msg,
+	validityPartial = readOptionalBool(reader, "Partial validity (true,false): ")
+	var msg *hummingbird.SearchAssetsRequest
+	validityMode := hummingbird.ValidityMode_full_overlap
+	if validityPartial {
+		validityMode = hummingbird.ValidityMode_partial_overlap
+	}
+	if owned {
+		msg = &hummingbird.SearchAssetsRequest{
+			Request: &hummingbird.SearchAssetsRequest_Owned{
+				Owned: &hummingbird.SearchOwnedAssetsRequest{
+					Ia:              ia,
+					IfIdIngress:     ingress,
+					IfIdEgress:      egress,
+					MinRequiredBw:   minReqBw,
+					StartsAtLatest:  startsAtLatestUnix,
+					StopsAtEarliest: stopsAtEarliestUnix,
+					Price:           price,
+				},
+			},
+			ValidityMode: validityMode,
+		}
+	} else {
+		if ia == nil {
+			fmt.Println("ISD-AS required")
+			return
+		}
+		if startsAtLatestUnix == nil {
+			fmt.Println("start at required")
+			return
+		}
+		if stopsAtEarliestUnix == nil {
+			fmt.Println("stops at required")
+			return
+		}
+		if minReqBw == nil {
+			fmt.Println("bandwith required")
+		}
+		msg = &hummingbird.SearchAssetsRequest{
+			Request: &hummingbird.SearchAssetsRequest_Listed{
+				Listed: &hummingbird.SearchListedAssetsRequest{
+					Ia:              *ia,
+					IfIdIngress:     ingress,
+					IfIdEgress:      egress,
+					MinRequiredBw:   *minReqBw,
+					StartsAtLatest:  *startsAtLatestUnix,
+					StopsAtEarliest: *stopsAtEarliestUnix,
+					Price:           price,
+				},
+			},
+			ValidityMode: validityMode,
+		}
+	}
+	rep, err := c.SearchAssets(ctx, &connect.Request[hummingbird.SearchAssetsRequest]{
+		Msg: msg,
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	transformed := make([]Asset, 0, len(rep.Msg.Assets))
+	for _, asset := range rep.Msg.Assets {
+		transformed = append(transformed, Asset{
+			ID:              hex.EncodeToString(asset.AssetId),
+			IA:              addr.IA(asset.Ia),
+			Bandwidth:       asset.Bandwidth,
+			BandwidthMin:    asset.BandwidthMin,
+			BandwidthMax:    asset.BandwidthMax,
+			TimeMinDuration: asset.TimeMinDuration,
+			TimeMaxDuration: asset.TimeMaxDuration,
+			StartAt:         asset.StartsAt.AsTime(),
+			StopsAt:         asset.StopsAt.AsTime(),
+			Price:           asset.Price,
+			IfIdIngress:     asset.IfIdIngress,
+			IfIdEgress:      asset.IfIdEgress,
+			TimeGranularity: asset.TimeGranularity,
 		})
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		transformed := make([]Asset, 0, len(rep.Msg.Assets))
-		for _, asset := range rep.Msg.Assets {
-			transformed = append(transformed, Asset{
-				ID:              hex.EncodeToString(asset.AssetId),
-				IA:              addr.IA(asset.Ia),
-				Bandwidth:       asset.Bandwidth,
-				BandwidthMin:    asset.BandwidthMin,
-				BandwidthMax:    asset.BandwidthMax,
-				TimeMinDuration: asset.TimeMinDuration,
-				TimeMaxDuration: asset.TimeMaxDuration,
-				StartAt:         asset.StartsAt.AsTime(),
-				StopsAt:         asset.StopsAt.AsTime(),
-				Price:           asset.Price,
-				IfIdIngress:     asset.IfIdIngress,
-				IfIdEgress:      asset.IfIdEgress,
-				TimeGranularity: asset.TimeGranularity,
-			})
-		}
-		j, err := json.MarshalIndent(transformed, "", "\t")
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		fmt.Println(string(j))
-		prompt := "More assets? [yes, no]: "
-		if !readConfirm(reader, &prompt) {
-			return
-		}
 	}
+	j, err := json.MarshalIndent(transformed, "", "\t")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(j))
 }
 
 func handleInfo(ctx context.Context, c hummingbirdconnect.MarketplaceServiceClient) {
@@ -1140,23 +1177,23 @@ func readOptionalUint32(reader *bufio.Reader, prompt string) *uint32 {
 	return &v
 }
 
-func readOptionalBool(reader *bufio.Reader, prompt string) *bool {
+func readOptionalBool(reader *bufio.Reader, prompt string) bool {
 	fmt.Print(prompt)
 
 	text, _ := reader.ReadString('\n')
 	text = strings.TrimSpace(text)
 
 	if text == "" {
-		return nil
+		return false
 	}
 
 	v, err := strconv.ParseBool(text)
 	if err != nil {
 		fmt.Println("Invalid bool")
-		return nil
+		return false
 	}
 
-	return &v
+	return v
 }
 
 func readTime(reader *bufio.Reader, prompt string) time.Time {

@@ -70,11 +70,18 @@ func NewStorage(
 	}, nil
 }
 
-func (s *MarketplaceStorage) Search(
+func (s *MarketplaceStorage) SearchListedAssets(
 	ctx context.Context,
-	params *marketplacedb.AssetQuery,
+	params *marketplacedb.ListedAssetQuery,
 ) ([]*marketplacedb.DBAsset, error) {
-	return s.db.Search(ctx, params)
+	return s.db.SearchListedAssets(ctx, params)
+}
+
+func (s *MarketplaceStorage) SearchOwnedAssets(
+	ctx context.Context,
+	params *marketplacedb.OwnedAssetQuery,
+) ([]*marketplacedb.DBAsset, error) {
+	return s.db.SearchOwnedAssets(ctx, params)
 }
 
 func (s *MarketplaceStorage) FetchReservations(
