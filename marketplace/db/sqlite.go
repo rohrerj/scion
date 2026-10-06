@@ -155,6 +155,50 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+func scanAssetWithAvailableBandwidthAndUsability(row rowScanner) (*DBAsset, error) {
+	asset := &DBAsset{}
+	var startsAt int64
+	var stopsAt int64
+	var isd uint16
+	var as uint64
+	var usableFrom int64
+	var usableTo int64
+	var availableBW uint32
+	if err := row.Scan(
+		&asset.ID,
+		&asset.AccountId,
+		&isd,
+		&as,
+		&asset.Bandwidth,
+		&asset.BandwidthMin,
+		&asset.BandwidthMax,
+		&asset.Price,
+		&asset.TimeGranularity,
+		&asset.TimeMinDuration,
+		&asset.TimeMaxDuration,
+		&startsAt,
+		&stopsAt,
+		&asset.IfIdIngress,
+		&asset.IfIdEgress,
+		&usableFrom,
+		&usableTo,
+		&availableBW,
+	); err != nil {
+		return nil, serrors.Wrap("Error reading DB response", err)
+	}
+	var err error
+	asset.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
+	if err != nil {
+		return nil, err
+	}
+	asset.StartAt = time.Unix(startsAt, 0)
+	asset.StopsAt = time.Unix(stopsAt, 0)
+	asset.Bandwidth = availableBW
+	asset.StartAt = time.Unix(usableFrom, 0)
+	asset.StopsAt = time.Unix(usableTo, 0)
+	return asset, nil
+}
+
 func scanAssetWithAvailableBandwidth(row rowScanner) (*DBAsset, error) {
 	asset := &DBAsset{}
 	var startsAt int64
@@ -711,32 +755,108 @@ func (e *executor) SearchListedAssets(ctx context.Context, params *ListedAssetQu
 	}
 	var stmt string
 	var args []any
+	var res []*DBAsset
 	if params.ValidityMode == FullOverlap {
 		stmt, args = e.buildSearchListedAssetsFullOverlapQuery(params)
-		fmt.Println(stmt, args)
+		//fmt.Println(stmt, args)
+		rows, err := e.read.QueryContext(ctx, stmt, args...)
+		if err != nil {
+			return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			a, err := scanAssetWithAvailableBandwidth(rows)
+			if err != nil {
+				return nil, err
+			}
+			res = append(res, a)
+		}
 	} else if params.ValidityMode == PartialOverlap {
 		stmt, args = e.buildSearchListedAssetsPartialOverlapQuery(params)
+		//fmt.Println(stmt, args)
+		rows, err := e.read.QueryContext(ctx, stmt, args...)
+		if err != nil {
+			return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			a, err := scanAssetWithAvailableBandwidthAndUsability(rows)
+			if err != nil {
+				return nil, err
+			}
+			res = append(res, a)
+		}
 	} else {
 		return nil, serrors.New("invalid validity mode")
 	}
-	rows, err := e.read.QueryContext(ctx, stmt, args...)
-	if err != nil {
-		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
-	}
-	defer rows.Close()
-	var res []*DBAsset
-	for rows.Next() {
-		a, err := scanAssetWithAvailableBandwidth(rows)
-		if err != nil {
-			return nil, err
-		}
-		res = append(res, a)
-	}
+
 	return res, nil
 }
 
 func (e *executor) buildSearchListedAssetsPartialOverlapQuery(params *ListedAssetQuery) (string, []any) {
-	return "", nil
+	var args []any
+	where := []string{}
+	queryStart := []string{`
+	WITH candidates AS (
+		SELECT ` + assetColumnsWithAlias + `
+		FROM Assets a
+		WHERE a.isd_id = ? AND a.as_id = ?
+		AND a.stops_at > ? AND a.starts_at < ?
+		AND a.account_id IS NULL
+		AND a.bandwidth >= ?
+	`}
+	queryEnd := `
+	),
+	hits AS (
+		SELECT c.id AS asset_id,
+			MAX(g.starts_at, ?) AS f,
+			MIN(g.stops_at,  ?) AS t,
+			g.available
+		FROM candidates c
+		JOIN Asset_Segment g
+		ON g.asset_id = c.id AND g.starts_at < ? AND g.stops_at > ?
+		WHERE g.available >= ?
+	),
+	marked AS (
+		SELECT *,
+			CASE WHEN f = LAG(t) OVER (PARTITION BY asset_id ORDER BY f)
+					THEN 0 ELSE 1 END AS new_island
+		FROM hits
+	),
+	islands AS (
+		SELECT *,
+			SUM(new_island) OVER (PARTITION BY asset_id ORDER BY f) AS island
+		FROM marked
+	)
+	SELECT c.id, c.account_id, c.isd_id, c.as_id, c.bandwidth, c.bandwidth_min, c.bandwidth_max,
+		c.price, c.time_granularity, c.time_min_duration, c.time_max_duration, c.starts_at, c.stops_at, 
+		c.ingress, c.egress,
+		MIN(i.f)         AS usable_from,
+		MAX(i.t)         AS usable_to,
+		MIN(i.available) AS max_buyable_bandwidth
+	FROM islands i
+	JOIN candidates c ON c.id = i.asset_id
+	GROUP BY i.asset_id, i.island
+	ORDER BY c.isd_id, c.as_id, c.ingress, c.egress, c.id, usable_from`
+	args = append(args, params.IA.ISD(), params.IA.AS(), params.StartsAt, params.StopsAt, params.MinRequiredBandwidth)
+	where = append(where, "(a.state = ?)")
+	args = append(args, AssetStateAvailable)
+	if params.Price != nil {
+		where = append(where, "(a.price<=?)")
+		args = append(args, *params.Price)
+	}
+	if params.Ingress != nil {
+		where = append(where, "(a.ingress=?)")
+		args = append(args, *params.Ingress)
+	}
+	if params.Egress != nil {
+		where = append(where, "(a.egress=?)")
+		args = append(args, *params.Egress)
+	}
+	args = append(args, params.StartsAt, params.StopsAt, params.StopsAt, params.StartsAt, params.MinRequiredBandwidth)
+	query := append(queryStart, fmt.Sprintf("AND %s", strings.Join(where, "AND\n")), queryEnd)
+	return strings.Join(query, "\n"), args
 }
 
 func (e *executor) buildSearchListedAssetsFullOverlapQuery(params *ListedAssetQuery) (string, []any) {
