@@ -52,6 +52,18 @@ func testAsset() *DBAsset {
 	}
 }
 
+func insertAsset(ctx context.Context, repo Repository, asset *DBAsset) (int64, error) {
+	assetId, err := repo.InsertAsset(ctx, asset)
+	if err != nil {
+		return 0, err
+	}
+	if !asset.AccountId.Valid {
+		_, err = repo.InsertAssetSegment(ctx, assetId,
+			asset.StartAt.Unix(), asset.StopsAt.Unix(), asset.Bandwidth)
+	}
+	return assetId, err
+}
+
 // TestAssetIDInt64 rejects identifiers that cannot be represented by SQLite.
 func TestAssetIDInt64(t *testing.T) {
 	id, err := AssetID(42).Int64()
@@ -70,18 +82,23 @@ func TestWithTxCommitsAndRollsBack(t *testing.T) {
 
 	// A successful callback commits its insert.
 	err := backend.WithTx(ctx, func(repository Repository) error {
-		_, err := repository.InsertAsset(ctx, testAsset())
+		_, err := insertAsset(ctx, repository, testAsset())
 		return err
 	})
 	require.NoError(t, err)
-	assets, err := backend.Search(ctx, &AssetQuery{PageSize: 64})
+	assets, err := backend.SearchListedAssets(ctx, &ListedAssetQuery{
+		IA:           addr.MustParseIA("1-ff00:0:110"),
+		StartsAt:     0,
+		StopsAt:      math.MaxInt64,
+		ValidityMode: PartialOverlap,
+	})
 	require.NoError(t, err)
 	require.Len(t, assets, 1)
 
 	// Rolls back the insert and preserves the error.
 	rollbackErr := errors.New("rollback")
 	err = backend.WithTx(ctx, func(repository Repository) error {
-		_, err := repository.InsertAsset(ctx, testAsset())
+		_, err := insertAsset(ctx, repository, testAsset())
 		if err != nil {
 			return err
 		}
@@ -90,7 +107,12 @@ func TestWithTxCommitsAndRollsBack(t *testing.T) {
 	require.ErrorIs(t, err, rollbackErr)
 
 	// Only the asset written by the committed transaction is visible.
-	assets, err = backend.Search(ctx, &AssetQuery{PageSize: 64})
+	assets, err = backend.SearchListedAssets(ctx, &ListedAssetQuery{
+		IA:           addr.MustParseIA("1-ff00:0:110"),
+		StartsAt:     0,
+		StopsAt:      math.MaxInt64,
+		ValidityMode: PartialOverlap,
+	})
 	require.NoError(t, err)
 	require.Len(t, assets, 1)
 }
@@ -102,7 +124,7 @@ func TestAssetTransitionAndRowScanners(t *testing.T) {
 	backend := newTestBackend(t)
 
 	asset := testAsset()
-	assetID, err := backend.InsertAsset(ctx, asset)
+	assetID, err := insertAsset(ctx, backend, testAsset())
 	require.NoError(t, err)
 	// Listing an asset without an owner lets the marketplace check it out.
 	transitioned, err := backend.TransitionAsset(ctx, assetID, nil,
@@ -113,7 +135,12 @@ func TestAssetTransitionAndRowScanners(t *testing.T) {
 	require.False(t, transitioned.AccountId.Valid)
 
 	// Checked-out assets are no longer returned by the available-asset search.
-	assets, err := backend.Search(ctx, &AssetQuery{PageSize: 64})
+	assets, err := backend.SearchListedAssets(ctx, &ListedAssetQuery{
+		IA:           addr.MustParseIA("1-ff00:0:110"),
+		StartsAt:     0,
+		StopsAt:      math.MaxInt64,
+		ValidityMode: PartialOverlap,
+	})
 	require.NoError(t, err)
 	require.Empty(t, assets)
 
@@ -193,11 +220,11 @@ func TestSearchOwnedAssets(t *testing.T) {
 
 	owned := testAsset()
 	owned.AccountId = sql.NullInt64{Int64: alicesAccountID, Valid: true}
-	ownedID, err := backend.InsertAsset(ctx, owned)
+	ownedID, err := insertAsset(ctx, backend, owned)
 	require.NoError(t, err)
 
 	// An asset nobody owns, and one owned by somebody else.
-	notOwnedAssetID, err := backend.InsertAsset(ctx, testAsset())
+	notOwnedAssetID, err := insertAsset(ctx, backend, testAsset())
 	require.NoError(t, err)
 	bobUserID, err := backend.CreateUser(ctx, &DBUser{Name: "bob", PasswordHash: "hash"})
 	require.NoError(t, err)
@@ -205,10 +232,12 @@ func TestSearchOwnedAssets(t *testing.T) {
 	require.NoError(t, err)
 	otherAsset := testAsset()
 	otherAsset.AccountId = sql.NullInt64{Int64: bobsAccountID, Valid: true}
-	_, err = backend.InsertAsset(ctx, otherAsset)
+	_, err = insertAsset(ctx, backend, otherAsset)
 	require.NoError(t, err)
 
-	assets, err := backend.Search(ctx, &AssetQuery{AccountId: &alicesAccountID, PageSize: 64})
+	assets, err := backend.SearchOwnedAssets(ctx, &OwnedAssetQuery{
+		AccountId: &alicesAccountID,
+	})
 	require.NoError(t, err)
 	require.Len(t, assets, 1)
 	require.Equal(t, ownedID, assets[0].ID)
@@ -216,27 +245,30 @@ func TestSearchOwnedAssets(t *testing.T) {
 	// The validity filters still apply to the assets of the account.
 	startsAt := owned.StartAt.Unix()
 	stopsAt := owned.StopsAt.Unix()
-	assets, err = backend.Search(ctx, &AssetQuery{
+	assets, err = backend.SearchOwnedAssets(ctx, &OwnedAssetQuery{
 		AccountId: &alicesAccountID,
 		StartsAt:  &startsAt,
 		StopsAt:   &stopsAt,
-		PageSize:  64,
 	})
 	require.NoError(t, err)
 	require.Len(t, assets, 1)
 
 	tooLate := owned.StopsAt.Add(time.Hour).Unix()
-	assets, err = backend.Search(ctx, &AssetQuery{
+	assets, err = backend.SearchOwnedAssets(ctx, &OwnedAssetQuery{
 		AccountId: &alicesAccountID,
 		StartsAt:  &startsAt,
 		StopsAt:   &tooLate,
-		PageSize:  64,
 	})
 	require.NoError(t, err)
 	require.Empty(t, assets, "an asset that stops too early must not be returned")
 
 	// Without an account, only the assets nobody owns are listed.
-	assets, err = backend.Search(ctx, &AssetQuery{PageSize: 64})
+	assets, err = backend.SearchListedAssets(ctx, &ListedAssetQuery{
+		IA:           addr.MustParseIA("1-ff00:0:110"),
+		StartsAt:     0,
+		StopsAt:      math.MaxInt64,
+		ValidityMode: PartialOverlap,
+	})
 	require.NoError(t, err)
 	require.Len(t, assets, 1)
 	require.Equal(t, notOwnedAssetID, assets[0].ID)
