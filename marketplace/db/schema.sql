@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS Reservations(
     egress INTEGER NOT NULL,
     bandwidth INTEGER NOT NULL,
     bw_encoded INTEGER NOT NULL,
-    starts_at TEXT NOT NULL,
-    stops_at TEXT NOT NULL,
+    starts_at INTEGER NOT NULL,
+    stops_at INTEGER NOT NULL,
     key BLOB NOT NULL,
     FOREIGN KEY (account_id) REFERENCES Accounts(id)
 );
@@ -79,8 +79,8 @@ CREATE TABLE IF NOT EXISTS Redemption_Delegations(
     as_id INTEGER NOT NULL,
     res_id_limit_low INTEGER NOT NULL DEFAULT 0,
     res_id_limit_high INTEGER NOT NULL,
-    expiration TEXT NOT NULL CHECK (expiration <= paid_until),
-    paid_until TEXT NOT NULL,
+    expiration INTEGER NOT NULL CHECK (expiration <= paid_until),
+    paid_until INTEGER NOT NULL,
     key BLOB NOT NULL,
     encodings BLOB NOT NULL,
     PRIMARY KEY(isd_id, as_id)
@@ -92,10 +92,10 @@ CREATE TABLE IF NOT EXISTS Asset_Events(
     ingress INTEGER,
     egress INTEGER,
     bandwidth INTEGER NOT NULL,
-    starts_at TEXT NOT NULL,
-    stops_at TEXT NOT NULL,
+    starts_at INTEGER NOT NULL,
+    stops_at INTEGER NOT NULL,
     price INTEGER NOT NULL,
     event_type INTEGER NOT NULL,
-    event_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    event_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS idx_asset_events ON Asset_Events(event_type, isd_id, as_id, stops_at, starts_at);

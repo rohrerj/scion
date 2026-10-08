@@ -157,8 +157,6 @@ type rowScanner interface {
 
 func scanAssetWithAvailableBandwidthAndUsability(row rowScanner) (*DBAsset, error) {
 	asset := &DBAsset{}
-	var startsAt int64
-	var stopsAt int64
 	var isd uint16
 	var as uint64
 	var usableFrom int64
@@ -176,8 +174,8 @@ func scanAssetWithAvailableBandwidthAndUsability(row rowScanner) (*DBAsset, erro
 		&asset.TimeGranularity,
 		&asset.TimeMinDuration,
 		&asset.TimeMaxDuration,
-		&startsAt,
-		&stopsAt,
+		&asset.StartAt,
+		&asset.StopsAt,
 		&asset.IfIdIngress,
 		&asset.IfIdEgress,
 		&usableFrom,
@@ -191,18 +189,14 @@ func scanAssetWithAvailableBandwidthAndUsability(row rowScanner) (*DBAsset, erro
 	if err != nil {
 		return nil, err
 	}
-	asset.StartAt = time.Unix(startsAt, 0)
-	asset.StopsAt = time.Unix(stopsAt, 0)
 	asset.Bandwidth = availableBW
-	asset.StartAt = time.Unix(usableFrom, 0)
-	asset.StopsAt = time.Unix(usableTo, 0)
+	asset.StartAt = usableFrom
+	asset.StopsAt = usableTo
 	return asset, nil
 }
 
 func scanAssetWithAvailableBandwidth(row rowScanner) (*DBAsset, error) {
 	asset := &DBAsset{}
-	var startsAt int64
-	var stopsAt int64
 	var isd uint16
 	var as uint64
 	var availableBW uint32
@@ -218,8 +212,8 @@ func scanAssetWithAvailableBandwidth(row rowScanner) (*DBAsset, error) {
 		&asset.TimeGranularity,
 		&asset.TimeMinDuration,
 		&asset.TimeMaxDuration,
-		&startsAt,
-		&stopsAt,
+		&asset.StartAt,
+		&asset.StopsAt,
 		&asset.IfIdIngress,
 		&asset.IfIdEgress,
 		&availableBW,
@@ -231,16 +225,12 @@ func scanAssetWithAvailableBandwidth(row rowScanner) (*DBAsset, error) {
 	if err != nil {
 		return nil, err
 	}
-	asset.StartAt = time.Unix(startsAt, 0)
-	asset.StopsAt = time.Unix(stopsAt, 0)
 	asset.Bandwidth = availableBW
 	return asset, nil
 }
 
 func scanAsset(row rowScanner) (*DBAsset, error) {
 	asset := &DBAsset{}
-	var startsAt int64
-	var stopsAt int64
 	var isd uint16
 	var as uint64
 	if err := row.Scan(
@@ -255,8 +245,8 @@ func scanAsset(row rowScanner) (*DBAsset, error) {
 		&asset.TimeGranularity,
 		&asset.TimeMinDuration,
 		&asset.TimeMaxDuration,
-		&startsAt,
-		&stopsAt,
+		&asset.StartAt,
+		&asset.StopsAt,
 		&asset.IfIdIngress,
 		&asset.IfIdEgress,
 	); err != nil {
@@ -267,15 +257,11 @@ func scanAsset(row rowScanner) (*DBAsset, error) {
 	if err != nil {
 		return nil, err
 	}
-	asset.StartAt = time.Unix(startsAt, 0)
-	asset.StopsAt = time.Unix(stopsAt, 0)
 	return asset, nil
 }
 
 func scanReservation(row rowScanner) (*DBReservation, error) {
 	reservation := &DBReservation{}
-	var startsAt string
-	var stopsAt string
 	var isd uint16
 	var as uint64
 	if err := row.Scan(
@@ -288,22 +274,14 @@ func scanReservation(row rowScanner) (*DBReservation, error) {
 		&reservation.Egress,
 		&reservation.Bandwidth,
 		&reservation.EncodedBandwidth,
-		&startsAt,
-		&stopsAt,
+		&reservation.StartsAt,
+		&reservation.StopsAt,
 		&reservation.Key,
 	); err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
 	}
 	var err error
 	reservation.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
-	if err != nil {
-		return nil, err
-	}
-	reservation.StartsAt, err = time.Parse(time.RFC3339, startsAt)
-	if err != nil {
-		return nil, err
-	}
-	reservation.StopsAt, err = time.Parse(time.RFC3339, stopsAt)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +360,7 @@ func (e *executor) FindRedemptionDelegations(
 	}
 	stmt := `SELECT isd_id, as_id, res_id_limit_low, res_id_limit_high, expiration, paid_until, key, encodings
 			 FROM Redemption_Delegations WHERE expiration >= ?`
-	args := []any{time.Now().UTC().Format(time.RFC3339)}
+	args := []any{time.Now().Unix()}
 	rows, err := e.read.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
@@ -391,8 +369,6 @@ func (e *executor) FindRedemptionDelegations(
 	var res []*RedemptionDelegation
 	for rows.Next() {
 		a := &RedemptionDelegation{}
-		var expirationString string
-		var paidUntilString string
 		var isd uint16
 		var as uint64
 		err = rows.Scan(
@@ -400,20 +376,12 @@ func (e *executor) FindRedemptionDelegations(
 			&as,
 			&a.ResIdLow,
 			&a.ResIdHigh,
-			&expirationString,
-			&paidUntilString,
+			&a.Expiration,
+			&a.PaidUntil,
 			&a.Key,
 			&a.Encodings)
 		if err != nil {
 			return nil, serrors.Wrap("Error reading DB response", err)
-		}
-		a.Expiration, err = time.Parse(time.RFC3339, expirationString)
-		if err != nil {
-			return nil, err
-		}
-		a.PaidUntil, err = time.Parse(time.RFC3339, paidUntilString)
-		if err != nil {
-			return nil, err
 		}
 		a.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
 		res = append(res, a)
@@ -431,7 +399,7 @@ func (e *executor) FindRedemptionDelegation(
 	stmt := `SELECT isd_id, as_id, res_id_limit_low, res_id_limit_high, expiration, paid_until, key, encodings
 			 FROM Redemption_Delegations
 			 WHERE expiration >= ? AND isd_id = ? AND as_id = ?`
-	rows, err := e.read.QueryContext(ctx, stmt, time.Now().Format(time.RFC3339), ia.ISD(), ia.AS())
+	rows, err := e.read.QueryContext(ctx, stmt, time.Now().Unix(), ia.ISD(), ia.AS())
 	if err != nil {
 		return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
 	}
@@ -440,8 +408,6 @@ func (e *executor) FindRedemptionDelegation(
 		return nil, nil
 	}
 	a := &RedemptionDelegation{}
-	var expirationString string
-	var paidUntilString string
 	var isd uint16
 	var as uint64
 	err = rows.Scan(
@@ -449,20 +415,12 @@ func (e *executor) FindRedemptionDelegation(
 		&as,
 		&a.ResIdLow,
 		&a.ResIdHigh,
-		&expirationString,
-		&paidUntilString,
+		&a.Expiration,
+		&a.PaidUntil,
 		&a.Key,
 		&a.Encodings)
 	if err != nil {
 		return nil, serrors.Wrap("Error reading DB response", err)
-	}
-	a.Expiration, err = time.Parse(time.RFC3339, expirationString)
-	if err != nil {
-		return nil, err
-	}
-	a.PaidUntil, err = time.Parse(time.RFC3339, paidUntilString)
-	if err != nil {
-		return nil, err
 	}
 	a.IA, err = addr.IAFrom(addr.ISD(isd), addr.AS(as))
 	return a, nil
@@ -569,8 +527,8 @@ func (e *executor) CreateOrUpdateRedemptionDelegations(
 		r.IA.AS(),
 		r.ResIdLow,
 		r.ResIdHigh,
-		r.Expiration.UTC().Format(time.RFC3339),
-		r.PaidUntil.UTC().Format(time.RFC3339),
+		r.Expiration,
+		r.PaidUntil,
 		r.Key,
 		r.Encodings)
 	if err != nil {
@@ -595,19 +553,9 @@ func (e *executor) FindUsedReservations(
 	var res []*UsedReservation
 	for rows.Next() {
 		a := &UsedReservation{}
-		var startsAtString string
-		var stopsAtString string
-		err = rows.Scan(&a.Id, &startsAtString, &stopsAtString)
+		err = rows.Scan(&a.Id, &a.StartsAt, &a.StopsAt)
 		if err != nil {
 			return nil, serrors.Wrap("Error reading DB response", err)
-		}
-		a.StartsAt, err = time.Parse(time.RFC3339, startsAtString)
-		if err != nil {
-			return nil, err
-		}
-		a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
-		if err != nil {
-			return nil, err
 		}
 		res = append(res, a)
 	}
@@ -623,7 +571,7 @@ func (e *executor) buildUsedReservationsQuery(params *UsedReservationsQuery) (st
 		params.IA.AS(),
 		params.Limit_low,
 		params.Limit_high,
-		time.Now().UTC().Format(time.RFC3339),
+		time.Now().Unix(),
 	}
 	return query, args
 }
@@ -641,19 +589,9 @@ func (e *executor) SearchAssetsForStatistics(ctx context.Context, params *Statis
 	var publishedAssets []*DBStat
 	for publishRows.Next() {
 		a := &DBStat{}
-		var startsAtString string
-		var stopsAtString string
-		err = publishRows.Scan(&a.Bandwidth, &a.Price, &startsAtString, &stopsAtString)
+		err = publishRows.Scan(&a.Bandwidth, &a.Price, &a.StartsAt, &a.StopsAt)
 		if err != nil {
 			return nil, nil, serrors.Wrap("Error reading DB response", err)
-		}
-		a.StartsAt, err = time.Parse(time.RFC3339, startsAtString)
-		if err != nil {
-			return nil, nil, err
-		}
-		a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
-		if err != nil {
-			return nil, nil, err
 		}
 		publishedAssets = append(publishedAssets, a)
 	}
@@ -666,19 +604,9 @@ func (e *executor) SearchAssetsForStatistics(ctx context.Context, params *Statis
 	var boughtAssets []*DBStat
 	for boughtRows.Next() {
 		a := &DBStat{}
-		var startsAtString string
-		var stopsAtString string
-		err = boughtRows.Scan(&a.Bandwidth, &a.Price, &startsAtString, &stopsAtString)
+		err = boughtRows.Scan(&a.Bandwidth, &a.Price, &a.StartsAt, &a.StopsAt)
 		if err != nil {
 			return nil, nil, serrors.Wrap("Error reading DB response", err)
-		}
-		a.StartsAt, err = time.Parse(time.RFC3339, startsAtString)
-		if err != nil {
-			return nil, nil, err
-		}
-		a.StopsAt, err = time.Parse(time.RFC3339, stopsAtString)
-		if err != nil {
-			return nil, nil, err
 		}
 		boughtAssets = append(boughtAssets, a)
 	}
@@ -713,7 +641,7 @@ func (e *executor) RegisterAssetEvent(ctx context.Context, a *DBAsset, eventType
 	inst := `INSERT INTO Asset_Events (event_type, isd_id, as_id, ingress, egress, bandwidth, starts_at, stops_at, price)
 	VALUES(?,?,?,?,?,?,?,?,?)`
 	res, err := e.write.ExecContext(ctx, inst, eventType, a.IA.ISD(), a.IA.AS(), a.IfIdIngress, a.IfIdEgress, a.Bandwidth,
-		a.StartAt.UTC().Format(time.RFC3339), a.StopsAt.UTC().Format(time.RFC3339), a.Price)
+		a.StartAt, a.StopsAt, a.Price)
 	if err != nil {
 		return 0, err
 	}
@@ -758,7 +686,6 @@ func (e *executor) SearchListedAssets(ctx context.Context, params *ListedAssetQu
 	var res []*DBAsset
 	if params.ValidityMode == FullOverlap {
 		stmt, args = e.buildSearchListedAssetsFullOverlapQuery(params)
-		//fmt.Println(stmt, args)
 		rows, err := e.read.QueryContext(ctx, stmt, args...)
 		if err != nil {
 			return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
@@ -774,7 +701,6 @@ func (e *executor) SearchListedAssets(ctx context.Context, params *ListedAssetQu
 		}
 	} else if params.ValidityMode == PartialOverlap {
 		stmt, args = e.buildSearchListedAssetsPartialOverlapQuery(params)
-		//fmt.Println(stmt, args)
 		rows, err := e.read.QueryContext(ctx, stmt, args...)
 		if err != nil {
 			return nil, serrors.New("Error looking up assets", "err", err, "q", stmt)
@@ -1041,8 +967,8 @@ func (e *executor) InsertReservation(ctx context.Context, r *DBReservation) (int
 		r.Egress,
 		r.Bandwidth,
 		r.EncodedBandwidth,
-		r.StartsAt.UTC().Format(time.RFC3339),
-		r.StopsAt.UTC().Format(time.RFC3339),
+		r.StartsAt,
+		r.StopsAt,
 		r.Key,
 		r.AccountId)
 	if err != nil {
@@ -1072,8 +998,8 @@ func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
 			a.TimeGranularity,
 			a.TimeMinDuration,
 			a.TimeMaxDuration,
-			a.StartAt.Unix(),
-			a.StopsAt.Unix(),
+			a.StartAt,
+			a.StopsAt,
 			a.IfIdIngress,
 			a.IfIdEgress,
 			a.AccountId)
@@ -1090,8 +1016,8 @@ func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
 			a.TimeGranularity,
 			a.TimeMinDuration,
 			a.TimeMaxDuration,
-			a.StartAt.Unix(),
-			a.StopsAt.Unix(),
+			a.StartAt,
+			a.StopsAt,
 			a.IfIdIngress,
 			a.IfIdEgress)
 	}
@@ -1501,8 +1427,6 @@ func (e *executor) BuyAsset(
 		AND g.starts_at < ? AND g.stops_at > ?
 		AND g.available < ?);
 	`
-	fmt.Println(inst)
-	fmt.Println(assetId, AssetStateAvailable, startsAt, stopsAt, stopsAt, startsAt, bw)
 	rows, err := e.write.QueryContext(ctx, inst, assetId, AssetStateAvailable, startsAt, stopsAt, stopsAt, startsAt, bw)
 	if err != nil {
 		return nil, err
@@ -1538,8 +1462,8 @@ func (e *executor) BuyAsset(
 		},
 		IA:              asset.IA,
 		Bandwidth:       bw,
-		StartAt:         time.Unix(startsAt, 0),
-		StopsAt:         time.Unix(stopsAt, 0),
+		StartAt:         startsAt,
+		StopsAt:         stopsAt,
 		BandwidthMin:    asset.BandwidthMin,
 		BandwidthMax:    asset.BandwidthMax,
 		Price:           asset.Price,
@@ -1554,15 +1478,6 @@ func (e *executor) BuyAsset(
 		return nil, err
 	}
 	userAsset.ID = newId
-	// TODO: we still need a new asset ID for the now user-owned asset. Maybe include it here?
-	/*recordPurchaseInst := `
-	INSERT INTO purchase (order_id, asset_id, bandwidth, starts_at, stops_at)
-	VALUES (?, ?, ?, ?, ?)
-	`
-	_, err = e.write.ExecContext(ctx, recordPurchaseInst, orderId, assetId, bw, startsAt, stopsAt)
-	if err != nil {
-		return 0, err
-	}*/
 	err = mergeAt(startsAt)
 	if err != nil {
 		return nil, err

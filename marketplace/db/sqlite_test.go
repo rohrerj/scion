@@ -47,8 +47,8 @@ func testAsset() *DBAsset {
 		Price:           5,
 		TimeGranularity: 60,
 		TimeMinDuration: 60,
-		StartAt:         start,
-		StopsAt:         start.Add(time.Hour),
+		StartAt:         start.Unix(),
+		StopsAt:         start.Add(time.Hour).Unix(),
 	}
 }
 
@@ -59,7 +59,7 @@ func insertAsset(ctx context.Context, repo Repository, asset *DBAsset) (int64, e
 	}
 	if !asset.AccountId.Valid {
 		_, err = repo.InsertAssetSegment(ctx, assetId,
-			asset.StartAt.Unix(), asset.StopsAt.Unix(), asset.Bandwidth)
+			asset.StartAt, asset.StopsAt, asset.Bandwidth)
 	}
 	return assetId, err
 }
@@ -243,8 +243,8 @@ func TestSearchOwnedAssets(t *testing.T) {
 	require.Equal(t, ownedID, assets[0].ID)
 
 	// The validity filters still apply to the assets of the account.
-	startsAt := owned.StartAt.Unix()
-	stopsAt := owned.StopsAt.Unix()
+	startsAt := owned.StartAt
+	stopsAt := owned.StopsAt
 	assets, err = backend.SearchOwnedAssets(ctx, &OwnedAssetQuery{
 		AccountId: &alicesAccountID,
 		StartsAt:  &startsAt,
@@ -253,7 +253,7 @@ func TestSearchOwnedAssets(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, assets, 1)
 
-	tooLate := owned.StopsAt.Add(time.Hour).Unix()
+	tooLate := owned.StopsAt + 60*60
 	assets, err = backend.SearchOwnedAssets(ctx, &OwnedAssetQuery{
 		AccountId: &alicesAccountID,
 		StartsAt:  &startsAt,
@@ -279,11 +279,12 @@ func TestCreateOrUpdateRedemptionDelegations(t *testing.T) {
 	ctx := context.Background()
 	backend := newTestBackend(t)
 	ia := addr.MustParseIA("1-ff00:0:110")
+	currentYear := time.Now().Year()
 	// first try creating a redemption delegation
 	delegationToInsert := &RedemptionDelegation{
 		IA:         ia,
-		Expiration: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
-		PaidUntil:  time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		Expiration: time.Date(currentYear+1, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		PaidUntil:  time.Date(currentYear+1, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
 		ResIdLow:   0,
 		ResIdHigh:  1024,
 		Key:        []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
@@ -303,8 +304,8 @@ func TestCreateOrUpdateRedemptionDelegations(t *testing.T) {
 	// now try to update a redemption delegation
 	delegationToUpdate := &RedemptionDelegation{
 		IA:         ia,
-		Expiration: time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC),
-		PaidUntil:  time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC),
+		Expiration: time.Date(currentYear+2, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		PaidUntil:  time.Date(currentYear+2, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
 		ResIdLow:   1024,
 		ResIdHigh:  2048,
 		Key:        []byte{16, 15, 14, 16, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1},
@@ -328,8 +329,8 @@ func TestRegisterAssetEvent(t *testing.T) {
 		Bandwidth:       1000,
 		BandwidthMin:    10,
 		BandwidthMax:    1000,
-		StartAt:         time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
-		StopsAt:         time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC),
+		StartAt:         time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		StopsAt:         time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
 		TimeGranularity: 10,
 		TimeMinDuration: 10,
 		TimeMaxDuration: 3600,
@@ -347,8 +348,8 @@ func TestRegisterAssetEvent(t *testing.T) {
 		Bandwidth:       1000,
 		BandwidthMin:    10,
 		BandwidthMax:    1000,
-		StartAt:         time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
-		StopsAt:         time.Date(2027, 1, 2, 0, 0, 0, 0, time.UTC),
+		StartAt:         time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		StopsAt:         time.Date(2027, 1, 2, 0, 0, 0, 0, time.UTC).Unix(),
 		TimeGranularity: 10,
 		TimeMinDuration: 10,
 		TimeMaxDuration: 3600,
@@ -362,8 +363,8 @@ func TestRegisterAssetEvent(t *testing.T) {
 	// now verify whether both registered events return the correct values.
 	publishStats, buyStats, err := backend.SearchAssetsForStatistics(ctx, &StatisticsQuery{
 		IA:          ia,
-		WindowStart: "2027-01-01T00:00:00Z",
-		WindowEnd:   "2028-01-01T00:00:00Z",
+		WindowStart: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		WindowEnd:   time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
 	})
 	require.NoError(t, err)
 	require.Len(t, publishStats, 1)

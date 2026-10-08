@@ -660,8 +660,8 @@ def insertAssets(db, assets):
             a.get("ingress"),
             a.get("egress"),
             a.get("bandwidth"),
-            a.get("starts_at"),
-            a.get("stops_at"),
+            rfc3339_to_unix(a.get("starts_at")),
+            rfc3339_to_unix(a.get("stops_at")),
             a.get("price"),
         ))
 
@@ -673,8 +673,8 @@ def insertAssets(db, assets):
                 a.get("ingress"),
                 a.get("egress"),
                 a.get("bandwidth"),
-                a.get("starts_at"),
-                a.get("stops_at"),
+                rfc3339_to_unix(a.get("starts_at")),
+                rfc3339_to_unix(a.get("stops_at")),
                 a.get("price"),
             ))
 
@@ -708,7 +708,7 @@ def insertReservations(db, reservations):
         isd_id, as_id = iaNumbers(r.get("ia"))
         rows.append((
             r.get("id"), isd_id, as_id, r.get("ingress"), r.get("egress"), r.get("bandwidth"),
-            r.get("bw_encoded"), r.get("starts_at"), r.get("stops_at"),
+            r.get("bw_encoded"), rfc3339_to_unix(r.get("starts_at")), rfc3339_to_unix(r.get("stops_at")),
             bytes.fromhex(r.get("key")), r.get("owner"),
         ))
     db.executemany(
@@ -738,7 +738,8 @@ def insertDelegations(db, delegations):
         )
         rows.append((
             isd_id, as_id, d.get("res_id_limit_low"), d.get("res_id_limit_high"),
-            d.get("expiration"), d.get("paid_until"), bytes.fromhex(d.get("key")), encodings,
+            rfc3339_to_unix(d.get("expiration")), rfc3339_to_unix(d.get("paid_until")),
+            bytes.fromhex(d.get("key")), encodings,
         ))
     db.executemany(
         """

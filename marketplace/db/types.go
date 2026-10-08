@@ -18,7 +18,6 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"math"
-	"time"
 
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/private/serrors"
@@ -113,18 +112,18 @@ type UsedReservation struct {
 	// The reservation ID
 	Id uint32
 	// inclusive start time of the reservation
-	StartsAt time.Time
+	StartsAt int64
 	// exclusive end time of the reservation
-	StopsAt time.Time
+	StopsAt int64
 }
 
 type RedemptionDelegation struct {
 	// ISD-AS
 	IA addr.IA
 	// expiration time of redemption delegation
-	Expiration time.Time
+	Expiration int64
 	// until when redemption delegation is paid
-	PaidUntil time.Time
+	PaidUntil int64
 	// the inclusive lower bound reservation ID used for redemption
 	ResIdLow uint32
 	// the exclusive upper bound reservation ID used for redemption
@@ -144,20 +143,20 @@ type ReservationQuery struct {
 	Ingress *uint32
 	// ingress ID of the reservation
 	Egress *uint32
-	// reservation starts at latest in RFC3339 format
-	StartsAt *string
-	// reservation stops at earliest in RFC3339 format
-	StopsAt *string
+	// reservation starts at latest in unix seconds
+	StartsAt *int64
+	// reservation stops at earliest in unix seconds
+	StopsAt *int64
 	// minimum bandwith the reservation holds
 	Bandwidth *uint32
 }
 type StatisticsQuery struct {
 	// ISD-AS for which statistics should be queried
 	IA addr.IA
-	// time window start in RFC3339 format
-	WindowStart string
-	// time window end in RFC3339 format
-	WindowEnd string
+	// time window start in unix seconds
+	WindowStart int64
+	// time window end in unix seconds
+	WindowEnd int64
 	// ingress ID of the assets
 	Ingress *uint32
 	// egress ID of the assets
@@ -169,9 +168,9 @@ type DBStat struct {
 	// the bandwidth of the asset
 	Bandwidth int64
 	// the inclusive start time of the asset
-	StartsAt time.Time
+	StartsAt int64
 	// the exclusive end time of the asset
-	StopsAt time.Time
+	StopsAt int64
 }
 
 type DBReservation struct {
@@ -190,9 +189,9 @@ type DBReservation struct {
 	// the dataplane encoded bandwidth of the reservation
 	EncodedBandwidth uint16
 	// inclusive start time of the reservation
-	StartsAt time.Time
+	StartsAt int64
 	// exclusive end time of the reservation
-	StopsAt time.Time
+	StopsAt int64
 	// the account ID of the owner
 	AccountId int64
 	// the cryptographic key
@@ -213,9 +212,9 @@ type DBAsset struct {
 	// the maximum bandwidth allowed at redemption
 	BandwidthMax uint32
 	// inclusive start time of the asset
-	StartAt time.Time
+	StartAt int64
 	// exclusive end time of the asset
-	StopsAt time.Time
+	StopsAt int64
 	// price per kbps per second of the asset
 	Price uint32
 	// asset duration must be divisible by time granularity at redemption

@@ -40,7 +40,6 @@ import (
 	"github.com/scionproto/scion/pkg/private/serrors"
 	"github.com/scionproto/scion/pkg/proto/hummingbird"
 	"github.com/scionproto/scion/pkg/proto/hummingbird/v1/hummingbirdconnect"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type jwtType int
@@ -387,7 +386,7 @@ func handleDelegate(
 
 	resp, err := c.DelegateRedemption(ctx, &connect.Request[hummingbird.DelegateRedemptionRequest]{
 		Msg: &hummingbird.DelegateRedemptionRequest{
-			ExpirationTime:          timestamppb.New(expTime),
+			ExpirationTime:          expTime.Unix(),
 			ReservationIdLowerBound: idLowerBound,
 			ReservationIdUpperBound: idUpperBound,
 			Key:                     key,
@@ -398,7 +397,7 @@ func handleDelegate(
 		fmt.Println(err)
 		return
 	}
-	fmt.Println("Delegated until:", resp.Msg.ExpirationTime.AsTime())
+	fmt.Println("Delegated until:", time.Unix(resp.Msg.ExpirationTime, 0))
 }
 func handlePublish(
 	ctx context.Context,
@@ -412,8 +411,8 @@ func handlePublish(
 		Bandwidth:       uint32(readUint64(reader, "bandwidth: ")),
 		BandwidthMin:    uint32(readUint64(reader, "minimum bandwidth: ")),
 		BandwidthMax:    uint32(readUint64(reader, "maximum bandwidth: ")),
-		StartsAt:        timestamppb.New(readTime(reader, "Starts at (2026-06-23T13:25:36Z): ")),
-		StopsAt:         timestamppb.New(readTime(reader, "Stops at (2026-06-23T13:25:36Z): ")),
+		StartsAt:        readTime(reader, "Starts at (2026-06-23T13:25:36Z): ").Unix(),
+		StopsAt:         readTime(reader, "Stops at (2026-06-23T13:25:36Z): ").Unix(),
 		Price:           uint32(readUint64(reader, "price per kbit per second: ")),
 		TimeMinDuration: uint32(readUint64(reader, "minimum time duration: ")),
 		TimeMaxDuration: uint32(readUint64(reader, "maximum time duration: ")),
@@ -494,10 +493,8 @@ func handleUpdate(
 							Bandwidth:    uint32(readUint64(reader, "bandwidth: ")),
 							BandwidthMin: uint32(readUint64(reader, "minimum bandwidth: ")),
 							BandwidthMax: uint32(readUint64(reader, "maximum bandwidth: ")),
-							StartsAt: timestamppb.New(
-								readTime(reader, "Starts at (2026-06-23T13:25:36Z): ")),
-							StopsAt: timestamppb.New(
-								readTime(reader, "Stops at (2026-06-23T13:25:36Z): ")),
+							StartsAt:     readTime(reader, "Starts at (2026-06-23T13:25:36Z): ").Unix(),
+							StopsAt:      readTime(reader, "Stops at (2026-06-23T13:25:36Z): ").Unix(),
 							Price: uint32(readUint64(
 								reader, "price per kbit per second: ")),
 							TimeMinDuration: uint32(readUint64(reader, "minimum time duration: ")),
@@ -586,8 +583,8 @@ func handleStatistics(
 	}
 	resp, err := c.Statistics(ctx, &connect.Request[hummingbird.StatisticsRequest]{
 		Msg: &hummingbird.StatisticsRequest{
-			Start:       timestamppb.New(startsAt),
-			End:         timestamppb.New(stopsAt),
+			Start:       startsAt.Unix(),
+			End:         stopsAt.Unix(),
 			Step:        uint32(stepSize),
 			IfIdIngress: ingress,
 			IfIdEgress:  egress,
@@ -647,14 +644,14 @@ func handleSplit(
 	case "time":
 		timeSplits := readString(reader, "time split (2026-06-23T13:25:36Z): ")
 		allSplits := strings.Split(timeSplits, ",")
-		timestampSplits := make([]*timestamppb.Timestamp, 0, len(allSplits))
+		timestampSplits := make([]int64, 0, len(allSplits))
 		for _, split := range allSplits {
 			timeSplit, err := time.Parse(time.RFC3339, split)
 			if err != nil {
 				fmt.Println(err)
 				return
 			}
-			timestampSplits = append(timestampSplits, timestamppb.New(timeSplit))
+			timestampSplits = append(timestampSplits, timeSplit.Unix())
 		}
 		req.SplitOption = &hummingbird.SplitAssetRequest_TimeSplit{
 			TimeSplit: &hummingbird.SplitTimeOption{
@@ -738,10 +735,12 @@ func handleReservation(
 		Bandwidth: bw,
 	}
 	if startsAt != nil {
-		req.StartsAt = timestamppb.New(*startsAt)
+		tmp := startsAt.Unix()
+		req.StartsAt = &tmp
 	}
 	if stopsAt != nil {
-		req.StopsAt = timestamppb.New(*stopsAt)
+		tmp := stopsAt.Unix()
+		req.StopsAt = &tmp
 	}
 	rep, err := c.FetchReservations(ctx, &connect.Request[hummingbird.FetchReservationsRequest]{
 		Msg: req,
@@ -770,8 +769,8 @@ func handleReservation(
 			EgressId:  res.EgressId,
 			Bw:        res.Bandwidth,
 			EncodedBw: uint16(res.DataplaneEncoding),
-			StartsAt:  res.StartsAt.AsTime(),
-			StopsAt:   res.StopsAt.AsTime(),
+			StartsAt:  time.Unix(res.StartsAt, 0),
+			StopsAt:   time.Unix(res.StopsAt, 0),
 			Ak:        res.AuthenticationKey,
 		})
 	}
@@ -885,10 +884,10 @@ func handleBuy(
 			fmt.Println("read asset id ", assetId, " with len ", len(assetId))
 			buyAsset := &hummingbird.BuyAsset{
 				AssetId: assetId,
-				StartsAtExactly: timestamppb.New(readTime(reader,
-					"Starts at exactly (2026-06-23T13:25:36Z): ")),
-				StopsAtExactly: timestamppb.New(readTime(reader,
-					"Stops at exactly (2026-06-23T13:25:36Z): ")),
+				StartsAtExactly: readTime(reader,
+					"Starts at exactly (2026-06-23T13:25:36Z): ").Unix(),
+				StopsAtExactly: readTime(reader,
+					"Stops at exactly (2026-06-23T13:25:36Z): ").Unix(),
 				BandwidthExact: uint32(readUint64(reader, "BW exact: ")),
 			}
 			buyAssets = append(buyAssets, buyAsset)
@@ -1003,6 +1002,7 @@ func handleSearch(
 		}
 		if minReqBw == nil {
 			fmt.Println("bandwith required")
+			return
 		}
 		msg = &hummingbird.SearchAssetsRequest{
 			Request: &hummingbird.SearchAssetsRequest_Listed{
@@ -1028,20 +1028,26 @@ func handleSearch(
 	}
 	transformed := make([]Asset, 0, len(rep.Msg.Assets))
 	for _, asset := range rep.Msg.Assets {
+		intervals := []AssetInterval{}
+		for _, interval := range asset.Intervals {
+			intervals = append(intervals, AssetInterval{
+				Bandwidth: interval.Bandwidth,
+				StartAt:   time.Unix(interval.StartsAt, 0),
+				StopsAt:   time.Unix(interval.StopsAt, 0),
+			})
+		}
 		transformed = append(transformed, Asset{
 			ID:              hex.EncodeToString(asset.AssetId),
 			IA:              addr.IA(asset.Ia),
-			Bandwidth:       asset.Bandwidth,
 			BandwidthMin:    asset.BandwidthMin,
 			BandwidthMax:    asset.BandwidthMax,
 			TimeMinDuration: asset.TimeMinDuration,
 			TimeMaxDuration: asset.TimeMaxDuration,
-			StartAt:         asset.StartsAt.AsTime(),
-			StopsAt:         asset.StopsAt.AsTime(),
 			Price:           asset.Price,
 			IfIdIngress:     asset.IfIdIngress,
 			IfIdEgress:      asset.IfIdEgress,
 			TimeGranularity: asset.TimeGranularity,
+			Intervals:       intervals,
 		})
 	}
 	j, err := json.MarshalIndent(transformed, "", "\t")
@@ -1252,15 +1258,18 @@ func main() {
 type Asset struct {
 	ID              string
 	IA              addr.IA
-	Bandwidth       uint32
 	BandwidthMin    uint32
 	BandwidthMax    uint32
-	StartAt         time.Time
-	StopsAt         time.Time
 	Price           uint32
 	TimeGranularity uint32
 	TimeMinDuration uint32
 	TimeMaxDuration uint32
 	IfIdIngress     *uint32
 	IfIdEgress      *uint32
+	Intervals       []AssetInterval
+}
+type AssetInterval struct {
+	Bandwidth uint32
+	StartAt   time.Time
+	StopsAt   time.Time
 }
