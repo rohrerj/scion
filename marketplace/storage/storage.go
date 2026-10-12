@@ -118,22 +118,73 @@ func (s *MarketplaceStorage) PublishAsset(
 }
 func (s *MarketplaceStorage) UpdateListedAsset(
 	ctx context.Context,
-	a *marketplacedb.DBAsset,
+	id int64,
+	ia addr.IA,
+	a *hummingbird.UpdateAsset,
 ) (int64, error) {
-	if err := validateAsset(a); err != nil {
-		return 0, err
-	}
 	var newID int64
 	err := s.db.WithTx(ctx, func(tx marketplacedb.Repository) error {
-		x, err := tx.DeleteListedAsset(ctx, a.IA, a.ID)
+		// get current dbAsset
+		dbAsset, err := tx.LookupAsset(ctx, id, ia)
+		if err != nil {
+			return err
+		}
+		// check for illegal modifications
+		if (a.Bandwidth != nil && *a.Bandwidth < dbAsset.Bandwidth) ||
+			(a.StartsAt != nil && *a.StartsAt > dbAsset.StartAt) ||
+			(a.StopsAt != nil && *a.StopsAt < dbAsset.StopsAt) {
+			return serrors.New("bandwidth and validity period cannot be decreased")
+		}
+		if a.Bandwidth != nil && *a.Bandwidth > dbAsset.Bandwidth {
+			if err = tx.IncreaseAssetSegmentsBandwidth(ctx, id, int64(*a.Bandwidth-dbAsset.Bandwidth)); err != nil {
+				return err
+			}
+			dbAsset.Bandwidth = *a.Bandwidth
+		}
+		if a.StartsAt != nil && *a.StartsAt < dbAsset.StartAt {
+			if _, err = tx.InsertAssetSegment(ctx, id, *a.StartsAt, dbAsset.StartAt, dbAsset.Bandwidth); err != nil {
+				return err
+			}
+			if err = tx.MergeAssetAt(ctx, id, dbAsset.StartAt); err != nil {
+				return err
+			}
+			dbAsset.StartAt = *a.StartsAt
+		}
+		if a.StopsAt != nil && *a.StopsAt > dbAsset.StopsAt {
+			if _, err = tx.InsertAssetSegment(ctx, id, dbAsset.StopsAt, *a.StopsAt, dbAsset.Bandwidth); err != nil {
+				return err
+			}
+			if err = tx.MergeAssetAt(ctx, id, dbAsset.StopsAt); err != nil {
+				return err
+			}
+			dbAsset.StopsAt = *a.StopsAt
+		}
+		if a.BandwidthMin != nil {
+			dbAsset.BandwidthMin = *a.BandwidthMin
+		}
+		if a.BandwidthMax != nil {
+			dbAsset.BandwidthMax = *a.BandwidthMax
+		}
+		if a.TimeMinDuration != nil {
+			dbAsset.TimeMinDuration = *a.TimeMinDuration
+		}
+		if a.TimeMaxDuration != nil {
+			dbAsset.TimeMaxDuration = *a.TimeMaxDuration
+		}
+		if a.TimeGranularity != nil {
+			dbAsset.TimeGranularity = *a.TimeGranularity
+		}
+		if a.Price != nil {
+			dbAsset.Price = *a.Price
+		}
+		x, err := tx.UpdateAsset(ctx, dbAsset)
 		if err != nil {
 			return err
 		}
 		if x != 1 {
-			return serrors.New("no modifiable asset with that ID found")
+			return serrors.New("invalid assets")
 		}
-		newID, err = tx.InsertAsset(ctx, a)
-		return err
+		return nil
 	})
 	return newID, err
 }
@@ -650,6 +701,7 @@ func (s *MarketplaceStorage) BuyAssets(
 	}
 	boughtIDs := []int64{}
 	costAcc := int64(0)
+
 	err := s.db.WithTx(ctx, func(tx marketplacedb.Repository) error {
 		calcCost := func(a *marketplacedb.DBAsset) (int64, bool) {
 			totalAssetPrice, ok := multiplyInts(int64(a.StopsAt-a.StartAt),
@@ -661,13 +713,40 @@ func (s *MarketplaceStorage) BuyAssets(
 				int64(s.transactionFeeAbsolute)
 			return addInt64(int64(totalAssetPrice), fee)
 		}
+		buyAsset := func(
+			assetId int64,
+			startsAt int64,
+			stopsAt int64,
+			bw uint32,
+		) (*marketplacedb.DBAsset, error) {
+			asset, err := tx.CheckAssetAvailability(ctx, assetId, startsAt, stopsAt, bw)
+			if err != nil {
+				return nil, err
+			}
+			if err = tx.SplitAssetAt(ctx, assetId, startsAt); err != nil {
+				return nil, err
+			}
+			if err = tx.SplitAssetAt(ctx, assetId, stopsAt); err != nil {
+				return nil, err
+			}
+			userAsset, err := tx.BuyAsset(ctx, startsAt, stopsAt, bw, accountID, asset)
+			if err != nil {
+				return nil, err
+			}
+			if err = tx.MergeAssetAt(ctx, assetId, startsAt); err != nil {
+				return nil, err
+			}
+			if err = tx.MergeAssetAt(ctx, assetId, stopsAt); err != nil {
+				return nil, err
+			}
+			return userAsset, nil
+		}
 		for _, asset := range assets {
 			assetId, err := DatabaseAssetID(asset.AssetId)
 			if err != nil {
 				return err
 			}
-			newAsset, err := tx.BuyAsset(ctx, assetId, asset.StartsAtExactly, asset.StopsAtExactly,
-				asset.BandwidthExact, accountID)
+			newAsset, err := buyAsset(assetId, asset.StartsAtExactly, asset.StopsAtExactly, asset.BandwidthExact)
 			if err != nil {
 				return err
 			}

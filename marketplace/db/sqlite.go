@@ -35,6 +35,7 @@ type Repository interface {
 	InsertReservation(ctx context.Context, r *DBReservation) (int64, error)
 	SearchOwnedAssets(ctx context.Context, params *OwnedAssetQuery) ([]*DBAsset, error)
 	SearchListedAssets(ctx context.Context, params *ListedAssetQuery) ([]*DBAsset, error)
+	LookupAsset(ctx context.Context, id int64, ia addr.IA) (*DBAsset, error)
 	FetchReservations(ctx context.Context, params *ReservationQuery) ([]*DBReservation, error)
 	GetUser(ctx context.Context, id int64) (*DBUser, error)
 	GetUserByName(ctx context.Context, name string) (*DBUser, error)
@@ -66,7 +67,12 @@ type Repository interface {
 	RegisterAssetEvent(ctx context.Context, a *DBAsset, eventType AssetEventType) (int64, error)
 	TransitionAsset(ctx context.Context, assetID int64, accountID *int64, from AssetState, to AssetState) (*DBAsset, error)
 	InsertAssetSegment(ctx context.Context, asset_id int64, from int64, to int64, bw uint32) (int64, error)
-	BuyAsset(ctx context.Context, assetId int64, startsAt int64, stopsAt int64, bw uint32, accountId int64) (*DBAsset, error)
+	CheckAssetAvailability(ctx context.Context, assetId int64, startsAt int64, stopsAt int64, bw uint32) (*DBAsset, error)
+	SplitAssetAt(ctx context.Context, assetId int64, point int64) error
+	MergeAssetAt(ctx context.Context, assetId int64, point int64) error
+	IncreaseAssetSegmentsBandwidth(ctx context.Context, assetId int64, delta int64) error
+	UpdateAsset(ctx context.Context, a *DBAsset) (int64, error)
+	BuyAsset(ctx context.Context, startsAt int64, stopsAt int64, bw uint32, accountId int64, dbAsset *DBAsset) (*DBAsset, error)
 }
 
 type MarketplaceDB interface {
@@ -675,6 +681,21 @@ func (e *executor) SearchOwnedAssets(ctx context.Context, params *OwnedAssetQuer
 		res = append(res, a)
 	}
 	return res, nil
+}
+
+func (e *executor) LookupAsset(ctx context.Context, id int64, ia addr.IA) (*DBAsset, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	q := `SELECT ` + assetColumnsWithAlias + ` FROM Assets a WHERE a.ID = ? AND a.isd_id = ? AND a.as_id = ?`
+	rows, err := e.read.QueryContext(ctx, q, id, ia.ISD(), ia.AS())
+	if err != nil {
+		return nil, err
+	}
+	if !rows.Next() {
+		return nil, serrors.New("asset not found")
+	}
+	return scanAsset(rows)
 }
 
 func (e *executor) SearchListedAssets(ctx context.Context, params *ListedAssetQuery) ([]*DBAsset, error) {
@@ -1361,41 +1382,43 @@ func (e *executor) InsertAssetSegment(ctx context.Context, asset_id int64, from 
 	return res.LastInsertId()
 }
 
-// Buys a single asset. Must be called as part of a transaction
-func (e *executor) BuyAsset(
-	ctx context.Context,
-	assetId int64,
-	startsAt int64,
-	stopsAt int64,
-	bw uint32,
-	accountId int64,
-) (*DBAsset, error) {
+func (e *executor) IncreaseAssetSegmentsBandwidth(ctx context.Context, assetId int64, delta int64) error {
 	if e.write == nil {
-		return nil, serrors.New("No database open")
+		return serrors.New("No database open")
 	}
-	splitAt := func(point int64) error {
-		insertInst := `
-		INSERT INTO Asset_segment (asset_id, starts_at, stops_at, available)
-		SELECT asset_id, ?, stops_at, available
-		FROM Asset_segment
-		WHERE asset_id = ? AND starts_at < ? AND stops_at > ?`
-		_, err := e.write.ExecContext(ctx, insertInst, point, assetId, point, point)
-		if err != nil {
-			return err
-		}
-		updateInst := `
-		UPDATE Asset_segment
-		SET stops_at = ?
-		WHERE asset_id = ? AND starts_at < ? AND stops_at > ?
-		`
-		_, err = e.write.ExecContext(ctx, updateInst, point, assetId, point, point)
-		if err != nil {
-			return err
-		}
-		return nil
+	inst := `
+	UPDATE Asset_Segment SET available = available + ?
+	WHERE asset_id = ?`
+	_, err := e.write.ExecContext(ctx, inst, delta, assetId)
+	if err != nil {
+		return err
 	}
-	mergeAt := func(point int64) error {
-		updateInst := `
+	return nil
+}
+
+func (e *executor) UpdateAsset(ctx context.Context, a *DBAsset) (int64, error) {
+	if e.write == nil {
+		return 0, serrors.New("No database open")
+	}
+	inst := `
+	UPDATE Assets
+	SET bandwidth = ?, bandwidth_min = ?, bandwidth_max = ?, price = ?, time_granularity = ?,
+	time_min_duration = ?, time_max_duration = ?, starts_at = ?, stops_at = ?
+	WHERE id = ? AND state = ? AND account_ID IS NULL`
+	res, err := e.write.ExecContext(ctx, inst, a.Bandwidth, a.BandwidthMin, a.BandwidthMax,
+		a.Price, a.TimeGranularity, a.TimeMinDuration, a.TimeMaxDuration, a.StartAt,
+		a.StopsAt, a.ID, AssetStateAvailable)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *executor) MergeAssetAt(ctx context.Context, assetId int64, point int64) error {
+	if e.write == nil {
+		return serrors.New("No database open")
+	}
+	updateInst := `
 		UPDATE Asset_Segment AS l
 		SET stops_at = r.stops_at
 		FROM Asset_Segment AS r
@@ -1403,17 +1426,53 @@ func (e *executor) BuyAsset(
 		  AND r.asset_id = ? AND r.starts_at = ?
 		  AND r.available = l.available
 		`
-		res, err := e.write.ExecContext(ctx, updateInst, assetId, point, assetId, point)
-		if err != nil {
-			return fmt.Errorf("merge at %d (update): %w", point, err)
+	res, err := e.write.ExecContext(ctx, updateInst, assetId, point, assetId, point)
+	if err != nil {
+		return fmt.Errorf("merge at %d (update): %w", point, err)
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		deleteInst := `DELETE FROM Asset_Segment WHERE asset_id = ? AND starts_at = ?`
+		if _, err := e.write.ExecContext(ctx, deleteInst, assetId, point); err != nil {
+			return fmt.Errorf("merge at %d (delete): %w", point, err)
 		}
-		if n, _ := res.RowsAffected(); n == 1 {
-			deleteInst := `DELETE FROM Asset_Segment WHERE asset_id = ? AND starts_at = ?`
-			if _, err := e.write.ExecContext(ctx, deleteInst, assetId, point); err != nil {
-				return fmt.Errorf("merge at %d (delete): %w", point, err)
-			}
-		}
-		return nil
+	}
+	return nil
+}
+
+func (e *executor) SplitAssetAt(ctx context.Context, assetId int64, point int64) error {
+	if e.write == nil {
+		return serrors.New("No database open")
+	}
+	insertInst := `
+		INSERT INTO Asset_segment (asset_id, starts_at, stops_at, available)
+		SELECT asset_id, ?, stops_at, available
+		FROM Asset_segment
+		WHERE asset_id = ? AND starts_at < ? AND stops_at > ?`
+	_, err := e.write.ExecContext(ctx, insertInst, point, assetId, point, point)
+	if err != nil {
+		return err
+	}
+	updateInst := `
+		UPDATE Asset_segment
+		SET stops_at = ?
+		WHERE asset_id = ? AND starts_at < ? AND stops_at > ?
+		`
+	_, err = e.write.ExecContext(ctx, updateInst, point, assetId, point, point)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (e *executor) CheckAssetAvailability(
+	ctx context.Context,
+	assetId int64,
+	startsAt int64,
+	stopsAt int64,
+	bw uint32,
+) (*DBAsset, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
 	}
 	inst := `
 	SELECT ` + assetColumnsWithAlias + ` FROM Assets a
@@ -1427,7 +1486,7 @@ func (e *executor) BuyAsset(
 		AND g.starts_at < ? AND g.stops_at > ?
 		AND g.available < ?);
 	`
-	rows, err := e.write.QueryContext(ctx, inst, assetId, AssetStateAvailable, startsAt, stopsAt, stopsAt, startsAt, bw)
+	rows, err := e.read.QueryContext(ctx, inst, assetId, AssetStateAvailable, startsAt, stopsAt, stopsAt, startsAt, bw)
 	if err != nil {
 		return nil, err
 	}
@@ -1438,20 +1497,23 @@ func (e *executor) BuyAsset(
 	if err != nil {
 		return nil, err
 	}
+	return asset, nil
+}
 
-	err = splitAt(startsAt)
-	if err != nil {
-		return nil, err
-	}
-	err = splitAt(stopsAt)
-	if err != nil {
-		return nil, err
-	}
+func (e *executor) BuyFromAssetSegment(
+	ctx context.Context,
+	assetId int64,
+	startsAt int64,
+	stopsAt int64,
+	bw uint32,
+	accountId int64,
+	asset *DBAsset,
+) (*DBAsset, error) {
 	decreaseAvailabilityInst := `
 	UPDATE asset_segment
 	SET available = available - ?
 	WHERE asset_id = ? AND starts_at >= ? AND stops_at <= ?`
-	_, err = e.write.ExecContext(ctx, decreaseAvailabilityInst, bw, assetId, startsAt, stopsAt)
+	_, err := e.write.ExecContext(ctx, decreaseAvailabilityInst, bw, assetId, startsAt, stopsAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1478,13 +1540,51 @@ func (e *executor) BuyAsset(
 		return nil, err
 	}
 	userAsset.ID = newId
-	err = mergeAt(startsAt)
+	return userAsset, nil
+}
+
+// Buys a single asset. Availability must be checked in advance in same transaction.
+func (e *executor) BuyAsset(
+	ctx context.Context,
+	startsAt int64,
+	stopsAt int64,
+	bw uint32,
+	accountId int64,
+	dbAsset *DBAsset,
+) (*DBAsset, error) {
+	if e.write == nil {
+		return nil, serrors.New("No database open")
+	}
+	decreaseAvailabilityInst := `
+	UPDATE asset_segment
+	SET available = available - ?
+	WHERE asset_id = ? AND starts_at >= ? AND stops_at <= ?`
+	_, err := e.write.ExecContext(ctx, decreaseAvailabilityInst, bw, dbAsset.ID, startsAt, stopsAt)
 	if err != nil {
 		return nil, err
 	}
-	err = mergeAt(stopsAt)
+	userAsset := &DBAsset{
+		AccountId: sql.NullInt64{
+			Int64: accountId,
+			Valid: true,
+		},
+		IA:              dbAsset.IA,
+		Bandwidth:       bw,
+		StartAt:         startsAt,
+		StopsAt:         stopsAt,
+		BandwidthMin:    dbAsset.BandwidthMin,
+		BandwidthMax:    dbAsset.BandwidthMax,
+		Price:           dbAsset.Price,
+		TimeGranularity: dbAsset.TimeGranularity,
+		TimeMinDuration: dbAsset.TimeMinDuration,
+		TimeMaxDuration: dbAsset.TimeMaxDuration,
+		IfIdIngress:     dbAsset.IfIdIngress,
+		IfIdEgress:      dbAsset.IfIdEgress,
+	}
+	newId, err := e.InsertAsset(ctx, userAsset)
 	if err != nil {
 		return nil, err
 	}
+	userAsset.ID = newId
 	return userAsset, nil
 }

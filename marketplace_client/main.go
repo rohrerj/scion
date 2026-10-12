@@ -484,22 +484,35 @@ func handleUpdate(
 					fmt.Println(err)
 					continue
 				}
+				bw := readOptionalUint32(reader, "bandwidth: ")
+				bwMin := readOptionalUint32(reader, "minimum bandwidth: ")
+				bwMax := readOptionalUint32(reader, "maximum bandwidth: ")
+				startsAt := readOptionalTime(reader, "Starts at (2026-06-23T13:25:36Z): ")
+				var startsAtUnix *int64
+				if startsAt != nil {
+					tmp := startsAt.Unix()
+					startsAtUnix = &tmp
+				}
+				stopsAt := readOptionalTime(reader, "Stops at (2026-06-23T13:25:36Z): ")
+				var stopsAtUnix *int64
+				if stopsAt != nil {
+					tmp := stopsAt.Unix()
+					stopsAtUnix = &tmp
+				}
 				assetUpdates = append(assetUpdates, &hummingbird.AssetUpdate{
 					AssetId: assetId,
 					Operation: &hummingbird.AssetUpdate_Update{
-						Update: &hummingbird.PublisherAsset{
-							IfIdIngress:  readOptionalUint32(reader, "ingress: "),
-							IfIdEgress:   readOptionalUint32(reader, "egress: "),
-							Bandwidth:    uint32(readUint64(reader, "bandwidth: ")),
-							BandwidthMin: uint32(readUint64(reader, "minimum bandwidth: ")),
-							BandwidthMax: uint32(readUint64(reader, "maximum bandwidth: ")),
-							StartsAt:     readTime(reader, "Starts at (2026-06-23T13:25:36Z): ").Unix(),
-							StopsAt:      readTime(reader, "Stops at (2026-06-23T13:25:36Z): ").Unix(),
-							Price: uint32(readUint64(
-								reader, "price per kbit per second: ")),
-							TimeMinDuration: uint32(readUint64(reader, "minimum time duration: ")),
-							TimeMaxDuration: uint32(readUint64(reader, "maximum time duration: ")),
-							TimeGranularity: uint32(readUint64(reader, "time granularity: "))},
+						Update: &hummingbird.UpdateAsset{
+							Bandwidth:       bw,
+							BandwidthMin:    bwMin,
+							BandwidthMax:    bwMax,
+							StartsAt:        startsAtUnix,
+							StopsAt:         stopsAtUnix,
+							Price:           readOptionalUint32(reader, "price per kbit per second: "),
+							TimeMinDuration: readOptionalUint32(reader, "minimum time duration: "),
+							TimeMaxDuration: readOptionalUint32(reader, "maximum time duration: "),
+							TimeGranularity: readOptionalUint32(reader, "time granularity: "),
+						},
 					},
 				})
 			default:
@@ -535,21 +548,14 @@ func handleUpdate(
 				if i >= len(assetUpdates) {
 					break
 				}
-				switch t := res.ResultType.(type) {
-				case *hummingbird.UpdateAssetResult_NewId:
-					if t.NewId == nil {
-						fmt.Printf("%s: deleted\n", hex.EncodeToString(assetUpdates[i].AssetId))
-					} else {
-						fmt.Printf("%s: updated to -> %s\n",
-							hex.EncodeToString(assetUpdates[i].AssetId),
-							hex.EncodeToString(t.NewId))
-					}
-				case *hummingbird.UpdateAssetResult_Error:
-					fmt.Printf("%s: error: %s\n",
-						hex.EncodeToString(assetUpdates[i].AssetId), t.Error)
-				default:
-					fmt.Printf("%s: unknown result",
+				if res.Error == nil {
+					fmt.Printf("Successfully updated / deleted %s\n",
 						hex.EncodeToString(assetUpdates[i].AssetId))
+				} else {
+					fmt.Printf("Error updating / deleting %s: %s\n",
+						hex.EncodeToString(assetUpdates[i].AssetId),
+						*res.Error,
+					)
 				}
 			}
 			return

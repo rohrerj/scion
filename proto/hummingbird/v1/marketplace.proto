@@ -37,19 +37,27 @@ message UpdateAssetsRequest {
 message AssetUpdate {
     bytes asset_id = 1;
     oneof operation {
-        PublisherAsset update = 2;
+        UpdateAsset update = 2;
         Remove remove = 3;
     }
+}
+message UpdateAsset {
+    optional uint32 bandwidth = 1;
+    optional uint32 bandwidth_min = 2;
+    optional uint32 bandwidth_max = 3;
+    optional int64 starts_at = 4;
+    optional int64 stops_at = 5;
+    optional uint32 time_granularity = 6;
+    optional uint32 time_min_duration = 7;
+    optional uint32 time_max_duration = 8;
+    optional uint32 price = 9;
 }
 message Remove {}
 message UpdateAssetsResponse {
     repeated UpdateAssetResult result = 1;
 }
 message UpdateAssetResult {
-    oneof result_type {
-        bytes new_id = 1;
-        string error = 2;
-    }
+    optional string error = 1;
 }
 
 message StatisticsRequest {

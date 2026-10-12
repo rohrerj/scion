@@ -286,35 +286,10 @@ func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[humming
 			}
 			return 0, nil
 		case *hummingbird.AssetUpdate_Update:
-			dbAsset := &db.DBAsset{
-				ID:              assetId,
-				IA:              ia,
-				Bandwidth:       t.Update.Bandwidth,
-				BandwidthMin:    t.Update.BandwidthMin,
-				BandwidthMax:    t.Update.BandwidthMax,
-				StartAt:         t.Update.StartsAt,
-				StopsAt:         t.Update.StopsAt,
-				Price:           t.Update.Price,
-				TimeGranularity: t.Update.TimeGranularity,
-				TimeMinDuration: t.Update.TimeMinDuration,
-				TimeMaxDuration: t.Update.TimeMaxDuration,
-			}
-			if time.Unix(dbAsset.StopsAt, 0).UTC().After(time.Now().Add(time.Duration(s.info.AssetValidityMax) * time.Second).UTC()) {
+			if t.Update.StopsAt != nil && time.Unix(*t.Update.StopsAt, 0).UTC().After(time.Now().Add(time.Duration(s.info.AssetValidityMax)*time.Second).UTC()) {
 				return 0, serrors.New("validity outside allowed range")
 			}
-			if t.Update.IfIdIngress != nil {
-				dbAsset.IfIdIngress = sql.NullInt32{
-					Valid: true,
-					Int32: int32(*t.Update.IfIdIngress),
-				}
-			}
-			if t.Update.IfIdEgress != nil {
-				dbAsset.IfIdEgress = sql.NullInt32{
-					Valid: true,
-					Int32: int32(*t.Update.IfIdEgress),
-				}
-			}
-			newId, err := s.store.UpdateListedAsset(ctx, dbAsset)
+			newId, err := s.store.UpdateListedAsset(ctx, assetId, ia, t.Update)
 			if err != nil {
 				return 0, err
 			}
@@ -325,18 +300,15 @@ func (s *Service) UpdateAssets(ctx context.Context, req *connect.Request[humming
 	}
 	res := make([]*hummingbird.UpdateAssetResult, 0, len(req.Msg.Assets))
 	for _, update := range req.Msg.Assets {
-		newId, err := handleAsset(update)
+		_, err := handleAsset(update)
 		if err != nil {
+			errString := err.Error()
 			res = append(res, &hummingbird.UpdateAssetResult{
-				ResultType: &hummingbird.UpdateAssetResult_Error{
-					Error: err.Error(),
-				},
+				Error: &errString,
 			})
 		} else {
 			res = append(res, &hummingbird.UpdateAssetResult{
-				ResultType: &hummingbird.UpdateAssetResult_NewId{
-					NewId: protoAssetID(newId),
-				},
+				Error: nil,
 			})
 		}
 	}
