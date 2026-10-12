@@ -679,7 +679,10 @@ func (s *MarketplaceStorage) BuyAssets(
 			if !ok {
 				return serrors.New("asset parameters would lead to integer overflow")
 			}
-
+			if uint64(costAcc) > maxPrice {
+				// we perform this check per asset to be able to terminate early
+				return serrors.New("assets too expensive")
+			}
 			boughtIDs = append(boughtIDs, newAsset.ID)
 		}
 		_, err := tx.UpdateAccountMoney(ctx, accountID, -costAcc)

@@ -447,14 +447,25 @@ func (s *Service) RedeemAsset(
 		// ingress and egress assets
 		ingressAsset := assets[0]
 		egressAsset := assets[1]
-		bw = min(ingressAsset.Bandwidth, egressAsset.Bandwidth)
+		if ingressAsset.IA != egressAsset.IA ||
+			ingressAsset.Bandwidth != egressAsset.Bandwidth ||
+			ingressAsset.StartAt != egressAsset.StartAt ||
+			ingressAsset.StopsAt != egressAsset.StopsAt ||
+			!ingressAsset.IfIdIngress.Valid ||
+			!egressAsset.IfIdEgress.Valid {
+			return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
+		}
+		bw = ingressAsset.Bandwidth
 		ingressID = uint32(ingressAsset.IfIdIngress.Int32)
 		egressID = uint32(egressAsset.IfIdEgress.Int32)
 		ia = ingressAsset.IA
-		startsAt = max(ingressAsset.StartAt, egressAsset.StartAt)
-		stopsAt = min(ingressAsset.StopsAt, egressAsset.StopsAt)
+		startsAt = ingressAsset.StartAt
+		stopsAt = ingressAsset.StopsAt
 	} else {
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
+	}
+	if stopsAt <= startsAt {
+		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid validity range"))
 	}
 	undoRedemption := func() error {
 		// we use context.Background here because if the client disconnected in the meantime,
@@ -472,10 +483,6 @@ func (s *Service) RedeemAsset(
 			log.Error("Error while undoing redemption", "err", err)
 		}
 		return err
-	}
-	if stopsAt <= startsAt {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			serrors.Join(serrors.New("invalid validity range"), undoRedemption()))
 	}
 	peer := s.FindRedemptionServerHandler(ia)
 	// The deadline is derived from the request context: a client who disconnects releases
