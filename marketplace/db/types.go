@@ -212,7 +212,7 @@ type DBAsset struct {
 	// the maximum bandwidth allowed at redemption
 	BandwidthMax uint32
 	// inclusive start time of the asset
-	StartAt int64
+	StartsAt int64
 	// exclusive end time of the asset
 	StopsAt int64
 	// price per kbps per second of the asset
@@ -227,6 +227,12 @@ type DBAsset struct {
 	IfIdIngress sql.NullInt32
 	// egress ID of the asset
 	IfIdEgress sql.NullInt32
+}
+
+type DBAssetSegment struct {
+	StartsAt  int64 `json:"starts_at"`
+	StopsAt   int64 `json:"stops_at"`
+	Available int64 `json:"available"`
 }
 
 type DBUser struct {

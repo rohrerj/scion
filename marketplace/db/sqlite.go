@@ -36,6 +36,8 @@ type Repository interface {
 	SearchOwnedAssets(ctx context.Context, params *OwnedAssetQuery) ([]*DBAsset, error)
 	SearchListedAssets(ctx context.Context, params *ListedAssetQuery) ([]*DBAsset, error)
 	LookupAsset(ctx context.Context, id int64, ia addr.IA) (*DBAsset, error)
+	LookupAssets(ctx context.Context, ia addr.IA) ([]*DBAsset, error)
+	LookupAllAssetSegments(ctx context.Context, id int64) ([]*DBAssetSegment, error)
 	FetchReservations(ctx context.Context, params *ReservationQuery) ([]*DBReservation, error)
 	GetUser(ctx context.Context, id int64) (*DBUser, error)
 	GetUserByName(ctx context.Context, name string) (*DBUser, error)
@@ -180,7 +182,7 @@ func scanAssetWithAvailableBandwidthAndUsability(row rowScanner) (*DBAsset, erro
 		&asset.TimeGranularity,
 		&asset.TimeMinDuration,
 		&asset.TimeMaxDuration,
-		&asset.StartAt,
+		&asset.StartsAt,
 		&asset.StopsAt,
 		&asset.IfIdIngress,
 		&asset.IfIdEgress,
@@ -196,7 +198,7 @@ func scanAssetWithAvailableBandwidthAndUsability(row rowScanner) (*DBAsset, erro
 		return nil, err
 	}
 	asset.Bandwidth = availableBW
-	asset.StartAt = usableFrom
+	asset.StartsAt = usableFrom
 	asset.StopsAt = usableTo
 	return asset, nil
 }
@@ -218,7 +220,7 @@ func scanAssetWithAvailableBandwidth(row rowScanner) (*DBAsset, error) {
 		&asset.TimeGranularity,
 		&asset.TimeMinDuration,
 		&asset.TimeMaxDuration,
-		&asset.StartAt,
+		&asset.StartsAt,
 		&asset.StopsAt,
 		&asset.IfIdIngress,
 		&asset.IfIdEgress,
@@ -251,7 +253,7 @@ func scanAsset(row rowScanner) (*DBAsset, error) {
 		&asset.TimeGranularity,
 		&asset.TimeMinDuration,
 		&asset.TimeMaxDuration,
-		&asset.StartAt,
+		&asset.StartsAt,
 		&asset.StopsAt,
 		&asset.IfIdIngress,
 		&asset.IfIdEgress,
@@ -647,7 +649,7 @@ func (e *executor) RegisterAssetEvent(ctx context.Context, a *DBAsset, eventType
 	inst := `INSERT INTO Asset_Events (event_type, isd_id, as_id, ingress, egress, bandwidth, starts_at, stops_at, price)
 	VALUES(?,?,?,?,?,?,?,?,?)`
 	res, err := e.write.ExecContext(ctx, inst, eventType, a.IA.ISD(), a.IA.AS(), a.IfIdIngress, a.IfIdEgress, a.Bandwidth,
-		a.StartAt, a.StopsAt, a.Price)
+		a.StartsAt, a.StopsAt, a.Price)
 	if err != nil {
 		return 0, err
 	}
@@ -696,6 +698,47 @@ func (e *executor) LookupAsset(ctx context.Context, id int64, ia addr.IA) (*DBAs
 		return nil, serrors.New("asset not found")
 	}
 	return scanAsset(rows)
+}
+
+func (e *executor) LookupAssets(ctx context.Context, ia addr.IA) ([]*DBAsset, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	q := `SELECT ` + assetColumnsWithAlias + ` FROM Assets a WHERE a.isd_id = ? AND a.as_id = ? AND a.account_id IS NULL`
+	rows, err := e.read.QueryContext(ctx, q, ia.ISD(), ia.AS())
+	if err != nil {
+		return nil, err
+	}
+	res := []*DBAsset{}
+	for rows.Next() {
+		asset, err := scanAsset(rows)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, asset)
+	}
+	return res, nil
+}
+
+func (e *executor) LookupAllAssetSegments(ctx context.Context, id int64) ([]*DBAssetSegment, error) {
+	if e.read == nil {
+		return nil, serrors.New("No database open")
+	}
+	q := `SELECT starts_at, stops_at, available FROM Asset_Segment WHERE asset_id = ?`
+	rows, err := e.read.QueryContext(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
+	res := []*DBAssetSegment{}
+	for rows.Next() {
+		seg := &DBAssetSegment{}
+		err = rows.Scan(&seg.StartsAt, &seg.StopsAt, &seg.Available)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, seg)
+	}
+	return res, nil
 }
 
 func (e *executor) SearchListedAssets(ctx context.Context, params *ListedAssetQuery) ([]*DBAsset, error) {
@@ -1019,7 +1062,7 @@ func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
 			a.TimeGranularity,
 			a.TimeMinDuration,
 			a.TimeMaxDuration,
-			a.StartAt,
+			a.StartsAt,
 			a.StopsAt,
 			a.IfIdIngress,
 			a.IfIdEgress,
@@ -1037,7 +1080,7 @@ func (e *executor) InsertAsset(ctx context.Context, a *DBAsset) (int64, error) {
 			a.TimeGranularity,
 			a.TimeMinDuration,
 			a.TimeMaxDuration,
-			a.StartAt,
+			a.StartsAt,
 			a.StopsAt,
 			a.IfIdIngress,
 			a.IfIdEgress)
@@ -1406,7 +1449,7 @@ func (e *executor) UpdateAsset(ctx context.Context, a *DBAsset) (int64, error) {
 	time_min_duration = ?, time_max_duration = ?, starts_at = ?, stops_at = ?
 	WHERE id = ? AND state = ? AND account_ID IS NULL`
 	res, err := e.write.ExecContext(ctx, inst, a.Bandwidth, a.BandwidthMin, a.BandwidthMax,
-		a.Price, a.TimeGranularity, a.TimeMinDuration, a.TimeMaxDuration, a.StartAt,
+		a.Price, a.TimeGranularity, a.TimeMinDuration, a.TimeMaxDuration, a.StartsAt,
 		a.StopsAt, a.ID, AssetStateAvailable)
 	if err != nil {
 		return 0, err
@@ -1524,7 +1567,7 @@ func (e *executor) BuyFromAssetSegment(
 		},
 		IA:              asset.IA,
 		Bandwidth:       bw,
-		StartAt:         startsAt,
+		StartsAt:        startsAt,
 		StopsAt:         stopsAt,
 		BandwidthMin:    asset.BandwidthMin,
 		BandwidthMax:    asset.BandwidthMax,
@@ -1570,7 +1613,7 @@ func (e *executor) BuyAsset(
 		},
 		IA:              dbAsset.IA,
 		Bandwidth:       bw,
-		StartAt:         startsAt,
+		StartsAt:        startsAt,
 		StopsAt:         stopsAt,
 		BandwidthMin:    dbAsset.BandwidthMin,
 		BandwidthMax:    dbAsset.BandwidthMax,

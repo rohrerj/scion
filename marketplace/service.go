@@ -329,7 +329,7 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 		Bandwidth:       req.Msg.Asset.Bandwidth,
 		BandwidthMin:    req.Msg.Asset.BandwidthMin,
 		BandwidthMax:    req.Msg.Asset.BandwidthMax,
-		StartAt:         req.Msg.Asset.StartsAt,
+		StartsAt:        req.Msg.Asset.StartsAt,
 		StopsAt:         req.Msg.Asset.StopsAt,
 		Price:           req.Msg.Asset.Price,
 		TimeGranularity: req.Msg.Asset.TimeGranularity,
@@ -341,7 +341,7 @@ func (s *Service) PublishAsset(ctx context.Context, req *connect.Request[humming
 	if time.Unix(dbAsset.StopsAt, 0).UTC().After(time.Now().Add(time.Duration(s.info.AssetValidityMax) * time.Second).UTC()) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("validity outside allowed range"))
 	}
-	if dbAsset.StopsAt <= dbAsset.StartAt {
+	if dbAsset.StopsAt <= dbAsset.StartsAt {
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("stopsAt must come after startsAt"))
 	}
 	if req.Msg.Asset.IfIdIngress != nil {
@@ -412,7 +412,7 @@ func (s *Service) RedeemAsset(
 		bw = pairAsset.Bandwidth
 		ingressID = uint32(pairAsset.IfIdIngress.Int32)
 		egressID = uint32(pairAsset.IfIdEgress.Int32)
-		startsAt = pairAsset.StartAt
+		startsAt = pairAsset.StartsAt
 		stopsAt = pairAsset.StopsAt
 		ia = pairAsset.IA
 	} else if len(assets) == 2 {
@@ -421,7 +421,7 @@ func (s *Service) RedeemAsset(
 		egressAsset := assets[1]
 		if ingressAsset.IA != egressAsset.IA ||
 			ingressAsset.Bandwidth != egressAsset.Bandwidth ||
-			ingressAsset.StartAt != egressAsset.StartAt ||
+			ingressAsset.StartsAt != egressAsset.StartsAt ||
 			ingressAsset.StopsAt != egressAsset.StopsAt ||
 			!ingressAsset.IfIdIngress.Valid ||
 			!egressAsset.IfIdEgress.Valid {
@@ -431,7 +431,7 @@ func (s *Service) RedeemAsset(
 		ingressID = uint32(ingressAsset.IfIdIngress.Int32)
 		egressID = uint32(egressAsset.IfIdEgress.Int32)
 		ia = ingressAsset.IA
-		startsAt = ingressAsset.StartAt
+		startsAt = ingressAsset.StartsAt
 		stopsAt = ingressAsset.StopsAt
 	} else {
 		return nil, connect.NewError(connect.CodeInvalidArgument, serrors.New("invalid assets"))
@@ -686,7 +686,7 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 		if found {
 			mapAsset.Intervals = append(mapAsset.Intervals, &hummingbird.SearchAssetInterval{
 				Bandwidth: asset.Bandwidth,
-				StartsAt:  asset.StartAt,
+				StartsAt:  asset.StartsAt,
 				StopsAt:   asset.StopsAt,
 			})
 		} else {
@@ -702,7 +702,7 @@ func (s *Service) SearchAssets(ctx context.Context, req *connect.Request[humming
 				Intervals: []*hummingbird.SearchAssetInterval{
 					&hummingbird.SearchAssetInterval{
 						Bandwidth: asset.Bandwidth,
-						StartsAt:  asset.StartAt,
+						StartsAt:  asset.StartsAt,
 						StopsAt:   asset.StopsAt,
 					},
 				},

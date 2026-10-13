@@ -104,7 +104,7 @@ func (s *MarketplaceStorage) PublishAsset(
 		if err != nil {
 			return err
 		}
-		_, err = tx.InsertAssetSegment(ctx, assetId, a.StartAt, a.StopsAt, a.Bandwidth)
+		_, err = tx.InsertAssetSegment(ctx, assetId, a.StartsAt, a.StopsAt, a.Bandwidth)
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func (s *MarketplaceStorage) UpdateListedAsset(
 		}
 		// check for illegal modifications
 		if (a.Bandwidth != nil && *a.Bandwidth < dbAsset.Bandwidth) ||
-			(a.StartsAt != nil && *a.StartsAt > dbAsset.StartAt) ||
+			(a.StartsAt != nil && *a.StartsAt > dbAsset.StartsAt) ||
 			(a.StopsAt != nil && *a.StopsAt < dbAsset.StopsAt) {
 			return serrors.New("bandwidth and validity period cannot be decreased")
 		}
@@ -141,14 +141,14 @@ func (s *MarketplaceStorage) UpdateListedAsset(
 			}
 			dbAsset.Bandwidth = *a.Bandwidth
 		}
-		if a.StartsAt != nil && *a.StartsAt < dbAsset.StartAt {
-			if _, err = tx.InsertAssetSegment(ctx, id, *a.StartsAt, dbAsset.StartAt, dbAsset.Bandwidth); err != nil {
+		if a.StartsAt != nil && *a.StartsAt < dbAsset.StartsAt {
+			if _, err = tx.InsertAssetSegment(ctx, id, *a.StartsAt, dbAsset.StartsAt, dbAsset.Bandwidth); err != nil {
 				return err
 			}
-			if err = tx.MergeAssetAt(ctx, id, dbAsset.StartAt); err != nil {
+			if err = tx.MergeAssetAt(ctx, id, dbAsset.StartsAt); err != nil {
 				return err
 			}
-			dbAsset.StartAt = *a.StartsAt
+			dbAsset.StartsAt = *a.StartsAt
 		}
 		if a.StopsAt != nil && *a.StopsAt > dbAsset.StopsAt {
 			if _, err = tx.InsertAssetSegment(ctx, id, dbAsset.StopsAt, *a.StopsAt, dbAsset.Bandwidth); err != nil {
@@ -498,7 +498,7 @@ func (s *MarketplaceStorage) CombineAssets(
 		ingress := assets[0].IfIdIngress
 		egress := assets[0].IfIdEgress
 		combinedStop := assets[0].StopsAt
-		useTimeAxis := assets[0].StopsAt == assets[1].StartAt
+		useTimeAxis := assets[0].StopsAt == assets[1].StartsAt
 		combinedMinBW := assets[0].BandwidthMin
 		combinedMaxBW := assets[0].BandwidthMax
 		combinedTimeMinDuration := assets[0].TimeMinDuration
@@ -525,12 +525,12 @@ func (s *MarketplaceStorage) CombineAssets(
 				if assets[0].Bandwidth != asset.Bandwidth {
 					return serrors.New("assets cannot be combined")
 				}
-				if combinedStop != asset.StartAt {
+				if combinedStop != asset.StartsAt {
 					return serrors.New("assets cannot be combined")
 				}
 				combinedStop = asset.StopsAt
 			} else {
-				if asset.StartAt != assets[0].StartAt || asset.StopsAt != assets[0].StopsAt {
+				if asset.StartsAt != assets[0].StartsAt || asset.StopsAt != assets[0].StopsAt {
 					return serrors.New("assets cannot be combined")
 				}
 				combinedBandwidth += asset.Bandwidth
@@ -550,7 +550,7 @@ func (s *MarketplaceStorage) CombineAssets(
 			TimeMaxDuration: combinedTimeMaxDuration,
 			TimeGranularity: combinedTimeGranularity,
 			Bandwidth:       combinedBandwidth,
-			StartAt:         assets[0].StartAt,
+			StartsAt:        assets[0].StartsAt,
 			StopsAt:         combinedStop,
 		}
 		for _, assetId := range assetIds {
@@ -587,7 +587,7 @@ func (s *MarketplaceStorage) SplitAsset(
 		}
 		var splitSegments []AssetSegment
 		baseSegment := AssetSegment{
-			StartsAt:  dbAsset.StartAt,
+			StartsAt:  dbAsset.StartsAt,
 			StopsAt:   dbAsset.StopsAt,
 			Bandwidth: dbAsset.Bandwidth,
 		}
@@ -649,7 +649,7 @@ func (s *MarketplaceStorage) SplitAsset(
 				IfIdIngress:     dbAsset.IfIdIngress,
 				IfIdEgress:      dbAsset.IfIdEgress,
 				Bandwidth:       segment.Bandwidth,
-				StartAt:         segment.StartsAt,
+				StartsAt:        segment.StartsAt,
 				StopsAt:         segment.StopsAt,
 			}
 			splitAssetId, err := tx.InsertAsset(ctx, asset)
@@ -704,7 +704,7 @@ func (s *MarketplaceStorage) BuyAssets(
 
 	err := s.db.WithTx(ctx, func(tx marketplacedb.Repository) error {
 		calcCost := func(a *marketplacedb.DBAsset) (int64, bool) {
-			totalAssetPrice, ok := multiplyInts(int64(a.StopsAt-a.StartAt),
+			totalAssetPrice, ok := multiplyInts(int64(a.StopsAt-a.StartsAt),
 				int64(a.Bandwidth), int64(a.Price))
 			if !ok {
 				return 0, false
@@ -718,43 +718,51 @@ func (s *MarketplaceStorage) BuyAssets(
 			startsAt int64,
 			stopsAt int64,
 			bw uint32,
-		) (*marketplacedb.DBAsset, error) {
+		) (*marketplacedb.DBAsset, int64, error) {
 			asset, err := tx.CheckAssetAvailability(ctx, assetId, startsAt, stopsAt, bw)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			if err = tx.SplitAssetAt(ctx, assetId, startsAt); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			if err = tx.SplitAssetAt(ctx, assetId, stopsAt); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			userAsset, err := tx.BuyAsset(ctx, startsAt, stopsAt, bw, accountID, asset)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			if err = tx.MergeAssetAt(ctx, assetId, startsAt); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			if err = tx.MergeAssetAt(ctx, assetId, stopsAt); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
-			return userAsset, nil
+			_, err = tx.RegisterAssetEvent(ctx, userAsset, marketplacedb.AssetBought)
+			if err != nil {
+				return nil, 0, err
+			}
+			cost, ok := calcCost(userAsset)
+			if !ok {
+				return nil, 0, serrors.New("asset parameters would lead to integer overflow")
+			}
+			_, err = tx.UpdateASMoney(ctx, asset.IA, cost)
+			if err != nil {
+				return nil, 0, err
+			}
+			return userAsset, cost, nil
 		}
 		for _, asset := range assets {
 			assetId, err := DatabaseAssetID(asset.AssetId)
 			if err != nil {
 				return err
 			}
-			newAsset, err := buyAsset(assetId, asset.StartsAtExactly, asset.StopsAtExactly, asset.BandwidthExact)
+			newAsset, cost, err := buyAsset(assetId, asset.StartsAtExactly, asset.StopsAtExactly, asset.BandwidthExact)
 			if err != nil {
 				return err
 			}
-			cost, ok := calcCost(newAsset)
-			if !ok {
-				return serrors.New("asset parameters would lead to integer overflow")
-			}
-			costAcc, ok = addInt64(costAcc, cost)
+			costAcc, ok := addInt64(costAcc, cost)
 			if !ok {
 				return serrors.New("asset parameters would lead to integer overflow")
 			}
@@ -812,7 +820,7 @@ func (s *MarketplaceStorage) UndoRedemption(
 func validateAsset(
 	a *marketplacedb.DBAsset,
 ) error {
-	duration := a.StopsAt - a.StartAt
+	duration := a.StopsAt - a.StartsAt
 	if a.Bandwidth == 0 {
 		return serrors.New("bandwidth is 0")
 	}
@@ -824,7 +832,7 @@ func validateAsset(
 func validateAssetForRedemption(
 	a *marketplacedb.DBAsset,
 ) error {
-	duration := a.StopsAt - a.StartAt
+	duration := a.StopsAt - a.StartsAt
 	if err := validateAsset(a); err != nil {
 		return err
 	}
@@ -1010,4 +1018,27 @@ func (s *MarketplaceStorage) AssignReservation(
 		return 0, err
 	}
 	return 1, nil
+}
+
+func (s *MarketplaceStorage) LookupAssets(ctx context.Context, ia addr.IA) ([]*marketplacedb.DBAsset, error) {
+	return s.db.LookupAssets(ctx, ia)
+}
+
+func (s *MarketplaceStorage) LookupAllAssetSegments(ctx context.Context, id int64, ia addr.IA) ([]*marketplacedb.DBAssetSegment, error) {
+	var segments []*marketplacedb.DBAssetSegment
+	err := s.db.WithTx(ctx, func(tx marketplacedb.Repository) error {
+		_, err := tx.LookupAsset(ctx, id, ia)
+		if err != nil {
+			return err
+		}
+		segments, err = tx.LookupAllAssetSegments(ctx, id)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return segments, nil
 }

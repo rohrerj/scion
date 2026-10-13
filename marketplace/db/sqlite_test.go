@@ -47,7 +47,7 @@ func testAsset() *DBAsset {
 		Price:           5,
 		TimeGranularity: 60,
 		TimeMinDuration: 60,
-		StartAt:         start.Unix(),
+		StartsAt:        start.Unix(),
 		StopsAt:         start.Add(time.Hour).Unix(),
 	}
 }
@@ -59,7 +59,7 @@ func insertAsset(ctx context.Context, repo Repository, asset *DBAsset) (int64, e
 	}
 	if !asset.AccountId.Valid {
 		_, err = repo.InsertAssetSegment(ctx, assetId,
-			asset.StartAt, asset.StopsAt, asset.Bandwidth)
+			asset.StartsAt, asset.StopsAt, asset.Bandwidth)
 	}
 	return assetId, err
 }
@@ -157,7 +157,7 @@ func TestAssetTransitionAndRowScanners(t *testing.T) {
 		Egress:           2,
 		Bandwidth:        100,
 		EncodedBandwidth: 5,
-		StartsAt:         asset.StartAt,
+		StartsAt:         asset.StartsAt,
 		StopsAt:          asset.StopsAt,
 		Key:              []byte("key"),
 	}
@@ -243,7 +243,7 @@ func TestSearchOwnedAssets(t *testing.T) {
 	require.Equal(t, ownedID, assets[0].ID)
 
 	// The validity filters still apply to the assets of the account.
-	startsAt := owned.StartAt
+	startsAt := owned.StartsAt
 	stopsAt := owned.StopsAt
 	assets, err = backend.SearchOwnedAssets(ctx, &OwnedAssetQuery{
 		AccountId: &alicesAccountID,
@@ -329,7 +329,7 @@ func TestRegisterAssetEvent(t *testing.T) {
 		Bandwidth:       1000,
 		BandwidthMin:    10,
 		BandwidthMax:    1000,
-		StartAt:         time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		StartsAt:        time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
 		StopsAt:         time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
 		TimeGranularity: 10,
 		TimeMinDuration: 10,
@@ -348,7 +348,7 @@ func TestRegisterAssetEvent(t *testing.T) {
 		Bandwidth:       1000,
 		BandwidthMin:    10,
 		BandwidthMax:    1000,
-		StartAt:         time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		StartsAt:        time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
 		StopsAt:         time.Date(2027, 1, 2, 0, 0, 0, 0, time.UTC).Unix(),
 		TimeGranularity: 10,
 		TimeMinDuration: 10,
@@ -371,11 +371,11 @@ func TestRegisterAssetEvent(t *testing.T) {
 	require.Len(t, buyStats, 1)
 	require.Equal(t, publishAsset.Bandwidth, uint32(publishStats[0].Bandwidth))
 	require.Equal(t, publishAsset.Price, uint32(publishStats[0].Price))
-	require.Equal(t, publishAsset.StartAt, publishStats[0].StartsAt)
+	require.Equal(t, publishAsset.StartsAt, publishStats[0].StartsAt)
 	require.Equal(t, publishAsset.StopsAt, publishStats[0].StopsAt)
 
 	require.Equal(t, buyAsset.Bandwidth, uint32(buyStats[0].Bandwidth))
 	require.Equal(t, buyAsset.Price, uint32(buyStats[0].Price))
-	require.Equal(t, buyAsset.StartAt, buyStats[0].StartsAt)
+	require.Equal(t, buyAsset.StartsAt, buyStats[0].StartsAt)
 	require.Equal(t, buyAsset.StopsAt, buyStats[0].StopsAt)
 }

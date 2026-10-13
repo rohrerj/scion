@@ -18,6 +18,7 @@ import (
 	"crypto/rand"
 	"embed"
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -81,6 +82,8 @@ func Init(signer *registration.Signer, store *storage.MarketplaceStorage, mux *h
 	mux.HandleFunc("/logout", h.logoutHandler)
 	mux.HandleFunc("/aslogin", h.asLoginHandler)
 	mux.HandleFunc("/asbalance", h.asBalanceHandler)
+	mux.HandleFunc("/asassets", h.asAssetsHandler)
+	mux.HandleFunc("/asassets/data", h.asAssetsDataHandler)
 	mux.Handle("/static/", http.FileServerFS(staticFS))
 }
 
@@ -166,6 +169,74 @@ func (h *Handler) asLoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, "/asbalance", http.StatusSeeOther)
+}
+
+func (h *Handler) asAssetsDataHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	ia, ok := session.Values["user"].(addr.IA)
+	if !ok {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseForm()
+	assetIdString := r.FormValue("id")
+	assetId, err := strconv.ParseInt(assetIdString, 10, 64)
+	if err != nil {
+		log.Debug("AS asset data handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	segments, err := h.store.LookupAllAssetSegments(r.Context(), assetId, ia)
+	if err != nil {
+		log.Debug("AS asset data handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	err = json.NewEncoder(w).Encode(segments)
+	if err != nil {
+		log.Debug("AS asset data handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+}
+
+func (h *Handler) asAssetsHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("1")
+	session, err := h.GetSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
+		return
+	}
+	ia, ok := session.Values["user"].(addr.IA)
+	if !ok {
+		http.Redirect(w, r, "/aslogin", http.StatusSeeOther)
+		return
+	}
+	fmt.Println("2")
+	assets, err := h.store.LookupAssets(r.Context(), ia)
+	if err != nil {
+		log.Debug("AS asset handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fmt.Println("3", assets)
+	err = templates.ExecuteTemplate(w, "asassets.html", map[string]any{
+		"Assets":   assets,
+		"Username": ia.String(),
+	})
+	if err != nil {
+		log.Debug("AS asset handler", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
 }
 
 func (h *Handler) asBalanceHandler(w http.ResponseWriter, r *http.Request) {
