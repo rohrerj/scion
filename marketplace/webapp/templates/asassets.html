@@ -73,9 +73,9 @@
                 </tbody>
             </table>
         </section>
-        <section id="viz" class="util" hidden aria-live="polite">
+        <section id="viz" class="card util" hidden aria-live="polite">
             <div class="util-head">
-                <h2 id="viz-title"></h2>
+                <h3 id="viz-title"></h3>
                 <button type="button" onclick="Utilization.hide()">Close</button>
             </div>
             <p id="viz-error" class="util-error" role="alert" hidden></p>
@@ -97,7 +97,7 @@
             <p class="util-hint">Drag across the chart to zoom into a range. Double-click to show everything.</p>
 
             <div class="util-stats">
-                <span>Bandwidth <b id="stat-bw"></b></span>
+                <span>Bandwidth in kbps <b id="stat-bw"></b></span>
                 <span>Average sold in view <b id="stat-avg"></b></span>
                 <span>Peak in view <b id="stat-peak"></b></span>
                 <span>Segments in view <b id="stat-count"></b></span>

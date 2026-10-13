@@ -388,6 +388,7 @@ select option {
 .util-chart {
     display: grid;
     grid-template-columns: 4em 1fr;
+    margin-top: 30px;
 }
 
 .util-y {
