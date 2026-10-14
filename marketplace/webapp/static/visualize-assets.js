@@ -37,6 +37,7 @@ const Utilization = (() => {
         const a = {
             id: data.id,
             bandwidth: Number(data.bandwidth),
+            price: Number(data.price),
             start: Number(data.start) * 1000, // unix seconds -> ms for JS Date
             end: Number(data.end) * 1000,
             slots: rawSlots
@@ -272,7 +273,7 @@ const Utilization = (() => {
             frag.appendChild(gap);
         };
         let cursor = from; // end of the data seen so far; anything after it is a gap
-        let weighted = 0, covered = 0, peak = 0, n = 0;
+        let weighted = 0, covered = 0, peak = 0, n = 0, revenue = 0;
         for (const s of asset.slots) {
             if (s.e <= from) continue;
             if (s.s >= to) break; // slots are sorted by start
@@ -284,6 +285,7 @@ const Utilization = (() => {
             const pct = (sold / bw) * 100;
             weighted += pct * (b - a);
             covered += b - a;
+            revenue += sold * asset.price * ((b - a) / 1000)
             peak = Math.max(peak, pct);
             n++;
 
@@ -303,6 +305,7 @@ const Utilization = (() => {
 
         $('stat-avg').textContent = covered ? (weighted / covered).toFixed(0) + '%' : '\u2013';
         $('stat-peak').textContent = n ? peak.toFixed(0) + '%' : '\u2013';
+        $('stat-revenue').textContent = n ? revenue : '\u2013';
         $('stat-count').textContent = String(n);
     }
 
