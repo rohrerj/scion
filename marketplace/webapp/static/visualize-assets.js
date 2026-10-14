@@ -305,7 +305,7 @@ const Utilization = (() => {
 
         $('stat-avg').textContent = covered ? (weighted / covered).toFixed(0) + '%' : '\u2013';
         $('stat-peak').textContent = n ? peak.toFixed(0) + '%' : '\u2013';
-        $('stat-revenue').textContent = n ? revenue : '\u2013';
+        $('stat-revenue').textContent = n ? fmtNum(Math.floor(revenue)) : '\u2013';
         $('stat-count').textContent = String(n);
     }
 
