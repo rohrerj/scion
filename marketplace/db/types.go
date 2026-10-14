@@ -38,7 +38,7 @@ type ValidityMode int
 
 const (
 	FullOverlap    ValidityMode = 0
-	PartialOverlap              = 1
+	PartialOverlap ValidityMode = 1
 )
 
 type AssetEventType int

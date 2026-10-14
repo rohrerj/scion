@@ -762,7 +762,8 @@ func (s *MarketplaceStorage) BuyAssets(
 			if err != nil {
 				return err
 			}
-			costAcc, ok := addInt64(costAcc, cost)
+			var ok bool
+			costAcc, ok = addInt64(costAcc, cost)
 			if !ok {
 				return serrors.New("asset parameters would lead to integer overflow")
 			}
