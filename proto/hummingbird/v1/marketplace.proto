@@ -47,10 +47,9 @@ message UpdateAsset {
     optional uint32 bandwidth_max = 3;
     optional int64 starts_at = 4;
     optional int64 stops_at = 5;
-    optional uint32 time_granularity = 6;
-    optional uint32 time_min_duration = 7;
-    optional uint32 time_max_duration = 8;
-    optional uint32 price = 9;
+    optional uint32 time_min_duration = 6;
+    optional uint32 time_max_duration = 7;
+    optional uint32 price = 8;
 }
 message Remove {}
 message UpdateAssetsResponse {

@@ -132,8 +132,12 @@ func (s *MarketplaceStorage) UpdateListedAsset(
 		// check for illegal modifications
 		if (a.Bandwidth != nil && *a.Bandwidth < dbAsset.Bandwidth) ||
 			(a.StartsAt != nil && *a.StartsAt > dbAsset.StartsAt) ||
-			(a.StopsAt != nil && *a.StopsAt < dbAsset.StopsAt) {
-			return serrors.New("bandwidth and validity period cannot be decreased")
+			(a.StopsAt != nil && *a.StopsAt < dbAsset.StopsAt) ||
+			(a.TimeMinDuration != nil && *a.TimeMinDuration > dbAsset.TimeMinDuration) ||
+			(a.TimeMaxDuration != nil && *a.TimeMaxDuration < dbAsset.TimeMaxDuration) ||
+			(a.BandwidthMin != nil && *a.BandwidthMin > dbAsset.BandwidthMin) ||
+			(a.BandwidthMax != nil && *a.BandwidthMax < dbAsset.BandwidthMax) {
+			return serrors.New("invalid asset modifications")
 		}
 		if a.Bandwidth != nil && *a.Bandwidth > dbAsset.Bandwidth {
 			if err = tx.IncreaseAssetSegmentsBandwidth(ctx, id, int64(*a.Bandwidth-dbAsset.Bandwidth)); err != nil {
@@ -170,9 +174,6 @@ func (s *MarketplaceStorage) UpdateListedAsset(
 		}
 		if a.TimeMaxDuration != nil {
 			dbAsset.TimeMaxDuration = *a.TimeMaxDuration
-		}
-		if a.TimeGranularity != nil {
-			dbAsset.TimeGranularity = *a.TimeGranularity
 		}
 		if a.Price != nil {
 			dbAsset.Price = *a.Price

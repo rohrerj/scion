@@ -254,10 +254,9 @@ type UpdateAsset struct {
 	BandwidthMax    *uint32                `protobuf:"varint,3,opt,name=bandwidth_max,json=bandwidthMax,proto3,oneof" json:"bandwidth_max,omitempty"`
 	StartsAt        *int64                 `protobuf:"varint,4,opt,name=starts_at,json=startsAt,proto3,oneof" json:"starts_at,omitempty"`
 	StopsAt         *int64                 `protobuf:"varint,5,opt,name=stops_at,json=stopsAt,proto3,oneof" json:"stops_at,omitempty"`
-	TimeGranularity *uint32                `protobuf:"varint,6,opt,name=time_granularity,json=timeGranularity,proto3,oneof" json:"time_granularity,omitempty"`
-	TimeMinDuration *uint32                `protobuf:"varint,7,opt,name=time_min_duration,json=timeMinDuration,proto3,oneof" json:"time_min_duration,omitempty"`
-	TimeMaxDuration *uint32                `protobuf:"varint,8,opt,name=time_max_duration,json=timeMaxDuration,proto3,oneof" json:"time_max_duration,omitempty"`
-	Price           *uint32                `protobuf:"varint,9,opt,name=price,proto3,oneof" json:"price,omitempty"`
+	TimeMinDuration *uint32                `protobuf:"varint,6,opt,name=time_min_duration,json=timeMinDuration,proto3,oneof" json:"time_min_duration,omitempty"`
+	TimeMaxDuration *uint32                `protobuf:"varint,7,opt,name=time_max_duration,json=timeMaxDuration,proto3,oneof" json:"time_max_duration,omitempty"`
+	Price           *uint32                `protobuf:"varint,8,opt,name=price,proto3,oneof" json:"price,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -323,13 +322,6 @@ func (x *UpdateAsset) GetStartsAt() int64 {
 func (x *UpdateAsset) GetStopsAt() int64 {
 	if x != nil && x.StopsAt != nil {
 		return *x.StopsAt
-	}
-	return 0
-}
-
-func (x *UpdateAsset) GetTimeGranularity() uint32 {
-	if x != nil && x.TimeGranularity != nil {
-		return *x.TimeGranularity
 	}
 	return 0
 }
@@ -2508,25 +2500,23 @@ const file_proto_hummingbird_v1_marketplace_proto_rawDesc = "" +
 	"\basset_id\x18\x01 \x01(\fR\aassetId\x12;\n" +
 	"\x06update\x18\x02 \x01(\v2!.proto.hummingbird.v1.UpdateAssetH\x00R\x06update\x126\n" +
 	"\x06remove\x18\x03 \x01(\v2\x1c.proto.hummingbird.v1.RemoveH\x00R\x06removeB\v\n" +
-	"\toperation\"\x8b\x04\n" +
+	"\toperation\"\xc6\x03\n" +
 	"\vUpdateAsset\x12!\n" +
 	"\tbandwidth\x18\x01 \x01(\rH\x00R\tbandwidth\x88\x01\x01\x12(\n" +
 	"\rbandwidth_min\x18\x02 \x01(\rH\x01R\fbandwidthMin\x88\x01\x01\x12(\n" +
 	"\rbandwidth_max\x18\x03 \x01(\rH\x02R\fbandwidthMax\x88\x01\x01\x12 \n" +
 	"\tstarts_at\x18\x04 \x01(\x03H\x03R\bstartsAt\x88\x01\x01\x12\x1e\n" +
-	"\bstops_at\x18\x05 \x01(\x03H\x04R\astopsAt\x88\x01\x01\x12.\n" +
-	"\x10time_granularity\x18\x06 \x01(\rH\x05R\x0ftimeGranularity\x88\x01\x01\x12/\n" +
-	"\x11time_min_duration\x18\a \x01(\rH\x06R\x0ftimeMinDuration\x88\x01\x01\x12/\n" +
-	"\x11time_max_duration\x18\b \x01(\rH\aR\x0ftimeMaxDuration\x88\x01\x01\x12\x19\n" +
-	"\x05price\x18\t \x01(\rH\bR\x05price\x88\x01\x01B\f\n" +
+	"\bstops_at\x18\x05 \x01(\x03H\x04R\astopsAt\x88\x01\x01\x12/\n" +
+	"\x11time_min_duration\x18\x06 \x01(\rH\x05R\x0ftimeMinDuration\x88\x01\x01\x12/\n" +
+	"\x11time_max_duration\x18\a \x01(\rH\x06R\x0ftimeMaxDuration\x88\x01\x01\x12\x19\n" +
+	"\x05price\x18\b \x01(\rH\aR\x05price\x88\x01\x01B\f\n" +
 	"\n" +
 	"_bandwidthB\x10\n" +
 	"\x0e_bandwidth_minB\x10\n" +
 	"\x0e_bandwidth_maxB\f\n" +
 	"\n" +
 	"_starts_atB\v\n" +
-	"\t_stops_atB\x13\n" +
-	"\x11_time_granularityB\x14\n" +
+	"\t_stops_atB\x14\n" +
 	"\x12_time_min_durationB\x14\n" +
 	"\x12_time_max_durationB\b\n" +
 	"\x06_price\"\b\n" +

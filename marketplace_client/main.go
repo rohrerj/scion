@@ -511,7 +511,6 @@ func handleUpdate(
 							Price:           readOptionalUint32(reader, "price per kbit per second: "),
 							TimeMinDuration: readOptionalUint32(reader, "minimum time duration: "),
 							TimeMaxDuration: readOptionalUint32(reader, "maximum time duration: "),
-							TimeGranularity: readOptionalUint32(reader, "time granularity: "),
 						},
 					},
 				})
