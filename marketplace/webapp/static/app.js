@@ -227,8 +227,8 @@ const Utilization = (() => {
 
     // ---------- loading ----------
 
-    // The page already knows id, bandwidth, start and end (data-* attributes on
-    // the button). Only the slots are fetched: POST /slots?id=<id> -> [ {starts_at, stops_at, available}, ... ]
+    // The page already knows id, bandwidth, price, start and end (data-* attributes on the button).
+    // Only the slots are fetched: POST /asassets/data?id=<id> -> [ {starts_at, stops_at, available}, ... ]
     // All timestamps from the server are unix seconds; internally everything is milliseconds.
     async function load(data) {
         if (cache.has(data.id)) return cache.get(data.id);
@@ -400,7 +400,7 @@ const Utilization = (() => {
     function makeTicks(from, to) {
         const sp = to - from;
         const step = STEPS.find((s) => sp / s <= 8) || STEPS[STEPS.length - 1];
-        const ticks = []; // aligned to UTC
+        const ticks = []; // multiples of the step since the Unix epoch (UTC); steps above 1 day are not week/month aligned
         for (let t = Math.ceil(from / step) * step; t <= to; t += step) ticks.push(t);
 
         const label = (t) => {
@@ -523,7 +523,7 @@ const Utilization = (() => {
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const LOCAL = 0; // interface "0" stands for the local AS itself
-    const MAX_U32 = 4294967295; // the server uses uint32 for all numbers in the request
+    const MAX_U32 = 4294967295; // the server uses uint32 for bandwidths, durations, prices and interfaces
 
     // Layout constants for the SVG (in viewBox units)
     const L = {
@@ -555,7 +555,7 @@ const Utilization = (() => {
         validFrom: null,      // Date
         validUntil: null,     // Date
         defaults: null,       // {bandwidth_min: kbps, ..., time_granularity: s, ...}
-        bandwidths: new Map(), // key -> {ingress, egress, kbps} or {interface, direction, kbps}
+        bandwidths: new Map(), // key -> {ingress, egress, kbps, price} or {interface, direction, kbps, price}, plus prefilled
         prefillNote: '',      // shown in the summary after pre-filling from static info
     };
 
@@ -577,8 +577,7 @@ const Utilization = (() => {
             bwSection: $('bandwidth-config'), bwSummary: $('bw-summary'), bwForm: $('bw-form'),
             bwA: $('bw-a'), bwALabel: $('bw-a-label'), bwBWrap: $('bw-b-wrap'), bwB: $('bw-b'),
             bwValue: $('bw-value'), bwUnit: $('bw-unit'), bwAbLabel: $('bw-ab-label'),
-            bwBaWrap: $('bw-ba-wrap'), bwBaLabel: $('bw-ba-label'),
-            bwDirWrap: $('bw-dir-wrap'), bwDir: $('bw-dir'),
+            bwBaLabel: $('bw-ba-label'),
             bwValueRev: $('bw-value-rev'), bwUnitRev: $('bw-unit-rev'),
             bwPrice: $('bw-price'), bwPriceLabel: $('bw-price-label'),
             bwPriceRev: $('bw-price-rev'), bwPriceRevLabel: $('bw-price-rev-label'),
@@ -607,7 +606,6 @@ const Utilization = (() => {
         el.bwForm.addEventListener('submit', onAddBandwidth);
         el.bwA.addEventListener('change', onPairChanged);
         el.bwB.addEventListener('change', onPairChanged);
-        el.bwDir.addEventListener('change', onPairChanged);
         el.create.addEventListener('click', onCreate);
         // The arrow follows the bandwidth field being edited (see onPairChanged)
         for (const n of [el.bwValue, el.bwUnit, el.bwPrice, el.bwValueRev, el.bwUnitRev, el.bwPriceRev]) {
@@ -666,11 +664,15 @@ const Utilization = (() => {
             for (const [k, e] of entries) if (e.prefilled) entries.delete(k);
             state.prefillNote = '';
             if (info) {
-                const added = prefill(entries, info, settings.mode, topo.byId, ratio);
+                const { added, localUnset } = prefill(entries, info, settings.mode, topo.byId, ratio);
                 const n = `${added} ${added === 1 ? 'entry' : 'entries'}`;
                 state.prefillNote = ratio > 0
                     ? `Pre-filled ${n} at ${ratio}% of the capacities in ${infoFile.name}.`
                     : `Added ${n} from ${infoFile.name} with 0 kbit/s (ratio 0%); entries left at 0 kbit/s are not submitted.`;
+                if (ratio > 0 && localUnset) {
+                    state.prefillNote += ` ${infoFile.name} has no capacity for interface 0 (local), so its entries` +
+                        ' were added with 0 kbit/s; entries left at 0 kbit/s are not submitted.';
+                }
             }
             prefilledFor = id;
         }
@@ -853,6 +855,7 @@ const Utilization = (() => {
     // Static info: { "Bandwidth": { "<if>": { "Inter": capacity, "Intra": { "<other if>": capacity } } } }
     // Capacities are in kbit/s. Anything missing or unusable is skipped.
     // Intra of interface x towards y is taken as the capacity for x → y.
+    // Interface "0" (local) is only used for its Inter capacity (per-interface pre-fill); usually it is missing.
     function parseStaticInfo(obj, name) {
         if (!isObject(obj) || !isObject(obj.Bandwidth)) throw new Error(`${name}: missing "Bandwidth" object.`);
         const usable = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
@@ -860,9 +863,9 @@ const Utilization = (() => {
         const intra = [];        // [{ingress, egress, capacity}]
         for (const [idStr, entry] of Object.entries(obj.Bandwidth)) {
             const id = toIfId(idStr);
-            if (id === null || id === LOCAL || !isObject(entry)) continue;
+            if (id === null || !isObject(entry)) continue;
             if (usable(entry.Inter)) inter.set(id, entry.Inter);
-            if (!isObject(entry.Intra)) continue;
+            if (id === LOCAL || !isObject(entry.Intra)) continue;
             for (const [otherStr, capacity] of Object.entries(entry.Intra)) {
                 const other = toIfId(otherStr);
                 if (other === null || other === LOCAL || other === id || !usable(capacity)) continue;
@@ -872,9 +875,12 @@ const Utilization = (() => {
         return { inter, intra };
     }
 
-    // Adds entries at ratio% of the capacity where none exist yet; returns how many were added.
+    // Adds entries at ratio% of the capacity where none exist yet.
     // Inter → 0 ↔ x (pairs) or ingress/egress of x (per interface); Intra → x → y (pairs only).
+    // Per interface, ingress/egress of 0 (local) are always added: at ratio% of the Inter capacity of "0"
+    // if the file has one, else with 0 kbit/s (to be filled in).
     // Added entries are marked "prefilled" until the user saves them through the form.
+    // Returns {added: number of entries added, localUnset: whether 0 (local) was added without a capacity}.
     function prefill(entries, info, mode, byId, ratio) {
         // Rounded down so the value never exceeds the share of the capacity; at least 1 kbit/s
         // 0% gives 0 kbit/s, which means "not specified yet"
@@ -884,13 +890,21 @@ const Utilization = (() => {
         let added = 0;
         const add = (e) => {
             const k = keyOf(e);
-            if (!entries.has(k)) {
-                entries.set(k, { ...e, prefilled: true });
-                added++;
-            }
+            if (entries.has(k)) return false;
+            entries.set(k, { ...e, prefilled: true });
+            added++;
+            return true;
         };
+        let localUnset = false;
+        if (mode !== 'pairs') {
+            const capacity = info.inter.get(LOCAL);
+            const kbps = capacity === undefined ? 0 : share(capacity);
+            for (const direction of ['ingress', 'egress']) {
+                if (add({ interface: LOCAL, direction, kbps, price: null }) && capacity === undefined) localUnset = true;
+            }
+        }
         for (const [id, capacity] of info.inter) {
-            if (!byId.has(id)) continue;
+            if (!byId.has(id)) continue; // also skips 0 (local), handled above
             const kbps = share(capacity);
             if (mode === 'pairs') {
                 add({ ingress: LOCAL, egress: id, kbps, price: null });
@@ -907,7 +921,7 @@ const Utilization = (() => {
                 }
             }
         }
-        return added;
+        return { added, localUnset };
     }
 
     // ---------------------------------------------------------- visualization
@@ -1158,16 +1172,13 @@ const Utilization = (() => {
         el.bwA.replaceChildren(...options());
         el.bwA.value = String(ids[0]);
         el.bwBWrap.hidden = !pairs;
-        el.bwBaWrap.hidden = !pairs;
-        el.bwDirWrap.hidden = pairs;
-        el.bwValueRev.required = pairs;
-        el.bwPriceRev.required = pairs;
+        // Both modes have two direction groups (pairs 1 → 2 / 2 → 1, per interface ingress / egress),
+        // each optional; see onAddBandwidth
         if (pairs) {
             el.bwB.replaceChildren(...options());
             el.bwB.value = String(ids.length > 1 ? ids[1] : LOCAL);
         } else {
             el.bwB.replaceChildren();
-            el.bwDir.value = 'ingress';
         }
         clearValueFields();
 
@@ -1200,25 +1211,30 @@ const Utilization = (() => {
         for (const o of el.bwB.options) o.disabled = o.value === el.bwA.value;
     }
 
-    // Current form selection; per interface: {a, dir}, pairs: {a: interface 1, b: interface 2}
+    // Current form selection; per interface: {a, b: null}, pairs: {a: interface 1, b: interface 2}
     function selected() {
         const a = Number(el.bwA.value);
-        return state.mode === 'pairs' ? { a, b: Number(el.bwB.value) } : { a, b: null, dir: el.bwDir.value };
+        return { a, b: state.mode === 'pairs' ? Number(el.bwB.value) : null };
     }
 
     function onPairChanged() {
         if (state.mode === 'pairs') syncPairOptions();
-        const { a, b, dir } = selected();
+        const { a, b } = selected();
+        // The arrow shows the direction whose fields are being edited: the first group
+        // (1 → 2, or ingress per interface) by default, the second while one of its fields has focus
+        const f = document.activeElement;
+        const second = [el.bwValueRev, el.bwUnitRev, el.bwPriceRev].includes(f);
         let exists;
         if (b === null) {
-            highlight([a], dir);
-            el.bwAbLabel.textContent = `${directionText(dir)} bandwidth`;
-            el.bwPriceLabel.textContent = `${directionText(dir)} price`;
-            exists = state.bandwidths.has(keyOf({ interface: a, direction: dir }));
+            highlight([a], second ? 'egress' : 'ingress');
+            el.bwAbLabel.textContent = 'Ingress bandwidth';
+            el.bwPriceLabel.textContent = 'Ingress price';
+            el.bwBaLabel.textContent = 'Egress bandwidth';
+            el.bwPriceRevLabel.textContent = 'Egress price';
+            exists = state.bandwidths.has(keyOf({ interface: a, direction: 'ingress' })) ||
+                state.bandwidths.has(keyOf({ interface: a, direction: 'egress' }));
         } else {
-            // The arrow shows the direction whose fields are being edited; 1 → 2 by default
-            const f = document.activeElement;
-            if ([el.bwValueRev, el.bwUnitRev, el.bwPriceRev].includes(f)) highlight([b, a]);
+            if (second) highlight([b, a]);
             else highlight([a, b]);
             el.bwAbLabel.textContent = `Bandwidth ${a} → ${b}`;
             el.bwPriceLabel.textContent = `Price ${a} → ${b}`;
@@ -1229,7 +1245,8 @@ const Utilization = (() => {
         el.bwSubmit.textContent = exists ? 'Update' : 'Add';
     }
 
-    // Puts stored values into the form: a pair in both directions, or one interface direction.
+    // Puts stored values into the form, always both directions: a pair as e.ingress → e.egress
+    // and back, an interface as ingress and egress. Focuses the first empty field of e's direction.
     function loadIntoForm(e) {
         const fill = (value, unit, price, key) => {
             const found = state.bandwidths.get(key);
@@ -1237,21 +1254,22 @@ const Utilization = (() => {
             else value.value = '';
             price.value = found && found.price !== null ? String(found.price) : '';
         };
+        let group;
         if (e.interface !== undefined) {
             el.bwA.value = String(e.interface);
-            el.bwDir.value = e.direction;
             onPairChanged();
-            fill(el.bwValue, el.bwUnit, el.bwPrice, keyOf(e));
-            (el.bwValue.value === '' ? el.bwValue : el.bwPrice).focus();
+            fill(el.bwValue, el.bwUnit, el.bwPrice, keyOf({ interface: e.interface, direction: 'ingress' }));
+            fill(el.bwValueRev, el.bwUnitRev, el.bwPriceRev, keyOf({ interface: e.interface, direction: 'egress' }));
+            group = e.direction === 'egress' ? [el.bwValueRev, el.bwPriceRev] : [el.bwValue, el.bwPrice];
         } else {
             el.bwA.value = String(e.ingress);
             el.bwB.value = String(e.egress);
             onPairChanged();
             fill(el.bwValue, el.bwUnit, el.bwPrice, pairKey(e.ingress, e.egress));
             fill(el.bwValueRev, el.bwUnitRev, el.bwPriceRev, pairKey(e.egress, e.ingress));
-            const firstEmpty = [el.bwValue, el.bwPrice, el.bwValueRev, el.bwPriceRev].find((n) => n.value === '');
-            (firstEmpty || el.bwValue).focus();
+            group = [el.bwValue, el.bwPrice];
         }
+        (group.find((n) => n.value === '') || group[0]).focus();
     }
 
     function readKbps(input, unit, what) {
@@ -1281,30 +1299,35 @@ const Utilization = (() => {
     function onAddBandwidth(ev) {
         ev.preventDefault();
         clearError();
-        const { a, b, dir } = selected();
+        const { a, b } = selected();
+        // Each direction is optional. A direction counts as set when its bandwidth or price field is
+        // filled, and then needs both. Empty directions are skipped: an existing entry for them stays
+        // as it is (rows are removed with "Remove" in the table). At least one direction is needed.
+        const first = { value: el.bwValue, unit: el.bwUnit, price: el.bwPrice };
+        const second = { value: el.bwValueRev, unit: el.bwUnitRev, price: el.bwPriceRev };
+        const groups = b === null
+            ? [
+                { ...first, what: `Interface ${ifcText(a)} ingress`, base: { interface: a, direction: 'ingress' } },
+                { ...second, what: `Interface ${ifcText(a)} egress`, base: { interface: a, direction: 'egress' } },
+            ]
+            : [
+                { ...first, what: `${a} → ${b}`, base: { ingress: a, egress: b } },
+                { ...second, what: `${b} → ${a}`, base: { ingress: b, egress: a } },
+            ];
         try {
-            if (b === null) {
-                const what = `Interface ${a} ${dir}`;
-                const e = {
-                    interface: a, direction: dir,
-                    kbps: readKbps(el.bwValue, el.bwUnit, what), price: readPrice(el.bwPrice, what),
-                };
-                state.bandwidths.set(keyOf(e), e);
-            } else {
-                if (a === b) throw new Error('Interface 1 and Interface 2 must be different.');
-                // Both directions are read before anything is stored.
-                const ab = {
-                    ingress: a, egress: b,
-                    kbps: readKbps(el.bwValue, el.bwUnit, `${a} → ${b}`), price: readPrice(el.bwPrice, `${a} → ${b}`),
-                };
-                const ba = {
-                    ingress: b, egress: a,
-                    kbps: readKbps(el.bwValueRev, el.bwUnitRev, `${b} → ${a}`),
-                    price: readPrice(el.bwPriceRev, `${b} → ${a}`),
-                };
-                state.bandwidths.set(keyOf(ab), ab);
-                state.bandwidths.set(keyOf(ba), ba);
+            if (b !== null && a === b) throw new Error('Interface 1 and Interface 2 must be different.');
+            const filled = groups.filter((g) => g.value.value.trim() !== '' || g.price.value.trim() !== '');
+            if (filled.length === 0) {
+                first.value.focus();
+                throw new Error('Please enter bandwidth and price for at least one direction.');
             }
+            // All set directions are read before anything is stored.
+            const entries = filled.map((g) => ({
+                ...g.base,
+                kbps: readKbps(g.value, g.unit, g.what),
+                price: readPrice(g.price, g.what),
+            }));
+            for (const e of entries) state.bandwidths.set(keyOf(e), e);
         } catch (err) {
             showError(err.message);
             return;
@@ -1441,7 +1464,7 @@ const Utilization = (() => {
 
     // ------------------------------------------------------ request
 
-    // Matches setupRequest on the server (plus "mode"):
+    // Matches setupRequest on the server, except check_overlap, which onCreate adds:
     // times as Unix seconds, bandwidths in kbit/s, durations in seconds, price per kbit/s per second.
     // Per-interface entries use 0 on the unused side: ingress x → {ingress: x, egress: 0},
     // egress x → {ingress: 0, egress: x}.
@@ -1582,9 +1605,6 @@ const Utilization = (() => {
         el.bwError.textContent = '';
         el.error.textContent = '';
     }
-
-    // For the later request: getConfig() returns the object above, validate() lists what is missing.
-    window.setupAssets = { getConfig: configObject, validate };
 })();
 
 

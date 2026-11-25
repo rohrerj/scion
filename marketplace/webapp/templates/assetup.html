@@ -118,13 +118,12 @@
                         <input type="radio" name="bw-mode" value="pairs" checked>
                         Per interface pair
                     </label>
-                    <p class="desc muted">Each pair is set in both directions, which can differ (e.g. 1 → 2 and 2 → 1).
-                        Interface 0 means local: for every interface x used in a pair, 0 ↔ x must be set as well.</p>
+                    <p class="desc muted">Each pair is set in both directions, which can differ (e.g. 1 → 2 and 2 → 1).</p>
                     <label class="radio">
                         <input type="radio" name="bw-mode" value="interfaces">
                         Per interface
                     </label>
-                    <p class="desc muted">Bandwidth per interface, set separately for ingress and egress.</p>
+                    <p class="desc muted">Bandwidth per interface, set for ingress and egress together, which can differ.</p>
                 </fieldset>
 
                 <p class="error" id="form-error" role="alert"></p>
@@ -148,24 +147,19 @@
             <form id="bw-form" class="bw-form" novalidate>
                 <label><span id="bw-a-label">Interface 1</span> <select id="bw-a" required></select></label>
                 <label id="bw-b-wrap"><span id="bw-b-label">Interface 2</span> <select id="bw-b"></select></label>
-                <label id="bw-dir-wrap">Direction
-                    <select id="bw-dir">
-                        <option value="ingress">Ingress</option>
-                        <option value="egress">Egress</option>
-                    </select>
-                </label>
-                <!-- One group per direction: bandwidth and price -->
+                <!-- One group per direction: bandwidth and price.
+                     Pairs: 1 → 2 and 2 → 1; per interface: ingress and egress. -->
                 <div class="dir-group">
                     <label>
                         <span id="bw-ab-label">Bandwidth</span>
                         <span class="unit-input">
-                            <input type="number" id="bw-value" min="0" step="any" required>
+                            <input type="number" id="bw-value" min="0" step="any">
                             <select id="bw-unit" class="unit-bw" aria-label="Unit"></select>
                         </span>
                     </label>
                     <label>
                         <span id="bw-price-label">Price</span>
-                        <input type="number" id="bw-price" class="price" min="0" step="1" required>
+                        <input type="number" id="bw-price" class="price" min="0" step="1">
                     </label>
                 </div>
                 <div class="dir-group" id="bw-ba-wrap">
@@ -183,8 +177,8 @@
                 </div>
                 <button type="submit" id="bw-submit">Add</button>
             </form>
-            <p class="desc muted price-hint">Prices are whole numbers per kbit/s per second. Entries with 0 kbit/s
-                are not submitted.</p>
+            <p class="desc muted price-hint">Each direction is optional: fill in bandwidth and price for one or
+                both. Prices are whole numbers per kbit/s per second. Entries with 0 kbit/s are not submitted.</p>
             <p class="error" id="bw-error" role="alert"></p>
             <div id="bw-missing" class="bw-missing" hidden>
                 <p>These directions have no bandwidth yet (optional, they can be left out):</p>
