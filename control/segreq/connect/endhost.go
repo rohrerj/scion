@@ -16,7 +16,7 @@ package connect
 
 import (
 	"context"
-	"sort"
+	"errors"
 
 	"connectrpc.com/connect"
 	"github.com/opentracing/opentracing-go"
@@ -29,6 +29,7 @@ import (
 	"github.com/scionproto/scion/pkg/private/prom"
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	seg "github.com/scionproto/scion/pkg/segment"
+	"github.com/scionproto/scion/private/pagination"
 	"github.com/scionproto/scion/private/pathdb"
 	"github.com/scionproto/scion/private/segment/segfetcher"
 	"github.com/scionproto/scion/private/tracing"
@@ -44,7 +45,6 @@ type EndhostServer struct {
 	Inspector    trust.Inspector
 	PathDB       pathdb.DB
 	PathStore    *segreq.Store
-	Paginator    *segreq.Paginator
 }
 
 func (s EndhostServer) ListSegments(ctx context.Context,
@@ -72,41 +72,38 @@ func (s EndhostServer) listSegments(ctx context.Context,
 	logger := log.FromCtx(ctx)
 	span := opentracing.SpanFromContext(ctx)
 	setQueryTags(span, src, dst)
-	logger.Debug("Received ListSegments request", "src", src, "dst", dst)
-	res := &endhost.ListSegmentsResponse{}
+	logger.Debug("Received ListSegments request", "src", src, "dst", dst,
+		"page_size", req.PageSize, "page_token", req.PageToken)
 	if src == dst {
 		// intra AS path, no segments are returned
 		s.updateMetric(span, prom.Success, nil)
-		return res, nil
+		return &endhost.ListSegmentsResponse{}, nil
 	}
 
-	pageSize := req.PageSize
-	if req.PageSize == 0 {
-		pageSize = 64
+	fetch := func(ctx context.Context) (segreq.SortedPaths, error) {
+		paths, err := s.getPaths(ctx, src, dst)
+		if err != nil {
+			logger.Debug("Failed to lookup path segments", "err", err)
+		}
+		return paths, err
 	}
-	allPaths, err := s.getPaths(ctx, src, dst)
-	if err != nil {
-		logger.Debug("Failed to lookup path segments", "err", err)
+	res, err := segreq.PageSegments(ctx, req, fetch)
+	switch {
+	case errors.Is(err, pagination.ErrInvalidPageSize),
+		errors.Is(err, pagination.ErrInvalidPageToken):
+		logger.Debug("Invalid ListSegments request", "err", err)
+		s.updateMetric(span, prom.ErrInvalidReq, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	case err != nil:
 		s.updateMetric(span, segfetcher.ErrToMetricsLabel(err), err)
 		return nil, err
 	}
-
-	resUp, resCore, resDown, nextPage := s.Paginator.GetPage(allPaths, int(pageSize), req.PageToken)
-	res.NextPageToken = nextPage
-	for _, segment := range resUp {
-		res.UpSegments = append(res.UpSegments, seg.PathSegmentToPB(segment))
-	}
-	for _, segment := range resCore {
-		res.CoreSegments = append(res.CoreSegments, seg.PathSegmentToPB(segment))
-	}
-	for _, segment := range resDown {
-		res.DownSegments = append(res.DownSegments, seg.PathSegmentToPB(segment))
-	}
-
-	logger.Debug("Replied with segments", "up", len(res.UpSegments), "core", len(res.CoreSegments),
-		"down", len(res.DownSegments))
+	sent := len(res.UpSegments) + len(res.CoreSegments) + len(res.DownSegments)
+	logger.Debug("Replied with segments", "up", len(res.UpSegments),
+		"core", len(res.CoreSegments), "down", len(res.DownSegments),
+		"more", res.NextPageToken != "")
 	s.updateMetric(span, prom.Success, nil)
-	s.incSegmentsSent(len(resUp) + len(resCore) + len(resDown))
+	s.incSegmentsSent(sent)
 	return res, nil
 }
 
@@ -131,14 +128,14 @@ func (s EndhostServer) incSegmentsSent(segments int) {
 // (they might be cached in the path DB) and check whether they can be stitched together.
 // In that case, the newely combined paths will be cached in the store.
 func (s EndhostServer) getPaths(ctx context.Context, src, dst addr.IA) (
-	[]segreq.CombinedPath, error) {
+	segreq.SortedPaths, error) {
 	if paths, found := s.PathStore.Get(src, dst); found {
 		return paths, nil
 	}
 	splitter := segreq.NewSplitter(s.LocalIA, s.IsCore, s.Inspector, s.PathDB)
 	reqs, err := splitter.Split(ctx, dst)
 	if err != nil {
-		return nil, err
+		return segreq.SortedPaths{}, err
 	}
 
 	upSegments := make(seg.Segments, 0, 1)
@@ -147,7 +144,7 @@ func (s EndhostServer) getPaths(ctx context.Context, src, dst addr.IA) (
 	for i := 0; i < len(reqs); i++ {
 		segs, err := s.Lookuper.LookupSegments(ctx, reqs[i].Src, reqs[i].Dst)
 		if err != nil {
-			return nil, err
+			return segreq.SortedPaths{}, err
 		}
 		for _, meta := range segs {
 			switch meta.Type {
@@ -237,9 +234,7 @@ func (s EndhostServer) getPaths(ctx context.Context, src, dst addr.IA) (
 			}
 		}
 	}
-	sort.Slice(allPaths, func(i, j int) bool {
-		return allPaths[i].Length() < allPaths[j].Length()
-	})
-	s.PathStore.Set(src, dst, allPaths)
-	return allPaths, nil
+	sorted := segreq.SortPaths(allPaths)
+	s.PathStore.Set(src, dst, sorted)
+	return sorted, nil
 }

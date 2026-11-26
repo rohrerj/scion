@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -67,6 +68,7 @@ import (
 	"github.com/scionproto/scion/pkg/addr"
 	libconnect "github.com/scionproto/scion/pkg/connect"
 	"github.com/scionproto/scion/pkg/connect/happy"
+	"github.com/scionproto/scion/pkg/endhost"
 	"github.com/scionproto/scion/pkg/experimental/hiddenpath"
 	libgrpc "github.com/scionproto/scion/pkg/grpc"
 	"github.com/scionproto/scion/pkg/jwt"
@@ -126,6 +128,8 @@ import (
 
 var (
 	globalCfg config.Config
+	// endhost API server version in the format <vendor>-<major>.<minor>.<patch>
+	endhostApiServerVersion = fmt.Sprintf("%s-%d.%d.%d", "scionproto", 1, 0, 0)
 )
 
 func main() {
@@ -457,7 +461,6 @@ func realMain(ctx context.Context) error {
 		Inspector:    inspector,
 		PathDB:       pathDB,
 		PathStore:    segreq.NewStore(),
-		Paginator:    segreq.NewPaginator(),
 		Requests:     libmetrics.NewPromCounter(metrics.ListSegmentsRequestsTotal),
 		SegmentsSent: libmetrics.NewPromCounter(metrics.ListSegmentsSentSegments),
 	}
@@ -852,15 +855,9 @@ func realMain(ctx context.Context) error {
 			globalCfg.General.ConfigDir,
 		).GetCertificate,
 	}
-	versionHeader := func(next http.Handler) http.Handler {
-		const version = "1.0.0"
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Endhost-API-Server-Version", version)
-			next.ServeHTTP(w, r)
-		})
-	}
-	endhostApiHandler := versionHeader(libconnect.AttachPeer(connectEndhost))
+	endhostApiHandler := libconnect.AttachPeer(connectEndhost)
 	if globalCfg.EndhostApi.JwtVerifierKeyFile != "" {
+		// the endhost API server is configured to require JWT tokens
 		jwtVerifier, err := jwt.VerifierFromFile(globalCfg.EndhostApi.JwtVerifierKeyFile)
 		if err != nil {
 			return err
@@ -884,9 +881,15 @@ func realMain(ctx context.Context) error {
 		}
 		endhostApiHandler = verifyToken(endhostApiHandler)
 	}
-
+	versionHeader := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Endhost-API-Version", endhost.EndhostAPIVersion)
+			w.Header().Set("Endhost-API-Server-Version", endhostApiServerVersion)
+			next.ServeHTTP(w, r)
+		})
+	}
 	endhostServer := http.Server{
-		Handler:   endhostApiHandler,
+		Handler:   versionHeader(endhostApiHandler),
 		TLSConfig: endhostTLSConfig,
 	}
 	endhost_api, found := topo.EndhostAPI()[globalCfg.General.ID]

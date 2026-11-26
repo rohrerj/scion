@@ -16,12 +16,16 @@ package connect
 
 import (
 	"context"
+	"crypto/x509"
+	"errors"
+	"net"
 	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/grpc/peer"
 
 	"github.com/opentracing/opentracing-go"
+	cstrust "github.com/scionproto/scion/control/trust"
 	trustmetrics "github.com/scionproto/scion/control/trust/metrics"
 	"github.com/scionproto/scion/pkg/addr"
 	"github.com/scionproto/scion/pkg/log"
@@ -31,6 +35,7 @@ import (
 	"github.com/scionproto/scion/pkg/proto/endhost"
 	"github.com/scionproto/scion/pkg/scrypto"
 	"github.com/scionproto/scion/pkg/scrypto/cppki"
+	"github.com/scionproto/scion/private/pagination"
 	"github.com/scionproto/scion/private/tracing"
 	"github.com/scionproto/scion/private/trust"
 )
@@ -71,44 +76,49 @@ func (s EndhostServer) chains(ctx context.Context,
 		ReqType: trustmetrics.ListChainsReq,
 		Client:  "unknown",
 	}
-	peer, ok := peer.FromContext(ctx)
-	if ok {
-		labels.Client = trustmetrics.PeerToLabel(peer.Addr, s.IA)
+	var peerAddr net.Addr
+	if p, ok := peer.FromContext(ctx); ok {
+		peerAddr = p.Addr
+		labels.Client = trustmetrics.PeerToLabel(peerAddr, s.IA)
 	}
 	span := opentracing.SpanFromContext(ctx)
 	logger := log.FromCtx(ctx)
-	logger.Debug("Received chains request", "subjects", req.Subjects, "peer", peer.Addr)
+	logger.Debug("Received chains request", "subjects", req.Subjects, "peer", peerAddr,
+		"page_size", req.PageSize, "page_token", req.PageToken)
 
 	var validity cppki.Validity
 	if !(req.AtLeastValidSince == 0 && req.AtLeastValidUntil == 0) {
 		validity.NotAfter = time.Unix(int64(req.AtLeastValidUntil), 0)
 		validity.NotBefore = time.Unix(int64(req.AtLeastValidSince), 0)
 	}
-	rep := &endhost.ListChainsResponse{
-		Chains: make([]*endhost.Chain, 0, len(req.Subjects)),
-	}
-	for _, subject := range req.Subjects {
+	fetch := func(ctx context.Context, subjectIdx int) ([][]*x509.Certificate, error) {
+		subject := req.Subjects[subjectIdx]
 		query := trust.ChainQuery{
 			IA:           addr.IA(subject.IsdAs),
 			SubjectKeyID: subject.SubjectKeyId,
 			Validity:     validity,
 		}
 		chains, err := s.Provider.GetChains(ctx, query, trust.AllowInactive(),
-			trust.Client(peer.Addr))
+			trust.Client(peerAddr))
 		if err != nil {
 			logger.Info("Unable to retrieve chains", "query", query, "err", err)
-			s.updateMetric(span, labels.WithResult(trustmetrics.ErrParse), err)
 			return nil, err
 		}
-		for _, chain := range chains {
-			rep.Chains = append(rep.Chains, &endhost.Chain{
-				Subject: subject,
-				AsCert:  chain[0].Raw,
-				CaCert:  chain[1].Raw,
-			})
-		}
+		return chains, nil
 	}
-	logger.Debug("Replied with chains", "count", len(rep.Chains))
+	rep, err := cstrust.PageChains(ctx, req, fetch)
+	switch {
+	case errors.Is(err, pagination.ErrInvalidPageSize),
+		errors.Is(err, pagination.ErrInvalidPageToken):
+		logger.Debug("Invalid chains request", "peer", peerAddr, "err", err)
+		s.updateMetric(span, labels.WithResult(trustmetrics.ErrParse), err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	case err != nil:
+		s.updateMetric(span, labels.WithResult(trustmetrics.ErrInternal), err)
+		return nil, err
+	}
+	logger.Debug("Replied with chains", "count", len(rep.Chains),
+		"more", rep.NextPageToken != "")
 	s.updateMetric(span, labels.WithResult(trustmetrics.Success), nil)
 	return rep, nil
 }
@@ -128,9 +138,10 @@ func (s *EndhostServer) trc(ctx context.Context, req *endhost.GetTrcRequest) (*e
 		ReqType: trustmetrics.TRCReq,
 		Client:  "unknown",
 	}
-	peer, ok := peer.FromContext(ctx)
-	if ok {
-		labels.Client = trustmetrics.PeerToLabel(peer.Addr, s.IA)
+	var peerAddr net.Addr
+	if p, ok := peer.FromContext(ctx); ok {
+		peerAddr = p.Addr
+		labels.Client = trustmetrics.PeerToLabel(peerAddr, s.IA)
 	}
 	trcID := cppki.TRCID{
 		ISD:    addr.ISD(req.Isd),
@@ -139,28 +150,28 @@ func (s *EndhostServer) trc(ctx context.Context, req *endhost.GetTrcRequest) (*e
 	}
 	span := opentracing.SpanFromContext(ctx)
 	logger := log.FromCtx(ctx)
-	logger.Debug("Received TRC request", "id", trcID, "peer", peer.Addr)
+	logger.Debug("Received TRC request", "id", trcID, "peer", peerAddr)
 
 	if req.Isd > uint32(addr.MaxISD) {
 		err := serrors.New("requested ISD not in range",
 			"max", addr.MaxISD, "isd", req.Isd)
-		logger.Debug("Invalid TRC request", "peer", peer.Addr, "err", err)
+		logger.Debug("Invalid TRC request", "peer", peerAddr, "err", err)
 		s.updateMetric(span, labels.WithResult(trustmetrics.ErrParse), err)
 		return nil, err
 	}
 
 	if !(trcID.Base.IsLatest() && trcID.Serial.IsLatest()) {
 		if err := trcID.Validate(); err != nil {
-			logger.Debug("Invalid TRC request", "peer", peer.Addr, "err", err)
+			logger.Debug("Invalid TRC request", "peer", peerAddr, "err", err)
 			s.updateMetric(span, labels.WithResult(trustmetrics.ErrParse), err)
 			return nil, err
 		}
 	} else if trcID.ISD == 0 {
-		logger.Debug("Invalid TRC request", "peer", peer.Addr, "err", cppki.ErrWildcardISD)
+		logger.Debug("Invalid TRC request", "peer", peerAddr, "err", cppki.ErrWildcardISD)
 		s.updateMetric(span, labels.WithResult(trustmetrics.ErrParse), cppki.ErrWildcardISD)
 		return nil, cppki.ErrWildcardISD
 	}
-	trc, err := s.Provider.GetSignedTRC(ctx, trcID, trust.AllowInactive(), trust.Client(peer.Addr))
+	trc, err := s.Provider.GetSignedTRC(ctx, trcID, trust.AllowInactive(), trust.Client(peerAddr))
 	if err != nil {
 		logger.Info("Unable to retrieve TRC", "id", trcID, "err", err)
 		s.updateMetric(span, labels.WithResult(trustmetrics.ErrInternal), err)

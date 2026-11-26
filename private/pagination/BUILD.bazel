@@ -1,0 +1,9 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = ["pagination.go"],
+    importpath = "github.com/scionproto/scion/private/pagination",
+    visibility = ["//visibility:public"],
+    deps = ["//pkg/private/serrors:go_default_library"],
+)
